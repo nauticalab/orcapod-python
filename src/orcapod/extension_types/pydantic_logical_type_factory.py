@@ -175,3 +175,195 @@ class PydanticLogicalType:
             for name, annotation in self._field_annotations
         }
         return self._python_type(**kwargs)
+
+
+class PydanticLogicalTypeFactory:
+    """Stateless factory that synthesises and reconstructs ``PydanticLogicalType`` instances.
+
+    **Write path** (``create_for_python_type``): derives Arrow struct type from the
+    model fields by delegating to ``converter.register_python_class`` per field.
+    Only fields in ``model_fields`` are stored — computed fields and private
+    attributes are excluded.
+
+    **Read path** (``reconstruct_from_arrow``): imports the model by FQCN, matches
+    fields against the already-resolved ``storage_type``, and returns a
+    ``PydanticLogicalType``.
+
+    Category tag: ``"orcapod.pydantic"``
+
+    Register with::
+
+        from pydantic import BaseModel
+        converter.register_logical_type_factory(
+            PydanticLogicalTypeFactory(),
+            category="orcapod.pydantic",
+            python_bases=[BaseModel],
+        )
+
+    Example:
+        >>> factory = PydanticLogicalTypeFactory()
+        >>> factory.supports_class(MyModel)
+        True
+        >>> factory.supports_class(str)
+        False
+    """
+
+    def supports_class(self, python_type: type) -> bool:
+        """Return True if ``python_type`` is a pydantic ``BaseModel`` subclass.
+
+        Args:
+            python_type: Any Python type.
+
+        Returns:
+            True if pydantic is installed and ``python_type`` is a ``BaseModel``
+            subclass. False if pydantic is not installed.
+        """
+        try:
+            from pydantic import BaseModel
+        except ImportError:
+            return False
+        return isinstance(python_type, type) and issubclass(python_type, BaseModel)
+
+    def create_for_python_type(
+        self,
+        python_type: type,
+        converter: TypeConverterProtocol,
+    ) -> PydanticLogicalType:
+        """Synthesise a ``PydanticLogicalType`` for a pydantic model (write path).
+
+        Derives the FQCN, obtains type hints, and resolves each field's Arrow type
+        via ``converter.register_python_class``. Only fields present in
+        ``model_fields`` are stored — computed fields and private attributes are
+        excluded. Rejects local / unnamed classes.
+
+        Args:
+            python_type: A pydantic ``BaseModel`` subclass.
+            converter: The active converter for field-type resolution.
+
+        Returns:
+            A ``PydanticLogicalType`` ready for registration.
+
+        Raises:
+            ValueError: If ``python_type`` is a local class (``__qualname__`` contains
+                ``"<locals>"``).
+        """
+        import typing
+
+        fqcn = f"{python_type.__module__}.{python_type.__qualname__}"
+        if "<locals>" in fqcn:
+            raise ValueError(
+                f"Cannot register local class {python_type!r} as a PydanticLogicalType — "
+                f"local classes have no stable fully-qualified class name and cannot be "
+                f"reconstructed on read. Define the model at module level."
+            )
+
+        try:
+            hints = typing.get_type_hints(python_type)
+        except Exception as exc:
+            raise ValueError(
+                f"Cannot get type hints for {python_type!r}: {exc}"
+            ) from exc
+
+        arrow_fields = []
+        field_annotations = []
+        for field_name in python_type.model_fields:
+            annotation = hints.get(field_name, Any)
+            arrow_type = converter.register_python_class(annotation)
+            # Strip top-level extension type before inserting into the struct (ET1;
+            # see DESIGN_ISSUES.md): Arrow cannot represent extension types inside
+            # struct field types.
+            if isinstance(arrow_type, pa.ExtensionType):
+                arrow_type = arrow_type.storage_type
+            arrow_fields.append(pa.field(field_name, arrow_type))
+            field_annotations.append((field_name, annotation))
+
+        storage_type = pa.struct(arrow_fields)
+        logger.debug("PydanticLogicalTypeFactory: synthesised %r for %r", fqcn, python_type)
+        return PydanticLogicalType(fqcn, python_type, storage_type, field_annotations)
+
+    def reconstruct_from_arrow(
+        self,
+        arrow_extension_name: str,
+        storage_type: pa.DataType,
+        metadata: dict[str, Any],
+        converter: TypeConverterProtocol,
+    ) -> PydanticLogicalType:
+        """Reconstruct a ``PydanticLogicalType`` from Arrow schema metadata (read path).
+
+        Imports the model from its FQCN (``arrow_extension_name``), then matches
+        the model field annotations against the fields in ``storage_type``.
+        ``storage_type`` is already bottom-up resolved by ``register_storage_type``
+        before this method is called.
+
+        Args:
+            arrow_extension_name: FQCN of the pydantic model (Arrow extension name).
+            storage_type: Already-resolved ``pa.StructType`` for the model fields.
+            metadata: Full parsed metadata JSON dict (always contains ``"category"``).
+            converter: The active converter (used for registration completeness invariant).
+
+        Returns:
+            A ``PydanticLogicalType`` ready for registration.
+
+        Raises:
+            ImportError: If the class cannot be imported from ``arrow_extension_name``.
+            ValueError: If ``storage_type`` is not a struct type.
+        """
+        import typing
+
+        if not pa.types.is_struct(storage_type):
+            raise ValueError(
+                f"PydanticLogicalTypeFactory.reconstruct_from_arrow: expected a struct "
+                f"storage type for {arrow_extension_name!r}, got {storage_type!r}."
+            )
+
+        cls = _import_pydantic_model_from_fqcn(arrow_extension_name)
+
+        try:
+            hints = typing.get_type_hints(cls)
+        except Exception as exc:
+            raise ValueError(
+                f"Cannot get type hints for {cls!r}: {exc}"
+            ) from exc
+
+        field_annotations = []
+        for field_name in cls.model_fields:
+            annotation = hints.get(field_name, Any)
+            # Register any logical type the field annotation maps to (registration
+            # completeness invariant: all nested logical types must be registered when
+            # the outer type is registered). The return value is discarded.
+            converter.register_python_class(annotation)
+            field_annotations.append((field_name, annotation))
+
+        logger.debug(
+            "PydanticLogicalTypeFactory: reconstructed %r from Arrow", arrow_extension_name
+        )
+        return PydanticLogicalType(
+            arrow_extension_name, cls, storage_type, field_annotations
+        )
+
+
+def _import_pydantic_model_from_fqcn(fqcn: str) -> type:
+    """Import a pydantic ``BaseModel`` subclass from its fully-qualified class name.
+
+    Delegates the module-prefix walk to ``type_utils._walk_fqcn``, then
+    validates the resolved object is a ``BaseModel`` subclass.
+
+    Args:
+        fqcn: Fully-qualified class name, e.g. ``"mypackage.sub.MyModel"``.
+
+    Returns:
+        The imported ``BaseModel`` subclass.
+
+    Raises:
+        ImportError: If no valid module+attribute split can be found, or if the
+            resolved object is not a ``BaseModel`` subclass.
+    """
+    from pydantic import BaseModel
+    from orcapod.extension_types.type_utils import _walk_fqcn
+
+    obj: Any = _walk_fqcn(fqcn)
+    if not (isinstance(obj, type) and issubclass(obj, BaseModel)):
+        raise ImportError(
+            f"{fqcn!r} does not resolve to a pydantic BaseModel subclass."
+        )
+    return obj
