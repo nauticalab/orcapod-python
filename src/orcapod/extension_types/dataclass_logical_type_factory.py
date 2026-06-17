@@ -322,6 +322,11 @@ class DataclassLogicalTypeFactory:
             if not field.init:
                 continue
             annotation = hints.get(field.name, Any)
+            # Register any logical type the field annotation maps to (registration
+            # completeness invariant: all nested logical types must be registered when
+            # the outer type is registered). The return value is discarded; only the
+            # side effect of registration matters here.
+            converter.register_python_class(annotation)
             field_annotations.append((field.name, annotation))
 
         logger.debug(
