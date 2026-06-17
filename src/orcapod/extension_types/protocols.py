@@ -25,11 +25,38 @@ class TypeConverterProtocol(Protocol):
     """
 
     def register_python_class(self, annotation: Any) -> "pa.DataType":
-        """Traverse a Python annotation and return its Arrow type, registering as needed."""
+        """Traverse a Python annotation, register any logical types found, and return
+        the storage-safe Arrow type.
+
+        The returned type may be a ``pa.ExtensionType`` at the top level for registered
+        classes (e.g. ``UUID`` → ``orcapod.uuid`` extension type), but struct fields and
+        list value types at any depth are always plain (non-extension) Arrow types.
+
+        Args:
+            annotation: A Python type or generic alias (e.g. ``list[str]``,
+                ``Optional[uuid.UUID]``, a dataclass type).
+
+        Returns:
+            A storage-safe ``pa.DataType``. May be ``pa.ExtensionType`` at the top level;
+            never contains nested extension types in struct/list fields.
+        """
         ...
 
     def register_storage_type(self, arrow_type: "pa.DataType") -> "pa.DataType":
-        """Traverse an Arrow type bottom-up, registering extension types, and return resolved type."""
+        """Traverse an Arrow type bottom-up, registering extension types, and return a
+        storage-safe type.
+
+        The returned type may be a ``pa.ExtensionType`` at the top level, but struct fields
+        and list value types at any depth are always plain (non-extension) Arrow types.
+        This invariant makes the return value safe to use as a struct field or list element
+        type without further stripping.
+
+        Args:
+            arrow_type: An Arrow type to traverse and register.
+
+        Returns:
+            A storage-safe ``pa.DataType``.
+        """
         ...
 
     def python_to_storage(self, value: Any, annotation: Any) -> Any:
