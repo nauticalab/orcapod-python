@@ -1047,14 +1047,16 @@ Track upstream PyArrow / Polars issues.
 **Severity:** medium
 **Issue:** PLT-1732
 
-When a logical type (e.g. `UUID`, a dataclass) appears as the element type of a top-level
-`list[T]` or `dict[K, V]` column, the extension type metadata for `T` is stripped before
-the Arrow/Parquet schema is written. This happens because PyArrow does not allow extension
-types inside list value fields or struct fields (ET1). As a result the stored Arrow schema
-shows `large_list(large_binary)` for `list[UUID]` — no `orcapod.uuid` marker — and on a
-fresh read `register_storage_type` finds nothing to register. Value conversion with
-`storage_to_python(..., list[UUID])` then fails unless the caller has already registered
-`UUID` manually.
+When a logical type (e.g. `UUID`, a dataclass) appears as the element type of a `list[T]`
+or `dict[K, V]` annotation, `register_python_class` now raises `ValueError` at
+schema-construction time rather than silently stripping the extension type. The underlying
+cause is that PyArrow does not allow extension types inside list value fields or struct
+fields (ET1): `pa.array([], type=pa.large_list(extension_type))` raises
+`ArrowNotImplementedError: extension`. If a caller manually strips to storage types and
+writes `large_list(large_binary)` for `list[UUID]`, the stored Arrow schema carries no
+`orcapod.uuid` marker; on a fresh read `register_storage_type` finds nothing to register,
+and value conversion with `storage_to_python(..., list[UUID])` fails unless `UUID` was
+registered manually beforehand.
 
 **This does NOT affect logical types that are fields of a registered outer dataclass.**
 Those are discovered and registered transitively: `register_discovered_extensions` finds
@@ -1068,10 +1070,11 @@ raises `ArrowNotImplementedError: extension` — identical to the ET1 struct-fie
 restriction. The `replace_logical_type` flag approach (preserving extension type inside
 list value field) is therefore infeasible at the PyArrow level.
 
-**Workaround (current):** callers that write `list[T]` top-level columns must manually
-call `converter.register_python_class(T)` before calling `storage_to_python` on a fresh
-converter. Alternatively, wrap the list in a dataclass field so the outer dataclass
-extension type carries the type information into the schema.
+**Current behaviour:** `register_python_class(list[T])` raises `ValueError` when `T`
+resolves to a logical type, pointing to this entry and PLT-1732. Use a direct `T` column
+(no list wrapper) or wrap the list inside a dataclass field — the outer dataclass extension
+type carries the annotation into the schema, and `reconstruct_from_arrow` re-registers `T`
+transitively on read.
 
 **Planned fix (PLT-1732, target v0.2):** Introduce `ListLogicalType` /
 `ListLogicalTypeFactory` and `StructLogicalType` / `StructLogicalTypeFactory`. A
