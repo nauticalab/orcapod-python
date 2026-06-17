@@ -4,8 +4,10 @@ This subpackage provides the registry and protocol for logical types that map
 between Python objects and their Arrow/Polars extension type representation.
 
 Built-in registrations (``LogicalPath``, ``LogicalUPath``, ``LogicalUUID``) are
-wired into ``DataContext`` via ``contexts/data/v0.1.json``. The logical type
-registry is accessible via ``get_default_context().type_converter._logical_type_registry``.
+wired into ``DataContext`` via ``contexts/data/v0.1.json``. Use
+``get_default_context().type_converter.register_python_class()`` to register new
+types, ``register_logical_type_factory()`` to add factories, and
+``apply_extension_types()`` to re-wrap Arrow tables with their registered extension types.
 
 ``DataclassLogicalTypeFactory`` provides automatic registration for Python dataclasses:
 register it with a ``LogicalTypeRegistry`` and any dataclass used in a ``FunctionPod``
