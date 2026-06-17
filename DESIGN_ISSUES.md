@@ -1016,16 +1016,16 @@ fields include `uuid.UUID` (stored as `orcapod.uuid` extension over `pa.large_bi
 Polars's Arrow IPC bridge handles top-level extension types via `pl.BaseExtension`, but has no
 path for extension types *nested inside* a struct at dtype-inference time.
 
-**Workaround:** `dataclass_handler._strip_ext_to_storage()` recursively replaces all
-`pa.ExtensionType` nodes with their plain storage types. This stripping is applied in
-`DataclassHandlerFactory.create_for_python_type` when building the struct's field types —
-so the stored Arrow schema (and thus the struct passed to `make_polars_extension_type` and
-`pa.Table.from_pylist`) never contains nested extension types. The consequence is that the
-schema for a dataclass extension column reports downgraded inner field types (e.g.
-`large_binary` instead of `orcapod.uuid`). This is invisible through the normal conversion
-path (all value conversion flows through `converter.storage_to_python`, which is
-annotation-driven), but would mislead any code that directly introspects the raw Arrow
-or Polars schema of a dataclass extension column's storage fields.
+**Workaround:** `register_python_class` and `register_storage_type` both uphold a
+*storage-safe* invariant: the returned type may be a `pa.ExtensionType` at the top level,
+but struct fields and list value types at any depth are always plain (non-extension) types.
+`DataclassLogicalTypeFactory.create_for_python_type` strips the top-level extension type
+with a one-liner (`if isinstance(arrow_type, pa.ExtensionType): arrow_type = arrow_type.storage_type`)
+before inserting it into the struct, so the struct passed to `make_polars_extension_type`
+and `pa.Table.from_pylist` never contains nested extension types. The private
+`_strip_ext_to_storage` recursive helper was removed in PLT-1720; the stripping is now
+trivially correct because the storage-safe invariant guarantees `.storage_type` is always
+already clean.
 
 **Also affects `pa.Table.from_pylist`:** the same restriction applies to PyArrow's
 `pa.Table.from_pylist` (and `pa.array`) — neither can build an array from a struct type
@@ -1038,9 +1038,9 @@ extension type is faithful: extension name, metadata bytes, and storage struct a
 preserved. Only the inner field schema (already stripped) is absent.
 
 **Fix needed:** Once PyArrow (and Polars) support nested extension types natively in struct
-construction and Arrow↔Polars conversion, `_strip_ext_to_storage` can be removed from
-`create_for_python_type` and `make_polars_extension_type` can accept extension-typed
-storage directly. Track upstream PyArrow / Polars issues.
+construction and Arrow↔Polars conversion, the stripping one-liner in `create_for_python_type`
+can be removed and `make_polars_extension_type` can accept extension-typed storage directly.
+Track upstream PyArrow / Polars issues.
 
 ---
 
