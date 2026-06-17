@@ -929,7 +929,7 @@ def test_register_storage_type_extension_miss_dispatches_to_factory():
 
 
 def test_register_storage_type_nested_struct_with_extension():
-    """Extension type nested inside a struct field is resolved bottom-up."""
+    """Extension type nested inside a struct field is stripped to storage type (ET1)."""
     import json
     import uuid as _u
 
@@ -963,8 +963,11 @@ def test_register_storage_type_nested_struct_with_extension():
 
     assert pa.types.is_struct(result)
     assert result.field("id").type == pa.int64()
-    assert isinstance(result.field("tag").type, pa.ExtensionType)
-    assert result.field("tag").type.extension_name == ext_name
+    # Storage-safe: extension type inside struct field is stripped to its storage type
+    assert result.field("tag").type == pa.large_string()
+    assert not isinstance(result.field("tag").type, pa.ExtensionType)
+    # Side effect: the extension type IS registered (check via registry)
+    assert converter._logical_type_registry.get_by_arrow_extension_name(ext_name) is not None
 
 
 # ── python_to_storage / storage_to_python / pass-through tests ───────────────
