@@ -125,9 +125,10 @@ def make_polars_extension_type(
     ``ArrowNotImplementedError: extension`` when it encounters an extension type
     nested inside a struct or list during dtype inference. Callers that need to
     build a Polars extension type whose storage contains nested extension types
-    must first strip those nodes to their plain storage types (see
-    ``dataclass_logical_type_factory._strip_ext_to_storage``). This is tracked as design
-    issue ET1 in ``DESIGN_ISSUES.md``.
+    must first strip those nodes to their plain storage types. Both
+    ``register_python_class`` and ``register_storage_type`` uphold a storage-safe
+    invariant that guarantees this. This is tracked as design issue ET1 in
+    ``DESIGN_ISSUES.md``.
 
     Args:
         extension_name: The extension type name used for Polars registration.
