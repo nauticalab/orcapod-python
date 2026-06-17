@@ -52,8 +52,8 @@ recursive registration correctly.
 
 | Function | Before | After |
 |---|---|---|
-| `register_python_class(annotation)` | Returns `pa.ExtensionType` for registered classes | Returns plain `pa.DataType` (storage type) for all annotations |
-| `register_storage_type(arrow_type)` | Returns resolved `pa.DataType` | Returns `None` (side-effect registration only) |
+| `register_python_class(annotation)` | Returns `pa.ExtensionType` for registered classes; may return extension types nested inside struct/list fields | Returns storage-safe `pa.DataType`: may be extension type at the top level for registered types, but struct/list fields always contain plain (non-extension) types at every depth |
+| `register_storage_type(arrow_type)` | Returns `pa.DataType`; may return extension types nested inside struct/list fields | Returns storage-safe `pa.DataType`: may be extension type at the top level, but struct/list fields always contain plain (non-extension) types at every depth |
 | `reconstruct_from_arrow(...)` | Does not register nested types | Must ensure all nested types are registered before returning (mechanism is factory-specific) |
 
 `python_type_to_arrow_type(annotation)` is **unchanged** — it still returns `pa.ExtensionType`
@@ -65,70 +65,98 @@ for registered classes, used for top-level column schema via `python_schema_to_a
 
 ### 1. `extension_types/protocols.py` — TypeConverterProtocol
 
-- `register_python_class`: update docstring — "return its plain Arrow storage type"
-- `register_storage_type`: change return type annotation from `pa.DataType` to `None`;
-  update docstring — "traverse an Arrow type bottom-up, registering extension types;
-  return value is None (side-effect only)"
+- `register_python_class`: update docstring — "return the storage-safe Arrow type: may be
+  extension type at the top level for registered types, but struct/list fields are always plain"
+- `register_storage_type`: update docstring — "traverse an Arrow type bottom-up,
+  registering any extension types encountered; return a storage-safe ``pa.DataType``
+  (may be extension type at the top level, but struct/list fields contain only plain types)"
 
 ### 2. `semantic_types/universal_converter.py` — UniversalTypeConverter
 
-**`_register_python_class_impl`**: two return sites change from extension type to storage type:
+**`_register_python_class_impl`**: the two return sites that previously returned the extension
+type now return it unchanged (no `.storage_type` strip). The storage-safe guarantee is satisfied
+at the top level because `DataclassLogicalType` and other factories always build their struct
+storage with plain field types:
 
 ```python
-# Registry hit
+# Registry hit — return ext type directly (already storage-safe by factory invariant)
 lt = self._logical_type_registry.get_by_python_type(annotation)
 if lt is not None:
-    return lt.get_arrow_extension_type().storage_type   # was .get_arrow_extension_type()
+    return lt.get_arrow_extension_type()   # unchanged from current behaviour
 
-# After factory dispatch
+# After factory dispatch — same
 lt = factory.create_for_python_type(annotation, converter=self)
 self._logical_type_registry.register_logical_type(lt)
-return lt.get_arrow_extension_type().storage_type       # was .get_arrow_extension_type()
+return lt.get_arrow_extension_type()       # unchanged from current behaviour
 ```
 
-All recursive calls within `_register_python_class_impl` (`list[T]`, `set[T]`, `dict[K,V]`,
-`Optional[T]`) naturally propagate storage types because they recurse through
-`self.register_python_class(...)`. For example:
+The container branches (`list[T]`, `set[T]`, `dict[K,V]`, `Optional[T]`) recurse through
+`self.register_python_class(...)` and receive a potentially extension-typed result. They strip
+it to `.storage_type` before embedding it in a list value or struct field — a trivial one-liner
+that replaces the old recursive `_strip_ext_to_storage` helper:
+
+```python
+# list[T] branch (illustrative)
+inner = self.register_python_class(inner_type)
+if isinstance(inner, pa.ExtensionType):
+    inner = inner.storage_type   # strip: cannot nest ext inside list value type
+return pa.large_list(inner)
+```
+
+End-to-end examples (identical to current spec — stripping in container branches is unchanged):
 - `list[UUID]` → `pa.large_list(pa.large_binary())`
 - `dict[str, UUID]` → `pa.large_list(pa.struct([key: large_string, value: large_binary]))`
 - `Optional[UUID]` → `pa.large_binary()`
+- `UUID` directly → `orcapod.uuid` extension type (top-level; storage is `pa.large_binary()`)
 
 `_convert_python_to_arrow` (used by `python_type_to_arrow_type`) is not touched.
 
-**`register_storage_type`**: simplified from "traverse + rebuild" to "traverse + register only".
-No longer rebuilds struct or list types (storage types are always plain after this change):
+**`register_storage_type`**: updated from "traverse + rebuild (may preserve nested extension types)" to "traverse + rebuild with storage-safe guarantee (strip extension types from struct/list fields)":
 
 ```python
-def register_storage_type(self, arrow_type: "pa.DataType") -> None:
+def register_storage_type(self, arrow_type: "pa.DataType") -> "pa.DataType":
     if isinstance(arrow_type, pa.ExtensionType):
         ext_name = arrow_type.extension_name
         if self._logical_type_registry is not None:
             if self._logical_type_registry.get_by_arrow_extension_name(ext_name) is not None:
-                return  # already registered
+                lt = self._logical_type_registry.get_by_arrow_extension_name(ext_name)
+                return lt.get_arrow_extension_type()   # already registered, return ext type
         self.register_storage_type(arrow_type.storage_type)   # bottom-up first
         raw_meta = arrow_type.__arrow_ext_serialize__()
-        self.register_arrow_extension(ext_name, raw_meta or None, arrow_type.storage_type)
-        return
+        return self.register_arrow_extension(ext_name, raw_meta or None, arrow_type.storage_type)
     if pa.types.is_struct(arrow_type):
+        resolved_fields = []
         for i in range(arrow_type.num_fields):
-            self.register_storage_type(arrow_type.field(i).type)
-        return
+            field = arrow_type.field(i)
+            resolved = self.register_storage_type(field.type)
+            if isinstance(resolved, pa.ExtensionType):
+                resolved = resolved.storage_type   # strip: ET1 forbids ext inside struct fields
+            resolved_fields.append(pa.field(field.name, resolved, nullable=field.nullable, metadata=field.metadata))
+        return pa.struct(resolved_fields)
     if pa.types.is_large_list(arrow_type) or pa.types.is_list(arrow_type):
-        self.register_storage_type(arrow_type.value_field.type)
-        return
-    # primitives: nothing to do
+        vf = arrow_type.value_field
+        resolved = self.register_storage_type(vf.type)
+        if isinstance(resolved, pa.ExtensionType):
+            resolved = resolved.storage_type   # strip: ET1 forbids ext inside list value type
+        return pa.large_list(pa.field(vf.name, resolved, nullable=vf.nullable, metadata=vf.metadata))
+    return arrow_type   # primitives: return unchanged
 ```
+
+The storage-safe guarantee: a top-level extension type may be returned (the caller can use it as a column type), but any struct or list the returned type contains will never have extension type nodes in their fields/value types.
 
 ### 3. `extension_types/dataclass_logical_type_factory.py`
 
 **`_strip_ext_to_storage`**: deleted entirely (private, not exported, no longer called).
 
-**`create_for_python_type`**: remove the `_strip_ext_to_storage` call; use `arrow_type` directly:
+**`create_for_python_type`**: replace the recursive `_strip_ext_to_storage` call with a trivial
+one-liner that strips only the top-level extension type (the storage-safe guarantee from
+`register_python_class` ensures `.storage_type` is always clean — no further recursion needed):
 
 ```python
 arrow_type = converter.register_python_class(annotation)
-# stripped_type = _strip_ext_to_storage(arrow_type)  ← removed
-arrow_fields.append(pa.field(field.name, arrow_type))   # arrow_type is already plain
+if isinstance(arrow_type, pa.ExtensionType):
+    arrow_type = arrow_type.storage_type   # strip top-level ext for struct field (ET1)
+arrow_fields.append(pa.field(field.name, arrow_type))
 ```
 
 **`reconstruct_from_arrow`** (`DataclassLogicalTypeFactory` implementation): satisfies the
@@ -157,17 +185,21 @@ register_discovered_extensions
 
 ### 4. `extension_types/database_hooks.py`
 
-Drop the now-unused return value of `register_storage_type`; pass `info.storage_type`
-directly to `register_arrow_extension` (it is always plain after this change):
+**No change.** `register_storage_type` still returns a meaningful `pa.DataType`, and
+`database_hooks.py` already passes that resolved value into `register_arrow_extension`:
 
 ```python
-converter.register_storage_type(info.storage_type)   # side effects only
+resolved_storage = converter.register_storage_type(info.storage_type)
 converter.register_arrow_extension(
     info.extension_name,
     info.extension_metadata,
-    info.storage_type,                               # was: resolved_storage
+    resolved_storage,
 )
 ```
+
+The only behavioral difference is that `resolved_storage` is now guaranteed to be
+storage-safe (no nested extension types in struct/list fields), which is precisely what
+`register_arrow_extension` needs.
 
 ### 5. `DESIGN_ISSUES.md`
 
@@ -180,29 +212,35 @@ if not, it was an untracked bug — no new entry needed since the fix is deliver
 
 ### `tests/test_semantic_types/test_universal_converter.py`
 
-**`register_python_class` tests** (4 updates): tests that assert `isinstance(result, pa.ExtensionType)` or check extension names are updated to assert the plain storage type instead:
+**`register_python_class` tests** (0 updates): the existing assertions check
+`isinstance(result, pa.ExtensionType)` and `result.extension_name == "..."`. Under the new
+storage-safe contract `register_python_class` still returns an extension type for registered
+classes — these tests are already correct and need no changes.
 
-| Test | Old assertion | New assertion |
-|---|---|---|
-| `test_register_python_class_registry_hit_path` | `isinstance(result, pa.ExtensionType)` | `result == pa.large_string()` (Path storage) |
-| `test_register_python_class_uuid_registry_hit` | `isinstance(result, pa.ExtensionType)` | `result == pa.large_binary()` |
-| `test_register_python_class_factory_dispatch` | `isinstance(result, pa.ExtensionType)` | storage type of the custom ext; side-effect (registry entry) verified separately |
-| `test_register_python_class_factory_dispatch` second call | `result2 == result` | `result2 == result` (still holds — same storage type) |
+**`register_storage_type` tests** (1 update): only the test that currently asserts an
+extension type is *preserved* inside a struct field needs to change. Under the new
+storage-safe contract, that extension type must be stripped to its storage type before
+being placed into the rebuilt struct.
 
-**`register_storage_type` tests** (7 updates): all return-value assertions replaced with:
-- `assert result is None`
-- side-effect assertion: type is findable in the registry (for extension type tests)
-
-Tests that currently verify struct/list return type shapes become side-effect-only (the
-traversal still happens, just no rebuilt type is returned).
+All other `register_storage_type` tests — including those that check the returned struct
+or list shape — continue to pass with only the assertion on the inner field type updated.
 
 ### `tests/test_extension_types/test_dataclass_logical_type_factory.py`
 
-- `test_register_python_class_dispatches_to_dataclass_factory`: update assertion from
-  `isinstance(result, pa.ExtensionType)` to checking the plain storage type
+- `test_register_python_class_dispatches_to_dataclass_factory`: **no change** — already
+  asserts `isinstance(result, pa.ExtensionType)` and `result.extension_name == "orcapod.uuid"`,
+  which is correct under the new storage-safe contract
 - New test `test_reconstruct_from_arrow_registers_nested_types`: creates a two-level
   dataclass hierarchy, calls `reconstruct_from_arrow` for the outer type only, then
   asserts that the inner type is also present in the registry
+- New test `test_nested_dataclass_parquet_roundtrip`: end-to-end Parquet round-trip for
+  a two-level dataclass (`_Inner` nested inside `_Outer`). Write path: build a converter,
+  register `_Outer`, write an Arrow table with an `_Outer` instance to a Parquet file.
+  Read path: create a **fresh converter** (only built-in types + `DataclassLogicalTypeFactory`,
+  neither `_Inner` nor `_Outer` pre-registered), read the Parquet file back, call
+  `register_discovered_extensions` on the schema — this should trigger the chain that
+  registers `_Outer` which in turn registers `_Inner`. Assert that converting the Arrow
+  struct storage back to a Python `_Outer` value produces the original object.
 
 ---
 
@@ -211,6 +249,7 @@ traversal still happens, just no rebuilt type is returned).
 - `python_type_to_arrow_type` — still returns extension type
 - `python_schema_to_arrow_schema` — already calls `python_type_to_arrow_type` (correct)
 - `register_arrow_extension` — unchanged
+- `extension_types/database_hooks.py` — unchanged (continues to use `register_storage_type` return value as before)
 - All write-path value conversion (`python_to_storage`, `get_python_to_arrow_converter`)
 - All read-path value conversion (`storage_to_python`, `get_arrow_to_python_converter`)
 - `DataclassLogicalType` itself
