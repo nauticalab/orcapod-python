@@ -42,54 +42,6 @@ logger = logging.getLogger(__name__)
 DATACLASS_CATEGORY = "orcapod.dataclass"
 
 
-def _strip_ext_to_storage(arrow_type: pa.DataType) -> pa.DataType:
-    """Recursively strip ``pa.ExtensionType`` nodes down to plain storage types.
-
-    Both ``pa.array`` (used to build struct arrays) and ``make_polars_extension_type``
-    fail when a struct (or list element) contains ``pa.ExtensionType`` fields — Arrow
-    raises ``ArrowNotImplementedError: extension`` in both cases (see ET1 in
-    ``DESIGN_ISSUES.md``).  This helper strips those extension types before
-    any such operation so that only plain scalar/binary/string types remain
-    inside struct fields.
-
-    Applied at struct construction time in
-    ``DataclassLogicalTypeFactory.create_for_python_type`` so that the resulting
-    ``storage_type`` never contains nested extension types.  Value conversion
-    is annotation-driven (not Arrow-type-driven), so stripping is safe.
-
-    Args:
-        arrow_type: An Arrow data type, possibly containing nested extension types.
-
-    Returns:
-        The same structural shape with all ``pa.ExtensionType`` nodes replaced
-        by their plain storage types.
-    """
-    if isinstance(arrow_type, pa.ExtensionType):
-        return _strip_ext_to_storage(arrow_type.storage_type)
-    if pa.types.is_struct(arrow_type):
-        new_fields = []
-        for i in range(arrow_type.num_fields):
-            field = arrow_type.field(i)
-            stripped = _strip_ext_to_storage(field.type)
-            new_fields.append(
-                pa.field(field.name, stripped, nullable=field.nullable, metadata=field.metadata)
-            )
-        return pa.struct(new_fields)
-    if pa.types.is_large_list(arrow_type):
-        vf = arrow_type.value_field
-        stripped = _strip_ext_to_storage(vf.type)
-        return pa.large_list(
-            pa.field(vf.name, stripped, nullable=vf.nullable, metadata=vf.metadata)
-        )
-    if pa.types.is_list(arrow_type):
-        vf = arrow_type.value_field
-        stripped = _strip_ext_to_storage(vf.type)
-        return pa.list_(
-            pa.field(vf.name, stripped, nullable=vf.nullable, metadata=vf.metadata)
-        )
-    return arrow_type
-
-
 class DataclassLogicalType:
     """Logical type binding a Python dataclass to its Arrow extension type representation.
 
@@ -134,10 +86,10 @@ class DataclassLogicalType:
             logical_name, storage_type, metadata=_metadata
         )
         self._arrow_ext: pa.ExtensionType | None = None
-        # ``storage_type`` is already stripped of nested extension types by
-        # ``DataclassLogicalTypeFactory.create_for_python_type`` (see ET1 in
-        # DESIGN_ISSUES.md).  ``make_polars_extension_type`` and
-        # ``pa.array`` both require plain storage types inside structs.
+        # ``storage_type`` must not contain nested extension types (ET1 in DESIGN_ISSUES.md).
+        # ``DataclassLogicalTypeFactory.create_for_python_type`` and ``reconstruct_from_arrow``
+        # both guarantee this by stripping any top-level extension type from each field's
+        # Arrow type before inserting it into the struct.
         self._polars_ext_class = make_polars_extension_type(logical_name, storage_type)
         self._polars_ext: pl.BaseExtension | None = None
 
@@ -308,11 +260,12 @@ class DataclassLogicalTypeFactory:
                 continue
             annotation = hints.get(field.name, Any)
             arrow_type = converter.register_python_class(annotation)
-            # Strip extension types from struct field types: pa.array cannot build a
-            # struct array when a field type is a pa.ExtensionType (see ET1 in
-            # DESIGN_ISSUES.md). Value conversion is annotation-driven so stripping is safe.
-            stripped_type = _strip_ext_to_storage(arrow_type)
-            arrow_fields.append(pa.field(field.name, stripped_type))
+            # register_python_class returns a storage-safe type: may be extension at the
+            # top level, but struct fields are always plain. Strip the top-level extension
+            # type here before inserting into the struct (ET1; see DESIGN_ISSUES.md).
+            if isinstance(arrow_type, pa.ExtensionType):
+                arrow_type = arrow_type.storage_type
+            arrow_fields.append(pa.field(field.name, arrow_type))
             field_annotations.append((field.name, annotation))
 
         storage_type = pa.struct(arrow_fields)
