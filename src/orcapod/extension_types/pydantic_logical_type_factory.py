@@ -25,7 +25,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
-from orcapod.extension_types.type_utils import _walk_fqcn
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

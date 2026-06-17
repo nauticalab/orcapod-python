@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import uuid as _uuid_module
 from typing import Any
 
 import pyarrow as pa
 import pytest
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
