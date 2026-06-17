@@ -113,6 +113,32 @@ def test_walk_fqcn_raises_import_error_on_single_part():
         _walk_fqcn("justname")
 
 
+def test_walk_fqcn_reraises_real_import_failure(monkeypatch):
+    """_walk_fqcn propagates ImportError from a module that exists but fails to import.
+
+    Simulates the case where a module on disk raises ModuleNotFoundError for
+    one of its own optional dependencies (exc.name is the missing dep, not the
+    module being imported).  The error must not be swallowed and replaced with
+    a generic "no valid module+attribute" ImportError.
+    """
+    import importlib as _importlib
+
+    original = _importlib.import_module
+
+    def _patched(name: str, *args, **kwargs):
+        if name == "pathlib":
+            # "pathlib" exists but pretend it tries to import a missing dep.
+            err = ModuleNotFoundError("No module named 'some_optional_dep'")
+            err.name = "some_optional_dep"
+            raise err
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(_importlib, "import_module", _patched)
+
+    with pytest.raises(ModuleNotFoundError, match="some_optional_dep"):
+        _walk_fqcn("pathlib.Path")
+
+
 # ── _import_from_fqcn tests ──────────────────────────────────────────────────
 
 
