@@ -294,8 +294,11 @@ class UniversalTypeConverter:
                 f"{annotation!r}. Only Optional[T] (T | None) is allowed."
             )
 
-        # list[T] → pa.large_list(T).  Strip extension type from element (ET1: extension
-        # types cannot be nested inside list value types).
+        # list[T] → pa.large_list(T).
+        # Raise if T resolves to an extension type: Arrow forbids extension types inside
+        # list value fields (ET1/ET2 in DESIGN_ISSUES.md). Fail loudly now rather than
+        # silently dropping type information and failing mysteriously on read.
+        # Native list-of-logical-type support is planned in PLT-1732 (ListLogicalType).
         if origin is list:
             if not args:
                 raise ValueError(
@@ -304,10 +307,15 @@ class UniversalTypeConverter:
                 )
             inner = self.register_python_class(args[0])
             if isinstance(inner, pa.ExtensionType):
-                inner = inner.storage_type  # strip: ET1
+                raise ValueError(
+                    f"'list[{args[0]}]' is not yet supported: the element type maps to Arrow "
+                    f"extension type {inner.extension_name!r}, which cannot be preserved inside "
+                    f"a list value field due to an Arrow limitation (ET2 in DESIGN_ISSUES.md). "
+                    f"Native list-of-logical-type support is tracked in PLT-1732."
+                )
             return pa.large_list(inner)
 
-        # set[T] → pa.large_list(T).  Strip extension type from element (ET1).
+        # set[T] → pa.large_list(T).  Same restriction as list[T].
         if origin is set:
             if not args:
                 raise ValueError(
@@ -316,11 +324,17 @@ class UniversalTypeConverter:
                 )
             inner = self.register_python_class(args[0])
             if isinstance(inner, pa.ExtensionType):
-                inner = inner.storage_type  # strip: ET1
+                raise ValueError(
+                    f"'set[{args[0]}]' is not yet supported: the element type maps to Arrow "
+                    f"extension type {inner.extension_name!r}, which cannot be preserved inside "
+                    f"a list value field due to an Arrow limitation (ET2 in DESIGN_ISSUES.md). "
+                    f"Native set-of-logical-type support is tracked in PLT-1732."
+                )
             return pa.large_list(inner)
 
         # dict[K, V] → pa.large_list(struct{key: K, value: V}).
-        # Strip extension types from key and value before embedding in the struct (ET1).
+        # Raise if K or V resolves to an extension type: the key/value land inside struct
+        # fields, which also forbids extension types (ET1 in DESIGN_ISSUES.md).
         if origin is dict:
             if len(args) < 2:
                 raise ValueError(
@@ -328,11 +342,21 @@ class UniversalTypeConverter:
                     "key and value types (e.g. dict[str, int])."
                 )
             key_arrow = self.register_python_class(args[0])
-            if isinstance(key_arrow, pa.ExtensionType):
-                key_arrow = key_arrow.storage_type  # strip: ET1
             val_arrow = self.register_python_class(args[1])
+            if isinstance(key_arrow, pa.ExtensionType):
+                raise ValueError(
+                    f"'dict[{args[0]}, ...]' is not yet supported: the key type maps to Arrow "
+                    f"extension type {key_arrow.extension_name!r}, which cannot be preserved "
+                    f"inside a struct field due to an Arrow limitation (ET1 in DESIGN_ISSUES.md). "
+                    f"Native dict-of-logical-type support is tracked in PLT-1732."
+                )
             if isinstance(val_arrow, pa.ExtensionType):
-                val_arrow = val_arrow.storage_type  # strip: ET1
+                raise ValueError(
+                    f"'dict[..., {args[1]}]' is not yet supported: the value type maps to Arrow "
+                    f"extension type {val_arrow.extension_name!r}, which cannot be preserved "
+                    f"inside a struct field due to an Arrow limitation (ET1 in DESIGN_ISSUES.md). "
+                    f"Native dict-of-logical-type support is tracked in PLT-1732."
+                )
             return pa.large_list(
                 pa.struct([pa.field("key", key_arrow), pa.field("value", val_arrow)])
             )

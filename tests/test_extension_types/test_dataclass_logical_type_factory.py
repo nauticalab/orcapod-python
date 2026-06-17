@@ -194,6 +194,22 @@ class _OuterForRegistrationTest:
     label: str
 
 
+# ── Module-level dataclasses for list[dataclass[dataclass]] round-trip test ──
+
+@dataclasses.dataclass
+class _ListItemDC:
+    """Inner dataclass used as element type in list[_ListItemDC] field."""
+    x: int
+    y: int
+
+
+@dataclasses.dataclass
+class _ListContainerDC:
+    """Outer dataclass with a list[_ListItemDC] field."""
+    items: list[_ListItemDC]
+    label: str
+
+
 def test_factory_create_flat_dataclass():
     from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DataclassLogicalType
 
@@ -506,3 +522,59 @@ def test_nested_dataclass_parquet_roundtrip(tmp_path):
     assert isinstance(reconstructed.inner, _InnerForRegistrationTest)
     assert reconstructed.inner.value == 42
     assert reconstructed.label == "hello"
+
+
+@pytest.mark.xfail(
+    reason=(
+        "list[T] where T is a logical type (e.g. a dataclass) is not yet supported. "
+        "Arrow cannot preserve extension types inside list value fields (ET2 in "
+        "DESIGN_ISSUES.md). Planned in PLT-1732 (ListLogicalType / StructLogicalType)."
+    ),
+    raises=ValueError,
+    strict=True,
+)
+def test_list_of_nested_dataclass_parquet_roundtrip(tmp_path):
+    """Parquet round-trip for a dataclass whose field is list[AnotherDataclass].
+
+    This test documents the PLT-1732 gap: registering a dataclass that contains a
+    list[T] field where T is itself a logical type currently raises ValueError because
+    Arrow cannot represent extension types inside list value fields.
+
+    Once PLT-1732 (ListLogicalType) is implemented, this test should pass and the
+    xfail marker should be removed.
+    """
+    import pyarrow.parquet as pq
+    from orcapod.extension_types.database_hooks import register_discovered_extensions, apply_extension_types
+
+    # ── Write path ───────────────────────────────────────────────────────────
+    write_converter = _make_full_converter()
+
+    items = [_ListItemDC(x=1, y=2), _ListItemDC(x=3, y=4)]
+    container = _ListContainerDC(items=items, label="test")
+
+    # This raises ValueError currently: list[_ListItemDC] contains a logical type
+    # (_ListItemDC is a dataclass → extension type) in a list value field position.
+    write_converter.register_python_class(_ListContainerDC)
+
+    arrow_schema = write_converter.python_schema_to_arrow_schema({"record": _ListContainerDC})
+    rows = [{"record": container}]
+    table = write_converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    parquet_path = tmp_path / "list_nested.parquet"
+    pq.write_table(table, parquet_path)
+
+    # ── Read path (fresh converter) ──────────────────────────────────────────
+    read_converter = _make_full_converter()
+    read_table = pq.read_table(parquet_path)
+    register_discovered_extensions(read_converter, read_table.schema)
+    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+
+    rows_out = read_converter.arrow_table_to_python_dicts(read_table)
+    assert len(rows_out) == 1
+    reconstructed = rows_out[0]["record"]
+    assert isinstance(reconstructed, _ListContainerDC)
+    assert len(reconstructed.items) == 2
+    assert isinstance(reconstructed.items[0], _ListItemDC)
+    assert reconstructed.items[0].x == 1
+    assert reconstructed.items[1].y == 4
+    assert reconstructed.label == "test"
