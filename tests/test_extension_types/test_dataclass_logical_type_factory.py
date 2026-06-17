@@ -454,3 +454,55 @@ def test_storage_to_python_raises_when_converter_none():
     lt = DataclassLogicalType("mymod._DC2", _DC, storage, [("x", int)])
     with pytest.raises(ValueError, match="converter"):
         lt.storage_to_python({"x": 1}, None)
+
+
+def test_nested_dataclass_parquet_roundtrip(tmp_path):
+    """Fresh-process Parquet round-trip for a two-level nested dataclass.
+
+    Verifies that register_discovered_extensions triggers the chain:
+      register_arrow_extension("Outer") -> reconstruct_from_arrow
+        -> register_python_class(Inner) -> registers Inner
+    so that storage_to_python can reconstruct the full nested object.
+    """
+    import pyarrow.parquet as pq
+    from orcapod.extension_types.database_hooks import register_discovered_extensions, apply_extension_types
+
+    # ── Write path ───────────────────────────────────────────────────────────
+    write_converter = _make_full_converter()
+
+    inner = _InnerForRegistrationTest(value=42)
+    outer = _OuterForRegistrationTest(inner=inner, label="hello")
+
+    # Register Outer (which also registers Inner via create_for_python_type)
+    write_converter.register_python_class(_OuterForRegistrationTest)
+
+    # Serialise: python_schema_to_arrow_schema gives the column-level Arrow schema
+    # (with extension types at the top level); python_dicts_to_arrow_table converts rows.
+    arrow_schema = write_converter.python_schema_to_arrow_schema({"item": _OuterForRegistrationTest})
+    rows = [{"item": outer}]
+    table = write_converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    parquet_path = tmp_path / "nested.parquet"
+    pq.write_table(table, parquet_path)
+
+    # ── Read path (fresh converter — neither Inner nor Outer pre-registered) ──
+    read_converter = _make_full_converter()
+    read_table = pq.read_table(parquet_path)
+
+    # register_discovered_extensions triggers: Outer -> reconstruct_from_arrow
+    # -> register_python_class(Inner) -> registers Inner
+    register_discovered_extensions(read_converter, read_table.schema)
+    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+
+    # Both types must now be registered
+    assert read_converter._logical_type_registry.get_by_python_type(_OuterForRegistrationTest) is not None
+    assert read_converter._logical_type_registry.get_by_python_type(_InnerForRegistrationTest) is not None
+
+    # Convert back to Python and verify full nested object
+    rows_out = read_converter.arrow_table_to_python_dicts(read_table)
+    assert len(rows_out) == 1
+    reconstructed = rows_out[0]["item"]
+    assert isinstance(reconstructed, _OuterForRegistrationTest)
+    assert isinstance(reconstructed.inner, _InnerForRegistrationTest)
+    assert reconstructed.inner.value == 42
+    assert reconstructed.label == "hello"
