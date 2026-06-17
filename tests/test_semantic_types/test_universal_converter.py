@@ -849,24 +849,20 @@ def test_register_python_class_cycle_detection():
         converter.register_python_class(_CycleClass)
 
 
-def test_register_python_class_list_of_uuid_strips_extension():
-    """list[UUID] → large_list(large_binary): UUID ext type is stripped from list value."""
+def test_register_python_class_list_of_uuid_raises():
+    """list[UUID] raises ValueError: UUID is a logical type and cannot be preserved
+    inside a list value field (ET2 in DESIGN_ISSUES.md). Tracked in PLT-1732."""
     converter = _make_converter()
-    result = converter.register_python_class(list[_uuid_module.UUID])
-    assert pa.types.is_large_list(result)
-    # Value type must be plain large_binary (not the orcapod.uuid extension type)
-    assert result.value_type == pa.large_binary()
-    assert not isinstance(result.value_type, pa.ExtensionType)
+    with pytest.raises(ValueError, match="PLT-1732"):
+        converter.register_python_class(list[_uuid_module.UUID])
 
 
-def test_register_python_class_dict_str_uuid_strips_extension():
-    """dict[str, UUID] → large_list(struct{key, value}): UUID ext type is stripped from value."""
+def test_register_python_class_dict_str_uuid_raises():
+    """dict[str, UUID] raises ValueError: UUID is a logical type and cannot be preserved
+    inside a struct field (ET1/ET2 in DESIGN_ISSUES.md). Tracked in PLT-1732."""
     converter = _make_converter()
-    result = converter.register_python_class(dict[str, _uuid_module.UUID])
-    assert pa.types.is_large_list(result)
-    value_field = result.value_type.field("value")
-    assert value_field.type == pa.large_binary()
-    assert not isinstance(value_field.type, pa.ExtensionType)
+    with pytest.raises(ValueError, match="PLT-1732"):
+        converter.register_python_class(dict[str, _uuid_module.UUID])
 
 
 # ── register_storage_type tests ──────────────────────────────────────────────

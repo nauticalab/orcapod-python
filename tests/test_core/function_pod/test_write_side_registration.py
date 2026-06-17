@@ -147,6 +147,11 @@ def test_pod_declaration_triggers_factory_for_output_type():
 
 # ── Complex / nested type tests ───────────────────────────────────────────────
 
+@pytest.mark.xfail(
+    reason="list[T] where T is a logical type not yet supported (PLT-1732: ListLogicalType)",
+    raises=ValueError,
+    strict=True,
+)
 def test_pod_declaration_with_nested_list_input():
     """list[_MyChild] in a function input causes factory synthesis for _MyChild."""
     registry, call_log = _make_registry_with_factory(_MyBase)
@@ -162,6 +167,11 @@ def test_pod_declaration_with_nested_list_input():
     assert _MyChild in call_log
 
 
+@pytest.mark.xfail(
+    reason="list[T] / dict[K, list[T]] where T is a logical type not yet supported (PLT-1732)",
+    raises=ValueError,
+    strict=True,
+)
 def test_pod_declaration_with_doubly_nested_input():
     """dict[str, list[_MyChild]] causes factory synthesis for _MyChild."""
     registry, call_log = _make_registry_with_factory(_MyBase)
@@ -192,6 +202,11 @@ def test_pod_declaration_with_optional_input():
     assert _MyChild in call_log
 
 
+@pytest.mark.xfail(
+    reason="list[T] where T is a logical type not yet supported (PLT-1732: ListLogicalType)",
+    raises=ValueError,
+    strict=True,
+)
 def test_pod_declaration_with_complex_output():
     """list[_MyChild] in the output schema causes factory synthesis."""
     registry, call_log = _make_registry_with_factory(_MyBase)
@@ -207,6 +222,11 @@ def test_pod_declaration_with_complex_output():
     assert _MyChild in call_log
 
 
+@pytest.mark.xfail(
+    reason="list[T] / dict[K, list[T]] where T is a logical type not yet supported (PLT-1732)",
+    raises=ValueError,
+    strict=True,
+)
 def test_pod_declaration_with_doubly_nested_output():
     """dict[str, list[_MyChild]] in the output causes factory synthesis for _MyChild."""
     registry, call_log = _make_registry_with_factory(_MyBase)
@@ -275,6 +295,11 @@ def test_pod_declaration_two_classes_both_in_output():
     assert _MyOtherChild in call_log
 
 
+@pytest.mark.xfail(
+    reason="list[T] where T is a logical type not yet supported (PLT-1732: ListLogicalType)",
+    raises=ValueError,
+    strict=True,
+)
 def test_pod_declaration_three_classes_mixed():
     """Three custom classes spread across input and output each get synthesized."""
     registry, call_log = _make_registry_with_factory(_MyBase, _MyOtherBase, _ThirdBase)
