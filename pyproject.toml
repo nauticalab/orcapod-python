@@ -47,7 +47,8 @@ postgresql = ["psycopg[binary]>=3.0"]
 spiraldb = [
     "pyspiral>=0.14.0",
 ]
-all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]"]
+pydantic = ["pydantic>=2.0"]
+all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]", "orcapod[pydantic]"]
 
 
 [tool.hatch.version]
