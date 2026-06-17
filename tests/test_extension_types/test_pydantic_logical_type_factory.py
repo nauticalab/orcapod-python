@@ -177,6 +177,18 @@ class _ModelWithPrivateAttr(BaseModel):
     _cache: str = PrivateAttr(default="")
 
 
+# ── Module-level models for read-path and round-trip tests ───────────────────
+
+class _RoundTripPoint(BaseModel):
+    x: int
+    y: int
+
+
+class _RoundTripRecord(BaseModel):
+    record_id: _uuid_module.UUID
+    label: str
+
+
 # ── Factory helper ────────────────────────────────────────────────────────────
 
 def _make_full_converter():
@@ -300,3 +312,149 @@ def test_private_fields_not_stored():
     assert "name" in field_names
     assert "_cache" not in field_names
     assert storage.num_fields == 1
+
+
+# ── PydanticLogicalTypeFactory read-path tests ────────────────────────────────
+
+def test_factory_reconstruct_from_arrow():
+    """reconstruct_from_arrow rebuilds the logical type from the Arrow struct."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory, PydanticLogicalType
+
+    storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.int64())])
+    metadata = {"category": "orcapod.pydantic"}
+    fqcn = f"{_RoundTripPoint.__module__}.{_RoundTripPoint.__qualname__}"
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.reconstruct_from_arrow(fqcn, storage, metadata, converter=converter)
+
+    assert isinstance(lt, PydanticLogicalType)
+    assert lt.python_type is _RoundTripPoint
+    assert lt.logical_type_name == fqcn
+
+
+def test_factory_reconstruct_from_arrow_invalid_fqcn():
+    """ImportError if the FQCN cannot be resolved."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    storage = pa.struct([pa.field("x", pa.int64())])
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+
+    with pytest.raises(ImportError):
+        factory.reconstruct_from_arrow(
+            "nonexistent.module.NoSuchModel", storage, {"category": "orcapod.pydantic"}, converter
+        )
+
+
+def test_reconstruct_from_arrow_registers_nested_types():
+    """reconstruct_from_arrow for Outer must register Inner as a side effect."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    inner_storage = pa.struct([pa.field("value", pa.int64())])
+    outer_storage = pa.struct([
+        pa.field("inner", inner_storage),
+        pa.field("label", pa.large_string()),
+    ])
+    outer_fqcn = f"{_OuterModel.__module__}.{_OuterModel.__qualname__}"
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+
+    # Inner is NOT pre-registered
+    assert converter._logical_type_registry.get_by_python_type(_InnerModel) is None
+
+    factory.reconstruct_from_arrow(outer_fqcn, outer_storage, {"category": "orcapod.pydantic"}, converter)
+
+    # Inner must now be registered as a side effect
+    assert converter._logical_type_registry.get_by_python_type(_InnerModel) is not None
+
+
+# ── Value round-trip tests ────────────────────────────────────────────────────
+
+def test_pydantic_python_to_storage_round_trip():
+    """python_to_storage → storage_to_python returns an equivalent model."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    converter = _make_full_converter()
+    factory = PydanticLogicalTypeFactory()
+    lt = factory.create_for_python_type(_RoundTripPoint, converter=converter)
+    converter.register_logical_type(lt)
+
+    point = _RoundTripPoint(x=10, y=20)
+    storage_value = lt.python_to_storage(point, converter)
+    assert storage_value == {"x": 10, "y": 20}
+
+    reconstructed = lt.storage_to_python(storage_value, converter)
+    assert isinstance(reconstructed, _RoundTripPoint)
+    assert reconstructed.x == 10
+    assert reconstructed.y == 20
+
+
+def test_pydantic_with_uuid_round_trip():
+    """Round-trip a pydantic model with a UUID field."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    converter = _make_full_converter()
+    factory = PydanticLogicalTypeFactory()
+    lt = factory.create_for_python_type(_RoundTripRecord, converter=converter)
+    converter.register_logical_type(lt)
+
+    u = _uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    record = _RoundTripRecord(record_id=u, label="hello")
+
+    storage_value = lt.python_to_storage(record, converter)
+    assert storage_value["label"] == "hello"
+    assert storage_value["record_id"] == u.bytes
+
+    reconstructed = lt.storage_to_python(storage_value, converter)
+    assert isinstance(reconstructed, _RoundTripRecord)
+    assert reconstructed.record_id == u
+    assert reconstructed.label == "hello"
+
+
+# ── Parquet integration test ──────────────────────────────────────────────────
+
+def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
+    """Fresh-process Parquet round-trip for a two-level nested pydantic model.
+
+    Verifies that register_discovered_extensions triggers the chain:
+      register_arrow_extension("Outer") -> reconstruct_from_arrow
+        -> register_python_class(Inner) -> registers Inner
+    so that storage_to_python can reconstruct the full nested object.
+    """
+    import pyarrow.parquet as pq
+    from orcapod.extension_types.database_hooks import register_discovered_extensions, apply_extension_types
+
+    # ── Write path ───────────────────────────────────────────────────────────
+    write_converter = _make_full_converter()
+
+    inner = _InnerModel(value=42)
+    outer = _OuterModel(inner=inner, label="hello")
+
+    write_converter.register_python_class(_OuterModel)
+
+    arrow_schema = write_converter.python_schema_to_arrow_schema({"item": _OuterModel})
+    rows = [{"item": outer}]
+    table = write_converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    parquet_path = tmp_path / "nested_pydantic.parquet"
+    pq.write_table(table, parquet_path)
+
+    # ── Read path (fresh converter — neither Inner nor Outer pre-registered) ──
+    read_converter = _make_full_converter()
+    read_table = pq.read_table(parquet_path)
+
+    register_discovered_extensions(read_converter, read_table.schema)
+    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+
+    assert read_converter._logical_type_registry.get_by_python_type(_OuterModel) is not None
+    assert read_converter._logical_type_registry.get_by_python_type(_InnerModel) is not None
+
+    rows_out = read_converter.arrow_table_to_python_dicts(read_table)
+    assert len(rows_out) == 1
+    reconstructed = rows_out[0]["item"]
+    assert isinstance(reconstructed, _OuterModel)
+    assert isinstance(reconstructed.inner, _InnerModel)
+    assert reconstructed.inner.value == 42
+    assert reconstructed.label == "hello"
