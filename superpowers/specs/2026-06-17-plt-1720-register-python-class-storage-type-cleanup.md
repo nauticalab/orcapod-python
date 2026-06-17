@@ -28,18 +28,23 @@ registered when reading `Outer` from Parquet. Value conversion for `Inner` then 
 ## Design invariant
 
 **Registration completeness**: when a logical type is registered by any path, all nested
-logical types it depends on must also be registered as a consequence.
+logical types it depends on must also be registered as a consequence. This is a contract on
+`LogicalTypeFactoryProtocol`: both `create_for_python_type` and `reconstruct_from_arrow`
+must leave the converter in a state where every logical type the returned `LogicalTypeProtocol`
+depends on is also registered before the method returns.
 
-This invariant is already met on the write path — `create_for_python_type` calls
-`converter.register_python_class(annotation)` for each field, pulling in all nested types
-recursively. The fix brings the read path (`reconstruct_from_arrow`) into the same
-compliance, and the `register_python_class` return-type change makes the write path
-self-consistent.
+How a factory satisfies this invariant is an implementation detail and is not prescribed here.
+A future factory could, for example, embed enough information in its Arrow extension metadata
+to reconstruct and register all inner types directly from the metadata, without ever importing
+the Python class. That would be equally valid.
 
-Both factory methods (`create_for_python_type` and `reconstruct_from_arrow`) use
-`register_python_class` as the single registration mechanism. The write path uses the
-returned storage type to build struct fields; the read path discards the return value and
-uses only the registration side effect.
+For `DataclassLogicalTypeFactory` specifically, the current implementation satisfies the
+invariant by calling `converter.register_python_class(annotation)` for each field annotation
+in both `create_for_python_type` (which already did this to build struct fields) and the
+newly updated `reconstruct_from_arrow` (which discards the return value and uses only the
+registration side effect). This is the natural choice because the dataclass field annotations
+are available via `typing.get_type_hints` and `register_python_class` already handles
+recursive registration correctly.
 
 ---
 
@@ -49,7 +54,7 @@ uses only the registration side effect.
 |---|---|---|
 | `register_python_class(annotation)` | Returns `pa.ExtensionType` for registered classes | Returns plain `pa.DataType` (storage type) for all annotations |
 | `register_storage_type(arrow_type)` | Returns resolved `pa.DataType` | Returns `None` (side-effect registration only) |
-| `reconstruct_from_arrow(...)` | Does not register nested types | Calls `converter.register_python_class` per field annotation |
+| `reconstruct_from_arrow(...)` | Does not register nested types | Must ensure all nested types are registered before returning (mechanism is factory-specific) |
 
 `python_type_to_arrow_type(annotation)` is **unchanged** — it still returns `pa.ExtensionType`
 for registered classes, used for top-level column schema via `python_schema_to_arrow_schema`.
@@ -126,8 +131,11 @@ arrow_type = converter.register_python_class(annotation)
 arrow_fields.append(pa.field(field.name, arrow_type))   # arrow_type is already plain
 ```
 
-**`reconstruct_from_arrow`**: add `converter.register_python_class(annotation)` per field
-annotation to satisfy the registration completeness invariant. Return value is discarded:
+**`reconstruct_from_arrow`** (`DataclassLogicalTypeFactory` implementation): satisfies the
+registration completeness invariant by calling `converter.register_python_class(annotation)`
+for each field annotation — the same mechanism the write path already uses. The return value
+is discarded; only the registration side effect is needed here. This is the implementation
+choice for the dataclass factory; other factories may satisfy the invariant differently.
 
 ```python
 for field in dataclasses.fields(cls):
@@ -138,7 +146,7 @@ for field in dataclasses.fields(cls):
     field_annotations.append((field.name, annotation))
 ```
 
-Trigger chain on read path:
+Trigger chain on read path (for the dataclass factory):
 ```
 register_discovered_extensions
   → converter.register_arrow_extension("mymod.Outer", ...)
