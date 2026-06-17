@@ -1042,6 +1042,45 @@ construction and Arrow↔Polars conversion, the stripping one-liner in `create_f
 can be removed and `make_polars_extension_type` can accept extension-typed storage directly.
 Track upstream PyArrow / Polars issues.
 
+### ET2 — Top-level `list[T]` / `dict[K, V]` columns lose extension-type schema metadata when `T`/`V` is a logical type
+**Status:** open
+**Severity:** medium
+**Issue:** PLT-1732
+
+When a logical type (e.g. `UUID`, a dataclass) appears as the element type of a top-level
+`list[T]` or `dict[K, V]` column, the extension type metadata for `T` is stripped before
+the Arrow/Parquet schema is written. This happens because PyArrow does not allow extension
+types inside list value fields or struct fields (ET1). As a result the stored Arrow schema
+shows `large_list(large_binary)` for `list[UUID]` — no `orcapod.uuid` marker — and on a
+fresh read `register_storage_type` finds nothing to register. Value conversion with
+`storage_to_python(..., list[UUID])` then fails unless the caller has already registered
+`UUID` manually.
+
+**This does NOT affect logical types that are fields of a registered outer dataclass.**
+Those are discovered and registered transitively: `register_discovered_extensions` finds
+the outer dataclass extension type → `reconstruct_from_arrow` → `register_python_class`
+per field annotation → inner type registered. The limitation applies only when the
+outermost container (`list[T]`, `dict[K, V]`) is the top-level column type with no outer
+dataclass wrapper.
+
+**Empirically confirmed** (2026-06-17): `pa.array([], type=pa.large_list(extension_type))`
+raises `ArrowNotImplementedError: extension` — identical to the ET1 struct-field
+restriction. The `replace_logical_type` flag approach (preserving extension type inside
+list value field) is therefore infeasible at the PyArrow level.
+
+**Workaround (current):** callers that write `list[T]` top-level columns must manually
+call `converter.register_python_class(T)` before calling `storage_to_python` on a fresh
+converter. Alternatively, wrap the list in a dataclass field so the outer dataclass
+extension type carries the type information into the schema.
+
+**Planned fix (PLT-1732, target v0.2):** Introduce `ListLogicalType` /
+`ListLogicalTypeFactory` and `StructLogicalType` / `StructLogicalTypeFactory`. A
+`list[UUID]` top-level column would be wrapped as a new extension type
+`orcapod.list[orcapod.uuid]` with storage `large_list(large_binary)`. The extension type
+sits at the outermost (list) level, not inside the list value field, so it satisfies ET1.
+`register_storage_type` would dispatch to the new factory on read, auto-registering the
+element type. See PLT-1732 for full design.
+
 ---
 
 ## `src/orcapod/semantic_types/universal_converter.py`
