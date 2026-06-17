@@ -296,14 +296,29 @@ class UniversalTypeConverter:
 
         # list[T] → pa.large_list(T)
         if origin is list:
+            if not args:
+                raise ValueError(
+                    "Unparameterized 'list' is not supported. Use 'list[T]' with a concrete "
+                    "element type (e.g. list[int], list[str])."
+                )
             return pa.large_list(self.register_python_class(args[0]))
 
         # set[T] → pa.large_list(T)
         if origin is set:
+            if not args:
+                raise ValueError(
+                    "Unparameterized 'set' is not supported. Use 'set[T]' with a concrete "
+                    "element type (e.g. set[int], set[str])."
+                )
             return pa.large_list(self.register_python_class(args[0]))
 
         # dict[K, V] → pa.large_list(struct{key: K, value: V})
         if origin is dict:
+            if len(args) < 2:
+                raise ValueError(
+                    "Unparameterized 'dict' is not supported. Use 'dict[K, V]' with concrete "
+                    "key and value types (e.g. dict[str, int])."
+                )
             key_arrow = self.register_python_class(args[0])
             val_arrow = self.register_python_class(args[1])
             return pa.large_list(
