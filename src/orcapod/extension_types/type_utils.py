@@ -86,7 +86,7 @@ def _walk_fqcn(fqcn: str) -> Any:
         attr_parts = parts[i:]
         try:
             module = importlib.import_module(module_path)
-        except (ImportError, ModuleNotFoundError):
+        except ImportError:
             continue
         obj: Any = module
         try:
