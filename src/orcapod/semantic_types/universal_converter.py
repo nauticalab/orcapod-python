@@ -294,25 +294,33 @@ class UniversalTypeConverter:
                 f"{annotation!r}. Only Optional[T] (T | None) is allowed."
             )
 
-        # list[T] → pa.large_list(T)
+        # list[T] → pa.large_list(T).  Strip extension type from element (ET1: extension
+        # types cannot be nested inside list value types).
         if origin is list:
             if not args:
                 raise ValueError(
                     "Unparameterized 'list' is not supported. Use 'list[T]' with a concrete "
                     "element type (e.g. list[int], list[str])."
                 )
-            return pa.large_list(self.register_python_class(args[0]))
+            inner = self.register_python_class(args[0])
+            if isinstance(inner, pa.ExtensionType):
+                inner = inner.storage_type  # strip: ET1
+            return pa.large_list(inner)
 
-        # set[T] → pa.large_list(T)
+        # set[T] → pa.large_list(T).  Strip extension type from element (ET1).
         if origin is set:
             if not args:
                 raise ValueError(
                     "Unparameterized 'set' is not supported. Use 'set[T]' with a concrete "
                     "element type (e.g. set[int], set[str])."
                 )
-            return pa.large_list(self.register_python_class(args[0]))
+            inner = self.register_python_class(args[0])
+            if isinstance(inner, pa.ExtensionType):
+                inner = inner.storage_type  # strip: ET1
+            return pa.large_list(inner)
 
-        # dict[K, V] → pa.large_list(struct{key: K, value: V})
+        # dict[K, V] → pa.large_list(struct{key: K, value: V}).
+        # Strip extension types from key and value before embedding in the struct (ET1).
         if origin is dict:
             if len(args) < 2:
                 raise ValueError(
@@ -320,7 +328,11 @@ class UniversalTypeConverter:
                     "key and value types (e.g. dict[str, int])."
                 )
             key_arrow = self.register_python_class(args[0])
+            if isinstance(key_arrow, pa.ExtensionType):
+                key_arrow = key_arrow.storage_type  # strip: ET1
             val_arrow = self.register_python_class(args[1])
+            if isinstance(val_arrow, pa.ExtensionType):
+                val_arrow = val_arrow.storage_type  # strip: ET1
             return pa.large_list(
                 pa.struct([pa.field("key", key_arrow), pa.field("value", val_arrow)])
             )
