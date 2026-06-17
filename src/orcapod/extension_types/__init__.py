@@ -12,6 +12,9 @@ types, ``register_logical_type_factory()`` to add factories, and
 ``DataclassLogicalTypeFactory`` provides automatic registration for Python dataclasses:
 register it with a ``LogicalTypeRegistry`` and any dataclass used in a ``FunctionPod``
 will be auto-registered on pod declaration.
+
+``PydanticLogicalTypeFactory`` provides automatic registration for pydantic v2
+``BaseModel`` subclasses. Requires the optional ``pydantic`` extra.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polar
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
 from .database_hooks import apply_extension_types, register_discovered_extensions
 from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
+from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalType, PydanticLogicalTypeFactory
 
 __all__ = [
     "LogicalTypeProtocol",
@@ -39,4 +43,8 @@ __all__ = [
     "DATACLASS_CATEGORY",
     "DataclassLogicalType",
     "DataclassLogicalTypeFactory",
+    # PLT-1731
+    "PYDANTIC_CATEGORY",
+    "PydanticLogicalType",
+    "PydanticLogicalTypeFactory",
 ]
