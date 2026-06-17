@@ -106,7 +106,7 @@ return pa.large_list(inner)
 End-to-end examples (identical to current spec — stripping in container branches is unchanged):
 - `list[UUID]` → `pa.large_list(pa.large_binary())`
 - `dict[str, UUID]` → `pa.large_list(pa.struct([key: large_string, value: large_binary]))`
-- `Optional[UUID]` → `pa.large_binary()`
+- `Optional[UUID]` → `orcapod.uuid` extension type (same as `UUID` directly; `Optional[T]` is a nullability wrapper that delegates to `register_python_class(T)` unchanged)
 - `UUID` directly → `orcapod.uuid` extension type (top-level; storage is `pa.large_binary()`)
 
 `_convert_python_to_arrow` (used by `python_type_to_arrow_type`) is not touched.
