@@ -91,21 +91,17 @@ return lt.get_arrow_extension_type()       # unchanged from current behaviour
 ```
 
 The container branches (`list[T]`, `set[T]`, `dict[K,V]`, `Optional[T]`) recurse through
-`self.register_python_class(...)` and receive a potentially extension-typed result. They strip
-it to `.storage_type` before embedding it in a list value or struct field — a trivial one-liner
-that replaces the old recursive `_strip_ext_to_storage` helper:
+`self.register_python_class(...)` and receive a potentially extension-typed result.
+For `Optional[T]` the result is returned unchanged (nullability is a field-level concern).
+For `list[T]`, `set[T]`, and `dict[K,V]`, if the element/key/value resolves to an extension
+type, a `ValueError` is raised rather than silently stripping the extension type — this is
+the ET2 policy (fail loudly at schema-construction time). See ET2 in `DESIGN_ISSUES.md` and
+PLT-1732 for the planned `ListLogicalType` fix.
 
-```python
-# list[T] branch (illustrative)
-inner = self.register_python_class(inner_type)
-if isinstance(inner, pa.ExtensionType):
-    inner = inner.storage_type   # strip: cannot nest ext inside list value type
-return pa.large_list(inner)
-```
-
-End-to-end examples (identical to current spec — stripping in container branches is unchanged):
-- `list[UUID]` → `pa.large_list(pa.large_binary())`
-- `dict[str, UUID]` → `pa.large_list(pa.struct([key: large_string, value: large_binary]))`
+End-to-end examples:
+- `list[UUID]` → raises `ValueError` (ET2: UUID is a logical type; use a direct UUID column or wrap in a dataclass field)
+- `dict[str, UUID]` → raises `ValueError` (ET2: same reason)
+- `list[int]` → `pa.large_list(pa.int64())` (plain types are fine)
 - `Optional[UUID]` → `orcapod.uuid` extension type (same as `UUID` directly; `Optional[T]` is a nullability wrapper that delegates to `register_python_class(T)` unchanged)
 - `UUID` directly → `orcapod.uuid` extension type (top-level; storage is `pa.large_binary()`)
 
