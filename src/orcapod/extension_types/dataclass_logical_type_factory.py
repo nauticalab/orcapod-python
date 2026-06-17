@@ -71,12 +71,22 @@ def _strip_ext_to_storage(arrow_type: pa.DataType) -> pa.DataType:
         for i in range(arrow_type.num_fields):
             field = arrow_type.field(i)
             stripped = _strip_ext_to_storage(field.type)
-            new_fields.append(pa.field(field.name, stripped, nullable=field.nullable))
+            new_fields.append(
+                pa.field(field.name, stripped, nullable=field.nullable, metadata=field.metadata)
+            )
         return pa.struct(new_fields)
     if pa.types.is_large_list(arrow_type):
-        return pa.large_list(_strip_ext_to_storage(arrow_type.value_type))
+        vf = arrow_type.value_field
+        stripped = _strip_ext_to_storage(vf.type)
+        return pa.large_list(
+            pa.field(vf.name, stripped, nullable=vf.nullable, metadata=vf.metadata)
+        )
     if pa.types.is_list(arrow_type):
-        return pa.list_(_strip_ext_to_storage(arrow_type.value_type))
+        vf = arrow_type.value_field
+        stripped = _strip_ext_to_storage(vf.type)
+        return pa.list_(
+            pa.field(vf.name, stripped, nullable=vf.nullable, metadata=vf.metadata)
+        )
     return arrow_type
 
 
