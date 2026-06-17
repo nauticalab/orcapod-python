@@ -1,11 +1,13 @@
-"""Utility helpers for Python type annotation inspection.
+"""Utility helpers for Python type annotation inspection and FQCN import.
 
 Used by the write-side registration trigger to extract leaf Python classes from
-complex generic annotations like ``list[dict[A, list[B]]]``.
+complex generic annotations like ``list[dict[A, list[B]]]``, and by logical type
+factories to import classes from fully-qualified class names.
 """
 
 from __future__ import annotations
 
+import importlib
 import typing
 from typing import Any, Iterator
 
@@ -49,3 +51,51 @@ def _extract_leaf_classes(annotation: Any) -> Iterator[type]:
         if arg is type(None):
             continue
         yield from _extract_leaf_classes(arg)
+
+
+def _walk_fqcn(fqcn: str) -> Any:
+    """Walk a fully-qualified class name and return the resolved object.
+
+    Tries module prefixes from longest to shortest, then walks the remaining
+    parts as attribute accesses. For example:
+
+    - ``"mypackage.sub.MyClass"`` → import ``mypackage.sub``, then
+      ``getattr(module, "MyClass")``.
+    - ``"mypackage.sub.Outer.Inner"`` → import ``mypackage.sub``, then
+      ``getattr(module, "Outer")``, then ``getattr(Outer, "Inner")``.
+
+    Does **not** validate the type of the resolved object — callers are
+    responsible for checking that the result is the expected kind of object
+    (e.g. a dataclass, a ``BaseModel`` subclass).
+
+    Args:
+        fqcn: Fully-qualified name, e.g. ``"mypackage.sub.MyClass"``.
+
+    Returns:
+        The resolved Python object.
+
+    Raises:
+        ImportError: If no valid module+attribute split can be found.
+    """
+    parts = fqcn.split(".")
+    if len(parts) < 2:
+        raise ImportError(f"Cannot import from FQCN {fqcn!r}: no module separator found.")
+
+    for i in range(len(parts) - 1, 0, -1):
+        module_path = ".".join(parts[:i])
+        attr_parts = parts[i:]
+        try:
+            module = importlib.import_module(module_path)
+        except (ImportError, ModuleNotFoundError):
+            continue
+        obj: Any = module
+        try:
+            for attr in attr_parts:
+                obj = getattr(obj, attr)
+        except AttributeError:
+            continue
+        return obj
+
+    raise ImportError(
+        f"Cannot import from FQCN {fqcn!r}: no valid module+attribute path found."
+    )

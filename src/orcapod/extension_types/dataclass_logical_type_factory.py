@@ -20,7 +20,6 @@ Category tag: ``"orcapod.dataclass"``
 from __future__ import annotations
 
 import dataclasses
-import importlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -339,15 +338,10 @@ class DataclassLogicalTypeFactory:
 
 
 def _import_from_fqcn(fqcn: str) -> type:
-    """Import a class from its fully-qualified class name.
+    """Import a dataclass from its fully-qualified class name.
 
-    Tries module prefixes from longest to shortest, then walks the remaining
-    parts as attribute access. For example:
-
-    - ``"mypackage.sub.MyClass"`` → import ``mypackage.sub``, then
-      ``getattr(module, "MyClass")``.
-    - ``"mypackage.sub.Outer.Inner"`` → import ``mypackage.sub``, then
-      ``getattr(module, "Outer")``, then ``getattr(Outer, "Inner")``.
+    Delegates the module-prefix walk to ``type_utils._walk_fqcn``, then
+    validates the resolved object is a dataclass type.
 
     Args:
         fqcn: Fully-qualified class name, e.g. ``"mypackage.sub.MyClass"``.
@@ -359,31 +353,11 @@ def _import_from_fqcn(fqcn: str) -> type:
         ImportError: If no valid module+attribute split can be found, or if the
             resolved object is not a dataclass type.
     """
-    parts = fqcn.split(".")
-    if len(parts) < 2:
-        raise ImportError(f"Cannot import from FQCN {fqcn!r}: no module separator found.")
+    from orcapod.extension_types.type_utils import _walk_fqcn
 
-    # Try module paths from longest to shortest prefix
-    for i in range(len(parts) - 1, 0, -1):
-        module_path = ".".join(parts[:i])
-        attr_parts = parts[i:]
-        try:
-            module = importlib.import_module(module_path)
-        except (ImportError, ModuleNotFoundError):
-            continue
-        # Walk the remaining attribute chain (handles nested classes)
-        obj: Any = module
-        try:
-            for attr in attr_parts:
-                obj = getattr(obj, attr)
-        except AttributeError:
-            continue
-        if not dataclasses.is_dataclass(obj) or not isinstance(obj, type):
-            raise ImportError(
-                f"{'.'.join(attr_parts)!r} in {module_path!r} is not a dataclass type."
-            )
-        return obj
-
-    raise ImportError(
-        f"Cannot import dataclass from FQCN {fqcn!r}: no valid module+attribute path found."
-    )
+    obj: Any = _walk_fqcn(fqcn)
+    if not dataclasses.is_dataclass(obj) or not isinstance(obj, type):
+        raise ImportError(
+            f"{fqcn!r} does not resolve to a dataclass type."
+        )
+    return obj
