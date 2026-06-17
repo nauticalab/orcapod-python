@@ -75,7 +75,11 @@ def _walk_fqcn(fqcn: str) -> Any:
         The resolved Python object.
 
     Raises:
-        ImportError: If no valid module+attribute split can be found.
+        ImportError: If no valid module+attribute split can be found, or if a
+            candidate module prefix exists on disk but raises an ``ImportError``
+            at import time (e.g. a missing optional dependency).  In the latter
+            case the original exception is re-raised unchanged so callers see
+            the true root cause.
     """
     parts = fqcn.split(".")
     if len(parts) < 2:
@@ -86,7 +90,15 @@ def _walk_fqcn(fqcn: str) -> Any:
         attr_parts = parts[i:]
         try:
             module = importlib.import_module(module_path)
-        except ImportError:
+        except ModuleNotFoundError as exc:
+            # Only continue when the module we tried to import (or a direct
+            # ancestor of it) simply does not exist.  If exc.name is not a
+            # prefix of module_path the module exists on disk but failed to
+            # import — for example because one of its optional dependencies is
+            # absent.  In that case re-raise so the caller sees the true root
+            # cause instead of a misleading "no valid module+attribute" error.
+            if exc.name is None or not module_path.startswith(exc.name):
+                raise
             continue
         obj: Any = module
         try:
