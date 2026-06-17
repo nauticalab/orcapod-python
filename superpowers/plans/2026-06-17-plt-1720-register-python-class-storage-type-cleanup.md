@@ -288,39 +288,33 @@ uv run pytest tests/test_semantic_types/test_universal_converter.py -k "register
 ```
 Expected: PASS
 
-- [ ] **Step 2: Write a new failing test for `list[UUID]` stripping**
+- [ ] **Step 2: Write a new failing test for `list[UUID]` error behaviour**
 
 Add at the end of the `register_python_class` block in `tests/test_semantic_types/test_universal_converter.py`:
 
 ```python
-def test_register_python_class_list_of_uuid_strips_extension():
-    """list[UUID] → large_list(large_binary): UUID ext type is stripped from list value."""
+def test_register_python_class_list_of_uuid_raises():
+    """list[UUID] raises ValueError: UUID is a logical type and cannot be preserved
+    inside a list value field (ET2 in DESIGN_ISSUES.md). Tracked in PLT-1732."""
     converter = _make_converter()
-    result = converter.register_python_class(list[_uuid_module.UUID])
-    assert pa.types.is_large_list(result)
-    # Value type must be plain large_binary (not the orcapod.uuid extension type)
-    assert result.value_type == pa.large_binary()
-    assert not isinstance(result.value_type, pa.ExtensionType)
+    with pytest.raises(ValueError, match="PLT-1732"):
+        converter.register_python_class(list[_uuid_module.UUID])
 
 
-def test_register_python_class_dict_str_uuid_strips_extension():
-    """dict[str, UUID] → large_list(struct{key, value}): UUID ext type is stripped from value."""
+def test_register_python_class_dict_str_uuid_raises():
+    """dict[str, UUID] raises ValueError: UUID is a logical type and cannot be preserved
+    inside a struct field (ET1/ET2 in DESIGN_ISSUES.md). Tracked in PLT-1732."""
     converter = _make_converter()
-    result = converter.register_python_class(dict[str, _uuid_module.UUID])
-    assert pa.types.is_large_list(result)
-    value_field = result.value_type.field("value")
-    assert value_field.type == pa.large_binary()
-    assert not isinstance(value_field.type, pa.ExtensionType)
+    with pytest.raises(ValueError, match="PLT-1732"):
+        converter.register_python_class(dict[str, _uuid_module.UUID])
 ```
 
 - [ ] **Step 3: Run the new tests to verify they fail**
 
 ```bash
-uv run pytest tests/test_semantic_types/test_universal_converter.py::test_register_python_class_list_of_uuid_strips_extension tests/test_semantic_types/test_universal_converter.py::test_register_python_class_dict_str_uuid_strips_extension -v
+uv run pytest tests/test_semantic_types/test_universal_converter.py::test_register_python_class_list_of_uuid_raises tests/test_semantic_types/test_universal_converter.py::test_register_python_class_dict_str_uuid_raises -v
 ```
-Expected: FAIL — UUID is currently returned as-is from `register_python_class(UUID)` (it's already an extension type); the list/dict branches embed it without stripping.
-
-Wait — check this. The current code at line 340 returns `lt.get_arrow_extension_type()` for UUID. Then line 304 does `pa.large_list(self.register_python_class(args[0]))` which calls `register_python_class(UUID)` → extension type → embeds in large_list. This IS a bug today. So the tests should indeed fail.
+Expected: FAIL — the list/dict branches currently embed the extension type without raising.
 
 - [ ] **Step 4: Fix the container branches in `_register_python_class_impl`**
 
@@ -421,7 +415,7 @@ Locate the list, set, and dict branches (lines ~297–325). Apply stripping afte
 - [ ] **Step 5: Run the new tests to verify they pass**
 
 ```bash
-uv run pytest tests/test_semantic_types/test_universal_converter.py::test_register_python_class_list_of_uuid_strips_extension tests/test_semantic_types/test_universal_converter.py::test_register_python_class_dict_str_uuid_strips_extension -v
+uv run pytest tests/test_semantic_types/test_universal_converter.py::test_register_python_class_list_of_uuid_raises tests/test_semantic_types/test_universal_converter.py::test_register_python_class_dict_str_uuid_raises -v
 ```
 Expected: PASS
 
@@ -826,7 +820,7 @@ git push -u origin eywalker/plt-1720-cleanup-register_python_class-should-return
 - ✅ Protocol docstrings updated (Task 1)
 - ✅ `DESIGN_ISSUES.md` ET1 updated (Task 7)
 - ✅ `test_register_storage_type_nested_struct_with_extension` updated (Task 2)
-- ✅ `test_register_python_class_list_of_uuid_strips_extension` added (Task 3)
+- ✅ `test_register_python_class_list_of_uuid_raises` added (Task 3)
 - ✅ `test_reconstruct_from_arrow_registers_nested_types` added (Task 5)
 - ✅ `test_nested_dataclass_parquet_roundtrip` added (Task 6)
 - ✅ `database_hooks.py` unchanged (no task needed — already uses `register_storage_type` return value)

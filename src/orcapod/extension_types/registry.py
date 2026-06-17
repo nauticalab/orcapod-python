@@ -123,11 +123,11 @@ def make_polars_extension_type(
     list element types). Polars's Arrow IPC bridge can handle a top-level
     extension type via ``pl.BaseExtension``, but raises
     ``ArrowNotImplementedError: extension`` when it encounters an extension type
-    nested inside a struct or list during dtype inference. Callers that need to
-    build a Polars extension type whose storage contains nested extension types
-    must first strip those nodes to their plain storage types. Both
-    ``register_python_class`` and ``register_storage_type`` uphold a storage-safe
-    invariant that guarantees this. This is tracked as design issue ET1 in
+    nested inside a struct or list during dtype inference. Callers must ensure
+    ``arrow_storage_type`` is storage-safe (no nested extension type nodes) before
+    passing it here. Types produced by ``register_python_class`` and
+    ``register_storage_type`` satisfy this invariant, but arbitrary
+    ``pa.DataType`` values do not. This is tracked as design issue ET1 in
     ``DESIGN_ISSUES.md``.
 
     Args:
