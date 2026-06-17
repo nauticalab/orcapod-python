@@ -87,9 +87,10 @@ class DataclassLogicalType:
         )
         self._arrow_ext: pa.ExtensionType | None = None
         # ``storage_type`` must not contain nested extension types (ET1 in DESIGN_ISSUES.md).
-        # ``DataclassLogicalTypeFactory.create_for_python_type`` and ``reconstruct_from_arrow``
-        # both guarantee this by stripping any top-level extension type from each field's
-        # Arrow type before inserting it into the struct.
+        # On the write path, ``DataclassLogicalTypeFactory.create_for_python_type`` strips any
+        # top-level extension type from each field's Arrow type before inserting it into the
+        # struct. On the read path, ``reconstruct_from_arrow`` receives a ``storage_type``
+        # already guaranteed storage-safe by ``register_storage_type``.
         self._polars_ext_class = make_polars_extension_type(logical_name, storage_type)
         self._polars_ext: pl.BaseExtension | None = None
 
