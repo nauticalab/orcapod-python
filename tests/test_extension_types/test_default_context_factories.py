@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 from pydantic import BaseModel
 
 from orcapod.contexts import create_registry
-from orcapod.extension_types.database_hooks import apply_extension_types, register_discovered_extensions
+from orcapod.extension_types.database_hooks import register_discovered_extensions
 from orcapod.extension_types.dataclass_logical_type_factory import (
     DataclassLogicalTypeFactory,
     DATACLASS_CATEGORY,
@@ -132,7 +132,7 @@ def test_default_context_dataclass_parquet_roundtrip(tmp_path):
     read_converter = create_registry().get_context().type_converter
     read_table = pq.read_table(parquet_path)
     register_discovered_extensions(read_converter, read_table.schema)
-    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+    read_table = read_converter.apply_extension_types(read_table)
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1
@@ -158,7 +158,7 @@ def test_default_context_pydantic_parquet_roundtrip(tmp_path):
     read_converter = create_registry().get_context().type_converter
     read_table = pq.read_table(parquet_path)
     register_discovered_extensions(read_converter, read_table.schema)
-    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+    read_table = read_converter.apply_extension_types(read_table)
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1
