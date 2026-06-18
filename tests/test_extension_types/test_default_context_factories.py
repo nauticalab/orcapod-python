@@ -57,3 +57,27 @@ def test_registry_factories_param_none_is_noop():
     registry = LogicalTypeRegistry(factories=None)
     assert registry._category_factories == {}
     assert registry._python_class_factories == {}
+
+
+# ── Default context integration tests ────────────────────────────────────────
+#
+# All tests use create_registry().get_context() — NOT get_default_context() —
+# to avoid cross-test contamination via the global singleton cache.
+
+from orcapod.contexts import create_registry
+
+
+def test_default_context_has_dataclass_factory():
+    """Default context registers DataclassLogicalTypeFactory under orcapod.dataclass."""
+    ctx = create_registry().get_context()
+    registry = ctx.type_converter._logical_type_registry
+    factory = registry._category_factories.get(DATACLASS_CATEGORY)
+    assert isinstance(factory, DataclassLogicalTypeFactory)
+
+
+def test_default_context_has_pydantic_factory():
+    """Default context registers PydanticLogicalTypeFactory under orcapod.pydantic."""
+    ctx = create_registry().get_context()
+    registry = ctx.type_converter._logical_type_registry
+    factory = registry._category_factories.get(PYDANTIC_CATEGORY)
+    assert isinstance(factory, PydanticLogicalTypeFactory)

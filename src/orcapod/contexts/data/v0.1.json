@@ -55,6 +55,24 @@
                             "_class": "orcapod.extension_types.builtin_logical_types.LogicalUUID",
                             "_config": {}
                         }
+                    ],
+                    "factories": [
+                        {
+                            "factory": {
+                                "_class": "orcapod.extension_types.dataclass_logical_type_factory.DataclassLogicalTypeFactory",
+                                "_config": {}
+                            },
+                            "category": "orcapod.dataclass",
+                            "python_bases": [{"_type": "builtins.object"}]
+                        },
+                        {
+                            "factory": {
+                                "_class": "orcapod.extension_types.pydantic_logical_type_factory.PydanticLogicalTypeFactory",
+                                "_config": {}
+                            },
+                            "category": "orcapod.pydantic",
+                            "python_bases": [{"_type": "pydantic.BaseModel"}]
+                        }
                     ]
                 }
             }
