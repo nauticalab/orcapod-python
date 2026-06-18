@@ -71,6 +71,10 @@ class TypeConverterProtocol(Protocol):
         """Re-wrap table columns into their registered Arrow extension types."""
         ...
 
+    def register_discovered_extensions(self, schema: "pa.Schema") -> None:
+        """Register any extension types found in ``schema`` that are not yet known."""
+        ...
+
     def register_arrow_extension(
         self,
         arrow_extension_name: str,
