@@ -1,4 +1,4 @@
-# PLT-1701: Wire DataclassHandlerFactory and PydanticLogicalTypeFactory into the Default LogicalTypeRegistry
+# PLT-1701: Wire DataclassLogicalTypeFactory and PydanticLogicalTypeFactory into the Default LogicalTypeRegistry
 
 **Date:** 2026-06-18
 **Issue:** PLT-1701
