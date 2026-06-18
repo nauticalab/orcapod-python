@@ -564,6 +564,27 @@ class UniversalTypeConverter:
         )
         _reg_disc(self, schema)
 
+    def load_extension_types(self, table: "pa.Table") -> "pa.Table":
+        """Register and apply extension types for *table* in one step.
+
+        Convenience wrapper that calls ``register_discovered_extensions`` followed
+        by ``apply_extension_types``. Use this as the standard post-read step after
+        loading a table from Parquet or IPC:
+
+            table = converter.load_extension_types(pq.read_table(path))
+
+        Args:
+            table: Arrow table as returned by a Parquet or IPC read, whose columns
+                may carry ``ARROW:extension:*`` field metadata but were loaded as
+                plain storage types.
+
+        Returns:
+            A new ``pa.Table`` with extension-typed columns re-wrapped, or the
+            original *table* unchanged if no extension types are present.
+        """
+        self.register_discovered_extensions(table.schema)
+        return self.apply_extension_types(table)
+
     def register_arrow_extension(
         self,
         arrow_extension_name: str,

@@ -129,9 +129,7 @@ def test_default_context_dataclass_parquet_roundtrip(tmp_path):
 
     # Read path — another fresh context, no manual factory setup
     read_converter = create_registry().get_context().type_converter
-    read_table = pq.read_table(parquet_path)
-    read_converter.register_discovered_extensions(read_table.schema)
-    read_table = read_converter.apply_extension_types(read_table)
+    read_table = read_converter.load_extension_types(pq.read_table(parquet_path))
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1
@@ -155,9 +153,7 @@ def test_default_context_pydantic_parquet_roundtrip(tmp_path):
 
     # Read path — another fresh context, no manual factory setup
     read_converter = create_registry().get_context().type_converter
-    read_table = pq.read_table(parquet_path)
-    read_converter.register_discovered_extensions(read_table.schema)
-    read_table = read_converter.apply_extension_types(read_table)
+    read_table = read_converter.load_extension_types(pq.read_table(parquet_path))
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1
