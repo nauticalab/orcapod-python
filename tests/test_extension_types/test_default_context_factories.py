@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 
-import pytest
+import pyarrow as pa
+import pyarrow.parquet as pq
+from pydantic import BaseModel
 
+from orcapod.contexts import create_registry
+from orcapod.extension_types.database_hooks import apply_extension_types, register_discovered_extensions
 from orcapod.extension_types.dataclass_logical_type_factory import (
     DataclassLogicalTypeFactory,
     DATACLASS_CATEGORY,
@@ -21,14 +25,13 @@ from orcapod.extension_types.registry import LogicalTypeRegistry
 
 @dataclasses.dataclass
 class _SimplePoint:
+    """Minimal dataclass used as a test fixture."""
     x: int
     y: int
 
 
-from pydantic import BaseModel
-
-
 class _SimpleModel(BaseModel):
+    """Minimal pydantic model used as a test fixture."""
     name: str
     score: float
 
@@ -72,8 +75,6 @@ def test_registry_factories_param_none_is_noop():
 # All tests use create_registry().get_context() — NOT get_default_context() —
 # to avoid cross-test contamination via the global singleton cache.
 
-from orcapod.contexts import create_registry
-
 
 def test_default_context_has_dataclass_factory():
     """Default context registers DataclassLogicalTypeFactory under orcapod.dataclass."""
@@ -92,9 +93,6 @@ def test_default_context_has_pydantic_factory():
 
 
 # ── Auto-registration tests ───────────────────────────────────────────────────
-
-import pyarrow as pa
-from orcapod.extension_types.database_hooks import apply_extension_types, register_discovered_extensions
 
 
 def test_default_context_dataclass_auto_registered_on_use():
@@ -116,8 +114,6 @@ def test_default_context_pydantic_auto_registered_on_use():
 
 
 # ── Parquet round-trip tests ─────────────────────────────────────────────────
-
-import pyarrow.parquet as pq
 
 
 def test_default_context_dataclass_parquet_roundtrip(tmp_path):
