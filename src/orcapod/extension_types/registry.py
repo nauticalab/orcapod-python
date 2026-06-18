@@ -193,6 +193,11 @@ class LogicalTypeRegistry:
     the same pattern as ``SemanticTypeRegistry``'s ``converters`` constructor
     argument.
 
+    An optional ``factories`` list can also be passed to pre-register
+    ``LogicalTypeFactoryProtocol`` instances at construction time. Each entry is a
+    dict with keys ``factory`` (the factory instance), ``category`` (optional str),
+    and ``python_bases`` (optional list of types).
+
     Example:
         >>> registry = LogicalTypeRegistry()
         >>> registry.register_logical_type(my_logical_type)
