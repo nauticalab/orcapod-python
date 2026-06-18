@@ -202,7 +202,11 @@ class LogicalTypeRegistry:
         >>> registry = LogicalTypeRegistry(logical_types=[path_lt, uuid_lt])
     """
 
-    def __init__(self, logical_types: list[LogicalTypeProtocol] | None = None) -> None:
+    def __init__(
+        self,
+        logical_types: list[LogicalTypeProtocol] | None = None,
+        factories: list[dict] | None = None,
+    ) -> None:
         self._by_logical_name: dict[str, LogicalTypeProtocol] = {}
         self._by_arrow_name: dict[str, LogicalTypeProtocol] = {}
         self._by_python_type: dict[type, LogicalTypeProtocol] = {}
@@ -210,6 +214,12 @@ class LogicalTypeRegistry:
         self._python_class_factories: dict[type, LogicalTypeFactoryProtocol] = {}
         for lt in (logical_types or []):
             self.register_logical_type(lt)
+        for entry in (factories or []):
+            self.register_logical_type_factory(
+                entry["factory"],
+                category=entry.get("category"),
+                python_bases=entry.get("python_bases", []),
+            )
 
     def register_logical_type(self, logical_type: LogicalTypeProtocol) -> None:
         """Register *logical_type* and its PyArrow/Polars extension types.
