@@ -215,13 +215,9 @@ class PydanticLogicalTypeFactory:
             python_type: Any Python type.
 
         Returns:
-            True if pydantic is installed and ``python_type`` is a ``BaseModel``
-            subclass. False if pydantic is not installed.
+            True if ``python_type`` is a ``BaseModel`` subclass.
         """
-        try:
-            from pydantic import BaseModel
-        except ImportError:
-            return False
+        from pydantic import BaseModel
         return isinstance(python_type, type) and issubclass(python_type, BaseModel)
 
     def create_for_python_type(
