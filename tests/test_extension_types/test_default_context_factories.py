@@ -56,3 +56,4 @@ def test_registry_factories_param_none_is_noop():
     """factories=None (default) constructs successfully."""
     registry = LogicalTypeRegistry(factories=None)
     assert registry._category_factories == {}
+    assert registry._python_class_factories == {}
