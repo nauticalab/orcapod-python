@@ -75,6 +75,10 @@ class TypeConverterProtocol(Protocol):
         """Register any extension types found in ``schema`` that are not yet known."""
         ...
 
+    def load_extension_types(self, table: "pa.Table") -> "pa.Table":
+        """Register and apply extension types for *table* in one step."""
+        ...
+
     def register_arrow_extension(
         self,
         arrow_extension_name: str,
