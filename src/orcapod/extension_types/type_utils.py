@@ -92,12 +92,16 @@ def _walk_fqcn(fqcn: str) -> Any:
             module = importlib.import_module(module_path)
         except ModuleNotFoundError as exc:
             # Only continue when the module we tried to import (or a direct
-            # ancestor of it) simply does not exist.  If exc.name is not a
-            # prefix of module_path the module exists on disk but failed to
-            # import — for example because one of its optional dependencies is
-            # absent.  In that case re-raise so the caller sees the true root
-            # cause instead of a misleading "no valid module+attribute" error.
-            if exc.name is None or not module_path.startswith(exc.name):
+            # ancestor of it) simply does not exist.  Use an exact-match or
+            # dotted-prefix check so that a dep whose name is a bare prefix of
+            # module_path (e.g. dep "path" vs module "pathlib") is not
+            # accidentally treated as a missing ancestor.
+            #
+            # Re-raise in all other cases so callers see the true root cause
+            # instead of a misleading "no valid module+attribute" error.
+            if exc.name is None or not (
+                exc.name == module_path or module_path.startswith(exc.name + ".")
+            ):
                 raise
             continue
         obj: Any = module
