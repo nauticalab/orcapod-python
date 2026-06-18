@@ -522,7 +522,7 @@ class UniversalTypeConverter:
         when the registry is absent or when the table contains no columns with
         ``ARROW:extension:name`` field metadata.
 
-        Call ``register_discovered_extensions(self, table.schema)`` first to
+        Call ``self.register_discovered_extensions(table.schema)`` first to
         ensure all extension types in the schema are registered before calling
         this method.
 
@@ -541,6 +541,28 @@ class UniversalTypeConverter:
             apply_extension_types as _apply_ext,
         )
         return _apply_ext(table, self._logical_type_registry)
+
+    def register_discovered_extensions(self, schema: "pa.Schema") -> None:
+        """Register any extension types found in ``schema`` that are not yet known.
+
+        A convenience wrapper around the module-level ``register_discovered_extensions``
+        function. Walks ``schema`` recursively and registers each discovered extension
+        type via this converter's ``register_arrow_extension``. Already-registered types
+        are skipped. No-op when the schema contains no extension types.
+
+        Call this before ``apply_extension_types`` when reading a table from Parquet or
+        IPC to ensure all extension types in the schema are registered:
+
+            converter.register_discovered_extensions(table.schema)
+            table = converter.apply_extension_types(table)
+
+        Args:
+            schema: The Arrow schema to inspect for extension types.
+        """
+        from orcapod.extension_types.database_hooks import (
+            register_discovered_extensions as _reg_disc,
+        )
+        _reg_disc(self, schema)
 
     def register_arrow_extension(
         self,
