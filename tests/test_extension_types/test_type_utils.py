@@ -139,6 +139,32 @@ def test_walk_fqcn_reraises_real_import_failure(monkeypatch):
         _walk_fqcn("pathlib.Path")
 
 
+def test_walk_fqcn_reraises_when_dep_name_is_bare_prefix_of_module(monkeypatch):
+    """_walk_fqcn does not swallow errors when exc.name is a bare substring of module_path.
+
+    Regression: the old ``module_path.startswith(exc.name)`` check would
+    incorrectly swallow a ModuleNotFoundError for a dep named ``"path"`` while
+    importing ``"pathlib"``, because ``"pathlib".startswith("path")`` is True.
+    The fix requires an exact match or a dotted-prefix match.
+    """
+    import importlib as _importlib
+
+    original = _importlib.import_module
+
+    def _patched(name: str, *args, **kwargs):
+        if name == "pathlib":
+            # dep name "path" is a bare prefix of "pathlib" — must not be swallowed.
+            err = ModuleNotFoundError("No module named 'path'")
+            err.name = "path"
+            raise err
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(_importlib, "import_module", _patched)
+
+    with pytest.raises(ModuleNotFoundError, match="'path'"):
+        _walk_fqcn("pathlib.Path")
+
+
 # ── _import_from_fqcn tests ──────────────────────────────────────────────────
 
 
