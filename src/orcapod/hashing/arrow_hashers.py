@@ -386,6 +386,8 @@ class StarfixArrowHasher:
 
         processed_table = self._process_table_columns(table)
         clean_schema = clean_schema_for_hashing(processed_table.schema)
+        # clean_schema_for_hashing only strips metadata; physical types and
+        # column order are unchanged, so from_arrays is safe without a cast.
         clean_table = pa.Table.from_arrays(
             processed_table.columns, schema=clean_schema
         )
