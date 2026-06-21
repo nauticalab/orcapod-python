@@ -312,3 +312,106 @@ class TestContextIntegration:
         h = ctx.arrow_hasher.hash_table(table)
         assert isinstance(h, ContentHash)
         assert len(h.digest) == _DIGEST_LEN
+
+
+# ---------------------------------------------------------------------------
+# Extension-aware hash path (PLT-1737)
+# ---------------------------------------------------------------------------
+
+_EXT_NAME_KEY = b"ARROW:extension:name"
+_COMMENT_KEY  = b"comment"
+
+
+class TestHashSchemaExtensionAware:
+    def test_extension_free_golden_value_unchanged(self):
+        """Stability invariant: extension-free schema hash is byte-identical to
+        the pre-v0.3.0 golden value (include_metadata=False is the default)."""
+        schema = pa.schema(
+            [
+                pa.field("id", pa.int32(), nullable=False),
+                pa.field("value", pa.float64(), nullable=True),
+            ]
+        )
+        h = _make_hasher().hash_schema(schema)
+        assert h.digest.hex() == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c", (
+            f"Stability invariant broken — extension-free golden digest changed. Got: {h.digest.hex()}"
+        )
+
+    def test_mixed_metadata_hash_equals_extension_only_hash(self):
+        """Key property: a schema with ARROW:extension:name plus unrelated metadata
+        hashes identically to the same schema with only the extension key."""
+        ext_only_schema = pa.schema([
+            pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"my.Type"}),
+        ])
+        mixed_schema = pa.schema([
+            pa.field("t", pa.binary(), metadata={
+                _EXT_NAME_KEY: b"my.Type",
+                _COMMENT_KEY:  b"ignored",
+            }),
+        ])
+        h_ext   = _make_hasher().hash_schema(ext_only_schema)
+        h_mixed = _make_hasher().hash_schema(mixed_schema)
+        assert h_ext.digest == h_mixed.digest
+
+    def test_metadata_key_ordering_does_not_affect_hash(self):
+        """Reordering metadata keys in the input does not change the hash."""
+        s1 = pa.schema([pa.field("t", pa.binary(), metadata={
+            _EXT_NAME_KEY: b"my.Type",
+            b"ARROW:extension:metadata": b"{}",
+        })])
+        s2 = pa.schema([pa.field("t", pa.binary(), metadata={
+            b"ARROW:extension:metadata": b"{}",
+            _EXT_NAME_KEY: b"my.Type",
+        })])
+        assert _make_hasher().hash_schema(s1).digest == _make_hasher().hash_schema(s2).digest
+
+    def test_extension_metadata_affects_hash(self):
+        """Changing an ARROW:extension:name value changes the hash."""
+        s1 = pa.schema([pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"TypeA"})])
+        s2 = pa.schema([pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"TypeB"})])
+        assert _make_hasher().hash_schema(s1).digest != _make_hasher().hash_schema(s2).digest
+
+    def test_unrelated_metadata_does_not_affect_hash(self):
+        """Adding only unrelated metadata keys does not change the hash."""
+        s_clean = pa.schema([pa.field("x", pa.int32())])
+        s_noise = pa.schema([pa.field("x", pa.int32(), metadata={_COMMENT_KEY: b"hi"})])
+        assert _make_hasher().hash_schema(s_clean).digest == _make_hasher().hash_schema(s_noise).digest
+
+
+class TestHashTableExtensionAware:
+    def test_extension_free_table_golden_value_unchanged(self):
+        """Stability invariant: extension-free table hash is byte-identical to
+        the pre-v0.3.0 golden value."""
+        table = pa.table({
+            "id":    pa.array([1, 2, 3], type=pa.int32()),
+            "score": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
+            "label": pa.array(["a", "b", "c"], type=pa.utf8()),
+        })
+        h = _make_hasher().hash_table(table)
+        assert h.digest.hex() == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791", (
+            f"Stability invariant broken — extension-free table golden digest changed. Got: {h.digest.hex()}"
+        )
+
+    def test_table_mixed_schema_metadata_equals_extension_only(self):
+        """Table schema with mixed metadata hashes identically to same table
+        schema with only the extension key (unrelated keys are stripped)."""
+        schema_ext_only = pa.schema([
+            pa.field("x", pa.int32(), metadata={_EXT_NAME_KEY: b"my.Type"}),
+        ])
+        schema_mixed = pa.schema([
+            pa.field("x", pa.int32(), metadata={
+                _EXT_NAME_KEY: b"my.Type",
+                _COMMENT_KEY:  b"ignored",
+            }),
+        ])
+        data = [pa.array([1, 2, 3], type=pa.int32())]
+        t_ext   = pa.table(data, schema=schema_ext_only)
+        t_mixed = pa.table(data, schema=schema_mixed)
+        assert _make_hasher().hash_table(t_ext).digest == _make_hasher().hash_table(t_mixed).digest
+
+    def test_table_unrelated_schema_metadata_does_not_affect_hash(self):
+        """Adding only unrelated schema metadata does not change the table hash."""
+        t_clean = pa.table({"x": pa.array([1, 2], type=pa.int32())})
+        schema_noise = pa.schema([pa.field("x", pa.int32(), metadata={_COMMENT_KEY: b"hi"})])
+        t_noise = pa.table([pa.array([1, 2], type=pa.int32())], schema=schema_noise)
+        assert _make_hasher().hash_table(t_clean).digest == _make_hasher().hash_table(t_noise).digest
