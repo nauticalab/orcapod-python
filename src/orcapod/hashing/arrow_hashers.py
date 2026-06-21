@@ -337,12 +337,14 @@ class StarfixArrowHasher:
     def hash_schema(self, schema: pa.Schema) -> ContentHash:
         """Hash an Arrow schema using the starfix canonical algorithm.
 
-        The schema is preprocessed by ``clean_schema_for_hashing`` before
-        hashing: non-``ARROW:extension:*`` metadata is stripped at every
-        level. ``include_metadata=True`` is passed to ``ArrowDigester`` only
-        when extension metadata is present after cleaning, preserving
-        byte-for-byte hash stability with pre-v0.3.0 output for schemas that
-        carry no extension metadata.
+        ``has_extension_metadata`` is checked first on the raw schema. When
+        no extension metadata is found, ``include_metadata=False`` is passed
+        to ``ArrowDigester`` directly without rebuilding the schema (starfix
+        ignores metadata when ``include_metadata=False``, so the hash is
+        identical). When extension metadata is present, ``clean_schema_for_hashing``
+        strips non-``ARROW:extension:*`` keys before hashing with
+        ``include_metadata=True``, preserving byte-for-byte hash stability
+        with pre-v0.3.0 output for extension-free schemas.
 
         Parameters
         ----------
@@ -355,20 +357,23 @@ class StarfixArrowHasher:
             A ``ContentHash`` whose ``digest`` is the 35-byte versioned
             SHA-256 produced by ``ArrowDigester.hash_schema``.
         """
-        clean = clean_schema_for_hashing(schema)
-        include_meta = has_extension_metadata(clean)
-        digest = ArrowDigester.hash_schema(clean, include_metadata=include_meta)
+        include_meta = has_extension_metadata(schema)
+        if include_meta:
+            schema = clean_schema_for_hashing(schema)
+        digest = ArrowDigester.hash_schema(schema, include_metadata=include_meta)
         return ContentHash(method=self._hasher_id, digest=digest)
 
     def hash_table(self, table: pa.Table | pa.RecordBatch) -> ContentHash:
         """Hash an Arrow table (or ``RecordBatch``) using starfix.
 
-        Semantic types are resolved to their content-hash strings before the
-        table is passed to ``ArrowDigester.hash_table``. The table's schema
-        is then preprocessed by ``clean_schema_for_hashing`` to strip
-        non-``ARROW:extension:*`` metadata. ``include_metadata=True`` is
-        passed to ``ArrowDigester`` only when extension metadata is present
-        after cleaning.
+        Semantic types are resolved to their content-hash strings first.
+        ``has_extension_metadata`` is then checked on the processed table's
+        schema. When no extension metadata is found, the processed table is
+        passed to ``ArrowDigester.hash_table`` directly with
+        ``include_metadata=False``, avoiding a schema rebuild and new table
+        allocation. When extension metadata is present,
+        ``clean_schema_for_hashing`` strips non-``ARROW:extension:*`` keys
+        before hashing with ``include_metadata=True``.
 
         Parameters
         ----------
@@ -385,12 +390,15 @@ class StarfixArrowHasher:
             table = pa.Table.from_batches([table])
 
         processed_table = self._process_table_columns(table)
-        clean_schema = clean_schema_for_hashing(processed_table.schema)
-        # clean_schema_for_hashing only strips metadata; physical types and
-        # column order are unchanged, so from_arrays is safe without a cast.
-        clean_table = pa.Table.from_arrays(
-            processed_table.columns, schema=clean_schema
-        )
-        include_meta = has_extension_metadata(clean_schema)
+        include_meta = has_extension_metadata(processed_table.schema)
+        if include_meta:
+            clean_schema = clean_schema_for_hashing(processed_table.schema)
+            # clean_schema_for_hashing only strips metadata; physical types and
+            # column order are unchanged, so from_arrays is safe without a cast.
+            clean_table = pa.Table.from_arrays(
+                processed_table.columns, schema=clean_schema
+            )
+        else:
+            clean_table = processed_table
         digest = ArrowDigester.hash_table(clean_table, include_metadata=include_meta)
         return ContentHash(method=self._hasher_id, digest=digest)

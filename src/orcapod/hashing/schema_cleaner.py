@@ -145,9 +145,9 @@ def clean_schema_for_hashing(schema: pa.Schema) -> pa.Schema:
     """Return a copy of ``schema`` with all non-extension metadata stripped.
 
     Walks the schema and every field recursively (through struct, list,
-    large_list, fixed_size_list, and map child fields). Retains only metadata
-    keys that start with ``b'ARROW:extension:'`` — at both schema level and
-    per-field level. All other metadata is dropped.
+    large_list, fixed_size_list, map, dictionary, and union child fields).
+    Retains only metadata keys that start with ``b'ARROW:extension:'`` — at
+    both schema level and per-field level. All other metadata is dropped.
 
     Names, types, and nullability flags are untouched.
 
@@ -171,8 +171,9 @@ def has_extension_metadata(schema: pa.Schema) -> bool:
     Intended to be called on the output of ``clean_schema_for_hashing`` so
     that the check is purely a key-presence test (no re-filtering needed).
 
-    Recurses through struct, list, large_list, fixed_size_list, and map child
-    fields identically to ``clean_schema_for_hashing``.
+    Recurses through struct, list, large_list, fixed_size_list, map,
+    dictionary, and union child fields identically to
+    ``clean_schema_for_hashing``.
 
     Args:
         schema: A ``pa.Schema`` (typically the output of
