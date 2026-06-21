@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Changed
+
+#### starfix v0.3.0 adoption + schema-metadata cleaner (PLT-1737)
+
+Bumped `starfix` dependency to `~=0.3.0` and introduced a schema-metadata
+cleaning step before all Arrow schema and table hashes.
+
+**What changed:** `StarfixArrowHasher.hash_schema` and `hash_table` now strip
+every metadata key that does not start with `ARROW:extension:` before passing
+the schema to starfix. Only identity-bearing extension metadata (e.g.
+`ARROW:extension:name`) is included in the hash. Unrelated keys (comments,
+vendor annotations, source-file provenance, etc.) are ignored.
+
+**Stability invariant:** Schemas with no `ARROW:extension:*` metadata anywhere
+continue to produce byte-for-byte identical hashes to pre-v0.3.0 Orcapod.
+
+**One-time hash invalidation:** Pipelines whose schemas contained
+`ARROW:extension:*` keys *alongside* unrelated field metadata (e.g. a
+`comment` key on the same field as `ARROW:extension:name`) will see a changed
+hash. On-disk caches for those pipelines should be treated as stale and
+recomputed.
+
+**New utility:** `orcapod.hashing.schema_cleaner.clean_schema_for_hashing` and
+`has_extension_metadata` are available as semi-public utilities for other
+Orcapod code that needs to inspect or clean Arrow schema metadata.
+
 ### Breaking Changes
 
 #### `packets` → `data` rename (hard break)
