@@ -25,7 +25,7 @@ Orcapod for non-extension-typed pipelines.
 
 ## Goals & Success Criteria
 
-- `starfix` dependency bumped to `>=0.3.0,<0.4.0`.
+- `starfix` dependency bumped to `~=0.3.0`.
 - `clean_schema_for_hashing(schema: pa.Schema) -> pa.Schema` implemented in
   `src/orcapod/hashing/schema_cleaner.py` as a semi-public utility.
 - `has_extension_metadata(schema: pa.Schema) -> bool` implemented in the same module.
@@ -117,10 +117,10 @@ identical to the old `ArrowDigester.hash_schema(schema)` call (the v0.3 default 
 
 `pyproject.toml`:
 ```
-starfix>=0.3.0,<0.4.0
+starfix~=0.3.0
 ```
 
-(Changed from `starfix>=0.2.0`.)
+(Changed from `starfix>=0.2.0`. `~=0.3.0` is PEP 440 compatible-release: allows patch increments, locks the minor.)
 
 ---
 
@@ -128,7 +128,7 @@ starfix>=0.3.0,<0.4.0
 
 | File | Change |
 |---|---|
-| `pyproject.toml` | `starfix>=0.3.0,<0.4.0` |
+| `pyproject.toml` | `starfix~=0.3.0` |
 | `uv.lock` | Updated by `uv add` |
 | `src/orcapod/hashing/schema_cleaner.py` | **NEW** — `clean_schema_for_hashing`, `has_extension_metadata`, private helpers |
 | `src/orcapod/hashing/arrow_hashers.py` | Update `hash_schema` and `hash_table` on `StarfixArrowHasher` |
@@ -165,7 +165,7 @@ starfix>=0.3.0,<0.4.0
 - `has_extension_metadata` detector.
 - Wiring in `StarfixArrowHasher.hash_schema` and `hash_table`.
 - Tests, docstrings, changelog note.
-- `starfix` dependency bump to `>=0.3.0,<0.4.0`.
+- `starfix` dependency bump to `~=0.3.0`.
 
 **Out of scope:**
 - Changes to starfix or starfix-python.
