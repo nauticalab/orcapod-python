@@ -18,16 +18,18 @@ from orcapod.hashing.schema_cleaner import clean_schema_for_hashing, has_extensi
 
 _EXT_NAME = b"ARROW:extension:name"
 _EXT_META = b"ARROW:extension:metadata"
-_COMMENT  = b"comment"
-_VENDOR   = b"vendor:tag"
+_COMMENT = b"comment"
+_VENDOR = b"vendor:tag"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ext_meta(name: str) -> dict[bytes, bytes]:
     return {_EXT_NAME: name.encode()}
+
 
 def _mixed_meta(name: str) -> dict[bytes, bytes]:
     return {_EXT_NAME: name.encode(), _COMMENT: b"ignore me", _VENDOR: b"v1"}

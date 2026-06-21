@@ -319,7 +319,7 @@ class TestContextIntegration:
 # ---------------------------------------------------------------------------
 
 _EXT_NAME_KEY = b"ARROW:extension:name"
-_COMMENT_KEY  = b"comment"
+_COMMENT_KEY = b"comment"
 
 
 class TestHashSchemaExtensionAware:
