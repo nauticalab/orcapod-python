@@ -16,7 +16,8 @@ Public API
 ----------
 - ``clean_schema_for_hashing(schema)`` — returns a cleaned copy of the schema.
 - ``has_extension_metadata(schema)`` — returns True if the (cleaned) schema has
-  any ``ARROW:extension:name`` key on any field at any nesting depth.
+  any ``ARROW:extension:name`` key on any field at any nesting depth, or in the
+  schema-level metadata.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ def _clean_type(arrow_type: pa.DataType) -> pa.DataType:
     if pa.types.is_large_list(arrow_type):
         return pa.large_list(_clean_field(arrow_type.value_field))
     if pa.types.is_fixed_size_list(arrow_type):
+        # pa.list_(field, size) produces FixedSizeListType when size is an int
         return pa.list_(_clean_field(arrow_type.value_field), arrow_type.list_size)
     if pa.types.is_map(arrow_type):
         return pa.map_(
@@ -87,7 +89,11 @@ def _has_extension_in_type(arrow_type: pa.DataType) -> bool:
             _has_extension_in_field(arrow_type.field(i))
             for i in range(arrow_type.num_fields)
         )
-    if pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type) or pa.types.is_fixed_size_list(arrow_type):
+    if (
+        pa.types.is_list(arrow_type)
+        or pa.types.is_large_list(arrow_type)
+        or pa.types.is_fixed_size_list(arrow_type)
+    ):
         return _has_extension_in_field(arrow_type.value_field)
     if pa.types.is_map(arrow_type):
         return (
@@ -148,7 +154,8 @@ def has_extension_metadata(schema: pa.Schema) -> bool:
 
     Returns:
         True if any field at any nesting depth carries ``ARROW:extension:name``
-        in its metadata; False otherwise.
+        in its metadata, or if the schema-level metadata contains
+        ``ARROW:extension:name``; False otherwise.
     """
     if schema.metadata and _EXTENSION_NAME_KEY in schema.metadata:
         return True

@@ -13,7 +13,6 @@ Coverage
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.hashing.schema_cleaner import clean_schema_for_hashing, has_extension_metadata
 
@@ -321,6 +320,21 @@ class TestHasExtensionMetadata:
             pa.field("m", pa.map_(
                 pa.string(),
                 pa.field("value", pa.int32(), metadata={_EXT_NAME: b"val.t"}),
+            )),
+        ])
+        assert has_extension_metadata(schema) is True
+
+    def test_true_for_extension_in_schema_level_metadata(self):
+        schema = pa.schema(
+            [pa.field("x", pa.int32())],
+            metadata={_EXT_NAME: b"schema.ext"},
+        )
+        assert has_extension_metadata(schema) is True
+
+    def test_true_for_extension_in_large_list_value_field(self):
+        schema = pa.schema([
+            pa.field("lst", pa.large_list(
+                pa.field("item", pa.int32(), metadata={_EXT_NAME: b"item.t"}),
             )),
         ])
         assert has_extension_metadata(schema) is True
