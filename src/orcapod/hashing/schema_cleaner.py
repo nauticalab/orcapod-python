@@ -44,8 +44,8 @@ def _clean_type(arrow_type: pa.DataType) -> pa.DataType:
     """Recursively rebuild a composite type with cleaned child-field metadata.
 
     For primitive (leaf) types, returns the type unchanged. For composite types
-    (struct, list, large_list, fixed_size_list, map), rebuilds the type using
-    cleaned versions of all child fields.
+    (struct, list, large_list, fixed_size_list, map, dictionary, and union),
+    rebuilds the type using cleaned versions of all child fields.
     """
     if pa.types.is_struct(arrow_type):
         return pa.struct([
