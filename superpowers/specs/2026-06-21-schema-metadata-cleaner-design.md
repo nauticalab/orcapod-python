@@ -64,6 +64,11 @@ Implementation uses a private `_clean_field(field: pa.Field) -> pa.Field` helper
 Schema-level metadata is filtered identically (keys starting with `b"ARROW:extension:"`
 survive; all others are dropped; result is `{}` if no extension keys are present).
 
+Because `_clean_field` calls itself on child fields (struct children, list value field,
+map key/item fields), the recursion naturally handles arbitrarily deep nesting — e.g.
+`list<struct<field: ext_type>>` — without any additional logic. Tests must cover at least
+two levels of nesting to confirm this property.
+
 #### `has_extension_metadata(schema: pa.Schema) -> bool`
 
 Walks the already-cleaned schema. Returns `True` at the first field that has
@@ -145,9 +150,9 @@ starfix~=0.3.0
 | Class | Coverage |
 |---|---|
 | `TestCleanSchemaForHashing` | Extension-free → metadata stripped to empty; extension-only → no-op; mixed → only `ARROW:extension:*` keys survive; schema-level metadata filtered |
-| `TestCleanFieldRecursion` | `struct` with extension-tagged child; `list`, `large_list`, `fixed_size_list`, `map` with extension-tagged value/key fields; names/types/nullability untouched |
-| `TestCleanSchemaFixtures` | Snapshot `(input, cleaned)` pairs for 3–4 representative schemas |
-| `TestHasExtensionMetadata` | `False` for no-metadata schema; `True` when any field has `ARROW:extension:name`; recurses into nested types; `False` on cleaned extension-free schema |
+| `TestCleanFieldRecursion` | `struct` with extension-tagged child; `list`, `large_list`, `fixed_size_list`, `map` with extension-tagged value/key fields; names/types/nullability untouched; **deep nesting**: `list<struct<ext_field>>` and `struct<struct<ext_field>>` — metadata stripped at every level |
+| `TestCleanSchemaFixtures` | Snapshot `(input, cleaned)` pairs for 3–4 representative schemas, including at least one with two levels of nesting |
+| `TestHasExtensionMetadata` | `False` for no-metadata schema; `True` when any field has `ARROW:extension:name`; recurses into nested types; `True` when extension metadata is only on a deeply-nested field; `False` on cleaned extension-free schema |
 
 ### `tests/test_hashing/test_starfix_arrow_hasher.py` (additions)
 
