@@ -7,6 +7,7 @@ import pyarrow as pa
 from starfix import ArrowDigester
 
 from orcapod.hashing import arrow_serialization
+from orcapod.hashing.schema_cleaner import clean_schema_for_hashing, has_extension_metadata
 from orcapod.hashing.visitors import SemanticHashingVisitor
 from orcapod.semantic_types import SemanticTypeRegistry
 from orcapod.types import ContentHash
@@ -336,10 +337,17 @@ class StarfixArrowHasher:
     def hash_schema(self, schema: pa.Schema) -> ContentHash:
         """Hash an Arrow schema using the starfix canonical algorithm.
 
+        The schema is preprocessed by ``clean_schema_for_hashing`` before
+        hashing: non-``ARROW:extension:*`` metadata is stripped at every
+        level. ``include_metadata=True`` is passed to ``ArrowDigester`` only
+        when extension metadata is present after cleaning, preserving
+        byte-for-byte hash stability with pre-v0.3.0 output for schemas that
+        carry no extension metadata.
+
         Parameters
         ----------
         schema:
-            The ``pyarrow.Schema`` to hash.
+            The ``pa.Schema`` to hash.
 
         Returns
         -------
@@ -347,16 +355,20 @@ class StarfixArrowHasher:
             A ``ContentHash`` whose ``digest`` is the 35-byte versioned
             SHA-256 produced by ``ArrowDigester.hash_schema``.
         """
-        digest = ArrowDigester.hash_schema(schema)
+        clean = clean_schema_for_hashing(schema)
+        include_meta = has_extension_metadata(clean)
+        digest = ArrowDigester.hash_schema(clean, include_metadata=include_meta)
         return ContentHash(method=self._hasher_id, digest=digest)
 
     def hash_table(self, table: pa.Table | pa.RecordBatch) -> ContentHash:
         """Hash an Arrow table (or ``RecordBatch``) using starfix.
 
-        Semantic types are resolved to their content-hash strings before
-        the table is passed to ``ArrowDigester.hash_table``, ensuring that
-        path-typed columns contribute their *file content* hash rather than
-        the literal path string.
+        Semantic types are resolved to their content-hash strings before the
+        table is passed to ``ArrowDigester.hash_table``. The table's schema
+        is then preprocessed by ``clean_schema_for_hashing`` to strip
+        non-``ARROW:extension:*`` metadata. ``include_metadata=True`` is
+        passed to ``ArrowDigester`` only when extension metadata is present
+        after cleaning.
 
         Parameters
         ----------
@@ -373,5 +385,10 @@ class StarfixArrowHasher:
             table = pa.Table.from_batches([table])
 
         processed_table = self._process_table_columns(table)
-        digest = ArrowDigester.hash_table(processed_table)
+        clean_schema = clean_schema_for_hashing(processed_table.schema)
+        clean_table = pa.Table.from_arrays(
+            processed_table.columns, schema=clean_schema
+        )
+        include_meta = has_extension_metadata(clean_schema)
+        digest = ArrowDigester.hash_table(clean_table, include_metadata=include_meta)
         return ContentHash(method=self._hasher_id, digest=digest)
