@@ -65,6 +65,25 @@ def _clean_type(arrow_type: pa.DataType) -> pa.DataType:
             _clean_field(arrow_type.item_field),
             arrow_type.keys_sorted,
         )
+    if pa.types.is_dictionary(arrow_type):
+        # index_type is an integer type and never carries extension metadata;
+        # only the value_type (the dictionary encoding) needs cleaning.
+        return pa.dictionary(
+            arrow_type.index_type,
+            _clean_type(arrow_type.value_type),
+            ordered=arrow_type.ordered,
+        )
+    if pa.types.is_union(arrow_type):
+        # pa.types.is_sparse_union / is_dense_union do not exist in this
+        # PyArrow version; use .mode to distinguish the two union modes.
+        cleaned_fields = [
+            _clean_field(arrow_type.field(i))
+            for i in range(arrow_type.num_fields)
+        ]
+        type_codes = list(arrow_type.type_codes)
+        if arrow_type.mode == "sparse":
+            return pa.sparse_union(cleaned_fields, type_codes=type_codes)
+        return pa.dense_union(cleaned_fields, type_codes=type_codes)
     return arrow_type
 
 
@@ -99,6 +118,13 @@ def _has_extension_in_type(arrow_type: pa.DataType) -> bool:
         return (
             _has_extension_in_field(arrow_type.key_field)
             or _has_extension_in_field(arrow_type.item_field)
+        )
+    if pa.types.is_dictionary(arrow_type):
+        return _has_extension_in_type(arrow_type.value_type)
+    if pa.types.is_union(arrow_type):
+        return any(
+            _has_extension_in_field(arrow_type.field(i))
+            for i in range(arrow_type.num_fields)
         )
     return False
 

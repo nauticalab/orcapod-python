@@ -215,6 +215,42 @@ class TestCleanFieldRecursion:
         gc = inner_field.type.field(0)
         assert gc.metadata == {_EXT_NAME: b"gc.t"}
 
+    def test_dictionary_value_type_cleaned(self):
+        """dictionary value_type child metadata is filtered; index_type preserved."""
+        # Build a dictionary whose value type is a struct with mixed metadata on a child
+        value_struct = pa.struct([
+            pa.field("label", pa.utf8(), metadata=_mixed_meta("label.t")),
+        ])
+        schema = pa.schema([
+            pa.field("d", pa.dictionary(pa.int8(), value_struct)),
+        ])
+        cleaned = clean_schema_for_hashing(schema)
+        cleaned_type = cleaned.field("d").type
+        assert pa.types.is_dictionary(cleaned_type)
+        # index_type must be unchanged
+        assert cleaned_type.index_type == pa.int8()
+        # value_type child field: only extension keys survive
+        label_field = cleaned_type.value_type.field(0)
+        assert label_field.metadata == {_EXT_NAME: b"label.t"}
+
+    def test_union_child_field_cleaned(self):
+        """sparse_union child field metadata is filtered; type_codes and field names preserved."""
+        schema = pa.schema([
+            pa.field("u", pa.sparse_union([
+                pa.field("a", pa.int32(), metadata=_mixed_meta("a.t")),
+                pa.field("b", pa.utf8(), metadata={_COMMENT: b"drop"}),
+            ])),
+        ])
+        cleaned = clean_schema_for_hashing(schema)
+        cleaned_type = cleaned.field("u").type
+        assert pa.types.is_union(cleaned_type)
+        assert cleaned_type.mode == "sparse"
+        assert list(cleaned_type.type_codes) == [0, 1]
+        assert cleaned_type.field(0).name == "a"
+        assert cleaned_type.field(0).metadata == {_EXT_NAME: b"a.t"}
+        assert cleaned_type.field(1).name == "b"
+        assert cleaned_type.field(1).metadata in (None, {})
+
 
 # ---------------------------------------------------------------------------
 # TestCleanSchemaFixtures  (input → expected snapshot pairs)
@@ -336,5 +372,25 @@ class TestHasExtensionMetadata:
             pa.field("lst", pa.large_list(
                 pa.field("item", pa.int32(), metadata={_EXT_NAME: b"item.t"}),
             )),
+        ])
+        assert has_extension_metadata(schema) is True
+
+    def test_true_for_extension_in_dictionary_value_field(self):
+        """Extension metadata on a dictionary value_type field is detected."""
+        value_struct = pa.struct([
+            pa.field("label", pa.utf8(), metadata={_EXT_NAME: b"label.t"}),
+        ])
+        schema = pa.schema([
+            pa.field("d", pa.dictionary(pa.int8(), value_struct)),
+        ])
+        assert has_extension_metadata(schema) is True
+
+    def test_true_for_extension_in_union_child_field(self):
+        """Extension metadata on a union child field is detected."""
+        schema = pa.schema([
+            pa.field("u", pa.sparse_union([
+                pa.field("a", pa.int32()),
+                pa.field("b", pa.utf8(), metadata={_EXT_NAME: b"b.t"}),
+            ])),
         ])
         assert has_extension_metadata(schema) is True
