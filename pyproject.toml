@@ -45,7 +45,7 @@ redis = ["redis>=6.2.0"]
 ray = ["ray[default]==2.48.0", "ipywidgets>=8.1.7"]
 postgresql = ["psycopg[binary]>=3.0"]
 spiraldb = [
-    "pyspiral>=0.11.0",
+    "pyspiral>=0.14.0",
 ]
 all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]"]
 
