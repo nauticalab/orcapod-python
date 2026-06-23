@@ -16,6 +16,20 @@ Project and server URL are configurable via env vars:
 
 - ``SPIRAL_PROJECT_ID`` (default: ``test-orcapod-362211``)
 - ``SPIRAL_SERVER_URL`` (default: ``http://api.spiraldb.dev``)
+
+Version compatibility note (PLT-1773)
+-------------------------------------
+pyspiral is in active development and must be kept current. The pinned version
+in ``uv.lock`` should be upgraded regularly (see PLT-1785 for the tracking issue).
+
+History: around 2026-06-15, ``t3.storage.dev`` (SpiralDB's object-storage
+backend) began strictly enforcing that every header in a presigned-URL request
+must appear in ``X-Amz-SignedHeaders``. pyspiral 0.11.7's embedded Rust HTTP
+client sent additional unsigned headers, causing all Vortex file reads to fail
+with ``AccessDenied: There were headers present in the request which were not
+signed``. Upgrading to pyspiral 0.14.x (which rewrote the HTTP stack in Python
+using ``httpx``) resolved the issue. If these tests start failing with a similar
+``AccessDenied`` / unsigned-headers error, upgrade pyspiral first.
 """
 from __future__ import annotations
 
