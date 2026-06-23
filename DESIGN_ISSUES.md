@@ -1016,3 +1016,37 @@ Python type: typing.Any`.
 is Arrow's canonical "unknown/no-type" marker; empty containers have no elements to
 validate, so the encoding is semantically correct. The now-unreachable `Any`-specific hint
 in the error branch was removed.
+
+---
+
+## `pyspiral` dependency (SpiralDB integration)
+
+### SP1 — pyspiral 0.11.7 broke against t3.storage.dev header-signing enforcement change
+**Status:** resolved
+**Severity:** high
+**Issue:** PLT-1773
+
+Around 2026-06-15, SpiralDB's object-storage backend (`t3.storage.dev`) began
+strictly enforcing that every header present in a presigned S3-style GET request
+must appear in `X-Amz-SignedHeaders`. pyspiral 0.11.7's embedded Rust HTTP
+client sent additional unsigned headers alongside the presigned URL, causing all
+Vortex file reads to return:
+
+```
+AccessDenied: There were headers present in the request which were not signed
+```
+
+All three `TestSpiralDBConnectorIntegration` tests failed on every CI push from
+2026-06-15 onward. The runner image version was identical between the last green
+and first red run, confirming this was a server-side enforcement change rather
+than a runner regression.
+
+**Fix:** Upgraded pyspiral from `0.11.7` to `0.14.9`. The 0.14.x line rewrote
+the HTTP/auth stack to use Python-level `httpx` instead of the embedded Rust
+client, eliminating the unsigned-header problem. The `pyproject.toml` minimum
+was bumped from `>=0.11.0` to `>=0.14.0` to document the effective floor.
+No connector code changes were needed — the public API is fully compatible
+across this version range.
+
+**Ongoing:** pyspiral releases frequently. See PLT-1785 for the tracking issue
+covering routine version bumps.
