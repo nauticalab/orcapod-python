@@ -49,46 +49,15 @@ def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
     return get_default_context().semantic_hasher
 
 
-def get_default_arrow_hasher(
-    cache_file_hash: bool | hp.StringCacherProtocol = True,
-) -> hp.ArrowHasherProtocol:
-    """
-    Return the ArrowHasherProtocol from the default data context.
+def get_default_arrow_hasher() -> hp.ArrowHasherProtocol:
+    """Return the ArrowHasherProtocol from the default data context.
 
-    If ``cache_file_hash`` is True an in-memory StringCacherProtocol is attached to
-    the hasher so that repeated hashes of the same file path are served from
-    cache.  Pass a ``StringCacherProtocol`` instance to use a custom caching backend
-    (e.g. SQLite-backed).
-
-    Note: caching is applied on top of the context's arrow hasher each time
-    this function is called.  If you need a single shared cached instance,
-    obtain it once and store it yourself.
-
-    Args:
-        cache_file_hash: True to use an ephemeral in-memory cache, a
-            StringCacherProtocol instance to use a custom cache, or False/None to
-            disable caching.
+    Note: file-hash caching (formerly via ``set_cacher``) has been removed.
+    ``StarfixArrowHasher`` does not support per-path caching. Use
+    ``CachedFileHasher`` when constructing a custom context if caching is needed.
 
     Returns:
-        ArrowHasherProtocol: The arrow hasher from the default data context,
-            optionally with file-hash caching attached.
+        ArrowHasherProtocol: The arrow hasher from the default data context.
     """
-    from typing import Any
-
     from orcapod.contexts import get_default_context
-
-    arrow_hasher: Any = get_default_context().arrow_hasher
-
-    if cache_file_hash:
-        from orcapod.hashing.string_cachers import InMemoryCacher
-
-        if cache_file_hash is True:
-            string_cacher: hp.StringCacherProtocol = InMemoryCacher(max_size=None)
-        else:
-            string_cacher = cache_file_hash
-
-        # set_cacher is present on StarfixArrowHasher but not on the
-        # ArrowHasherProtocol protocol, so we call it via Any to avoid a type error.
-        arrow_hasher.set_cacher("path", string_cacher)
-
-    return arrow_hasher
+    return get_default_context().arrow_hasher

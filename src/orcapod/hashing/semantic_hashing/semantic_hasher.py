@@ -391,7 +391,7 @@ class SemanticAwarePythonHasher:
             )
 
         logger.warning(
-            "SemanticHasherProtocol (non-strict): no handler for type '%s'. "
+            "SemanticAwarePythonHasher (non-strict): no PythonTypeSemanticHasherProtocol registered for type '%s'. "
             "Falling back to best-effort string representation.",
             qualified,
         )
