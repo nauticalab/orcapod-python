@@ -154,7 +154,7 @@ Each test creates its own converter via `create_registry().get_context().type_co
 
 ### `test_roundtrips.py`
 
-#### Parameterised over all three backends
+#### Parameterised over both backends
 
 **`test_builtin_path_round_trip[backend]`**
 Write a `Path` column, read back, assert `pathlib.Path` values are reconstructed and the Arrow
