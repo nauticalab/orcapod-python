@@ -1102,9 +1102,12 @@ back, the column is returned as the raw storage type (e.g. `large_string`, `larg
 the SQL backend and causes silent data-type loss.
 
 **Interim fix (PLT-1659):** `ConnectorArrowDatabase.add_records()` now raises `ValueError`
-immediately when any non-record-id column carries an Arrow extension type (checked via
-`isinstance(field.type, pa.ExtensionType)`), surfacing the issue at write time rather than
-on a confusing read.
+immediately when any non-record-id column is extension-typed, surfacing the issue at write
+time rather than on a confusing read. Two representations are rejected:
+- In-memory extension types: `isinstance(field.type, pa.ExtensionType)`.
+- Metadata-only columns: plain storage type whose field metadata contains
+  `b"ARROW:extension:name"` (the representation produced when reading a Parquet/IPC file
+  with an unregistered extension type).
 
 **Full fix (PLT-1795, target v0.2):** Preserve extension-type metadata in the SQL schema via
 a companion metadata table (one row per column: `table_name`, `column_name`,
