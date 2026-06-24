@@ -1086,6 +1086,35 @@ element type. See PLT-1732 for full design.
 
 ---
 
+## `src/orcapod/databases/connector_arrow_database.py`
+
+### CA1 — SQL connectors silently lose Arrow extension-type field metadata on round-trip
+**Status:** in progress
+**Severity:** high
+**Issue:** PLT-1795
+
+`SQLiteConnector` (and any `DBConnectorProtocol` implementation that maps Arrow → SQL types)
+does not preserve `ARROW:extension:name` / `ARROW:extension:metadata` field metadata. When a
+column whose Arrow type is a `pa.ExtensionType` (e.g. `orcapod.path`, `orcapod.uuid`, or any
+dataclass extension type) is written via `ConnectorArrowDatabase.add_records()` and then read
+back, the column is returned as the raw storage type (e.g. `large_string`, `large_binary`,
+`struct`) with no extension marker. This makes Parquet/Delta round-trips impossible through
+the SQL backend and causes silent data-type loss.
+
+**Interim fix (PLT-1659):** `ConnectorArrowDatabase.add_records()` now raises `ValueError`
+immediately when any non-record-id column carries an Arrow extension type (checked via
+`isinstance(field.type, pa.ExtensionType)`), surfacing the issue at write time rather than
+on a confusing read.
+
+**Full fix (PLT-1795, target v0.2):** Preserve extension-type metadata in the SQL schema via
+a companion metadata table (one row per column: `table_name`, `column_name`,
+`extension_name`, `extension_metadata`). On `create_table_if_not_exists`, write rows for any
+extension-typed columns; on `iter_batches`, join the metadata table and reconstruct the
+`pa.ExtensionType` for affected columns before returning the batch. Once implemented, the
+`ValueError` guard in `add_records()` can be lifted.
+
+---
+
 ## `src/orcapod/semantic_types/universal_converter.py`
 
 ### UC1 — `python_type_to_arrow_type` raised on `typing.Any` from empty-container inference
