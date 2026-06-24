@@ -1,23 +1,5 @@
 """
-Type Handler Registry for the SemanticHasherProtocol system.
-
-Provides a registry through which TypeHandlerProtocol implementations can be
-registered for specific Python types. Lookup is MRO-aware: if no handler
-is registered for an exact type, the registry walks the MRO of the object's
-class to find the nearest ancestor for which a handler has been registered.
-
-Usage
------
-# Register a handler for a specific type:
-registry = TypeHandlerRegistry()
-registry.register(Path, PathContentHandler())
-
-# Or use the global default registry:
-from orcapod.hashing.semantic_hashing.type_handler_registry import get_default_type_handler_registry
-get_default_type_handler_registry().register(MyType, MyTypeHandler())
-
-# Look up a handler (returns None if not found):
-handler = registry.get_handler(some_object)
+PythonTypeSemanticHasherRegistry — MRO-aware registry for PythonTypeSemanticHasherProtocol instances.
 """
 
 from __future__ import annotations
@@ -29,21 +11,18 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import (
         ArrowHasherProtocol,
-        TypeHandlerProtocol,
+        PythonTypeSemanticHasherProtocol,
     )
 
 logger = logging.getLogger(__name__)
 
 
-class TypeHandlerRegistry:
-    """
-    Registry mapping Python types to TypeHandlerProtocol instances.
+class PythonTypeSemanticHasherRegistry:
+    """Registry mapping Python types to PythonTypeSemanticHasherProtocol instances.
 
-    Lookup is MRO-aware: when no handler is registered for the exact type of
+    Lookup is MRO-aware: when no hasher is registered for the exact type of
     an object, the registry walks the object's MRO (most-derived first) until
-    it finds a match.  This means a handler registered for a base class is
-    automatically inherited by all subclasses, unless a more specific handler
-    has been registered for the subclass.
+    it finds a match.
 
     Thread safety
     -------------
@@ -52,42 +31,28 @@ class TypeHandlerRegistry:
     """
 
     def __init__(
-        self, handlers: list[tuple[type, TypeHandlerProtocol]] | None = None
+        self, handlers: list[tuple[type, "PythonTypeSemanticHasherProtocol"]] | None = None
     ) -> None:
         """
         Args:
-            handlers: Optional list of ``(target_type, handler)`` pairs to
-                register at construction time.  Designed for use with
-                ``parse_objectspec``: the JSON spec provides a list of
-                two-element arrays where the first element uses ``_type``
-                to resolve a Python type and the second uses ``_class`` to
-                instantiate the handler.
+            handlers: Optional list of ``(target_type, hasher)`` pairs to
+                register at construction time.
         """
-        # Maps type -> handler; insertion order is preserved but lookup uses MRO.
-        self._handlers: dict[type, TypeHandlerProtocol] = {}
+        self._handlers: dict[type, "PythonTypeSemanticHasherProtocol"] = {}
         self._lock = threading.RLock()
         if handlers:
             for target_type, handler in handlers:
                 self.register(target_type, handler)
 
-    # ------------------------------------------------------------------
-    # Registration
-    # ------------------------------------------------------------------
+    def register(self, target_type: type, handler: "PythonTypeSemanticHasherProtocol") -> None:
+        """Register a hasher for a specific Python type.
 
-    def register(self, target_type: type, handler: TypeHandlerProtocol) -> None:
-        """
-        Register a handler for a specific Python type.
-
-        If a handler is already registered for *target_type*, it is silently
-        replaced by the new handler.
+        If a hasher is already registered for *target_type*, it is silently
+        replaced by the new hasher.
 
         Args:
-            target_type: The Python type (or class) for which the handler
-                         should be used.  Must be a ``type`` object.
-            handler:     A TypeHandlerProtocol instance whose ``handle()`` method will
-                         be called when an object of ``target_type`` (or a
-                         subclass with no more specific handler) is encountered
-                         during structure resolution.
+            target_type: The Python type (or class) for which the hasher should be used.
+            handler: A ``PythonTypeSemanticHasherProtocol`` instance.
 
         Raises:
             TypeError: If ``target_type`` is not a ``type``.
@@ -100,7 +65,7 @@ class TypeHandlerRegistry:
             existing = self._handlers.get(target_type)
             if existing is not None and existing is not handler:
                 logger.debug(
-                    "TypeHandlerRegistry: replacing existing handler for %s (%s -> %s)",
+                    "PythonTypeSemanticHasherRegistry: replacing existing hasher for %s (%s -> %s)",
                     target_type.__name__,
                     type(existing).__name__,
                     type(handler).__name__,
@@ -108,14 +73,13 @@ class TypeHandlerRegistry:
             self._handlers[target_type] = handler
 
     def unregister(self, target_type: type) -> bool:
-        """
-        Remove the handler registered for *target_type*, if any.
+        """Remove the hasher registered for *target_type*, if any.
 
         Args:
-            target_type: The type whose handler should be removed.
+            target_type: The type whose hasher should be removed.
 
         Returns:
-            True if a handler was removed, False if none was registered.
+            True if a hasher was removed, False if none was registered.
         """
         with self._lock:
             if target_type in self._handlers:
@@ -123,59 +87,41 @@ class TypeHandlerRegistry:
                 return True
             return False
 
-    # ------------------------------------------------------------------
-    # Lookup
-    # ------------------------------------------------------------------
-
-    def get_handler(self, obj: Any) -> "TypeHandlerProtocol | None":
-        """
-        Look up the handler for *obj* using MRO-aware resolution.
-
-        The MRO of ``type(obj)`` is walked from most-derived to least-derived
-        (i.e. the object's own class first, then its bases).  The first
-        match found in the registry is returned.
+    def get_semantic_hasher(self, obj: Any) -> "PythonTypeSemanticHasherProtocol | None":
+        """Look up the hasher for *obj* using MRO-aware resolution.
 
         Args:
-            obj: The object for which a handler is needed.
+            obj: The object for which a hasher is needed.
 
         Returns:
-            The registered TypeHandlerProtocol, or None if no handler is registered
-            for the object's type or any of its base classes.
+            The registered ``PythonTypeSemanticHasherProtocol``, or None.
         """
         obj_type = type(obj)
         with self._lock:
-            # Fast path: exact type match.
             handler = self._handlers.get(obj_type)
             if handler is not None:
                 return handler
-
-            # Slow path: walk the MRO, skipping the type itself (already
-            # checked above) and skipping ``object`` as a last resort -- a
-            # handler registered for ``object`` would match everything.
             for base in obj_type.__mro__[1:]:
                 handler = self._handlers.get(base)
                 if handler is not None:
                     logger.debug(
-                        "TypeHandlerRegistry: resolved handler for %s via base %s",
+                        "PythonTypeSemanticHasherRegistry: resolved hasher for %s via base %s",
                         obj_type.__name__,
                         base.__name__,
                     )
                     return handler
-
         return None
 
-    def get_handler_for_type(self, target_type: type) -> "TypeHandlerProtocol | None":
-        """
-        Look up the handler for a *type object* (rather than an instance).
-
-        Useful when the caller already has the type and wants to check
-        registration without constructing a dummy instance.
+    def get_semantic_hasher_for_type(
+        self, target_type: type
+    ) -> "PythonTypeSemanticHasherProtocol | None":
+        """Look up the hasher for a *type object* (rather than an instance).
 
         Args:
             target_type: The type to look up.
 
         Returns:
-            The registered TypeHandlerProtocol, or None.
+            The registered ``PythonTypeSemanticHasherProtocol``, or None.
         """
         with self._lock:
             handler = self._handlers.get(target_type)
@@ -187,74 +133,52 @@ class TypeHandlerRegistry:
                     return handler
         return None
 
-    def has_handler(self, target_type: type) -> bool:
-        """
-        Return True if a handler is registered for *target_type* or any of
-        its MRO ancestors.
+    def has_semantic_hasher(self, target_type: type) -> bool:
+        """Return True if a hasher is registered for *target_type* or any MRO ancestor.
 
         Args:
             target_type: The type to check.
         """
-        return self.get_handler_for_type(target_type) is not None
+        return self.get_semantic_hasher_for_type(target_type) is not None
 
     def registered_types(self) -> list[type]:
-        """
-        Return a list of all directly-registered types (no MRO expansion).
-
-        Returns:
-            A snapshot list of types that have explicit handler registrations.
-        """
+        """Return a list of all directly-registered types (no MRO expansion)."""
         with self._lock:
             return list(self._handlers.keys())
-
-    # ------------------------------------------------------------------
-    # Dunder helpers
-    # ------------------------------------------------------------------
 
     def __repr__(self) -> str:
         with self._lock:
             names = [t.__name__ for t in self._handlers]
-        return f"TypeHandlerRegistry(registered={names!r})"
+        return f"PythonTypeSemanticHasherRegistry(registered={names!r})"
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._handlers)
 
 
-# ---------------------------------------------------------------------------
-# Pre-populated registry
-# ---------------------------------------------------------------------------
-
-
-def get_default_type_handler_registry() -> "TypeHandlerRegistry":
-    """
-    Return the TypeHandlerRegistry from the default data context.
+def get_default_python_type_semantic_hasher_registry() -> "PythonTypeSemanticHasherRegistry":
+    """Return the PythonTypeSemanticHasherRegistry from the default data context.
 
     This is a convenience wrapper; the registry is owned and versioned by the
-    active DataContext.  Importing this function from
+    active ``DataContext``. Importing this function from
     ``orcapod.hashing.defaults`` or ``orcapod.hashing`` is equivalent.
     """
     from orcapod.hashing.defaults import (
-        get_default_type_handler_registry as _get,
-    )  # stays in hashing/
-
+        get_default_python_type_semantic_hasher_registry as _get,
+    )
     return _get()
 
 
-class BuiltinTypeHandlerRegistry(TypeHandlerRegistry):
-    """
-    A TypeHandlerRegistry pre-populated with all built-in handlers.
+class BuiltinPythonTypeSemanticHasherRegistry(PythonTypeSemanticHasherRegistry):
+    """A PythonTypeSemanticHasherRegistry pre-populated with all built-in hashers.
 
     Constructed via the data context JSON spec so that the default registry
-    is versioned alongside the rest of the context components.  The built-in
-    handlers are registered in ``__init__`` so that no separate population
-    step is required after construction.
+    is versioned alongside the rest of the context components.
     """
 
     def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
         super().__init__()
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
-            register_builtin_handlers,
+            register_builtin_python_type_semantic_hashers,
         )
-
-        register_builtin_handlers(self, arrow_hasher=arrow_hasher)
+        register_builtin_python_type_semantic_hashers(self, arrow_hasher=arrow_hasher)
