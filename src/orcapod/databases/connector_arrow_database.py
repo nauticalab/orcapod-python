@@ -244,6 +244,28 @@ class ConnectorArrowDatabase:
                 f"got {rid_type}. Encode the column to bytes before calling add_records()."
             )
 
+        # Reject Arrow extension-typed columns: SQL connectors do not preserve
+        # ARROW:extension:* field metadata, so extension types would be silently
+        # dropped on read, making round-trips impossible.  Use DeltaTableDatabase
+        # or write directly to Parquet instead.  See PLT-1795 for the planned fix.
+        ext_fields = [
+            field.name
+            for field in records.schema
+            if isinstance(field.type, pa.ExtensionType)
+        ]
+        if ext_fields:
+            ext_info = ", ".join(
+                f"{records.schema.field(n).name!r}: {records.schema.field(n).type.extension_name!r}"
+                for n in ext_fields
+            )
+            raise ValueError(
+                f"ConnectorArrowDatabase does not support Arrow extension-typed columns "
+                f"({ext_info}). SQL connectors do not preserve ARROW:extension:* field "
+                f"metadata, so extension types would be silently dropped on read. "
+                f"Use DeltaTableDatabase or write directly to Parquet instead. "
+                f"See PLT-1795 for the planned fix."
+            )
+
         records = self._deduplicate_within_table(records)
         record_key = self._get_record_key(record_path)
         input_ids = set(cast(list[bytes], records[self.RECORD_ID_COLUMN].to_pylist()))
