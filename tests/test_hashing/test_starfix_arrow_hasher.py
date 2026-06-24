@@ -27,7 +27,6 @@ from __future__ import annotations
 import pytest
 import pyarrow as pa
 
-from orcapod.contexts import get_default_context
 from orcapod.hashing.arrow_hashers import StarfixArrowHasher
 from orcapod.hashing.versioned_hashers import (
     _CURRENT_ARROW_HASHER_ID,
@@ -46,9 +45,11 @@ _DIGEST_LEN = 35  # 3 version bytes + 32 SHA-256 bytes
 
 
 def _make_hasher() -> StarfixArrowHasher:
+    from orcapod.contexts import get_default_context
     ctx = get_default_context()
     return StarfixArrowHasher(
         type_converter=ctx.type_converter,
+        semantic_hasher=ctx.semantic_hasher,
         hasher_id=HASHER_ID,
     )
 
