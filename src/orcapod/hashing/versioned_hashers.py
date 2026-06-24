@@ -93,27 +93,16 @@ def get_versioned_semantic_hasher(
 def get_versioned_semantic_arrow_hasher(
     hasher_id: str = _CURRENT_ARROW_HASHER_ID,
 ) -> hp.ArrowHasherProtocol:
+    """Return a StarfixArrowHasher configured for the current version.
+
+    Sources ``type_converter`` and ``semantic_hasher`` from the default
+    ``DataContext`` so that the arrow hasher is consistent with all other
+    versioned components.
     """
-    Return a StarfixArrowHasher configured for the current version.
-
-    The arrow hasher handles Arrow table / RecordBatch hashing with
-    extension-type awareness (e.g. Path columns are hashed by file content).
-
-    Parameters
-    ----------
-    hasher_id:
-        Identifier embedded in every ContentHash produced by this hasher.
-
-    Returns
-    -------
-    ArrowHasherProtocol
-        A fully configured StarfixArrowHasher instance.
-    """
-    from orcapod.contexts import get_default_context
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
+    from orcapod.contexts import resolve_context
 
-    ctx = get_default_context()
-
+    ctx = resolve_context(None)  # default context
     logger.debug(
         "get_versioned_semantic_arrow_hasher: creating StarfixArrowHasher "
         "(hasher_id=%r)",
@@ -122,4 +111,5 @@ def get_versioned_semantic_arrow_hasher(
     return StarfixArrowHasher(
         hasher_id=hasher_id,
         type_converter=ctx.type_converter,
+        semantic_hasher=ctx.semantic_hasher,
     )

@@ -191,11 +191,20 @@ class ArrowTableSemanticHasher:
     """Hasher for ``pa.Table`` and ``pa.RecordBatch`` objects.
 
     Args:
-        arrow_hasher: Any object satisfying ``ArrowHasherProtocol``.
+        arrow_hasher: Any object satisfying ``ArrowHasherProtocol``.  When
+            ``None``, the default data context's ``arrow_hasher`` is resolved
+            lazily at call time (breaking the circular dependency that would
+            arise if the registry were constructed before the arrow hasher).
     """
 
-    def __init__(self, arrow_hasher: "ArrowHasherProtocol") -> None:
-        self.arrow_hasher = arrow_hasher
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
+        self._arrow_hasher = arrow_hasher
+
+    def _get_arrow_hasher(self) -> "ArrowHasherProtocol":
+        if self._arrow_hasher is not None:
+            return self._arrow_hasher
+        from orcapod.contexts import get_default_context
+        return get_default_context().arrow_hasher  # type: ignore[return-value]
 
     def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         import pyarrow as _pa
@@ -206,7 +215,7 @@ class ArrowTableSemanticHasher:
             raise TypeError(
                 f"ArrowTableSemanticHasher: expected pa.Table or pa.RecordBatch, got {type(obj)!r}"
             )
-        return self.arrow_hasher.hash_table(obj)
+        return self._get_arrow_hasher().hash_table(obj)
 
 
 class SchemaSemanticHasher:
