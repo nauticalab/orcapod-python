@@ -87,7 +87,7 @@ def get_default_arrow_hasher(
         else:
             string_cacher = cache_file_hash
 
-        # set_cacher is present on SemanticArrowHasher but not on the
+        # set_cacher is present on StarfixArrowHasher but not on the
         # ArrowHasherProtocol protocol, so we call it via Any to avoid a type error.
         arrow_hasher.set_cacher("path", string_cacher)
 
