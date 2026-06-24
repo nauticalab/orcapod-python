@@ -95,14 +95,13 @@ def _delta_write(table: pa.Table, base_path: Path) -> None:
 
 def _delta_read(base_path: Path, converter: UniversalTypeConverter) -> pa.Table:
     import deltalake
-    import pyarrow.dataset as pa_ds
     dt = deltalake.DeltaTable(str(base_path / "delta"))
-    # Read via PyArrow dataset directly rather than dt.to_pyarrow_table().
-    # to_pyarrow_table() normalises large_string → string and large_binary →
-    # binary via Delta Lake's schema layer, which causes the extension type
-    # deserializer to reject the storage type mismatch.  Reading the underlying
-    # Parquet files directly preserves the original Arrow types.
-    raw = pa_ds.dataset(dt.file_uris(), format="parquet").to_table()
+    # as_large_types=True preserves large_string / large_binary rather than
+    # normalising them to string / binary (Delta Lake's default behaviour).
+    # Without this flag, extension types that use large_string or large_binary
+    # as storage fail to deserialise because the _deserialize method strictly
+    # checks that the storage type matches the registered one.
+    raw = dt.to_pyarrow_dataset(as_large_types=True).to_table()
     return converter.load_extension_types(raw)
 
 
