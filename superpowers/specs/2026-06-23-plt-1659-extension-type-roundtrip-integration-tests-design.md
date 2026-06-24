@@ -25,7 +25,8 @@ schema walker, database hooks, built-in logical types, protocols) are not duplic
 
 ### Built-in types: `Path`, `UPath`, `UUID`
 
-Round-trip through all three storage backends. Assertions:
+Round-trip through two storage backends (Parquet and Delta — SQLite excluded, see
+`test_roundtrips.py` note). Assertions:
 - Python object is faithfully reconstructed after read.
 - Arrow extension names are in the `orcapod.*` namespace (`orcapod.path`, `orcapod.upath`,
   `orcapod.uuid`).
@@ -88,8 +89,10 @@ tests/test_extension_types/
 
 ## Backend Parameterisation
 
-`test_roundtrips.py` parameterises over three storage backends via a `_StorageBackend`
-dataclass with two callables:
+`test_roundtrips.py` parameterises over **two** storage backends via a `_StorageBackend`
+dataclass with two callables. SQLite (`ConnectorArrowDatabase` + `SQLiteConnector`) is
+excluded because `SQLiteConnector` discards `ARROW:extension:*` field metadata during type
+mapping — see `DESIGN_ISSUES.md` CA1 and PLT-1795.
 
 ```python
 @dataclasses.dataclass
@@ -102,11 +105,13 @@ class _StorageBackend:
 | `name` | `write` | `read` |
 |---|---|---|
 | `"parquet"` | `pq.write_table(table, path / "data.parquet")` | `converter.load_extension_types(pq.read_table(path / "data.parquet"))` |
-| `"delta"` | `deltalake.write_deltalake(str(path / "delta"), table)` | `converter.load_extension_types(DeltaTable(str(path / "delta")).to_pyarrow_table())` |
-| `"sqlite"` | `ConnectorArrowDatabase(SQLiteConnector(path / "db.sqlite")).add_record(...).flush()` | `ExtensionAwareDatabase(db, converter).get_all_records(...)` → drop `__record_id` column |
+| `"delta"` | `deltalake.write_deltalake(str(path / "delta"), table)` | `converter.load_extension_types(DeltaTable(str(path / "delta")).to_pyarrow_dataset(as_large_types=True).to_table())` |
 
-The `read` callable always returns a `pa.Table` containing only the original user data columns
-(metadata columns like `__record_id` stripped for database backends).
+`as_large_types=True` is required for the Delta backend: without it, Delta Lake normalises
+`large_string` → `string` and `large_binary` → `binary`, which causes the extension type
+deserializer to reject the storage type mismatch.
+
+The `read` callable always returns a `pa.Table` containing only the original user data columns.
 
 A `@pytest.fixture(params=[...])` named `storage_backend` yields one `_StorageBackend` per run.
 
