@@ -1,30 +1,20 @@
 """
-Built-in TypeHandlerProtocol implementations for the SemanticHasherProtocol system.
+Built-in PythonTypeSemanticHasherProtocol implementations.
 
-This module provides handlers for all Python types that the SemanticHasherProtocol
-knows how to process out of the box:
+  PathSemanticHasher       -- pathlib.Path: file content hash
+  UPathSemanticHasher      -- upath.UPath: file content hash (remote-aware)
+  UUIDSemanticHasher       -- uuid.UUID: 16-byte binary representation
+  BytesSemanticHasher      -- bytes/bytearray: hex string representation
+  FunctionSemanticHasher   -- callable with __code__: via FunctionInfoExtractorProtocol
+  TypeObjectSemanticHasher -- type objects: stable "type:<module>.<qualname>" string
+  SpecialFormSemanticHasher    -- typing._SpecialForm
+  GenericAliasSemanticHasher   -- generic alias type annotations
+  UnionTypeSemanticHasher      -- types.UnionType (Python 3.10+ X | Y syntax)
+  ArrowTableSemanticHasher     -- pa.Table / pa.RecordBatch
+  SchemaSemanticHasher         -- Schema objects
 
-  - PathContentHandler    -- pathlib.Path: returns ContentHash of file content
-  - UPathContentHandler   -- upath.UPath: returns ContentHash of file content (remote-aware)
-  - UUIDHandler           -- uuid.UUID: raw 16-byte binary representation
-  - BytesHandler          -- bytes / bytearray: hex string representation
-  - FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
-  - TypeObjectHandler     -- type objects (classes): stable "type:<name>" string
-
-Note: ContentHash requires no handler -- it is recognised as a terminal by
-``hash_object`` and returned as-is.
-
-The module also exposes ``register_builtin_handlers(registry)`` which is
-called automatically when the global default registry is first accessed.
-
-Extending the system
---------------------
-To add a handler for a third-party type, create a class that implements the
-TypeHandlerProtocol protocol (a single ``handle(obj, hasher)`` method) and register
-it:
-
-    from orcapod.hashing.semantic_hashing.type_handler_registry import get_default_type_handler_registry
-    get_default_type_handler_registry().register(MyType, MyTypeHandler())
+``register_builtin_python_type_semantic_hashers(registry)`` populates a registry
+with all of the above.
 """
 
 from __future__ import annotations
@@ -36,442 +26,271 @@ from uuid import UUID
 
 from upath import UPath
 
-from orcapod.types import PathLike, Schema
+from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     from orcapod.hashing.semantic_hashing.type_handler_registry import (
-        TypeHandlerRegistry,
+        PythonTypeSemanticHasherRegistry,
     )
+    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
     from orcapod.protocols.hashing_protocols import (
         ArrowHasherProtocol,
         FileContentHasherProtocol,
-        SemanticHasherProtocol,
     )
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Individual handlers
-# ---------------------------------------------------------------------------
-
-
-class PathContentHandler:
-    """
-    Handler for pathlib.Path objects.
-
-    Hashes the *content* of the file at the given path using the injected
-    FileContentHasherProtocol, producing a stable content-addressed identifier.
-    The resulting bytes are stored as a hex string embedded in the resolved
-    structure.
-
-    The path must refer to an existing, readable file.  Directories and
-    missing paths are not supported and will raise an error -- if you need
-    a path-as-string handler, register a separate handler for that use case
-    or return a ``str`` from ``identity_structure()`` instead of a ``Path``.
+class PathSemanticHasher:
+    """Hasher for pathlib.Path objects — hashes file *content*.
 
     Args:
-        file_hasher: Any object with a ``hash_file(path) -> ContentHash``
-                     method (satisfies the FileContentHasherProtocol protocol).
+        file_hasher: Any object with a ``hash_file(path) -> ContentHash`` method.
     """
 
-    def __init__(self, file_hasher: FileContentHasherProtocol) -> None:
+    def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
         self.file_hasher = file_hasher
 
-    def handle(self, obj: PathLike, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: PathLike, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         path: Path = Path(obj)
-
         if not path.exists():
             raise FileNotFoundError(
-                f"PathContentHandler: path does not exist: {path!r}. "
-                "Paths must refer to existing files for content-based hashing. "
-                "If you intended to hash the path string, return str(path) from "
-                "identity_structure() instead of a Path object."
+                f"PathSemanticHasher: path does not exist: {path!r}. "
+                "Paths must refer to existing files for content-based hashing."
             )
-
         if path.is_dir():
             raise IsADirectoryError(
-                f"PathContentHandler: path is a directory: {path!r}. "
+                f"PathSemanticHasher: path is a directory: {path!r}. "
                 "Only regular files are supported for content-based hashing."
             )
-
-        logger.debug("PathContentHandler: hashing file content at %s", path)
+        logger.debug("PathSemanticHasher: hashing file content at %s", path)
         return self.file_hasher.hash_file(path)
 
 
-class UPathContentHandler:
-    """
-    Handler for universal_pathlib.UPath objects.
-
-    Behaves identically to ``PathContentHandler`` but preserves the UPath
-    instance so that remote filesystem semantics (e.g. S3, GCS) are retained
-    during file content hashing.
+class UPathSemanticHasher:
+    """Hasher for universal_pathlib.UPath objects — hashes file content.
 
     Args:
-        file_hasher: Any object with a ``hash_file(path) -> ContentHash``
-                     method (satisfies the FileContentHasherProtocol protocol).
+        file_hasher: Any object with a ``hash_file(path) -> ContentHash`` method.
     """
 
-    def __init__(self, file_hasher: FileContentHasherProtocol) -> None:
+    def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
         self.file_hasher = file_hasher
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         if not isinstance(obj, UPath):
             raise TypeError(
-                f"UPathContentHandler: expected a UPath, got {type(obj)!r}. "
-                "Use PathContentHandler for pathlib.Path objects."
+                f"UPathSemanticHasher: expected a UPath, got {type(obj)!r}."
             )
-
         if not obj.exists():
             raise FileNotFoundError(
-                f"UPathContentHandler: path does not exist: {obj!r}. "
-                "Paths must refer to existing files for content-based hashing."
+                f"UPathSemanticHasher: path does not exist: {obj!r}."
             )
-
         if obj.is_dir():
             raise IsADirectoryError(
-                f"UPathContentHandler: path is a directory: {obj!r}. "
-                "Only regular files are supported for content-based hashing."
+                f"UPathSemanticHasher: path is a directory: {obj!r}."
             )
-
-        logger.debug("UPathContentHandler: hashing file content at %s", obj)
+        logger.debug("UPathSemanticHasher: hashing file content at %s", obj)
         return self.file_hasher.hash_file(obj)
 
 
-class UUIDHandler:
-    """Handler for ``uuid.UUID`` objects.
+class UUIDSemanticHasher:
+    """Hasher for ``uuid.UUID`` objects — hashes the raw 16-byte binary representation."""
 
-    Returns the raw 16-byte binary representation of the UUID.
-    The binary form is compact, unambiguous, and independent of string
-    formatting conventions.  UUID values in data columns are stored as
-    ``pa.binary(16)`` (fixed-size) within the struct type used by
-    ``UUIDStructConverter``; database record IDs use ``pa.large_binary()``.
-    """
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
-        return obj.bytes
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+        return hasher.hash_object(obj.bytes)
 
 
-class BytesHandler:
-    """
-    Handler for bytes and bytearray objects.
+class BytesSemanticHasher:
+    """Hasher for bytes and bytearray objects — hashes the lowercase hex representation."""
 
-    Converts binary data to its lowercase hex string representation.  This
-    avoids JSON serialisation issues with raw bytes while preserving the
-    exact byte sequence in the hash input.
-    """
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         if isinstance(obj, (bytes, bytearray)):
-            return obj.hex()
-        raise TypeError(f"BytesHandler: expected bytes or bytearray, got {type(obj)!r}")
+            return hasher.hash_object(obj.hex())
+        raise TypeError(
+            f"BytesSemanticHasher: expected bytes or bytearray, got {type(obj)!r}"
+        )
 
 
-class FunctionHandler:
-    """
-    Handler for Python functions / callables that carry a ``__code__`` attribute.
-
-    Delegates to a FunctionInfoExtractorProtocol to produce a stable, serialisable
-    dict representation of the function.  The extractor is responsible for
-    deciding which parts of the function (name, signature, source body, etc.)
-    are included.
+class FunctionSemanticHasher:
+    """Hasher for Python functions/callables with a ``__code__`` attribute.
 
     Args:
         function_info_extractor: Any object with an
-            ``extract_function_info(func) -> dict`` method (satisfies the
-            FunctionInfoExtractorProtocol protocol).
+            ``extract_function_info(func) -> dict`` method.
     """
 
     def __init__(self, function_info_extractor: Any) -> None:
         self.function_info_extractor = function_info_extractor
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         if not (callable(obj) and hasattr(obj, "__code__")):
             raise TypeError(
-                f"FunctionHandler: expected a callable with __code__, got {type(obj)!r}"
+                f"FunctionSemanticHasher: expected a callable with __code__, got {type(obj)!r}"
             )
         func_name = getattr(obj, "__name__", repr(obj))
-        logger.debug("FunctionHandler: extracting info for function %r", func_name)
+        logger.debug("FunctionSemanticHasher: extracting info for function %r", func_name)
         info: dict[str, Any] = self.function_info_extractor.extract_function_info(obj)
-        return info
+        return hasher.hash_object(info)
 
 
-class TypeObjectHandler:
-    """
-    Handler for type objects (i.e. classes passed as values).
+class TypeObjectSemanticHasher:
+    """Hasher for type objects (classes passed as values).
 
-    Returns a stable string of the form ``"type:<module>.<qualname>"`` so
-    that different classes always produce different hash inputs and the
-    result is human-readable.
+    Returns a stable string of the form ``"type:<module>.<qualname>"``.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         if not isinstance(obj, type):
             raise TypeError(
-                f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
+                f"TypeObjectSemanticHasher: expected a type/class, got {type(obj)!r}"
             )
         module: str = obj.__module__ or "<unknown>"
         qualname: str = obj.__qualname__
-        return f"type:{module}.{qualname}"
+        return hasher.hash_object(f"type:{module}.{qualname}")
 
 
-class SpecialFormHandler:
-    """
-    Handler for ``typing._SpecialForm`` objects such as ``typing.Union`` and
-    ``typing.ClassVar``.
+class SpecialFormSemanticHasher:
+    """Hasher for ``typing._SpecialForm`` objects such as ``typing.Union``."""
 
-    These appear as the ``__origin__`` of typing generics — for example,
-    ``Optional[int]`` is ``Union[int, None]``, whose ``__origin__`` is
-    ``typing.Union``.  Returns a stable string of the form
-    ``"special_form:typing.<name>"`` so they can be safely embedded as the
-    origin component inside a ``GenericAliasHandler`` result.
-    """
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         name = getattr(obj, "_name", None) or repr(obj)
-        return f"special_form:typing.{name}"
+        return hasher.hash_object(f"special_form:typing.{name}")
 
 
-class GenericAliasHandler:
-    """
-    Handler for generic alias type annotations such as ``dict[int, list[int]]``
-    (``types.GenericAlias``) and ``typing`` generics (``typing._GenericAlias``).
+class GenericAliasSemanticHasher:
+    """Hasher for generic alias type annotations (``dict[int, str]``, ``Optional[X]``, etc.)."""
 
-    Produces a stable dict containing the origin type and a list of hashed
-    argument types so that structurally identical generic annotations always
-    yield the same hash, and structurally different ones yield different hashes.
-
-    When the origin is ``typing.Union`` (i.e. ``typing.Optional[X]`` or
-    ``typing.Union[X, Y]``), the handler produces a canonical ``"union"``
-    form with sorted args — identical to `UnionTypeHandler` — so that
-    ``typing.Optional[int]`` and ``int | None`` hash equivalently.
-    """
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         import typing
 
         origin = getattr(obj, "__origin__", None)
         args = getattr(obj, "__args__", None) or ()
         if origin is None:
-            return f"generic_alias:{obj!r}"
-
-        # Normalize typing.Union / typing.Optional to the canonical union
-        # form so that typing.Optional[int] ≡ typing.Union[int, None] ≡ int | None.
+            return hasher.hash_object(f"generic_alias:{obj!r}")
         if origin is typing.Union:
             hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
-            return {
-                "__type__": "union",
-                "args": hashed_args,
-            }
-
-        return {
+            return hasher.hash_object({"__type__": "union", "args": hashed_args})
+        return hasher.hash_object({
             "__type__": "generic_alias",
             "origin": hasher.hash_object(origin).to_string(),
             "args": [hasher.hash_object(arg).to_string() for arg in args],
-        }
+        })
 
 
-class UnionTypeHandler:
-    """
-    Handler for ``types.UnionType`` objects (Python 3.10+ ``X | Y`` syntax).
+class UnionTypeSemanticHasher:
+    """Hasher for ``types.UnionType`` objects (Python 3.10+ ``X | Y`` syntax)."""
 
-    ``str | None``, ``int | float``, etc. produce a ``types.UnionType`` at
-    runtime, which is distinct from ``typing.Union[str, None]``
-    (a ``typing._GenericAlias``).  This handler normalises union types into
-    a canonical ``"union"`` form with sorted args — identical to the union
-    branch in `GenericAliasHandler` — so that ``int | None``,
-    ``typing.Optional[int]``, and ``typing.Union[int, None]`` all hash
-    equivalently.
-    """
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         args = getattr(obj, "__args__", None) or ()
         hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
-        return {
-            "__type__": "union",
-            "args": hashed_args,
-        }
+        return hasher.hash_object({"__type__": "union", "args": hashed_args})
 
 
-class ArrowTableHandler:
-    """
-    Handler for ``pa.Table`` and ``pa.RecordBatch`` objects.
-
-    Delegates to the injected ``ArrowHasherProtocol`` to produce a stable,
-    content-addressed ``ContentHash`` of the Arrow table data.  The returned
-    ``ContentHash`` is recognised as a terminal by ``hash_object`` and
-    returned as-is — no further recursion occurs.
+class ArrowTableSemanticHasher:
+    """Hasher for ``pa.Table`` and ``pa.RecordBatch`` objects.
 
     Args:
-        arrow_hasher: Any object satisfying ArrowHasherProtocol (i.e. has a
-                      ``hash_table(table) -> ContentHash`` method).
+        arrow_hasher: Any object satisfying ``ArrowHasherProtocol``.
     """
 
-    def __init__(self, arrow_hasher: ArrowHasherProtocol) -> None:
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol") -> None:
         self.arrow_hasher = arrow_hasher
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         import pyarrow as _pa
 
         if isinstance(obj, _pa.RecordBatch):
             obj = _pa.Table.from_batches([obj])
         if not isinstance(obj, _pa.Table):
             raise TypeError(
-                f"ArrowTableHandler: expected pa.Table or pa.RecordBatch, got {type(obj)!r}"
+                f"ArrowTableSemanticHasher: expected pa.Table or pa.RecordBatch, got {type(obj)!r}"
             )
         return self.arrow_hasher.hash_table(obj)
 
 
-class SchemaHandler:
-    """
-    Handler for `Schema` objects.
+class SchemaSemanticHasher:
+    """Hasher for ``Schema`` objects."""
 
-    Produces a stable dict containing both the field-type mapping and the
-    sorted list of optional field names, so that two schemas differing only
-    in which fields are optional produce different hashes.
-    """
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
         if not isinstance(obj, Schema):
-            raise TypeError(f"SchemaHandler: expected a Schema, got {type(obj)!r}")
-        # schema handler is not implemented yet
-        raise NotImplementedError()
-        # visited: frozenset[int] = frozenset()
-
-        # return {
-        #     "fields": {k: hasher._expand_element(v, visited) for k, v in obj.items()},
-        #     "optional_fields": sorted(obj.optional_fields),
-        # }
+            raise TypeError(
+                f"SchemaSemanticHasher: expected a Schema, got {type(obj)!r}"
+            )
+        raise NotImplementedError("SchemaSemanticHasher is not yet implemented.")
 
 
-# ---------------------------------------------------------------------------
-# Registration helper
-# ---------------------------------------------------------------------------
-
-
-def register_builtin_handlers(
-    registry: "TypeHandlerRegistry",
+def register_builtin_python_type_semantic_hashers(
+    registry: "PythonTypeSemanticHasherRegistry",
     file_hasher: Any = None,
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
 ) -> None:
-    """
-    Register all built-in TypeHandlers into *registry*.
+    """Register all built-in semantic hashers into *registry*.
 
-    This function is called automatically when the global default registry is
-    first accessed via ``get_default_type_handler_registry()``.  It can also
-    be called manually to populate a custom registry.
-
-    Path, function, and Arrow table handling require auxiliary objects.
-    When these are not supplied, sensible defaults are constructed:
-
-      - ``BasicFileHasher`` (SHA-256, 64 KiB buffer) for Path handling.
-      - ``FunctionSignatureExtractor`` for function handling.
-      - ``SemanticArrowHasher`` (SHA-256, logical serialisation) for Arrow table handling.
+    When ``arrow_hasher`` is None, ``pa.Table`` and ``pa.RecordBatch`` handlers
+    are **not** registered (to avoid circular dependency in the JSON context
+    construction — the default context's ``python_type_semantic_hasher_registry``
+    is built before ``arrow_hasher``).
 
     Args:
-        registry:
-            The TypeHandlerRegistry to populate.
-        file_hasher:
-            Optional object satisfying FileContentHasherProtocol (i.e. has a
-            ``hash_file(path) -> ContentHash`` method).  Defaults to a
-            ``BasicFileHasher`` configured with SHA-256.
-        function_info_extractor:
-            Optional object satisfying FunctionInfoExtractorProtocol (i.e. has an
-            ``extract_function_info(func) -> dict`` method).  Defaults to
-            ``FunctionSignatureExtractor``.
-        arrow_hasher:
-            Optional object satisfying ArrowHasherProtocol (i.e. has a
-            ``hash_table(table) -> ContentHash`` method).  Defaults to a
-            ``SemanticArrowHasher`` configured with SHA-256 and logical serialisation.
-            Should be the data context's arrow hasher when called from a versioned
-            context so that hashing is consistent across all components.
+        registry: The ``PythonTypeSemanticHasherRegistry`` to populate.
+        file_hasher: Optional ``FileContentHasherProtocol`` for path hashing.
+            Defaults to ``BasicFileHasher(sha256)``.
+        function_info_extractor: Optional ``FunctionInfoExtractorProtocol``.
+            Defaults to ``FunctionSignatureExtractor``.
+        arrow_hasher: Optional ``ArrowHasherProtocol`` for nested table hashing.
+            When None, Arrow table handlers are skipped.
     """
-    # Resolve defaults for auxiliary objects ----------------------------
     if file_hasher is None:
-        from orcapod.hashing.file_hashers import BasicFileHasher  # stays in hashing/
-
+        from orcapod.hashing.file_hashers import BasicFileHasher
         file_hasher = BasicFileHasher(algorithm="sha256")
 
     if function_info_extractor is None:
         from orcapod.hashing.semantic_hashing.function_info_extractors import (
             FunctionSignatureExtractor,
         )
-
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
         )
 
-    if arrow_hasher is None:
-        from orcapod.hashing.arrow_hashers import SemanticArrowHasher
-        from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
+    bytes_hasher = BytesSemanticHasher()
+    registry.register(bytes, bytes_hasher)
+    registry.register(bytearray, bytes_hasher)
 
-        arrow_hasher = SemanticArrowHasher(
-            semantic_registry=SemanticTypeRegistry(),
-            hasher_id="arrow_v0.1",
-            hash_algorithm="sha256",
-            serialization_method="logical",
-        )
+    registry.register(Path, PathSemanticHasher(file_hasher))
+    registry.register(UPath, UPathSemanticHasher(file_hasher))
+    registry.register(UUID, UUIDSemanticHasher())
 
-    # Register handlers -------------------------------------------------
-
-    # bytes / bytearray
-    bytes_handler = BytesHandler()
-    registry.register(bytes, bytes_handler)
-    registry.register(bytearray, bytes_handler)
-
-    # pathlib.Path (and subclasses such as PosixPath / WindowsPath)
-    registry.register(Path, PathContentHandler(file_hasher))
-
-    # uuid.UUID
-    registry.register(UUID, UUIDHandler())
-
-    # Note: ContentHash needs no handler -- SemanticHasherProtocol treats it as
-    # a terminal in hash_object() and returns it as-is.
-
-    # Functions -- register types.FunctionType so MRO lookup works for
-    # plain ``def`` functions, plus built-in functions and bound methods.
     import types as _types
 
-    function_handler = FunctionHandler(function_info_extractor)
-    registry.register(_types.FunctionType, function_handler)
-    registry.register(_types.BuiltinFunctionType, function_handler)
-    registry.register(_types.MethodType, function_handler)
+    function_hasher = FunctionSemanticHasher(function_info_extractor)
+    registry.register(_types.FunctionType, function_hasher)
+    registry.register(_types.BuiltinFunctionType, function_hasher)
+    registry.register(_types.MethodType, function_hasher)
 
-    # type objects (classes used as values, e.g. passed in a dict)
-    registry.register(type, TypeObjectHandler())
+    registry.register(type, TypeObjectSemanticHasher())
+    registry.register(_types.UnionType, UnionTypeSemanticHasher())
 
-    # types.UnionType (Python 3.10+ X | Y syntax, e.g. str | None)
-    registry.register(_types.UnionType, UnionTypeHandler())
-
-    # generic alias type annotations: dict[int, str], list[str], etc.
-    generic_alias_handler = GenericAliasHandler()
-    registry.register(_types.GenericAlias, generic_alias_handler)
-    # typing._GenericAlias covers Optional[X], Union[X, Y], Dict[K, V], etc.
-    # typing._SpecialForm covers typing.Union, typing.ClassVar, etc. which
-    # appear as __origin__ on those generics (e.g. Optional[int].__origin__
-    # is typing.Union, a _SpecialForm).
+    generic_alias_hasher = GenericAliasSemanticHasher()
+    registry.register(_types.GenericAlias, generic_alias_hasher)
     try:
         import typing as _typing
-
-        registry.register(_typing._GenericAlias, generic_alias_handler)  # type: ignore[attr-defined]
-        registry.register(_typing._SpecialForm, SpecialFormHandler())  # type: ignore[attr-defined]
+        registry.register(_typing._GenericAlias, generic_alias_hasher)  # type: ignore[attr-defined]
+        registry.register(_typing._SpecialForm, SpecialFormSemanticHasher())  # type: ignore[attr-defined]
     except AttributeError:
         pass
 
-    # Schema objects -- must come after type handler so Schema is matched
-    # specifically rather than falling through to the Mapping expansion path
-    registry.register(Schema, SchemaHandler())
+    registry.register(Schema, SchemaSemanticHasher())
 
-    # Arrow tables and record batches -- delegate to the injected arrow hasher
-    import pyarrow as _pa
-
-    arrow_table_handler = ArrowTableHandler(arrow_hasher)
-    registry.register(_pa.Table, arrow_table_handler)
-    registry.register(_pa.RecordBatch, arrow_table_handler)
+    if arrow_hasher is not None:
+        import pyarrow as _pa
+        arrow_table_hasher = ArrowTableSemanticHasher(arrow_hasher)
+        registry.register(_pa.Table, arrow_table_hasher)
+        registry.register(_pa.RecordBatch, arrow_table_hasher)
 
     logger.debug(
-        "register_builtin_handlers: registered %d built-in handlers",
+        "register_builtin_python_type_semantic_hashers: registered %d hashers",
         len(registry),
     )
