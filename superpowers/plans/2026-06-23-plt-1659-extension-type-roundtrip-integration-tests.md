@@ -4,7 +4,7 @@
 
 **Goal:** Add three new integration test files covering end-to-end extension type round-trips through Parquet, Delta Lake, schema compatibility, and per-process cache behaviour.
 
-**Architecture:** Pure test-only change — no source files modified. Three focused test files: `test_roundtrips.py` (write/read through Parquet and Delta backends), `test_schema_compatibility.py` (Arrow-level identity + Python-type-level compatibility), `test_cache_behavior.py` (registry cache populated and skipped on second read). SQLite backend is excluded from value round-trip tests because `SQLiteConnector` does not preserve `ARROW:extension:*` field metadata; that pattern is already covered by `test_extension_aware_database.py`.
+**Architecture:** Three focused test files plus one source change and one docs update. Test files: `test_roundtrips.py` (write/read through Parquet and Delta backends), `test_schema_compatibility.py` (Arrow-level identity + Python-type-level compatibility), `test_cache_behavior.py` (registry cache populated and skipped on second read). SQLite backend is excluded from value round-trip tests because `SQLiteConnector` does not preserve `ARROW:extension:*` field metadata; that pattern is already covered by `test_extension_aware_database.py`. Source change: `ConnectorArrowDatabase.add_records()` gets a `ValueError` guard that rejects extension-typed columns (both in-memory `pa.ExtensionType` and metadata-only fields) as an interim safety measure while PLT-1795 is pending.
 
 **Tech Stack:** pytest, pyarrow, pyarrow.parquet, deltalake, polars, orcapod extension type APIs (`create_registry`, `UniversalTypeConverter`, `DataclassLogicalTypeFactory`), `unittest.mock.patch.object`.
 
@@ -17,8 +17,8 @@
 | Create | `tests/test_extension_types/test_schema_compatibility.py` |
 | Create | `tests/test_extension_types/test_cache_behavior.py` |
 | Create | `tests/test_extension_types/test_roundtrips.py` |
-
-No source files are modified.
+| Modify | `src/orcapod/databases/connector_arrow_database.py` — add `ValueError` guard in `add_records()` |
+| Modify | `DESIGN_ISSUES.md` — add CA1 entry documenting SQL metadata loss and interim guard |
 
 ---
 

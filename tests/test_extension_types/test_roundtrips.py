@@ -7,7 +7,7 @@ Tests the complete pipeline:
 Each round-trip test is parameterised over two storage backends:
 
 - ``parquet``: direct ``pyarrow.parquet`` write/read.
-- ``delta``: ``deltalake.write_deltalake`` / ``DeltaTable.to_pyarrow_table()``.
+- ``delta``: ``deltalake.write_deltalake`` / ``DeltaTable.to_pyarrow_dataset(as_large_types=True).to_table()``.
 
 SQLite (``ConnectorArrowDatabase`` + ``SQLiteConnector``) is excluded because
 ``SQLiteConnector`` maps Arrow types to SQL column types and discards
