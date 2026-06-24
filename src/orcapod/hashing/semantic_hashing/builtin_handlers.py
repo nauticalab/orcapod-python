@@ -237,10 +237,11 @@ def register_builtin_python_type_semantic_hashers(
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
-    When ``arrow_hasher`` is None, ``pa.Table`` and ``pa.RecordBatch`` handlers
-    are **not** registered (to avoid circular dependency in the JSON context
-    construction — the default context's ``python_type_semantic_hasher_registry``
-    is built before ``arrow_hasher``).
+    ``pa.Table`` and ``pa.RecordBatch`` are always registered via
+    ``ArrowTableSemanticHasher``. When ``arrow_hasher`` is provided it is
+    passed through for immediate use; when ``None``, ``ArrowTableSemanticHasher``
+    resolves the active arrow hasher lazily via ``get_default_context()`` at
+    hash time, breaking the construction-time circular dependency.
 
     Args:
         registry: The ``PythonTypeSemanticHasherRegistry`` to populate.
@@ -249,7 +250,7 @@ def register_builtin_python_type_semantic_hashers(
         function_info_extractor: Optional ``FunctionInfoExtractorProtocol``.
             Defaults to ``FunctionSignatureExtractor``.
         arrow_hasher: Optional ``ArrowHasherProtocol`` for nested table hashing.
-            When None, Arrow table handlers are skipped.
+            When ``None``, lazy resolution via the default context is used.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import BasicFileHasher
@@ -293,11 +294,10 @@ def register_builtin_python_type_semantic_hashers(
 
     registry.register(Schema, SchemaSemanticHasher())
 
-    if arrow_hasher is not None:
-        import pyarrow as _pa
-        arrow_table_hasher = ArrowTableSemanticHasher(arrow_hasher)
-        registry.register(_pa.Table, arrow_table_hasher)
-        registry.register(_pa.RecordBatch, arrow_table_hasher)
+    import pyarrow as _pa
+    arrow_table_hasher = ArrowTableSemanticHasher(arrow_hasher)
+    registry.register(_pa.Table, arrow_table_hasher)
+    registry.register(_pa.RecordBatch, arrow_table_hasher)
 
     logger.debug(
         "register_builtin_python_type_semantic_hashers: registered %d hashers",

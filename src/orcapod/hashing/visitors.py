@@ -108,7 +108,7 @@ class ArrowTypeDataVisitor(ABC):
 
     def _visit_struct_fields(
         self, struct_type: "pa.StructType", data: dict | None
-    ) -> tuple["pa.StructType", dict]:
+    ) -> tuple["pa.StructType", dict | None]:
         """Recursively process struct fields. Default behavior for regular structs."""
         if data is None:
             return struct_type, None
@@ -126,7 +126,7 @@ class ArrowTypeDataVisitor(ABC):
 
     def _visit_list_elements(
         self, list_type: "pa.ListType", data: list | None
-    ) -> tuple["pa.DataType", list]:
+    ) -> tuple["pa.DataType", list | None]:
         """Recursively process list elements."""
         if data is None:
             return list_type, None
@@ -138,7 +138,7 @@ class ArrowTypeDataVisitor(ABC):
         for item in data:
             current_element_type, processed_item = self.visit(element_type, item)
             processed_elements.append(processed_item)
-            if new_element_type is None:
+            if new_element_type is None and processed_item is not None:
                 new_element_type = current_element_type
 
         if new_element_type is None:
@@ -224,7 +224,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         # The "::" separator is unambiguous because to_prefixed_digest() uses only ":".
         type_name = extension_type.extension_name.replace(".", ":")
         hash_bytes = (
-            type_name.encode("ascii")
+            type_name.encode("utf-8")
             + b"::"
             + content_hash.to_prefixed_digest()
         )
@@ -264,7 +264,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
 
     def _visit_struct_fields(
         self, struct_type: "pa.StructType", data: dict | None
-    ) -> tuple["pa.StructType", dict]:
+    ) -> tuple["pa.StructType", dict | None]:
         """Override to add field path tracking for better error messages."""
         if data is None:
             return struct_type, None
