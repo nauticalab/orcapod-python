@@ -1098,11 +1098,10 @@ does not preserve `ARROW:extension:name` / `ARROW:extension:metadata` field meta
 column whose Arrow type is a `pa.ExtensionType` (e.g. `orcapod.path`, `orcapod.uuid`, or any
 dataclass extension type) is written via `ConnectorArrowDatabase.add_records()` and then read
 back, the column is returned as the raw storage type (e.g. `large_string`, `large_binary`,
-`struct`) with no extension marker. This makes Parquet/Delta round-trips impossible through
-the SQL backend and causes silent data-type loss.
+`struct`) with no extension marker. This makes SQL connector round-trips impossible and causes silent data-type loss.
 
 **Interim fix (PLT-1659):** `ConnectorArrowDatabase.add_records()` now raises `ValueError`
-immediately when any non-record-id column is extension-typed, surfacing the issue at write
+immediately when any column is extension-typed, surfacing the issue at write
 time rather than on a confusing read. Two representations are rejected:
 - In-memory extension types: `isinstance(field.type, pa.ExtensionType)`.
 - Metadata-only columns: plain storage type whose field metadata contains
