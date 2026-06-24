@@ -5,7 +5,7 @@ Public API
 ----------
   SemanticAwarePythonHasher            -- content-based recursive object hasher
   SemanticHasherProtocol               -- protocol for semantic hashers
-  PythonTypeSemanticHasherRegistry     -- registry mapping types to PythonTypeSemanticHasherProtocol instances
+  PythonTypeSemanticHasherRegistry     -- registry mapping types to PythonTypeHandler instances
   get_default_semantic_hasher          -- global default SemanticHasherProtocol factory
   get_default_python_type_semantic_hasher_registry -- global default registry factory
   ContentIdentifiableMixin             -- convenience mixin for content-identifiable objects
@@ -53,7 +53,7 @@ from orcapod.protocols.hashing_protocols import (
     ContentIdentifiableProtocol,
     FileContentHasherProtocol,
     FunctionInfoExtractorProtocol,
-    PythonTypeSemanticHasherProtocol,
+    PythonTypeHandler,
     SemanticHasherProtocol,
     SemanticTypeHasherProtocol,
     StringCacherProtocol,
@@ -97,7 +97,7 @@ __all__ = [
     "register_builtin_python_type_semantic_hashers",
     "SemanticHasherProtocol",
     "ContentIdentifiableProtocol",
-    "PythonTypeSemanticHasherProtocol",
+    "PythonTypeHandler",
     "FileContentHasherProtocol",
     "ArrowHasherProtocol",
     "StringCacherProtocol",

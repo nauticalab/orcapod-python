@@ -58,12 +58,12 @@ def lenient_hasher(registry: PythonTypeSemanticHasherRegistry) -> SemanticAwareP
 
 
 class _FakeHandler:
-    """Minimal object satisfying PythonTypeSemanticHasherProtocol for testing."""
+    """Minimal object satisfying PythonTypeHandler for testing."""
 
     def __init__(self, return_value: Any = "handled") -> None:
         self._return_value = return_value
 
-    def hash(self, obj: Any, hasher: SemanticAwarePythonHasher) -> Any:
+    def handle(self, obj: Any, hasher: SemanticAwarePythonHasher) -> Any:
         return str(self._return_value)
 
 
@@ -230,7 +230,7 @@ class TestSemanticAwarePythonHasherStrictMode:
         class Unknown:
             pass
 
-        with pytest.raises(TypeError, match="no PythonTypeSemanticHasherProtocol registered"):
+        with pytest.raises(TypeError, match="no PythonTypeHandler registered"):
             hasher.hash_object(Unknown())
 
     def test_unknown_type_lenient_succeeds(

@@ -299,7 +299,7 @@ class Unhandled:
 
 class TestStrictMode:
     def test_strict_raises_on_unknown_type(self, hasher):
-        with pytest.raises(TypeError, match="no PythonTypeSemanticHasherProtocol registered"):
+        with pytest.raises(TypeError, match="no PythonTypeHandler registered"):
             hasher.hash_object(Unhandled(1))
 
     def test_non_strict_returns_content_hash(self, lenient_hasher):
@@ -830,7 +830,7 @@ class _DummySemanticHasher:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    def hash(self, obj: Any, hasher: Any) -> Any:
+    def handle(self, obj: Any, hasher: Any) -> Any:
         # Returns a representative Python structure; outer hasher performs final hashing
         return f"{self.tag}:{obj}"
 
@@ -953,7 +953,7 @@ class Celsius:
 
 
 class CelsiusHandler:
-    def hash(self, obj: Any, hasher: Any) -> Any:
+    def handle(self, obj: Any, hasher: Any) -> Any:
         return {"__type__": "Celsius", "degrees": obj.degrees}
 
 
@@ -1008,7 +1008,7 @@ class TestCustomHandlerRegistration:
         """A handler that returns a ContentHash must not be re-hashed."""
 
         class DirectHashHandler:
-            def hash(self, obj: Any, hasher: Any) -> ContentHash:
+            def handle(self, obj: Any, hasher: Any) -> ContentHash:
                 return ContentHash("direct", b"\xaa" * 32)
 
         registry = PythonTypeSemanticHasherRegistry()
@@ -1042,8 +1042,8 @@ class TestCustomHandlerRegistration:
                 self.k = k
 
         class KelvinHandler:
-            def hash(self, obj: Any, hasher: Any) -> ContentHash:
-                return hasher.hash_object({"__type__": "Kelvin", "k": obj.k})
+            def handle(self, obj: Any, hasher: Any) -> Any:
+                return {"__type__": "Kelvin", "k": obj.k}
 
         global_registry = get_default_python_type_semantic_hasher_registry()
         global_registry.register(Kelvin, KelvinHandler())

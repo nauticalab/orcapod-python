@@ -13,7 +13,7 @@ recursive with ``_expand_structure``:
   - Primitive          → JSON-serialise + SHA-256
   - Structure          → delegate to ``_expand_structure``, then
                          JSON-serialise the resulting tagged tree + SHA-256
-  - Semantic hasher match → semantic_hasher.hash(obj, self) returns a representative
+  - Semantic hasher match → handler.handle(obj, self) returns a representative
                             Python structure (or ContentHash as terminal); the result
                             is fed back into hash_object for final hashing
   - ContentIdentifiableProtocol→ call identity_structure(), recurse via hash_object
@@ -92,7 +92,7 @@ class SemanticAwarePythonHasher:
         Embedded in every ContentHash produced.
     type_semantic_hasher_registry:
         ``PythonTypeSemanticHasherRegistry`` for MRO-aware lookup of
-        ``PythonTypeSemanticHasherProtocol`` instances.
+        ``PythonTypeHandler`` instances.
         If None, the default registry is used.
     strict:
         When True (default) raises TypeError for unhandled types.
@@ -145,7 +145,7 @@ class SemanticAwarePythonHasher:
         - ContentHash        → terminal; returned as-is
         - Primitive          → JSON-serialised and hashed directly
         - Structure          → structurally expanded then hashed
-        - Semantic hasher match → handler.hash(obj, self) returns a representative Python
+        - Semantic hasher match → handler.handle(obj, self) returns a representative Python
           structure (or ContentHash); result is fed back into hash_object for final hashing
         - ContentIdentifiableProtocol→ resolver(obj) if resolver provided, else obj.content_hash()
         - Unknown type       → TypeError in strict mode; best-effort otherwise
@@ -187,7 +187,7 @@ class SemanticAwarePythonHasher:
                 type(obj).__name__,
                 type(semantic_hasher).__name__,
             )
-            result = semantic_hasher.hash(obj, self)
+            result = semantic_hasher.handle(obj, self)
             return self.hash_object(result, resolver=resolver)
 
         # ContentIdentifiableProtocol: use resolver if provided, else content_hash().
@@ -366,7 +366,7 @@ class SemanticAwarePythonHasher:
         except (TypeError, ValueError) as exc:
             raise TypeError(
                 f"SemanticAwarePythonHasher: failed to JSON-serialise object of type "
-                f"{type(obj).__name__!r}. Ensure all PythonTypeSemanticHasherProtocol "
+                f"{type(obj).__name__!r}. Ensure all PythonTypeHandler "
                 "implementations and identity_structure() return JSON-serialisable "
                 "primitives or structures."
             ) from exc
@@ -389,15 +389,15 @@ class SemanticAwarePythonHasher:
 
         if self._strict:
             raise TypeError(
-                f"SemanticAwarePythonHasher (strict): no PythonTypeSemanticHasherProtocol "
+                f"SemanticAwarePythonHasher (strict): no PythonTypeHandler "
                 f"registered for type '{qualified}' and it does not implement "
-                "ContentIdentifiableProtocol. Register a PythonTypeSemanticHasherProtocol "
+                "ContentIdentifiableProtocol. Register a PythonTypeHandler "
                 "via the PythonTypeSemanticHasherRegistry or implement "
                 "identity_structure() on the class."
             )
 
         logger.warning(
-            "SemanticAwarePythonHasher (non-strict): no PythonTypeSemanticHasherProtocol registered for type '%s'. "
+            "SemanticAwarePythonHasher (non-strict): no PythonTypeHandler registered for type '%s'. "
             "Falling back to best-effort string representation.",
             qualified,
         )
