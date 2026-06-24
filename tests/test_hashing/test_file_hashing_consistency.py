@@ -3,8 +3,8 @@ Integration tests verifying that file hashing is consistent across both paths:
 
 1. **Arrow hasher path**: SemanticArrowHasher processes an Arrow table containing a
    path struct column → calls PythonPathStructConverter.hash_struct_dict → file_hasher.
-2. **Semantic hasher path**: BaseSemanticHasher hashes a Python Path object →
-   calls PathContentHandler.handle → file_hasher.
+2. **Semantic hasher path**: SemanticAwarePythonHasher hashes a Python Path object →
+   calls PathSemanticHasher.handle → file_hasher.
 
 Both paths must delegate to the same FileContentHasherProtocol so that identical
 file content always produces identical hashes, regardless of entry point.
@@ -18,10 +18,10 @@ import pytest
 from orcapod.hashing.arrow_hashers import SemanticArrowHasher
 from orcapod.hashing.file_hashers import BasicFileHasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
-    register_builtin_handlers,
+    register_builtin_python_type_semantic_hashers,
 )
-from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
-from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
+from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
 from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
@@ -52,11 +52,11 @@ def arrow_hasher(path_converter):
 
 @pytest.fixture
 def semantic_hasher(file_hasher):
-    """BaseSemanticHasher wired with the shared file_hasher via PathContentHandler."""
-    registry = TypeHandlerRegistry()
-    register_builtin_handlers(registry, file_hasher=file_hasher)
-    return BaseSemanticHasher(
-        hasher_id="test_v1", type_handler_registry=registry, strict=True
+    """SemanticAwarePythonHasher wired with the shared file_hasher via PathSemanticHasher."""
+    registry = PythonTypeSemanticHasherRegistry()
+    register_builtin_python_type_semantic_hashers(registry, file_hasher=file_hasher)
+    return SemanticAwarePythonHasher(
+        hasher_id="test_v1", type_semantic_hasher_registry=registry, strict=True
     )
 
 
