@@ -297,6 +297,7 @@ def test_factory_not_called_on_second_read(tmp_path):
     with patch.object(
         DataclassLogicalTypeFactory,
         "reconstruct_from_arrow",
+        autospec=True,
         wraps=DataclassLogicalTypeFactory.reconstruct_from_arrow,
     ) as spy:
         # First read: factory is called once
@@ -350,7 +351,7 @@ Tests the complete pipeline:
 Each round-trip test is parameterised over two storage backends:
 
 - ``parquet``: direct ``pyarrow.parquet`` write/read.
-- ``delta``: ``deltalake.write_deltalake`` / ``DeltaTable.to_pyarrow_table()``.
+- ``delta``: ``deltalake.write_deltalake`` / ``DeltaTable.to_pyarrow_dataset(as_large_types=True).to_table()``.
 
 SQLite (``ConnectorArrowDatabase`` + ``SQLiteConnector``) is excluded because
 ``SQLiteConnector`` maps Arrow types to SQL column types and discards
@@ -439,7 +440,9 @@ def _delta_write(table: pa.Table, base_path: Path) -> None:
 def _delta_read(base_path: Path, converter: UniversalTypeConverter) -> pa.Table:
     import deltalake
     dt = deltalake.DeltaTable(str(base_path / "delta"))
-    raw = dt.to_pyarrow_table()
+    # as_large_types=True preserves large_string / large_binary rather than
+    # normalising them to string / binary (Delta Lake's default behaviour).
+    raw = dt.to_pyarrow_dataset(as_large_types=True).to_table()
     return converter.load_extension_types(raw)
 
 
@@ -697,17 +700,25 @@ Append the following block at the end of `tests/test_extension_types/test_roundt
 
 
 def test_delta_polars_read_delta(tmp_path: Path) -> None:
-    """Write a dataclass column to Delta; read back via pl.read_delta; extension type preserved.
+    """Write a dataclass column to Delta; read back via pl.read_delta; extension type survives.
 
     The write-side converter registers _PointA in both PyArrow's and Polars'
-    global registries.  pl.read_delta can then decode the column as the correct
-    extension type.  load_extension_types on the resulting Arrow table registers
-    _PointA in the fresh read-side converter and wraps the column.
+    global registries (``register_python_class`` calls ``make_polars_extension_type``
+    which registers with Polars).  ``pl.read_delta`` can therefore decode the column
+    as the correct Polars extension type, not a plain ``Struct``.
+
+    Note: ``pl.DataFrame.to_arrow()`` exports Polars extension types as PyArrow
+    extension arrays but with empty serialized bytes (Polars does not forward
+    ``__arrow_ext_metadata__`` through its Arrow export).  Python-object
+    reconstruction via the Polars-to-Arrow path is therefore not possible; that
+    path is tested by the separate ``parquet`` / ``delta`` parametrised tests
+    which read underlying Parquet files directly.
     """
     import deltalake
     import polars as pl
 
     delta_path = str(tmp_path / "polars_delta")
+    fqcn = f"{_PointA.__module__}.{_PointA.__qualname__}"
 
     # Write — registers _PointA in PyArrow + Polars global registries.
     write_converter = _fresh_converter()
@@ -721,23 +732,14 @@ def test_delta_polars_read_delta(tmp_path: Path) -> None:
     # _PointA is already in the Polars global registry from the write step above.
     df = pl.read_delta(delta_path)
 
-    # Convert to Arrow and load extension types with a fresh (local-registry) converter.
-    read_converter = _fresh_converter()
-    loaded = read_converter.load_extension_types(df.to_arrow())
-
-    fqcn = f"{_PointA.__module__}.{_PointA.__qualname__}"
-    field = loaded.schema.field("point")
-    assert hasattr(field.type, "extension_name"), (
-        f"Expected extension type on field 'point', got {field.type!r}"
+    # Assert the column carries the correct Polars extension type — not a plain Struct.
+    col_dtype = df.dtypes[0]
+    assert col_dtype.is_extension(), (
+        f"Expected a Polars extension type on column 'point', got {col_dtype!r}"
     )
-    assert field.type.extension_name == fqcn
-
-    rows_out = read_converter.arrow_table_to_python_dicts(loaded)
-    assert len(rows_out) == 1
-    reconstructed = rows_out[0]["point"]
-    assert isinstance(reconstructed, _PointA)
-    assert reconstructed.x == 5
-    assert reconstructed.y == 9
+    assert col_dtype.ext_name() == fqcn, (
+        f"Expected extension name {fqcn!r}, got {col_dtype.ext_name()!r}"
+    )
 ```
 
 - [ ] **Step 2: Run the new test to verify it passes**
