@@ -21,8 +21,8 @@ class DataContext:
             registration. This is the single public API for all type operations.
         arrow_hasher: Arrow table hasher for this context
         semantic_hasher: General semantic hasher for this context. The
-            ``TypeHandlerRegistry`` used for hashing is accessible via
-            ``semantic_hasher.type_handler_registry``.
+            ``PythonTypeSemanticHasherRegistry`` used for hashing is accessible via
+            ``semantic_hasher.type_semantic_hasher_registry``.
     """
 
     context_key: str
