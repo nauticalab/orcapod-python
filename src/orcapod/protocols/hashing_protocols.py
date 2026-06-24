@@ -9,7 +9,7 @@ from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
+    from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
 
 
 @runtime_checkable
@@ -18,208 +18,81 @@ class DataContextAwareProtocol(Protocol):
 
     @property
     def data_context_key(self) -> str:
-        """
-        Return the data context key associated with this object.
-
-        Returns:
-            str: The data context key
-        """
+        """Return the data context key associated with this object."""
         ...
 
 
 @runtime_checkable
 class PipelineElementProtocol(Protocol):
-    """
-    Protocol for objects that have a stable identity as an element in a
-    pipeline graph — determined by schema and upstream topology, not by
-    data content.
-
-    This is a parallel identity chain to ContentIdentifiableProtocol.
-    Where content identity captures the precise, data-inclusive identity of
-    an object, pipeline identity captures only what is structurally meaningful
-    for pipeline database path scoping: the schemas and the recursive topology
-    of the upstream computation.
-
-    The base case (RootSource) returns a hash of (tag_schema, data_schema).
-    Every other element recurses through the pipeline_hash() of its upstream
-    inputs, with the hash values themselves (ContentHash objects) used as
-    terminal leaves so no special hasher mode is required.
-
-    Two sources with identical schemas processed through the same function pod
-    graph will produce the same pipeline_hash() at every downstream node,
-    enabling automatic multi-source table sharing in the pipeline database.
-    """
+    """Protocol for objects that have a stable identity as an element in a pipeline graph."""
 
     def pipeline_identity_structure(self) -> Any:
-        """
-        Return a structure representing this element's pipeline identity.
-
-        At source nodes (base case): return (tag_schema, data_schema).
-        At all other nodes: return a structure containing references to
-        upstream pipeline elements and/or data functions as raw objects.
-        The pipeline resolver threaded through pipeline_hash() ensures that
-        PipelineElementProtocol objects are resolved via pipeline_hash() and
-        other ContentIdentifiable objects via content_hash(), both using the
-        same hasher throughout the computation.
-        """
+        """Return a structure representing this element's pipeline identity."""
         ...
 
     def pipeline_hash(self, hasher=None) -> ContentHash:
-        """
-        Return the pipeline-level hash of this element, computed from
-        pipeline_identity_structure() and cached by hasher_id.
-
-        Args:
-            hasher: Optional semantic hasher to use.  When omitted, resolved
-                from the element's data_context.
-        """
+        """Return the pipeline-level hash of this element."""
         ...
 
 
 @runtime_checkable
 class ContentIdentifiableProtocol(Protocol):
-    """
-    Protocol for objects that can express their semantic identity as a plain
-    Python structure.
-
-    This is the only method a class needs to implement to participate in the
-    content-based hashing system. The returned structure is recursively
-    resolved by the SemanticHasherProtocol -- any nested ContentIdentifiableProtocol objects
-    within the structure will themselves be expanded and hashed, producing a
-    Merkle-tree-like composition of hashes.
-
-    The method should return a deterministic structure whose value depends
-    only on the semantic content of the object -- not on memory addresses,
-    object IDs, or other incidental runtime state.
-    """
+    """Protocol for objects that can express their semantic identity as a plain Python structure."""
 
     def identity_structure(self) -> Any:
-        """
-        Return a structure that represents the semantic identity of this object.
-
-        The returned value may be any Python object:
-          - Primitives (str, int, float, bool, None) are used as-is.
-          - Collections (list, dict, set, tuple) are recursively traversed.
-          - Nested ContentIdentifiableProtocol objects are recursively resolved by
-            the SemanticHasherProtocol: their identity structure is hashed to a
-            ContentHash hex token, which is then embedded in place of the
-            object in the parent structure.
-          - Any type that has a registered TypeHandlerProtocol in the
-            SemanticHasherProtocol's registry is handled by that handler.
-
-        Returns:
-            Any: A structure representing this object's semantic content.
-                 Should be deterministic and include all identity-relevant data.
-        """
+        """Return a structure that represents the semantic identity of this object."""
         ...
 
-    def content_hash(self, hasher: SemanticHasherProtocol | None = None) -> ContentHash:
-        """
-        Returns the content hash.
-
-        Args:
-            hasher: Optional semantic hasher to use for the entire recursive
-                computation.  When omitted, resolved from the object's
-                data_context (or injected hasher for mixin-based objects).
-                The same hasher propagates to all nested ContentIdentifiable
-                objects, ensuring one consistent context per computation.
-        """
+    def content_hash(self, hasher: "SemanticHasherProtocol | None" = None) -> ContentHash:
+        """Returns the content hash."""
         ...
 
 
-class TypeHandlerProtocol(Protocol):
-    """
-    Protocol for type-specific serialization handlers used by SemanticHasherProtocol.
+class PythonTypeSemanticHasherProtocol(Protocol):
+    """Protocol for type-specific semantic hashers used by SemanticAwarePythonHasher.
 
-    A TypeHandlerProtocol converts a specific Python type into a value that
-    ``hash_object`` can process.  Handlers are registered with a
-    TypeHandlerRegistry and looked up via MRO-aware resolution.
+    A ``PythonTypeSemanticHasherProtocol`` hashes a specific Python type to a
+    ``ContentHash``. Implementations are registered with a
+    ``PythonTypeSemanticHasherRegistry`` and looked up via MRO-aware resolution.
 
-    The returned value is passed directly back to ``hash_object``, so it may
-    be anything that ``hash_object`` understands:
-
-      - A primitive (None, bool, int, float, str) -- hashed directly.
-      - A structure (list, tuple, dict, set, frozenset) -- expanded and hashed.
-      - A ContentHash -- treated as a terminal; returned as-is without
-        re-hashing.  Use this when the handler has already computed the
-        definitive hash of the object (e.g. hashing a file's content).
-      - A ContentIdentifiableProtocol -- its identity_structure() will be called.
-      - Another registered type -- dispatched through the registry.
+    Each implementation receives the full ``SemanticAwarePythonHasher`` so it can
+    delegate hashing of sub-values back to the outer hasher without coupling to a
+    specific hasher instance.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
-        """
-        Convert *obj* into a value that ``hash_object`` can process.
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+        """Hash *obj* to a ContentHash.
 
         Args:
-            obj:    The object to handle.
-            hasher: The SemanticHasherProtocol, available if the handler needs to
-                    hash sub-objects explicitly via ``hasher.hash_object()``.
+            obj:    The object to hash. Always matches the registered type.
+            hasher: The active ``SemanticAwarePythonHasher``. Use
+                    ``hasher.hash_object(sub_value)`` to hash sub-values.
 
         Returns:
-            Any value accepted by ``hash_object``: a primitive, structure,
-            ContentHash, ContentIdentifiableProtocol, or another registered type.
+            ContentHash: The content-addressed hash of *obj*.
         """
         ...
 
 
 class SemanticHasherProtocol(Protocol):
-    """
-    Protocol for the semantic content-based hasher.
-
-    ``hash_object(obj)`` is the single recursive entry point.  It produces a
-    ContentHash for any Python object using the following dispatch:
-
-      - ContentHash        → terminal; returned as-is
-      - Primitive          → JSON-serialised and hashed directly
-      - Structure          → structurally expanded (type-tagged), then hashed
-      - Handler match      → handler.handle() returns a new value; recurse
-      - ContentIdentifiableProtocol→ identity_structure() returns a value; recurse
-      - Unknown            → TypeError (strict) or best-effort string (lenient)
-
-    Containers are type-tagged before hashing so that list, tuple, dict, set,
-    and namedtuple produce distinct hashes even when their elements are equal.
-
-    Unknown types raise TypeError by default (strict mode).  Set
-    strict=False on construction to fall back to a best-effort string
-    representation with a warning instead.
-    """
+    """Protocol for the semantic content-based hasher."""
 
     def hash_object(
         self,
         obj: Any,
         resolver: Callable[[Any], ContentHash] | None = None,
     ) -> ContentHash:
-        """
-        Hash *obj* based on its semantic content.
-
-        Args:
-            obj: The object to hash.
-            resolver: Optional callable invoked for any ContentIdentifiable
-                object encountered during hashing.  When provided it overrides
-                the default obj.content_hash() call, allowing the caller to
-                control which identity chain is used and to propagate a
-                consistent hasher through the full recursive computation.
-
-        Returns:
-            ContentHash: Stable, content-based hash of the object.
-        """
+        """Hash *obj* based on its semantic content."""
         ...
 
     @property
     def hasher_id(self) -> str:
-        """
-        Returns a unique identifier/name for this hasher instance.
-
-        The hasher_id is embedded in every ContentHash produced by this
-        hasher, allowing hashes from different versions or configurations
-        to be distinguished.
-        """
+        """Returns a unique identifier/name for this hasher instance."""
         ...
 
     @property
-    def type_handler_registry(self) -> "TypeHandlerRegistry":
-        """Return the TypeHandlerRegistry used by this hasher."""
+    def type_semantic_hasher_registry(self) -> "PythonTypeSemanticHasherRegistry":
+        """Return the PythonTypeSemanticHasherRegistry used by this hasher."""
         ...
 
 
@@ -269,11 +142,8 @@ class SemanticTypeHasherProtocol(Protocol):
         """Unique identifier for this semantic type hasher."""
         ...
 
-    def hash_column(
-        self,
-        column: "pa.Array",
-    ) -> "pa.Array":
-        """Hash a column with this semantic type and return the hash bytes an an array"""
+    def hash_column(self, column: "pa.Array") -> "pa.Array":
+        """Hash a column with this semantic type and return the hash bytes as an array."""
         ...
 
     def set_cacher(self, cacher: StringCacherProtocol) -> None:
