@@ -41,10 +41,6 @@
                 "Enhanced version with timestamp support and improved hashing"
             ]
         },
-        "semantic_registry": {
-            "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the semantic registry"
-        },
         "type_converter": {
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the python-arrow type converter"
@@ -57,9 +53,9 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the semantic hasher component"
         },
-        "type_handler_registry": {
+        "python_type_semantic_hasher_registry": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the TypeHandlerRegistry used by the semantic hasher"
+            "description": "ObjectSpec for the PythonTypeSemanticHasherRegistry used by the semantic hasher"
         },
         "file_hasher": {
             "$ref": "#/$defs/objectspec",

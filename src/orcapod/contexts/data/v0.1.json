@@ -1,30 +1,11 @@
 {
     "context_key": "std:v0.1:default",
     "version": "v0.1",
-    "description": "Initial stable release with basic Path semantic type support",
+    "description": "Initial stable release with extension type hashing support",
     "file_hasher": {
         "_class": "orcapod.hashing.file_hashers.BasicFileHasher",
         "_config": {
             "algorithm": "sha256"
-        }
-    },
-    "semantic_registry": {
-        "_class": "orcapod.semantic_types.semantic_registry.SemanticTypeRegistry",
-        "_config": {
-            "converters": {
-                "upath": {
-                    "_class": "orcapod.semantic_types.semantic_struct_converters.UPathStructConverter",
-                    "_config": {
-                        "file_hasher": {"_ref": "file_hasher"}
-                    }
-                },
-                "path": {
-                    "_class": "orcapod.semantic_types.semantic_struct_converters.PythonPathStructConverter",
-                    "_config": {
-                        "file_hasher": {"_ref": "file_hasher"}
-                    }
-                }
-            }
         }
     },
     "type_converter": {
@@ -76,34 +57,25 @@
             "include_defaults": true
         }
     },
-    "arrow_hasher": {
-        "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
-        "_config": {
-            "hasher_id": "arrow_v0.1",
-            "type_converter": {
-                "_ref": "type_converter"
-            }
-        }
-    },
-    "type_handler_registry": {
+    "python_type_semantic_hasher_registry": {
         "_class": "orcapod.hashing.semantic_hashing.type_handler_registry.PythonTypeSemanticHasherRegistry",
         "_config": {
             "handlers": [
-                [{"_type": "builtins.bytes"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesSemanticHasher",    "_config": {}}],
-                [{"_type": "builtins.bytearray"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesSemanticHasher",    "_config": {}}],
-                [{"_type": "pathlib.Path"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathSemanticHasher", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
-                [{"_type": "upath.core.UPath"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathSemanticHasher", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
-                [{"_type": "uuid.UUID"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDSemanticHasher",         "_config": {}}],
-                [{"_type": "types.FunctionType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "types.BuiltinFunctionType"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "types.MethodType"},          {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "builtins.type"},       {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectSemanticHasher",   "_config": {}}],
-                [{"_type": "types.GenericAlias"},   {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasSemanticHasher",  "_config": {}}],
-                [{"_type": "types.UnionType"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeSemanticHasher",    "_config": {}}],
-                [{"_type": "typing._GenericAlias"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasSemanticHasher",  "_config": {}}],
-                [{"_type": "typing._SpecialForm"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormSemanticHasher",   "_config": {}}],
-                [{"_type": "pyarrow.Table"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableSemanticHasher",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}],
-                [{"_type": "pyarrow.RecordBatch"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableSemanticHasher",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}]
+                [{"_type": "builtins.bytes"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesSemanticHasher",        "_config": {}}],
+                [{"_type": "builtins.bytearray"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesSemanticHasher",        "_config": {}}],
+                [{"_type": "pathlib.Path"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathSemanticHasher",         "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
+                [{"_type": "upath.core.UPath"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathSemanticHasher",        "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
+                [{"_type": "uuid.UUID"},               {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDSemanticHasher",         "_config": {}}],
+                [{"_type": "types.FunctionType"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher",     "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "types.BuiltinFunctionType"},{"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher",    "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "types.MethodType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher",     "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "builtins.type"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectSemanticHasher",   "_config": {}}],
+                [{"_type": "types.GenericAlias"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasSemanticHasher", "_config": {}}],
+                [{"_type": "types.UnionType"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeSemanticHasher",    "_config": {}}],
+                [{"_type": "typing._GenericAlias"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasSemanticHasher", "_config": {}}],
+                [{"_type": "typing._SpecialForm"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormSemanticHasher",  "_config": {}}],
+                [{"_type": "pyarrow.Table"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableSemanticHasher",   "_config": {}}],
+                [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableSemanticHasher",   "_config": {}}]
             ]
         }
     },
@@ -112,18 +84,27 @@
         "_config": {
             "hasher_id": "semantic_v0.1",
             "type_semantic_hasher_registry": {
-                "_ref": "type_handler_registry"
+                "_ref": "python_type_semantic_hasher_registry"
             }
         }
     },
+    "arrow_hasher": {
+        "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
+        "_config": {
+            "hasher_id": "arrow_v0.1",
+            "type_converter": {"_ref": "type_converter"},
+            "semantic_hasher": {"_ref": "semantic_hasher"}
+        }
+    },
     "metadata": {
-        "created_date": "2025-08-01",
+        "created_date": "2026-06-24",
         "author": "OrcaPod Core Team",
         "changelog": [
             "Initial release with Path semantic type support",
             "Basic SHA-256 hashing for files and objects",
             "Arrow logical serialization method",
-            "Introduced arrow_v0.1 StarfixArrowHasher using starfix ArrowDigester for cross-language-compatible Arrow hashing"
+            "Introduced arrow_v0.1 StarfixArrowHasher using starfix ArrowDigester for cross-language-compatible Arrow hashing",
+            "Hard cut: replaced shape-based SemanticTypeRegistry with extension-type hashing; renamed all hashing classes to cleaner names"
         ]
     }
 }
