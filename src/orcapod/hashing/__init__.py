@@ -5,18 +5,18 @@ Public API
 ----------
   SemanticAwarePythonHasher            -- content-based recursive object hasher
   SemanticHasherProtocol               -- protocol for semantic hashers
-  PythonTypeSemanticHasherRegistry     -- registry mapping types to PythonTypeHandler instances
+  PythonTypeHandlerRegistry            -- registry mapping types to PythonTypeHandler instances
   get_default_semantic_hasher          -- global default SemanticHasherProtocol factory
-  get_default_python_type_semantic_hasher_registry -- global default registry factory
+  get_default_python_type_handler_registry -- global default registry factory
   ContentIdentifiableMixin             -- convenience mixin for content-identifiable objects
 
 Built-in hashers (importable for custom registry setup):
-  PathSemanticHasher
-  UUIDSemanticHasher
-  BytesSemanticHasher
-  FunctionSemanticHasher
-  TypeObjectSemanticHasher
-  register_builtin_python_type_semantic_hashers
+  PathHandler
+  UUIDHandler
+  BytesHandler
+  FunctionHandler
+  TypeObjectHandler
+  register_builtin_python_type_handlers
 
 Utility:
   FileContentHasherProtocol
@@ -27,26 +27,26 @@ Utility:
 
 from orcapod.hashing.defaults import (
     get_default_arrow_hasher,
-    get_default_python_type_semantic_hasher_registry,
+    get_default_python_type_handler_registry,
     get_default_semantic_hasher,
 )
 from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
-    BytesSemanticHasher,
-    FunctionSemanticHasher,
-    PathSemanticHasher,
-    TypeObjectSemanticHasher,
-    UUIDSemanticHasher,
-    register_builtin_python_type_semantic_hashers,
+    BytesHandler,
+    FunctionHandler,
+    PathHandler,
+    TypeObjectHandler,
+    UUIDHandler,
+    register_builtin_python_type_handlers,
 )
 from orcapod.hashing.semantic_hashing.content_identifiable_mixin import (
     ContentIdentifiableMixin,
 )
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.hashing.semantic_hashing.type_handler_registry import (
-    BuiltinPythonTypeSemanticHasherRegistry,
-    PythonTypeSemanticHasherRegistry,
+    BuiltinPythonTypeHandlerRegistry,
+    PythonTypeHandlerRegistry,
 )
 from orcapod.protocols.hashing_protocols import (
     ArrowHasherProtocol,
@@ -84,17 +84,17 @@ except ImportError:
 
 __all__ = [
     "SemanticAwarePythonHasher",
-    "PythonTypeSemanticHasherRegistry",
-    "BuiltinPythonTypeSemanticHasherRegistry",
-    "get_default_python_type_semantic_hasher_registry",
+    "PythonTypeHandlerRegistry",
+    "BuiltinPythonTypeHandlerRegistry",
+    "get_default_python_type_handler_registry",
     "get_default_semantic_hasher",
     "ContentIdentifiableMixin",
-    "PathSemanticHasher",
-    "UUIDSemanticHasher",
-    "BytesSemanticHasher",
-    "FunctionSemanticHasher",
-    "TypeObjectSemanticHasher",
-    "register_builtin_python_type_semantic_hashers",
+    "PathHandler",
+    "UUIDHandler",
+    "BytesHandler",
+    "FunctionHandler",
+    "TypeObjectHandler",
+    "register_builtin_python_type_handlers",
     "SemanticHasherProtocol",
     "ContentIdentifiableProtocol",
     "PythonTypeHandler",

@@ -210,7 +210,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
             return extension_type, storage_value
 
         # Only hash if a semantic hasher is registered for this Python type.
-        if not self._python_hasher.type_semantic_hasher_registry.has_semantic_hasher(
+        if not self._python_hasher.type_handler_registry.has_semantic_hasher(
             python_type
         ):
             return extension_type, storage_value
