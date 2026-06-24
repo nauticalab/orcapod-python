@@ -53,17 +53,17 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the semantic hasher component"
         },
-        "python_type_semantic_hasher_registry": {
+        "python_type_handler_registry": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the PythonTypeSemanticHasherRegistry used by the semantic hasher"
+            "description": "ObjectSpec for the PythonTypeHandlerRegistry used by the semantic hasher"
         },
         "file_hasher": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the file content hasher (used by PathSemanticHasher)"
+            "description": "ObjectSpec for the file content hasher (used by PathHandler)"
         },
         "function_info_extractor": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the function info extractor (used by FunctionSemanticHasher)"
+            "description": "ObjectSpec for the function info extractor (used by FunctionHandler)"
         },
         "metadata": {
             "type": "object",
@@ -180,7 +180,7 @@
                 "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.SemanticAwarePythonHasher",
                 "_config": {
                     "hasher_id": "semantic_v0.1",
-                    "type_semantic_hasher_registry": {"_ref": "python_type_semantic_hasher_registry"}
+                    "type_handler_registry": {"_ref": "python_type_handler_registry"}
                 }
             },
             "metadata": {

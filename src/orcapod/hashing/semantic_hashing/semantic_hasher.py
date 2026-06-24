@@ -71,7 +71,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.types import ContentHash
 
@@ -90,8 +90,8 @@ class SemanticAwarePythonHasher:
     hasher_id:
         A short string identifying this hasher version/configuration.
         Embedded in every ContentHash produced.
-    type_semantic_hasher_registry:
-        ``PythonTypeSemanticHasherRegistry`` for MRO-aware lookup of
+    type_handler_registry:
+        ``PythonTypeHandlerRegistry`` for MRO-aware lookup of
         ``PythonTypeHandler`` instances.
         If None, the default registry is used.
     strict:
@@ -102,17 +102,17 @@ class SemanticAwarePythonHasher:
     def __init__(
         self,
         hasher_id: str,
-        type_semantic_hasher_registry: PythonTypeSemanticHasherRegistry | None = None,
+        type_handler_registry: PythonTypeHandlerRegistry | None = None,
         strict: bool = True,
     ) -> None:
         self._hasher_id = hasher_id
         self._strict = strict
 
-        if type_semantic_hasher_registry is None:
-            from orcapod.hashing.defaults import get_default_python_type_semantic_hasher_registry
-            self._registry = get_default_python_type_semantic_hasher_registry()
+        if type_handler_registry is None:
+            from orcapod.hashing.defaults import get_default_python_type_handler_registry
+            self._registry = get_default_python_type_handler_registry()
         else:
-            self._registry = type_semantic_hasher_registry
+            self._registry = type_handler_registry
 
     # ------------------------------------------------------------------
     # Public API
@@ -127,8 +127,8 @@ class SemanticAwarePythonHasher:
         return self._strict
 
     @property
-    def type_semantic_hasher_registry(self) -> PythonTypeSemanticHasherRegistry:
-        """Return the ``PythonTypeSemanticHasherRegistry`` used by this hasher."""
+    def type_handler_registry(self) -> PythonTypeHandlerRegistry:
+        """Return the ``PythonTypeHandlerRegistry`` used by this hasher."""
         return self._registry
 
     def hash_object(
@@ -392,7 +392,7 @@ class SemanticAwarePythonHasher:
                 f"SemanticAwarePythonHasher (strict): no PythonTypeHandler "
                 f"registered for type '{qualified}' and it does not implement "
                 "ContentIdentifiableProtocol. Register a PythonTypeHandler "
-                "via the PythonTypeSemanticHasherRegistry or implement "
+                "via the PythonTypeHandlerRegistry or implement "
                 "identity_structure() on the class."
             )
 

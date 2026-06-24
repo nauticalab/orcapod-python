@@ -10,24 +10,24 @@
 # from its JSON spec.  Constructing them here would bypass versioning and
 # produce hashers that are decoupled from the active data context.
 
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
 from orcapod.protocols import hashing_protocols as hp
 
 
-def get_default_python_type_semantic_hasher_registry() -> PythonTypeSemanticHasherRegistry:
+def get_default_python_type_handler_registry() -> PythonTypeHandlerRegistry:
     """
-    Return the ``PythonTypeSemanticHasherRegistry`` from the default data context's
+    Return the ``PythonTypeHandlerRegistry`` from the default data context's
     semantic hasher.
 
     The registry is owned by the active ``SemanticAwarePythonHasher``, which is itself
     versioned inside the active ``DataContext``.
 
     Returns:
-        PythonTypeSemanticHasherRegistry: The type semantic hasher registry from the
+        PythonTypeHandlerRegistry: The type handler registry from the
             default data context.
     """
     from orcapod.contexts import get_default_context
-    return get_default_context().semantic_hasher.type_semantic_hasher_registry
+    return get_default_context().semantic_hasher.type_handler_registry
 
 
 def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:

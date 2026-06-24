@@ -9,7 +9,7 @@ from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
+    from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
     from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 
 
@@ -55,7 +55,7 @@ class PythonTypeHandler(Protocol):
     A ``PythonTypeHandler`` converts a specific Python type into a
     representative Python structure that ``SemanticAwarePythonHasher.hash_object()``
     can then hash.  Implementations are registered with a
-    ``PythonTypeSemanticHasherRegistry`` and looked up via MRO-aware resolution.
+    ``PythonTypeHandlerRegistry`` and looked up via MRO-aware resolution.
 
     Each implementation receives the full ``SemanticAwarePythonHasher`` so it can
     delegate hashing of sub-values back to the outer hasher without coupling to a
@@ -102,8 +102,8 @@ class SemanticHasherProtocol(Protocol):
         ...
 
     @property
-    def type_semantic_hasher_registry(self) -> "PythonTypeSemanticHasherRegistry":
-        """Return the PythonTypeSemanticHasherRegistry used by this hasher."""
+    def type_handler_registry(self) -> "PythonTypeHandlerRegistry":
+        """Return the PythonTypeHandlerRegistry used by this hasher."""
         ...
 
 

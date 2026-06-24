@@ -125,14 +125,14 @@ class TestSemanticHashingVisitorExtension:
     def test_unregistered_python_type_passes_through(self, ctx):
         """Extension types with no registered semantic hasher pass through unchanged."""
         import uuid
-        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
+        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
         from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 
         # Build a hasher with a registry that has NO entry for UUID
-        empty_registry = PythonTypeSemanticHasherRegistry()
+        empty_registry = PythonTypeHandlerRegistry()
         stripped_hasher = SemanticAwarePythonHasher(
             hasher_id="test_v0",
-            type_semantic_hasher_registry=empty_registry,
+            type_handler_registry=empty_registry,
         )
 
         arrow_type = ctx.type_converter.register_python_class(uuid.UUID)

@@ -49,7 +49,7 @@ _CURRENT_ARROW_HASHER_ID = "arrow_v0.1"
 def get_versioned_semantic_hasher(
     hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
     strict: bool = True,
-    type_semantic_hasher_registry: "Any | None" = None,
+    type_handler_registry: "Any | None" = None,
 ) -> hp.SemanticHasherProtocol:
     """Return a SemanticAwarePythonHasher configured for the current version.
 
@@ -60,17 +60,17 @@ def get_versioned_semantic_hasher(
     strict:
         When True raises TypeError for unhandled types. When False falls back
         to a best-effort string representation.
-    type_semantic_hasher_registry:
-        Optional ``PythonTypeSemanticHasherRegistry`` to inject. When None the
+    type_handler_registry:
+        Optional ``PythonTypeHandlerRegistry`` to inject. When None the
         global default registry is used.
     """
     from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 
-    if type_semantic_hasher_registry is None:
+    if type_handler_registry is None:
         from orcapod.hashing.semantic_hashing.type_handler_registry import (
-            get_default_python_type_semantic_hasher_registry,
+            get_default_python_type_handler_registry,
         )
-        type_semantic_hasher_registry = get_default_python_type_semantic_hasher_registry()
+        type_handler_registry = get_default_python_type_handler_registry()
 
     logger.debug(
         "get_versioned_semantic_hasher: creating SemanticAwarePythonHasher "
@@ -80,7 +80,7 @@ def get_versioned_semantic_hasher(
     )
     return SemanticAwarePythonHasher(
         hasher_id=hasher_id,
-        type_semantic_hasher_registry=type_semantic_hasher_registry,
+        type_handler_registry=type_handler_registry,
         strict=strict,
     )
 
