@@ -2,11 +2,11 @@
 orcapod.hashing.semantic_hashing
 =================================
   SemanticAwarePythonHasher           -- content-based recursive object hasher
-  PythonTypeSemanticHasherRegistry    -- MRO-aware registry mapping types → PythonTypeSemanticHasherProtocol
+  PythonTypeSemanticHasherRegistry    -- MRO-aware registry mapping types → PythonTypeHandler
   BuiltinPythonTypeSemanticHasherRegistry  -- pre-populated registry with built-in hashers
   ContentIdentifiableMixin            -- convenience mixin for content-identifiable objects
 
-Built-in PythonTypeSemanticHasherProtocol implementations:
+Built-in PythonTypeHandler implementations:
   PathSemanticHasher          -- pathlib.Path  → file-content hash
   UUIDSemanticHasher          -- uuid.UUID     → canonical bytes
   BytesSemanticHasher         -- bytes/bytearray → hex string

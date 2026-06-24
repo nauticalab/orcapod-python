@@ -49,10 +49,10 @@ class ContentIdentifiableProtocol(Protocol):
         ...
 
 
-class PythonTypeSemanticHasherProtocol(Protocol):
+class PythonTypeHandler(Protocol):
     """Protocol for type-specific semantic hashers used by SemanticAwarePythonHasher.
 
-    A ``PythonTypeSemanticHasherProtocol`` converts a specific Python type into a
+    A ``PythonTypeHandler`` converts a specific Python type into a
     representative Python structure that ``SemanticAwarePythonHasher.hash_object()``
     can then hash.  Implementations are registered with a
     ``PythonTypeSemanticHasherRegistry`` and looked up via MRO-aware resolution.
@@ -62,7 +62,7 @@ class PythonTypeSemanticHasherProtocol(Protocol):
     specific hasher instance.
     """
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         """Return a representative Python structure for *obj*.
 
         The returned value is passed back into

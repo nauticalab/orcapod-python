@@ -1,5 +1,8 @@
 """
-PythonTypeSemanticHasherRegistry — MRO-aware registry for PythonTypeSemanticHasherProtocol instances.
+PythonTypeSemanticHasherRegistry — MRO-aware registry for PythonTypeHandler instances.
+
+``PythonTypeHandler`` is the protocol for type-specific handlers; this registry
+provides MRO-aware lookup so subclasses inherit their parent's handler.
 """
 
 from __future__ import annotations
@@ -11,14 +14,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import (
         ArrowHasherProtocol,
-        PythonTypeSemanticHasherProtocol,
+        PythonTypeHandler,
     )
 
 logger = logging.getLogger(__name__)
 
 
 class PythonTypeSemanticHasherRegistry:
-    """Registry mapping Python types to PythonTypeSemanticHasherProtocol instances.
+    """Registry mapping Python types to PythonTypeHandler instances.
 
     Lookup is MRO-aware: when no hasher is registered for the exact type of
     an object, the registry walks the object's MRO (most-derived first) until
@@ -31,20 +34,20 @@ class PythonTypeSemanticHasherRegistry:
     """
 
     def __init__(
-        self, handlers: list[tuple[type, "PythonTypeSemanticHasherProtocol"]] | None = None
+        self, handlers: list[tuple[type, "PythonTypeHandler"]] | None = None
     ) -> None:
         """
         Args:
             handlers: Optional list of ``(target_type, hasher)`` pairs to
                 register at construction time.
         """
-        self._handlers: dict[type, "PythonTypeSemanticHasherProtocol"] = {}
+        self._handlers: dict[type, "PythonTypeHandler"] = {}
         self._lock = threading.RLock()
         if handlers:
             for target_type, handler in handlers:
                 self.register(target_type, handler)
 
-    def register(self, target_type: type, handler: "PythonTypeSemanticHasherProtocol") -> None:
+    def register(self, target_type: type, handler: "PythonTypeHandler") -> None:
         """Register a hasher for a specific Python type.
 
         If a hasher is already registered for *target_type*, it is silently
@@ -52,7 +55,7 @@ class PythonTypeSemanticHasherRegistry:
 
         Args:
             target_type: The Python type (or class) for which the hasher should be used.
-            handler: A ``PythonTypeSemanticHasherProtocol`` instance.
+            handler: A ``PythonTypeHandler`` instance.
 
         Raises:
             TypeError: If ``target_type`` is not a ``type``.
@@ -87,14 +90,14 @@ class PythonTypeSemanticHasherRegistry:
                 return True
             return False
 
-    def get_semantic_hasher(self, obj: Any) -> "PythonTypeSemanticHasherProtocol | None":
+    def get_semantic_hasher(self, obj: Any) -> "PythonTypeHandler | None":
         """Look up the hasher for *obj* using MRO-aware resolution.
 
         Args:
             obj: The object for which a hasher is needed.
 
         Returns:
-            The registered ``PythonTypeSemanticHasherProtocol``, or None.
+            The registered ``PythonTypeHandler``, or None.
         """
         obj_type = type(obj)
         with self._lock:
@@ -114,14 +117,14 @@ class PythonTypeSemanticHasherRegistry:
 
     def get_semantic_hasher_for_type(
         self, target_type: type
-    ) -> "PythonTypeSemanticHasherProtocol | None":
+    ) -> "PythonTypeHandler | None":
         """Look up the hasher for a *type object* (rather than an instance).
 
         Args:
             target_type: The type to look up.
 
         Returns:
-            The registered ``PythonTypeSemanticHasherProtocol``, or None.
+            The registered ``PythonTypeHandler``, or None.
         """
         with self._lock:
             handler = self._handlers.get(target_type)
