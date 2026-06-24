@@ -5,6 +5,7 @@ Generic visitor pattern for traversing Arrow types and data simultaneously.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import typing
 from typing import TYPE_CHECKING, Any
 
 from orcapod.utils.lazy_module import LazyModule
@@ -201,13 +202,11 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         if storage_value is None:
             return extension_type, None
 
-        from typing import Any as _Any
-
         # Resolve extension type → Python type.
         python_type = self._type_converter.arrow_type_to_python_type(extension_type)
 
         # If the converter couldn't resolve to a concrete class, passthrough.
-        if python_type is _Any or not isinstance(python_type, type):
+        if python_type is typing.Any or not isinstance(python_type, type):
             return extension_type, storage_value
 
         # Only hash if a semantic hasher is registered for this Python type.

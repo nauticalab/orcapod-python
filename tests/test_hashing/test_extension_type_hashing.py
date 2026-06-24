@@ -16,29 +16,31 @@ def ctx():
 
 
 class TestArrowTypeDataVisitorExtension:
-    def test_visit_dispatches_to_visit_extension_for_extension_types(self, ctx):
+    def test_visit_dispatches_to_visit_extension_for_extension_types(self, ctx, tmp_path):
         """visit() routes ExtensionType columns to visit_extension(), not visit_struct()."""
+        # Create a real file so visit_extension can complete without errors
+        real_file = tmp_path / "dummy.txt"
+        real_file.write_text("dispatch test")
+
         arrow_type = ctx.type_converter.register_python_class(Path)
         assert isinstance(arrow_type, pa.ExtensionType), (
             "Path must be registered as an Arrow extension type"
         )
+        storage_val = ctx.type_converter.python_to_storage(Path(real_file), Path)
 
         calls = []
 
         class TrackingVisitor(SemanticHashingVisitor):
             def visit_extension(self, ext_type, storage_value):
                 calls.append("visit_extension")
-                # Don't call super() here — just passthrough to avoid hashing a
-                # non-existent path. This test only verifies dispatch routing.
-                return ext_type, storage_value
+                return super().visit_extension(ext_type, storage_value)
 
             def visit_struct(self, struct_type, data):
                 calls.append("visit_struct")
                 return super().visit_struct(struct_type, data)
 
         visitor = TrackingVisitor(ctx.type_converter, ctx.semantic_hasher)
-        # Any value is fine for this dispatch test — use a dummy string (storage for Path is str)
-        visitor.visit(arrow_type, "/tmp/dummy")
+        visitor.visit(arrow_type, storage_val)
         assert "visit_extension" in calls
         assert "visit_struct" not in calls
 
