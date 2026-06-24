@@ -1,7 +1,7 @@
 import hashlib
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 from starfix import ArrowDigester
@@ -12,6 +12,10 @@ from orcapod.hashing.visitors import SemanticHashingVisitor
 from orcapod.semantic_types import SemanticTypeRegistry
 from orcapod.types import ContentHash
 from orcapod.utils import arrow_utils
+
+if TYPE_CHECKING:
+    from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 
 SERIALIZATION_METHOD_LUT: dict[str, Callable[[pa.Table], bytes]] = {
     "logical": arrow_serialization.serialize_table_logical,
@@ -97,11 +101,10 @@ class SemanticArrowHasher:
         return self._hasher_id
 
     def _process_table_columns(self, table: pa.Table | pa.RecordBatch) -> pa.Table:
-        """
-        Process table columns using visitor pattern to handle nested semantic types.
+        """Process table columns using the semantic registry to hash struct-typed semantic columns.
 
-        This replaces the old column-by-column processing with a visitor-based approach
-        that can handle semantic types nested inside complex data structures.
+        Traverses each column and replaces recognised semantic struct types (detected by
+        struct signature via ``SemanticTypeRegistry``) with their content-hash strings.
         """
         # TODO: Process in batchwise/chunk-wise fashion for memory efficiency
         # Currently using to_pylist() for simplicity but this loads entire table into memory
@@ -109,36 +112,28 @@ class SemanticArrowHasher:
         new_columns = []
         new_fields = []
 
-        # Import here to avoid circular dependencies
         for i, field in enumerate(table.schema):
-            # Convert column to struct dicts for processing
             column_data = table.column(i).to_pylist()
 
-            # TODO: verify the functioning of the visitor pattern
-            # Create fresh visitor for each column (stateless approach)
-            visitor = SemanticHashingVisitor(self.semantic_registry)
-
             try:
-                # Use visitor to transform both type and data
-                new_type = None
-                processed_data = []
-                for c in column_data:
-                    processed_type, processed_value = visitor.visit(field.type, c)
-                    if new_type is None:
-                        new_type = processed_type
-                    processed_data.append(processed_value)
+                if pa.types.is_struct(field.type):
+                    converter = self.semantic_registry.get_converter_for_struct_signature(field.type)
+                    if converter is not None:
+                        # Semantic struct — replace with hash strings
+                        processed_data = [
+                            converter.hash_struct_dict(row) if row is not None else None
+                            for row in column_data
+                        ]
+                        new_type = pa.large_string()
+                        new_columns.append(pa.array(processed_data, type=new_type))
+                        new_fields.append(pa.field(field.name, new_type))
+                        continue
 
-                # Create new Arrow column from processed data
-                assert new_type is not None, "Failed to infer new column type"
-                # TODO: revisit this logic
-                new_column = pa.array(processed_data, type=new_type)
-                new_field = pa.field(field.name, new_type)
-
-                new_columns.append(new_column)
-                new_fields.append(new_field)
+                # Not a semantic type — pass through unchanged
+                new_columns.append(table.column(i))
+                new_fields.append(field)
 
             except Exception as e:
-                # Add context about which column failed
                 raise RuntimeError(
                     f"Failed to process column '{field.name}': {str(e)}"
                 ) from e
@@ -248,11 +243,10 @@ class StarfixArrowHasher:
     Pipeline
     --------
     1. **Semantic pre-processing** — the ``SemanticHashingVisitor`` traverses
-       every column and replaces recognised semantic types (e.g. ``Path``
-       structs) with their content-addressed hash strings.  This step runs
-       before the Arrow bytes are ever touched by starfix, so the final hash
-       captures *file content* for path-typed columns rather than the raw
-       path string.
+       every column and replaces recognised extension-typed columns (e.g. ``Path``)
+       with their content-addressed hash bytes.  This step runs before the Arrow
+       bytes are ever touched by starfix, so the final hash captures *file content*
+       for path-typed columns rather than the raw path string.
     2. **Starfix hashing** — ``ArrowDigester.hash_table`` (or
        ``ArrowDigester.hash_schema``) is called on the pre-processed table /
        schema.  The digester is column-order-independent and normalises
@@ -262,8 +256,12 @@ class StarfixArrowHasher:
 
     Parameters
     ----------
-    semantic_registry:
-        Registry of semantic type converters used during pre-processing.
+    type_converter:
+        ``UniversalTypeConverter`` used by ``SemanticHashingVisitor`` to resolve
+        Arrow extension types to Python types and convert storage values.
+    python_hasher:
+        ``SemanticAwarePythonHasher`` used by ``SemanticHashingVisitor`` to hash
+        Python objects produced from extension-typed columns.
     hasher_id:
         String identifier embedded in every ``ContentHash`` produced by
         this hasher.  Bump this value whenever the hash algorithm changes
@@ -272,26 +270,45 @@ class StarfixArrowHasher:
 
     def __init__(
         self,
-        semantic_registry: SemanticTypeRegistry,
+        type_converter: "UniversalTypeConverter",
         hasher_id: str,
+        python_hasher: "SemanticAwarePythonHasher | None" = None,
     ) -> None:
         self._hasher_id = hasher_id
-        self.semantic_registry = semantic_registry
+        self._type_converter = type_converter
+        self._python_hasher = python_hasher
 
     @property
     def hasher_id(self) -> str:
         return self._hasher_id
 
+    def _get_python_hasher(self) -> "SemanticAwarePythonHasher":
+        """Return the python_hasher, lazily resolving from default context if not set.
+
+        Lazy resolution breaks the circular dependency that would arise if ``arrow_hasher``
+        were constructed before ``semantic_hasher`` in the context JSON spec (which is the
+        natural order since ``type_handler_registry`` references ``arrow_hasher`` for
+        ``ArrowTableSemanticHasher``).
+        """
+        if self._python_hasher is not None:
+            return self._python_hasher
+        from orcapod.contexts import get_default_context
+        return get_default_context().semantic_hasher  # type: ignore[return-value]
+
     def _process_table_columns(self, table: pa.Table | pa.RecordBatch) -> pa.Table:
-        """Replace semantic-typed columns with their content-hash strings."""
+        """Replace extension-typed columns with their content-hash bytes."""
         new_columns: list[pa.Array] = []
         new_fields: list[pa.Field] = []
 
+        python_hasher = self._get_python_hasher()
+
         for i, field in enumerate(table.schema):
-            # Short-circuit: primitive columns cannot contain semantic types, so skip
-            # the costly Python round-trip and reuse the original Arrow array directly.
+            # Short-circuit: primitive columns (non-extension, non-struct, non-list, non-map)
+            # cannot contain extension semantic types, so skip the costly Python round-trip
+            # and reuse the original Arrow array directly.
             if not (
-                pa.types.is_struct(field.type)
+                isinstance(field.type, pa.ExtensionType)
+                or pa.types.is_struct(field.type)
                 or pa.types.is_list(field.type)
                 or pa.types.is_large_list(field.type)
                 or pa.types.is_fixed_size_list(field.type)
@@ -302,7 +319,7 @@ class StarfixArrowHasher:
                 continue
 
             column_data = table.column(i).to_pylist()
-            visitor = SemanticHashingVisitor(self.semantic_registry)
+            visitor = SemanticHashingVisitor(self._type_converter, python_hasher)
 
             try:
                 new_type: pa.DataType | None = None

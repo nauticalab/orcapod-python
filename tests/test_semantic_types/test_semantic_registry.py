@@ -132,39 +132,35 @@ def test_integration_with_converter():
     assert retrieved is converter
 
 
-def test_uuid_type_registered_in_default_registry():
-    """uuid.UUID should be registered and map to pa.struct([pa.field('uuid', pa.binary(16))])."""
-    from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
+def test_uuid_type_registered_in_default_context():
+    """uuid.UUID should be registered as an Arrow extension type in the default context."""
+    from orcapod.contexts import get_default_context
 
-    hasher = get_versioned_semantic_arrow_hasher()
-    registry = hasher.semantic_registry
-    converter = registry.get_converter_for_python_type(uuid.UUID)
-    assert converter is not None
-    assert converter.arrow_struct_type == pa.struct([pa.field("uuid", pa.binary(16))])
-
-
-def test_uuid_struct_resolves_to_converter():
-    """pa.struct([pa.field('uuid', pa.binary(16))]) should resolve back to a converter for uuid.UUID."""
-    from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
-
-    hasher = get_versioned_semantic_arrow_hasher()
-    registry = hasher.semantic_registry
-    converter = registry.get_converter_for_struct_signature(
-        pa.struct([pa.field("uuid", pa.binary(16))])
+    ctx = get_default_context()
+    arrow_type = ctx.type_converter.register_python_class(uuid.UUID)
+    assert isinstance(arrow_type, pa.ExtensionType), (
+        "uuid.UUID must be registered as an Arrow extension type"
     )
-    assert converter is not None
-    assert converter.python_type is uuid.UUID
 
 
-def test_uuid_semantic_type_name_registered():
-    """Converter registered under the name 'uuid'."""
-    from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
+def test_uuid_extension_type_resolves_to_python_type():
+    """The Arrow extension type for UUID should resolve back to uuid.UUID."""
+    from orcapod.contexts import get_default_context
 
-    hasher = get_versioned_semantic_arrow_hasher()
-    registry = hasher.semantic_registry
-    converter = registry.get_converter_for_semantic_type("uuid")
-    assert converter is not None
-    assert converter.python_type is uuid.UUID
+    ctx = get_default_context()
+    arrow_type = ctx.type_converter.register_python_class(uuid.UUID)
+    python_type = ctx.type_converter.arrow_type_to_python_type(arrow_type)
+    assert python_type is uuid.UUID
+
+
+def test_uuid_extension_name():
+    """The UUID extension type should have the expected extension name."""
+    from orcapod.contexts import get_default_context
+
+    ctx = get_default_context()
+    arrow_type = ctx.type_converter.register_python_class(uuid.UUID)
+    assert isinstance(arrow_type, pa.ExtensionType)
+    assert "uuid" in arrow_type.extension_name.lower()
 
 
 # Comprehensive unregister tests for future implementation

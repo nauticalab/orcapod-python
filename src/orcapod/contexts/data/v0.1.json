@@ -27,15 +27,6 @@
             }
         }
     },
-    "arrow_hasher": {
-        "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
-        "_config": {
-            "hasher_id": "arrow_v0.1",
-            "semantic_registry": {
-                "_ref": "semantic_registry"
-            }
-        }
-    },
     "type_converter": {
         "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
         "_config": {
@@ -83,6 +74,15 @@
         "_config": {
             "include_module": true,
             "include_defaults": true
+        }
+    },
+    "arrow_hasher": {
+        "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
+        "_config": {
+            "hasher_id": "arrow_v0.1",
+            "type_converter": {
+                "_ref": "type_converter"
+            }
         }
     },
     "type_handler_registry": {
