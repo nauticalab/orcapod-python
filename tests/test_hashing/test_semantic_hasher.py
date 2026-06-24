@@ -826,12 +826,13 @@ class TestContentIdentifiableMixin:
 # ---------------------------------------------------------------------------
 
 
-class _DummyHandler:
+class _DummySemanticHasher:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
     def hash(self, obj: Any, hasher: Any) -> Any:
-        return f"{self.tag}:{obj}"
+        # Returns a ContentHash by delegating to the outer hasher
+        return hasher.hash_object(f"{self.tag}:{obj}")
 
 
 class Base:
@@ -849,26 +850,26 @@ class GrandChild(Child):
 class TestPythonTypeSemanticHasherRegistry:
     def test_register_and_get_exact(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h = _DummyHandler("base")
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.get_semantic_hasher(Base()) is h
 
     def test_mro_lookup_child(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h = _DummyHandler("base")
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.get_semantic_hasher(Child()) is h
 
     def test_mro_lookup_grandchild(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h = _DummyHandler("base")
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.get_semantic_hasher(GrandChild()) is h
 
     def test_more_specific_handler_wins(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h_base = _DummyHandler("base")
-        h_child = _DummyHandler("child")
+        h_base = _DummySemanticHasher("base")
+        h_child = _DummySemanticHasher("child")
         reg.register(Base, h_base)
         reg.register(Child, h_child)
         assert reg.get_semantic_hasher(Child()) is h_child
@@ -880,7 +881,7 @@ class TestPythonTypeSemanticHasherRegistry:
 
     def test_unregister_removes_handler(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h = _DummyHandler("base")
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.unregister(Base) is True
         assert reg.get_semantic_hasher(Base()) is None
@@ -891,8 +892,8 @@ class TestPythonTypeSemanticHasherRegistry:
 
     def test_replace_existing_handler(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h1 = _DummyHandler("first")
-        h2 = _DummyHandler("second")
+        h1 = _DummySemanticHasher("first")
+        h2 = _DummySemanticHasher("second")
         reg.register(Base, h1)
         reg.register(Base, h2)
         assert reg.get_semantic_hasher(Base()) is h2
@@ -900,16 +901,16 @@ class TestPythonTypeSemanticHasherRegistry:
     def test_register_non_type_raises(self):
         reg = PythonTypeSemanticHasherRegistry()
         with pytest.raises(TypeError):
-            reg.register("not_a_type", _DummyHandler("x"))  # type: ignore[arg-type]
+            reg.register("not_a_type", _DummySemanticHasher("x"))  # type: ignore[arg-type]
 
     def test_has_handler_exact(self):
         reg = PythonTypeSemanticHasherRegistry()
-        reg.register(Base, _DummyHandler("b"))
+        reg.register(Base, _DummySemanticHasher("b"))
         assert reg.has_semantic_hasher(Base) is True
 
     def test_has_handler_via_mro(self):
         reg = PythonTypeSemanticHasherRegistry()
-        reg.register(Base, _DummyHandler("b"))
+        reg.register(Base, _DummySemanticHasher("b"))
         assert reg.has_semantic_hasher(Child) is True
 
     def test_has_handler_false(self):
@@ -918,8 +919,8 @@ class TestPythonTypeSemanticHasherRegistry:
 
     def test_registered_types_snapshot(self):
         reg = PythonTypeSemanticHasherRegistry()
-        reg.register(Base, _DummyHandler("b"))
-        reg.register(Child, _DummyHandler("c"))
+        reg.register(Base, _DummySemanticHasher("b"))
+        reg.register(Child, _DummySemanticHasher("c"))
         types = reg.registered_types()
         assert Base in types
         assert Child in types
@@ -927,14 +928,14 @@ class TestPythonTypeSemanticHasherRegistry:
     def test_len(self):
         reg = PythonTypeSemanticHasherRegistry()
         assert len(reg) == 0
-        reg.register(Base, _DummyHandler("b"))
+        reg.register(Base, _DummySemanticHasher("b"))
         assert len(reg) == 1
-        reg.register(Child, _DummyHandler("c"))
+        reg.register(Child, _DummySemanticHasher("c"))
         assert len(reg) == 2
 
     def test_get_handler_for_type(self):
         reg = PythonTypeSemanticHasherRegistry()
-        h = _DummyHandler("b")
+        h = _DummySemanticHasher("b")
         reg.register(Base, h)
         assert reg.get_semantic_hasher_for_type(Base) is h
         assert reg.get_semantic_hasher_for_type(Child) is h  # via MRO
