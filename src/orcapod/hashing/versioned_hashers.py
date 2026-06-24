@@ -94,10 +94,10 @@ def get_versioned_semantic_arrow_hasher(
     hasher_id: str = _CURRENT_ARROW_HASHER_ID,
 ) -> hp.ArrowHasherProtocol:
     """
-    Return a SemanticArrowHasher configured for the current version.
+    Return a StarfixArrowHasher configured for the current version.
 
     The arrow hasher handles Arrow table / RecordBatch hashing with
-    semantic-type awareness (e.g. Path columns are hashed by file content).
+    extension-type awareness (e.g. Path columns are hashed by file content).
 
     Parameters
     ----------
@@ -107,34 +107,19 @@ def get_versioned_semantic_arrow_hasher(
     Returns
     -------
     ArrowHasherProtocol
-        A fully configured SemanticArrowHasher instance.
+        A fully configured StarfixArrowHasher instance.
     """
+    from orcapod.contexts import get_default_context
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
-    from orcapod.hashing.file_hashers import BasicFileHasher
-    from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
-    from orcapod.semantic_types.semantic_struct_converters import (
-        PythonPathStructConverter,
-        UUIDStructConverter,
-    )
 
-    # Build a default semantic registry populated with the standard converters.
-    # We use Any-typed locals here to side-step type-checker false positives
-    # that arise from the protocol definition of SemanticStructConverterProtocol having
-    # a slightly different hash_struct_dict signature than the concrete class.
-    registry: Any = SemanticTypeRegistry()
-    file_hasher = BasicFileHasher(algorithm="sha256")
-    path_converter: Any = PythonPathStructConverter(file_hasher=file_hasher)
-    registry.register_converter("path", path_converter)
-    uuid_converter: Any = UUIDStructConverter()
-    registry.register_converter("uuid", uuid_converter)
+    ctx = get_default_context()
 
     logger.debug(
         "get_versioned_semantic_arrow_hasher: creating StarfixArrowHasher "
         "(hasher_id=%r)",
         hasher_id,
     )
-    hasher: Any = StarfixArrowHasher(
+    return StarfixArrowHasher(
         hasher_id=hasher_id,
-        semantic_registry=registry,
+        type_converter=ctx.type_converter,
     )
-    return hasher
