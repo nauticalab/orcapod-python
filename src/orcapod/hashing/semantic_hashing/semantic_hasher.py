@@ -13,7 +13,9 @@ recursive with ``_expand_structure``:
   - Primitive          → JSON-serialise + SHA-256
   - Structure          → delegate to ``_expand_structure``, then
                          JSON-serialise the resulting tagged tree + SHA-256
-  - Semantic hasher match → semantic_hasher.hash(obj, self) returns ContentHash directly
+  - Semantic hasher match → semantic_hasher.hash(obj, self) returns a representative
+                            Python structure (or ContentHash as terminal); the result
+                            is fed back into hash_object for final hashing
   - ContentIdentifiableProtocol→ call identity_structure(), recurse via hash_object
   - Fallback           → strict error or best-effort string, then hash
 
@@ -143,7 +145,8 @@ class SemanticAwarePythonHasher:
         - ContentHash        → terminal; returned as-is
         - Primitive          → JSON-serialised and hashed directly
         - Structure          → structurally expanded then hashed
-        - Semantic hasher match → semantic_hasher.hash(obj, self) returns ContentHash directly
+        - Semantic hasher match → handler.hash(obj, self) returns a representative Python
+          structure (or ContentHash); result is fed back into hash_object for final hashing
         - ContentIdentifiableProtocol→ resolver(obj) if resolver provided, else obj.content_hash()
         - Unknown type       → TypeError in strict mode; best-effort otherwise
 
@@ -174,7 +177,9 @@ class SemanticAwarePythonHasher:
             )
             return self._hash_to_content_hash(expanded)
 
-        # Semantic hasher dispatch: the hasher produces a ContentHash directly.
+        # Semantic hasher dispatch: handler returns a representative Python structure
+        # (or a ContentHash as terminal); feed the result back into hash_object so
+        # that returning a plain structure is equivalent to calling hash_object on it.
         semantic_hasher = self._registry.get_semantic_hasher(obj)
         if semantic_hasher is not None:
             logger.debug(
@@ -182,7 +187,8 @@ class SemanticAwarePythonHasher:
                 type(obj).__name__,
                 type(semantic_hasher).__name__,
             )
-            return semantic_hasher.hash(obj, self)
+            result = semantic_hasher.hash(obj, self)
+            return self.hash_object(result, resolver=resolver)
 
         # ContentIdentifiableProtocol: use resolver if provided, else content_hash().
         if isinstance(obj, hp.ContentIdentifiableProtocol):
