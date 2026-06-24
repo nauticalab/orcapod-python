@@ -86,32 +86,32 @@
         }
     },
     "type_handler_registry": {
-        "_class": "orcapod.hashing.semantic_hashing.type_handler_registry.TypeHandlerRegistry",
+        "_class": "orcapod.hashing.semantic_hashing.type_handler_registry.PythonTypeSemanticHasherRegistry",
         "_config": {
             "handlers": [
-                [{"_type": "builtins.bytes"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",    "_config": {}}],
-                [{"_type": "builtins.bytearray"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",    "_config": {}}],
-                [{"_type": "pathlib.Path"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathContentHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
-                [{"_type": "upath.core.UPath"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathContentHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
-                [{"_type": "uuid.UUID"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDHandler",         "_config": {}}],
-                [{"_type": "types.FunctionType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "types.BuiltinFunctionType"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "types.MethodType"},          {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "builtins.type"},       {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",   "_config": {}}],
-                [{"_type": "types.GenericAlias"},   {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",  "_config": {}}],
-                [{"_type": "types.UnionType"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeHandler",    "_config": {}}],
-                [{"_type": "typing._GenericAlias"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",  "_config": {}}],
-                [{"_type": "typing._SpecialForm"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",   "_config": {}}],
-                [{"_type": "pyarrow.Table"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}],
-                [{"_type": "pyarrow.RecordBatch"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}]
+                [{"_type": "builtins.bytes"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesSemanticHasher",    "_config": {}}],
+                [{"_type": "builtins.bytearray"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesSemanticHasher",    "_config": {}}],
+                [{"_type": "pathlib.Path"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathSemanticHasher", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
+                [{"_type": "upath.core.UPath"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathSemanticHasher", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
+                [{"_type": "uuid.UUID"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDSemanticHasher",         "_config": {}}],
+                [{"_type": "types.FunctionType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "types.BuiltinFunctionType"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "types.MethodType"},          {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionSemanticHasher", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "builtins.type"},       {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectSemanticHasher",   "_config": {}}],
+                [{"_type": "types.GenericAlias"},   {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasSemanticHasher",  "_config": {}}],
+                [{"_type": "types.UnionType"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeSemanticHasher",    "_config": {}}],
+                [{"_type": "typing._GenericAlias"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasSemanticHasher",  "_config": {}}],
+                [{"_type": "typing._SpecialForm"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormSemanticHasher",   "_config": {}}],
+                [{"_type": "pyarrow.Table"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableSemanticHasher",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}],
+                [{"_type": "pyarrow.RecordBatch"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableSemanticHasher",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}]
             ]
         }
     },
     "semantic_hasher": {
-        "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.BaseSemanticHasher",
+        "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.SemanticAwarePythonHasher",
         "_config": {
             "hasher_id": "semantic_v0.1",
-            "type_handler_registry": {
+            "type_semantic_hasher_registry": {
                 "_ref": "type_handler_registry"
             }
         }
