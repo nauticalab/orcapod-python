@@ -1,5 +1,5 @@
 """
-BaseSemanticHasher -- content-based recursive object hasher.
+SemanticAwarePythonHasher -- content-based recursive object hasher.
 
 Algorithm
 ---------
@@ -13,7 +13,7 @@ recursive with ``_expand_structure``:
   - Primitive          → JSON-serialise + SHA-256
   - Structure          → delegate to ``_expand_structure``, then
                          JSON-serialise the resulting tagged tree + SHA-256
-  - Handler match      → call handler.handle(obj), recurse via hash_object
+  - Semantic hasher match → semantic_hasher.hash(obj, self) returns ContentHash directly
   - ContentIdentifiableProtocol→ call identity_structure(), recurse via hash_object
   - Fallback           → strict error or best-effort string, then hash
 
@@ -69,7 +69,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeSemanticHasherRegistry
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.types import ContentHash
 
@@ -79,7 +79,7 @@ _CIRCULAR_REF_SENTINEL = "CircularRef"
 _MEMADDR_RE = re.compile(r" at 0x[0-9a-fA-F]+")
 
 
-class BaseSemanticHasher:
+class SemanticAwarePythonHasher:
     """
     Content-based recursive hasher.
 
@@ -88,9 +88,10 @@ class BaseSemanticHasher:
     hasher_id:
         A short string identifying this hasher version/configuration.
         Embedded in every ContentHash produced.
-    type_handler_registry:
-        TypeHandlerRegistry for MRO-aware lookup of TypeHandlerProtocol instances.
-        If None, the default registry from the active DataContext is used.
+    type_semantic_hasher_registry:
+        ``PythonTypeSemanticHasherRegistry`` for MRO-aware lookup of
+        ``PythonTypeSemanticHasherProtocol`` instances.
+        If None, the default registry is used.
     strict:
         When True (default) raises TypeError for unhandled types.
         When False falls back to a best-effort string representation.
@@ -99,18 +100,17 @@ class BaseSemanticHasher:
     def __init__(
         self,
         hasher_id: str,
-        type_handler_registry: TypeHandlerRegistry | None = None,
+        type_semantic_hasher_registry: PythonTypeSemanticHasherRegistry | None = None,
         strict: bool = True,
     ) -> None:
         self._hasher_id = hasher_id
         self._strict = strict
 
-        if type_handler_registry is None:
-            from orcapod.hashing.defaults import get_default_type_handler_registry
-
-            self._registry = get_default_type_handler_registry()  # stays in hashing/
+        if type_semantic_hasher_registry is None:
+            from orcapod.hashing.defaults import get_default_python_type_semantic_hasher_registry
+            self._registry = get_default_python_type_semantic_hasher_registry()
         else:
-            self._registry = type_handler_registry
+            self._registry = type_semantic_hasher_registry
 
     # ------------------------------------------------------------------
     # Public API
@@ -125,8 +125,8 @@ class BaseSemanticHasher:
         return self._strict
 
     @property
-    def type_handler_registry(self) -> TypeHandlerRegistry:
-        """Return the ``TypeHandlerRegistry`` used by this hasher."""
+    def type_semantic_hasher_registry(self) -> PythonTypeSemanticHasherRegistry:
+        """Return the ``PythonTypeSemanticHasherRegistry`` used by this hasher."""
         return self._registry
 
     def hash_object(
@@ -143,7 +143,7 @@ class BaseSemanticHasher:
         - ContentHash        → terminal; returned as-is
         - Primitive          → JSON-serialised and hashed directly
         - Structure          → structurally expanded then hashed
-        - Handler match      → handler produces a value, recurse
+        - Semantic hasher match → semantic_hasher.hash(obj, self) returns ContentHash directly
         - ContentIdentifiableProtocol→ resolver(obj) if resolver provided, else obj.content_hash()
         - Unknown type       → TypeError in strict mode; best-effort otherwise
 
@@ -174,15 +174,15 @@ class BaseSemanticHasher:
             )
             return self._hash_to_content_hash(expanded)
 
-        # Handler dispatch: the handler produces a new value; recurse.
-        handler = self._registry.get_handler(obj)
-        if handler is not None:
+        # Semantic hasher dispatch: the hasher produces a ContentHash directly.
+        semantic_hasher = self._registry.get_semantic_hasher(obj)
+        if semantic_hasher is not None:
             logger.debug(
-                "hash_object: dispatching %s to handler %s",
+                "hash_object: dispatching %s to semantic hasher %s",
                 type(obj).__name__,
-                type(handler).__name__,
+                type(semantic_hasher).__name__,
             )
-            return self.hash_object(handler.handle(obj, self), resolver=resolver)
+            return semantic_hasher.hash(obj, self)
 
         # ContentIdentifiableProtocol: use resolver if provided, else content_hash().
         if isinstance(obj, hp.ContentIdentifiableProtocol):
@@ -359,9 +359,9 @@ class BaseSemanticHasher:
             ).encode("utf-8")
         except (TypeError, ValueError) as exc:
             raise TypeError(
-                f"BaseSemanticHasher: failed to JSON-serialise object of type "
-                f"{type(obj).__name__!r}. Ensure all TypeHandlers and "
-                "identity_structure() implementations return JSON-serialisable "
+                f"SemanticAwarePythonHasher: failed to JSON-serialise object of type "
+                f"{type(obj).__name__!r}. Ensure all PythonTypeSemanticHasherProtocol "
+                "implementations and identity_structure() return JSON-serialisable "
                 "primitives or structures."
             ) from exc
 
@@ -383,9 +383,10 @@ class BaseSemanticHasher:
 
         if self._strict:
             raise TypeError(
-                f"BaseSemanticHasher (strict): no TypeHandlerProtocol registered for type "
-                f"'{qualified}' and it does not implement ContentIdentifiableProtocol. "
-                "Register a TypeHandlerProtocol via the TypeHandlerRegistry or implement "
+                f"SemanticAwarePythonHasher (strict): no PythonTypeSemanticHasherProtocol "
+                f"registered for type '{qualified}' and it does not implement "
+                "ContentIdentifiableProtocol. Register a PythonTypeSemanticHasherProtocol "
+                "via the PythonTypeSemanticHasherRegistry or implement "
                 "identity_structure() on the class."
             )
 
