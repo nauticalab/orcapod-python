@@ -3,8 +3,7 @@
 # throughout the tests to ensure consistent hashing behavior across different runs
 # and revisions of the codebase.
 #
-# Uses the new BaseSemanticHasher API (get_default_semantic_hasher) rather than
-# the legacy hash_to_hex / hash_to_int / hash_to_uuid functions.
+# Uses SemanticAwarePythonHasher via get_default_semantic_hasher.
 
 import json
 from collections import OrderedDict
@@ -27,7 +26,7 @@ output_file = DATA_STRUCTURES_DIR / f"hash_examples_{timestamp}.json"
 
 
 def generate_hash_examples():
-    """Generate hash examples for various data structures using BaseSemanticHasher."""
+    """Generate hash examples for various data structures using ``SemanticAwarePythonHasher``."""
     hasher = get_default_semantic_hasher()
     examples = []
 
