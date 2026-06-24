@@ -3,14 +3,14 @@ ContentIdentifiableMixin -- convenience base class for content-identifiable obje
 
 Any class that implements ``identity_structure()`` can inherit from this mixin
 to gain a full suite of content-based identity helpers without having to wire
-up a BaseSemanticHasher manually:
+up a ``SemanticAwarePythonHasher`` manually:
 
   - ``content_hash()``  -- returns a stable ContentHash for the object
   - ``__hash__()``      -- Python hash based on content (int)
   - ``__eq__()``        -- equality via content_hash comparison
 
-The mixin uses the global default BaseSemanticHasher by default, but accepts an
-injected hasher for testing or custom configurations.
+The mixin uses the global default ``SemanticAwarePythonHasher`` by default, but
+accepts an injected hasher for testing or custom configurations.
 
 Usage
 -----
@@ -32,7 +32,7 @@ Simple usage with the global default hasher::
 
 With an injected hasher (e.g. in tests)::
 
-    hasher = BaseSemanticHasher(hasher_id="test", strict=True)
+    hasher = SemanticAwarePythonHasher(hasher_id="test", strict=True)
     record = MyRecord("foo", 42)
     record._semantic_hasher = hasher
     print(record.content_hash())
@@ -65,7 +65,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
+from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.types import ContentHash
 
 logger = logging.getLogger(__name__)
@@ -82,19 +82,19 @@ class ContentIdentifiableMixin:
             ...
 
     The returned structure is recursively resolved and hashed by the
-    BaseSemanticHasher to produce a stable ContentHash.
+    ``SemanticAwarePythonHasher`` to produce a stable ContentHash.
 
     Parameters (passed as keyword arguments to ``__init__``)
     ---------------------------------------------------------
     semantic_hasher:
-        Optional BaseSemanticHasher instance to use.  When omitted, the hasher
-        is obtained from the default data context via
+        Optional ``SemanticAwarePythonHasher`` instance to use.  When omitted,
+        the hasher is obtained from the default data context via
         ``orcapod.contexts.get_default_context().semantic_hasher``, which is
         the single source of truth for versioned component configuration.
     """
 
     def __init__(
-        self, *, semantic_hasher: BaseSemanticHasher | None = None, **kwargs: Any
+        self, *, semantic_hasher: SemanticAwarePythonHasher | None = None, **kwargs: Any
     ) -> None:
         # Cooperative MRO-friendly init -- forward remaining kwargs up the chain.
         super().__init__(**kwargs)
@@ -215,9 +215,8 @@ class ContentIdentifiableMixin:
     # Hasher resolution
     # ------------------------------------------------------------------
 
-    def _get_hasher(self) -> BaseSemanticHasher:
-        """
-        Return the BaseSemanticHasher to use for this object.
+    def _get_hasher(self) -> SemanticAwarePythonHasher:
+        """Return the ``SemanticAwarePythonHasher`` to use for this object.
 
         Resolution order:
           1. The instance-level ``_semantic_hasher`` attribute (set at
@@ -230,7 +229,7 @@ class ContentIdentifiableMixin:
              type converter, etc.) that belong to the same context.
 
         Returns:
-            BaseSemanticHasher: The hasher to use.
+            SemanticAwarePythonHasher: The hasher to use.
         """
         if self._semantic_hasher is not None:
             return self._semantic_hasher
