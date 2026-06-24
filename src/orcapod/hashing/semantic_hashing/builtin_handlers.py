@@ -95,18 +95,18 @@ class UPathSemanticHasher:
 
 
 class UUIDSemanticHasher:
-    """Hasher for ``uuid.UUID`` objects — hashes the raw 16-byte binary representation."""
+    """Hasher for ``uuid.UUID`` objects — returns the raw 16-byte binary representation."""
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
-        return hasher.hash_object(obj.bytes)
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+        return obj.bytes
 
 
 class BytesSemanticHasher:
-    """Hasher for bytes and bytearray objects — hashes the lowercase hex representation."""
+    """Hasher for bytes and bytearray objects — returns the lowercase hex string."""
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         if isinstance(obj, (bytes, bytearray)):
-            return hasher.hash_object(obj.hex())
+            return obj.hex()
         raise TypeError(
             f"BytesSemanticHasher: expected bytes or bytearray, got {type(obj)!r}"
         )
@@ -123,7 +123,7 @@ class FunctionSemanticHasher:
     def __init__(self, function_info_extractor: Any) -> None:
         self.function_info_extractor = function_info_extractor
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         if not (callable(obj) and hasattr(obj, "__code__")):
             raise TypeError(
                 f"FunctionSemanticHasher: expected a callable with __code__, got {type(obj)!r}"
@@ -131,7 +131,7 @@ class FunctionSemanticHasher:
         func_name = getattr(obj, "__name__", repr(obj))
         logger.debug("FunctionSemanticHasher: extracting info for function %r", func_name)
         info: dict[str, Any] = self.function_info_extractor.extract_function_info(obj)
-        return hasher.hash_object(info)
+        return info
 
 
 class TypeObjectSemanticHasher:
@@ -140,51 +140,51 @@ class TypeObjectSemanticHasher:
     Returns a stable string of the form ``"type:<module>.<qualname>"``.
     """
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         if not isinstance(obj, type):
             raise TypeError(
                 f"TypeObjectSemanticHasher: expected a type/class, got {type(obj)!r}"
             )
         module: str = obj.__module__ or "<unknown>"
         qualname: str = obj.__qualname__
-        return hasher.hash_object(f"type:{module}.{qualname}")
+        return f"type:{module}.{qualname}"
 
 
 class SpecialFormSemanticHasher:
     """Hasher for ``typing._SpecialForm`` objects such as ``typing.Union``."""
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         name = getattr(obj, "_name", None) or repr(obj)
-        return hasher.hash_object(f"special_form:typing.{name}")
+        return f"special_form:typing.{name}"
 
 
 class GenericAliasSemanticHasher:
     """Hasher for generic alias type annotations (``dict[int, str]``, ``Optional[X]``, etc.)."""
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         import typing
 
         origin = getattr(obj, "__origin__", None)
         args = getattr(obj, "__args__", None) or ()
         if origin is None:
-            return hasher.hash_object(f"generic_alias:{obj!r}")
+            return f"generic_alias:{obj!r}"
         if origin is typing.Union:
             hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
-            return hasher.hash_object({"__type__": "union", "args": hashed_args})
-        return hasher.hash_object({
+            return {"__type__": "union", "args": hashed_args}
+        return {
             "__type__": "generic_alias",
             "origin": hasher.hash_object(origin).to_string(),
             "args": [hasher.hash_object(arg).to_string() for arg in args],
-        })
+        }
 
 
 class UnionTypeSemanticHasher:
     """Hasher for ``types.UnionType`` objects (Python 3.10+ ``X | Y`` syntax)."""
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         args = getattr(obj, "__args__", None) or ()
         hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
-        return hasher.hash_object({"__type__": "union", "args": hashed_args})
+        return {"__type__": "union", "args": hashed_args}
 
 
 class ArrowTableSemanticHasher:
@@ -221,7 +221,7 @@ class ArrowTableSemanticHasher:
 class SchemaSemanticHasher:
     """Hasher for ``Schema`` objects."""
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
         if not isinstance(obj, Schema):
             raise TypeError(
                 f"SchemaSemanticHasher: expected a Schema, got {type(obj)!r}"

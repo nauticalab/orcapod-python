@@ -52,8 +52,9 @@ class ContentIdentifiableProtocol(Protocol):
 class PythonTypeSemanticHasherProtocol(Protocol):
     """Protocol for type-specific semantic hashers used by SemanticAwarePythonHasher.
 
-    A ``PythonTypeSemanticHasherProtocol`` hashes a specific Python type to a
-    ``ContentHash``. Implementations are registered with a
+    A ``PythonTypeSemanticHasherProtocol`` converts a specific Python type into a
+    representative Python structure that ``SemanticAwarePythonHasher.hash_object()``
+    can then hash.  Implementations are registered with a
     ``PythonTypeSemanticHasherRegistry`` and looked up via MRO-aware resolution.
 
     Each implementation receives the full ``SemanticAwarePythonHasher`` so it can
@@ -61,16 +62,25 @@ class PythonTypeSemanticHasherProtocol(Protocol):
     specific hasher instance.
     """
 
-    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
-        """Hash *obj* to a ContentHash.
+    def hash(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+        """Return a representative Python structure for *obj*.
+
+        The returned value is passed back into
+        ``SemanticAwarePythonHasher.hash_object()`` for final hashing.  Returning
+        a ``ContentHash`` short-circuits the process: the caller returns it as-is
+        without re-hashing.  This is useful for handlers that compute content-based
+        hashes from external data (e.g. file content, Arrow tables).
 
         Args:
             obj:    The object to hash. Always matches the registered type.
             hasher: The active ``SemanticAwarePythonHasher``. Use
-                    ``hasher.hash_object(sub_value)`` to hash sub-values.
+                    ``hasher.hash_object(sub_value)`` to hash sub-values that
+                    require type-specific treatment.
 
         Returns:
-            ContentHash: The content-addressed hash of *obj*.
+            A representative Python structure (primitive, dict, list, bytes, etc.)
+            that will be passed into ``hash_object()`` for final hashing, or a
+            ``ContentHash`` to terminate hashing immediately.
         """
         ...
 

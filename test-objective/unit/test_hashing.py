@@ -63,8 +63,8 @@ class _FakeHandler:
     def __init__(self, return_value: Any = "handled") -> None:
         self._return_value = return_value
 
-    def hash(self, obj: Any, hasher: SemanticAwarePythonHasher) -> ContentHash:
-        return ContentHash(method="fake", digest=str(self._return_value).encode())
+    def hash(self, obj: Any, hasher: SemanticAwarePythonHasher) -> Any:
+        return str(self._return_value)
 
 
 class _IdentityObj:

@@ -831,8 +831,8 @@ class _DummySemanticHasher:
         self.tag = tag
 
     def hash(self, obj: Any, hasher: Any) -> Any:
-        # Returns a ContentHash by delegating to the outer hasher
-        return hasher.hash_object(f"{self.tag}:{obj}")
+        # Returns a representative Python structure; outer hasher performs final hashing
+        return f"{self.tag}:{obj}"
 
 
 class Base:
@@ -953,8 +953,8 @@ class Celsius:
 
 
 class CelsiusHandler:
-    def hash(self, obj: Any, hasher: Any) -> ContentHash:
-        return hasher.hash_object({"__type__": "Celsius", "degrees": obj.degrees})
+    def hash(self, obj: Any, hasher: Any) -> Any:
+        return {"__type__": "Celsius", "degrees": obj.degrees}
 
 
 class TestCustomHandlerRegistration:
