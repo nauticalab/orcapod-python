@@ -190,8 +190,8 @@ class LogicalTypeRegistry:
 
     An optional ``logical_types`` list can be passed at construction time to
     pre-register one or more ``LogicalTypeProtocol`` instances immediately, following
-    the same pattern as ``SemanticTypeRegistry``'s ``converters`` constructor
-    argument.
+    the same pattern as the ``logical_types`` constructor argument used by
+    other registries in this package.
 
     An optional ``factories`` list can also be passed to pre-register
     ``LogicalTypeFactoryProtocol`` instances at construction time. Each entry is a

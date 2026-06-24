@@ -14,8 +14,8 @@ get_versioned_semantic_hasher()
     recursive hasher that replaces BasicObjectHasher).
 
 get_versioned_semantic_arrow_hasher()
-    Return the current-version SemanticArrowHasher (Arrow table hasher
-    with semantic-type support).
+    Return the current-version StarfixArrowHasher (Arrow table hasher
+    with extension-type semantic support).
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ def get_versioned_semantic_hasher(
 
 
 # ---------------------------------------------------------------------------
-# SemanticArrowHasher factory
+# StarfixArrowHasher factory
 # ---------------------------------------------------------------------------
 
 

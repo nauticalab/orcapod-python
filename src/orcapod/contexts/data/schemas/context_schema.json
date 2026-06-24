@@ -59,11 +59,11 @@
         },
         "file_hasher": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the file content hasher (used by PathContentHandler)"
+            "description": "ObjectSpec for the file content hasher (used by PathSemanticHasher)"
         },
         "function_info_extractor": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the function info extractor (used by FunctionHandler)"
+            "description": "ObjectSpec for the function info extractor (used by FunctionSemanticHasher)"
         },
         "metadata": {
             "type": "object",
@@ -163,51 +163,32 @@
         {
             "context_key": "std:v0.1:default",
             "version": "v0.1",
-            "description": "Initial stable release with basic Path semantic type support",
-            "semantic_type_registry": {
-                "_class": "orcapod.types.semantic_types.SemanticTypeRegistry",
-                "_config": {
-                    "converters": [
-                        {
-                            "_class": "orcapod.types.semantic_types.PythonPathStructConverter",
-                            "_config": {}
-                        }
-                    ]
-                }
+            "description": "Initial stable release with extension type hashing support",
+            "type_converter": {
+                "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
+                "_config": {}
             },
             "arrow_hasher": {
-                "_class": "orcapod.hashing.arrow_hashers.SemanticArrowHasher",
+                "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
                 "_config": {
                     "hasher_id": "arrow_v0.1",
-                    "hash_algorithm": "sha256",
-                    "serialization_method": "logical",
-                    "semantic_type_hashers": {
-                        "path": {
-                            "_class": "orcapod.hashing.semantic_type_hashers.PathHasher",
-                            "_config": {
-                                "file_hasher": {
-                                    "_class": "orcapod.hashing.file_hashers.BasicFileHasher",
-                                    "_config": {
-                                        "algorithm": "sha256"
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    "type_converter": {"_ref": "type_converter"},
+                    "semantic_hasher": {"_ref": "semantic_hasher"}
                 }
             },
             "semantic_hasher": {
-                "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.BaseSemanticHasher",
+                "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.SemanticAwarePythonHasher",
                 "_config": {
-                    "hasher_id": "semantic_v0.1"
+                    "hasher_id": "semantic_v0.1",
+                    "type_semantic_hasher_registry": {"_ref": "python_type_semantic_hasher_registry"}
                 }
             },
             "metadata": {
-                "created_date": "2025-08-01",
+                "created_date": "2026-06-24",
                 "author": "OrcaPod Team",
                 "changelog": [
-                    "Initial release with semantic type registry",
-                    "Basic Arrow and object hashing capabilities"
+                    "Initial release with extension type hashing support",
+                    "StarfixArrowHasher for cross-language-compatible Arrow hashing"
                 ]
             }
         }
