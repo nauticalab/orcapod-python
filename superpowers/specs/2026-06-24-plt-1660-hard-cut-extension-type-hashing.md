@@ -126,9 +126,13 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
        convert the storage value to a Python object and hash it, replacing the
        column with a ``pa.large_binary()`` value of the form::
 
-           extension_name_bytes + b":" + content_hash.to_prefixed_digest()
+           type_name_bytes + b"::" + content_hash.to_prefixed_digest()
 
-       where ``content_hash.to_prefixed_digest()`` = ``method_bytes + b":" + digest``.
+       where ``type_name`` is the extension name with dots replaced by colons
+       (e.g. ``"orcapod.path"`` → ``"orcapod:path"``), and
+       ``content_hash.to_prefixed_digest()`` = ``method_bytes + b":" + digest``.
+       The ``::`` separator is unambiguous because ``to_prefixed_digest()`` only
+       uses single ``:``. Splitting on ``b"::"`` recovers both parts cleanly.
     3. If no hasher is registered (or if ``type_converter`` does not know the
        extension type), return the extension type and storage value unchanged.
        The downstream ``StarfixArrowHasher`` / ``ArrowDigester`` will see the
@@ -165,10 +169,14 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         python_obj = self._type_converter.storage_to_python(storage_value, python_type)
         content_hash = self._python_hasher.hash_object(python_obj)
 
-        # Encode as binary: "<extension_name>:<method>:<digest>"
+        # Encode as binary: "<type_name>::<method>:<digest>"
+        # Dots in the extension name are replaced with colons so the type prefix
+        # uses a consistent namespace separator (e.g. "orcapod:path").
+        # The "::" separator is unambiguous — to_prefixed_digest() only uses ":".
+        type_name = extension_type.extension_name.replace(".", ":")
         hash_bytes = (
-            extension_type.extension_name.encode("ascii")
-            + b":"
+            type_name.encode("ascii")
+            + b"::"
             + content_hash.to_prefixed_digest()
         )
         return pa.large_binary(), hash_bytes
@@ -557,17 +565,26 @@ grep -rn "SemanticTypeRegistry\|semantic_registry\|SemanticStructConverter\
 Hash values produced by `visit_extension` are stored as `pa.large_binary()` with the layout:
 
 ```
-<extension_name_ascii> ":" <content_hash.to_prefixed_digest()>
+<type_name> "::" <content_hash.to_prefixed_digest()>
 ```
 
-where `content_hash.to_prefixed_digest()` = `method.encode("ascii") + b":" + digest_bytes`.
+where:
+- `type_name` = `extension_type.extension_name.replace(".", ":")` — dots in the Arrow extension
+  name are replaced with colons so the prefix uses a uniform namespace separator
+  (e.g. `"orcapod.path"` → `"orcapod:path"`, `"my.module.MyClass"` → `"my:module:MyClass"`)
+- `"::"` is the separator between type prefix and hash — unambiguous because
+  `to_prefixed_digest()` only uses single `":"`
+- `content_hash.to_prefixed_digest()` = `method.encode("ascii") + b":" + digest_bytes`
 
-Full example for a `pathlib.Path` column whose file is hashed with SHA-256 by the semantic hasher:
+Full example for a `pathlib.Path` column whose file is hashed by the semantic hasher:
 ```
-b"orcapod.path:semantic_v0.1:\xab\xcd\xef..."
-              ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^
-              hasher_id       raw SHA-256 digest
+b"orcapod:path::semantic_v0.1:\xab\xcd\xef..."
+  ^^^^^^^^^^^  ^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^
+  type prefix  hasher_id       raw SHA-256 digest
+  (dots→colons)
 ```
+
+Parsing: `value.split(b"::", 1)` → `(b"orcapod:path", b"semantic_v0.1:\xab...")`.
 
 This is consistent with the existing pattern in `function_node.py`:
 ```python
