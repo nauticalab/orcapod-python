@@ -1,7 +1,7 @@
 """
 Tests for hash samples consistency.
 
-Verifies that BaseSemanticHasher produces identical hashes across runs for a
+Verifies that SemanticAwarePythonHasher produces identical hashes across runs for a
 fixed set of recorded input values.  The sample file is generated (or
 regenerated) by running generate_hash_examples.py.
 
