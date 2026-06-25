@@ -50,7 +50,7 @@ def get_versioned_semantic_hasher(
     strict: bool = True,
     type_handler_registry: "hp.HandlerRegistryProtocol | None" = None,
 ) -> hp.SemanticHasherProtocol:
-    """Return a SemanticAwarePythonHasher configured for the current version.
+    """Return a SemanticHasherProtocol configured for the current version.
 
     Parameters
     ----------
@@ -60,7 +60,7 @@ def get_versioned_semantic_hasher(
         When True raises TypeError for unhandled types. When False falls back
         to a best-effort string representation.
     type_handler_registry:
-        Optional ``PythonTypeHandlerRegistry`` to inject. When None the
+        Optional ``HandlerRegistryProtocol`` to inject. When None the
         global default registry is used.
     """
     from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
