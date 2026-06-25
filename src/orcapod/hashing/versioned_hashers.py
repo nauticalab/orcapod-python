@@ -21,7 +21,6 @@ get_versioned_semantic_arrow_hasher()
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from orcapod.protocols import hashing_protocols as hp
 
@@ -49,7 +48,7 @@ _CURRENT_ARROW_HASHER_ID = "arrow_v0.1"
 def get_versioned_semantic_hasher(
     hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
     strict: bool = True,
-    type_handler_registry: "Any | None" = None,
+    type_handler_registry: "hp.HandlerRegistryProtocol | None" = None,
 ) -> hp.SemanticHasherProtocol:
     """Return a SemanticAwarePythonHasher configured for the current version.
 

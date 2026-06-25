@@ -90,11 +90,11 @@ class PythonTypeHandlerRegistry:
                 return True
             return False
 
-    def get_semantic_hasher(self, obj: Any) -> "PythonTypeHandler | None":
-        """Look up the hasher for *obj* using MRO-aware resolution.
+    def get_handler(self, obj: Any) -> "PythonTypeHandler | None":
+        """Look up the handler for *obj* using MRO-aware resolution.
 
         Args:
-            obj: The object for which a hasher is needed.
+            obj: The object for which a handler is needed.
 
         Returns:
             The registered ``PythonTypeHandler``, or None.
@@ -115,10 +115,10 @@ class PythonTypeHandlerRegistry:
                     return handler
         return None
 
-    def get_semantic_hasher_for_type(
+    def get_handler_for_type(
         self, target_type: type
     ) -> "PythonTypeHandler | None":
-        """Look up the hasher for a *type object* (rather than an instance).
+        """Look up the handler for a *type object* (rather than an instance).
 
         Args:
             target_type: The type to look up.
@@ -136,13 +136,13 @@ class PythonTypeHandlerRegistry:
                     return handler
         return None
 
-    def has_semantic_hasher(self, target_type: type) -> bool:
-        """Return True if a hasher is registered for *target_type* or any MRO ancestor.
+    def has_handler(self, target_type: type) -> bool:
+        """Return True if a handler is registered for *target_type* or any MRO ancestor.
 
         Args:
             target_type: The type to check.
         """
-        return self.get_semantic_hasher_for_type(target_type) is not None
+        return self.get_handler_for_type(target_type) is not None
 
     def registered_types(self) -> list[type]:
         """Return a list of all directly-registered types (no MRO expansion)."""

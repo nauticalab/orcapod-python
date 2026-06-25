@@ -9,8 +9,6 @@ from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
-    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 
 
 @runtime_checkable
@@ -53,27 +51,27 @@ class PythonTypeHandler(Protocol):
     """Protocol for type-specific semantic hashers used by SemanticAwarePythonHasher.
 
     A ``PythonTypeHandler`` converts a specific Python type into a
-    representative Python structure that ``SemanticAwarePythonHasher.hash_object()``
+    representative Python structure that ``SemanticHasherProtocol.hash_object()``
     can then hash.  Implementations are registered with a
-    ``PythonTypeHandlerRegistry`` and looked up via MRO-aware resolution.
+    ``HandlerRegistryProtocol`` and looked up via MRO-aware resolution.
 
-    Each implementation receives the full ``SemanticAwarePythonHasher`` so it can
+    Each implementation receives the full ``SemanticHasherProtocol`` so it can
     delegate hashing of sub-values back to the outer hasher without coupling to a
     specific hasher instance.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         """Return a representative Python structure for *obj*.
 
         The returned value is passed back into
-        ``SemanticAwarePythonHasher.hash_object()`` for final hashing.  Returning
+        ``SemanticHasherProtocol.hash_object()`` for final hashing.  Returning
         a ``ContentHash`` short-circuits the process: the caller returns it as-is
         without re-hashing.  This is useful for handlers that compute content-based
         hashes from external data (e.g. file content, Arrow tables).
 
         Args:
             obj:    The object to hash. Always matches the registered type.
-            hasher: The active ``SemanticAwarePythonHasher``. Use
+            hasher: The active ``SemanticHasherProtocol``. Use
                     ``hasher.hash_object(sub_value)`` to hash sub-values that
                     require type-specific treatment.
 
@@ -82,6 +80,26 @@ class PythonTypeHandler(Protocol):
             that will be passed into ``hash_object()`` for final hashing, or a
             ``ContentHash`` to terminate hashing immediately.
         """
+        ...
+
+
+class HandlerRegistryProtocol(Protocol):
+    """Protocol for type handler registries used by ``SemanticHasherProtocol``.
+
+    Abstracts over ``PythonTypeHandlerRegistry`` so that ``SemanticHasherProtocol``
+    and its consumers do not depend on the concrete registry class.
+    """
+
+    def get_handler(self, obj: Any) -> "PythonTypeHandler | None":
+        """Look up the handler for *obj* using MRO-aware resolution."""
+        ...
+
+    def get_handler_for_type(self, target_type: type) -> "PythonTypeHandler | None":
+        """Look up the handler for a type object (rather than an instance)."""
+        ...
+
+    def has_handler(self, target_type: type) -> bool:
+        """Return True if a handler is registered for *target_type* or any MRO ancestor."""
         ...
 
 
@@ -102,8 +120,8 @@ class SemanticHasherProtocol(Protocol):
         ...
 
     @property
-    def type_handler_registry(self) -> "PythonTypeHandlerRegistry":
-        """Return the PythonTypeHandlerRegistry used by this hasher."""
+    def type_handler_registry(self) -> HandlerRegistryProtocol:
+        """Return the handler registry used by this hasher."""
         ...
 
 

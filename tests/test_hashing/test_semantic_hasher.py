@@ -852,19 +852,19 @@ class TestPythonTypeHandlerRegistry:
         reg = PythonTypeHandlerRegistry()
         h = _DummySemanticHasher("base")
         reg.register(Base, h)
-        assert reg.get_semantic_hasher(Base()) is h
+        assert reg.get_handler(Base()) is h
 
     def test_mro_lookup_child(self):
         reg = PythonTypeHandlerRegistry()
         h = _DummySemanticHasher("base")
         reg.register(Base, h)
-        assert reg.get_semantic_hasher(Child()) is h
+        assert reg.get_handler(Child()) is h
 
     def test_mro_lookup_grandchild(self):
         reg = PythonTypeHandlerRegistry()
         h = _DummySemanticHasher("base")
         reg.register(Base, h)
-        assert reg.get_semantic_hasher(GrandChild()) is h
+        assert reg.get_handler(GrandChild()) is h
 
     def test_more_specific_handler_wins(self):
         reg = PythonTypeHandlerRegistry()
@@ -872,19 +872,19 @@ class TestPythonTypeHandlerRegistry:
         h_child = _DummySemanticHasher("child")
         reg.register(Base, h_base)
         reg.register(Child, h_child)
-        assert reg.get_semantic_hasher(Child()) is h_child
-        assert reg.get_semantic_hasher(GrandChild()) is h_child
+        assert reg.get_handler(Child()) is h_child
+        assert reg.get_handler(GrandChild()) is h_child
 
     def test_unregistered_returns_none(self):
         reg = PythonTypeHandlerRegistry()
-        assert reg.get_semantic_hasher(Base()) is None
+        assert reg.get_handler(Base()) is None
 
     def test_unregister_removes_handler(self):
         reg = PythonTypeHandlerRegistry()
         h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.unregister(Base) is True
-        assert reg.get_semantic_hasher(Base()) is None
+        assert reg.get_handler(Base()) is None
 
     def test_unregister_nonexistent_returns_false(self):
         reg = PythonTypeHandlerRegistry()
@@ -896,7 +896,7 @@ class TestPythonTypeHandlerRegistry:
         h2 = _DummySemanticHasher("second")
         reg.register(Base, h1)
         reg.register(Base, h2)
-        assert reg.get_semantic_hasher(Base()) is h2
+        assert reg.get_handler(Base()) is h2
 
     def test_register_non_type_raises(self):
         reg = PythonTypeHandlerRegistry()
@@ -906,16 +906,16 @@ class TestPythonTypeHandlerRegistry:
     def test_has_handler_exact(self):
         reg = PythonTypeHandlerRegistry()
         reg.register(Base, _DummySemanticHasher("b"))
-        assert reg.has_semantic_hasher(Base) is True
+        assert reg.has_handler(Base) is True
 
     def test_has_handler_via_mro(self):
         reg = PythonTypeHandlerRegistry()
         reg.register(Base, _DummySemanticHasher("b"))
-        assert reg.has_semantic_hasher(Child) is True
+        assert reg.has_handler(Child) is True
 
     def test_has_handler_false(self):
         reg = PythonTypeHandlerRegistry()
-        assert reg.has_semantic_hasher(Base) is False
+        assert reg.has_handler(Base) is False
 
     def test_registered_types_snapshot(self):
         reg = PythonTypeHandlerRegistry()
@@ -937,9 +937,9 @@ class TestPythonTypeHandlerRegistry:
         reg = PythonTypeHandlerRegistry()
         h = _DummySemanticHasher("b")
         reg.register(Base, h)
-        assert reg.get_semantic_hasher_for_type(Base) is h
-        assert reg.get_semantic_hasher_for_type(Child) is h  # via MRO
-        assert reg.get_semantic_hasher_for_type(int) is None
+        assert reg.get_handler_for_type(Base) is h
+        assert reg.get_handler_for_type(Child) is h  # via MRO
+        assert reg.get_handler_for_type(int) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1077,21 +1077,21 @@ class TestGlobalSingletons:
         import typing as _typing
 
         reg = get_default_python_type_handler_registry()
-        assert reg.has_semantic_hasher(bytes)
-        assert reg.has_semantic_hasher(bytearray)
-        assert reg.has_semantic_hasher(UUID)
-        assert reg.has_semantic_hasher(Path)
-        assert reg.has_semantic_hasher(_types.FunctionType)
-        assert reg.has_semantic_hasher(type)
-        assert reg.has_semantic_hasher(_types.GenericAlias)
-        assert reg.has_semantic_hasher(_types.UnionType)
-        assert reg.has_semantic_hasher(_typing._GenericAlias)  # type: ignore[attr-defined]
-        assert reg.has_semantic_hasher(_typing._SpecialForm)  # type: ignore[attr-defined]
+        assert reg.has_handler(bytes)
+        assert reg.has_handler(bytearray)
+        assert reg.has_handler(UUID)
+        assert reg.has_handler(Path)
+        assert reg.has_handler(_types.FunctionType)
+        assert reg.has_handler(type)
+        assert reg.has_handler(_types.GenericAlias)
+        assert reg.has_handler(_types.UnionType)
+        assert reg.has_handler(_typing._GenericAlias)  # type: ignore[attr-defined]
+        assert reg.has_handler(_typing._SpecialForm)  # type: ignore[attr-defined]
 
     def test_default_registry_has_no_content_hash_handler(self):
         """ContentHash is handled as a terminal -- no registry entry needed."""
         reg = get_default_python_type_handler_registry()
-        assert not reg.has_semantic_hasher(ContentHash)
+        assert not reg.has_handler(ContentHash)
 
     def test_default_hasher_can_hash_common_types(self):
         h = get_default_semantic_hasher()
