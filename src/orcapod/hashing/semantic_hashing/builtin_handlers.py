@@ -1,5 +1,5 @@
 """
-Built-in PythonTypeHandler implementations.
+Built-in PythonTypeHandlerProtocol implementations.
 
   PathHandler       -- pathlib.Path: file content hash
   UPathHandler      -- upath.UPath: file content hash (remote-aware)

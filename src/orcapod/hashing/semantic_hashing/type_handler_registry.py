@@ -1,7 +1,7 @@
 """
-PythonTypeHandlerRegistry — MRO-aware registry for PythonTypeHandler instances.
+PythonTypeHandlerRegistry — MRO-aware registry for PythonTypeHandlerProtocol instances.
 
-``PythonTypeHandler`` is the protocol for type-specific handlers; this registry
+``PythonTypeHandlerProtocol`` is the protocol for type-specific handlers; this registry
 provides MRO-aware lookup so subclasses inherit their parent's handler.
 """
 
@@ -14,14 +14,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import (
         ArrowHasherProtocol,
-        PythonTypeHandler,
+        PythonTypeHandlerProtocol,
     )
 
 logger = logging.getLogger(__name__)
 
 
 class PythonTypeHandlerRegistry:
-    """Registry mapping Python types to PythonTypeHandler instances.
+    """Registry mapping Python types to PythonTypeHandlerProtocol instances.
 
     Lookup is MRO-aware: when no hasher is registered for the exact type of
     an object, the registry walks the object's MRO (most-derived first) until
@@ -34,20 +34,20 @@ class PythonTypeHandlerRegistry:
     """
 
     def __init__(
-        self, handlers: list[tuple[type, "PythonTypeHandler"]] | None = None
+        self, handlers: list[tuple[type, "PythonTypeHandlerProtocol"]] | None = None
     ) -> None:
         """
         Args:
             handlers: Optional list of ``(target_type, hasher)`` pairs to
                 register at construction time.
         """
-        self._handlers: dict[type, "PythonTypeHandler"] = {}
+        self._handlers: dict[type, "PythonTypeHandlerProtocol"] = {}
         self._lock = threading.RLock()
         if handlers:
             for target_type, handler in handlers:
                 self.register(target_type, handler)
 
-    def register(self, target_type: type, handler: "PythonTypeHandler") -> None:
+    def register(self, target_type: type, handler: "PythonTypeHandlerProtocol") -> None:
         """Register a hasher for a specific Python type.
 
         If a hasher is already registered for *target_type*, it is silently
@@ -55,7 +55,7 @@ class PythonTypeHandlerRegistry:
 
         Args:
             target_type: The Python type (or class) for which the hasher should be used.
-            handler: A ``PythonTypeHandler`` instance.
+            handler: A ``PythonTypeHandlerProtocol`` instance.
 
         Raises:
             TypeError: If ``target_type`` is not a ``type``.
@@ -90,14 +90,14 @@ class PythonTypeHandlerRegistry:
                 return True
             return False
 
-    def get_handler(self, obj: Any) -> "PythonTypeHandler | None":
+    def get_handler(self, obj: Any) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for *obj* using MRO-aware resolution.
 
         Args:
             obj: The object for which a handler is needed.
 
         Returns:
-            The registered ``PythonTypeHandler``, or None.
+            The registered ``PythonTypeHandlerProtocol``, or None.
         """
         obj_type = type(obj)
         with self._lock:
@@ -117,14 +117,14 @@ class PythonTypeHandlerRegistry:
 
     def get_handler_for_type(
         self, target_type: type
-    ) -> "PythonTypeHandler | None":
+    ) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for a *type object* (rather than an instance).
 
         Args:
             target_type: The type to look up.
 
         Returns:
-            The registered ``PythonTypeHandler``, or None.
+            The registered ``PythonTypeHandlerProtocol``, or None.
         """
         with self._lock:
             handler = self._handlers.get(target_type)
