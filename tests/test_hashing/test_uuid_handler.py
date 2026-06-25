@@ -1,4 +1,4 @@
-"""Tests for UUIDHandler hash() method behaviour.
+"""Tests for UUIDHandler handle() dispatch via SemanticAwarePythonHasher.
 
 Verifies that UUIDHandler produces a ContentHash based on the 16-byte
 binary representation of a UUID, consistent with OrcaPod's canonical

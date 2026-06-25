@@ -90,6 +90,10 @@ class HandlerRegistryProtocol(Protocol):
     and its consumers do not depend on the concrete registry class.
     """
 
+    def register(self, target_type: type, handler: "PythonTypeHandlerProtocol") -> None:
+        """Register a handler for a specific Python type."""
+        ...
+
     def get_handler(self, obj: Any) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for *obj* using MRO-aware resolution."""
         ...
@@ -100,6 +104,10 @@ class HandlerRegistryProtocol(Protocol):
 
     def has_handler(self, target_type: type) -> bool:
         """Return True if a handler is registered for *target_type* or any MRO ancestor."""
+        ...
+
+    def __len__(self) -> int:
+        """Return the number of directly-registered types."""
         ...
 
 
