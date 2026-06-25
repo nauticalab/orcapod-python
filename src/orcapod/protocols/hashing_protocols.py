@@ -47,10 +47,10 @@ class ContentIdentifiableProtocol(Protocol):
         ...
 
 
-class PythonTypeHandler(Protocol):
-    """Protocol for type-specific semantic hashers used by SemanticAwarePythonHasher.
+class PythonTypeHandlerProtocol(Protocol):
+    """Protocol for type-specific semantic hashers used by ``SemanticAwarePythonHasher``.
 
-    A ``PythonTypeHandler`` converts a specific Python type into a
+    A ``PythonTypeHandlerProtocol`` converts a specific Python type into a
     representative Python structure that ``SemanticHasherProtocol.hash_object()``
     can then hash.  Implementations are registered with a
     ``HandlerRegistryProtocol`` and looked up via MRO-aware resolution.
@@ -90,11 +90,11 @@ class HandlerRegistryProtocol(Protocol):
     and its consumers do not depend on the concrete registry class.
     """
 
-    def get_handler(self, obj: Any) -> "PythonTypeHandler | None":
+    def get_handler(self, obj: Any) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for *obj* using MRO-aware resolution."""
         ...
 
-    def get_handler_for_type(self, target_type: type) -> "PythonTypeHandler | None":
+    def get_handler_for_type(self, target_type: type) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for a type object (rather than an instance)."""
         ...
 

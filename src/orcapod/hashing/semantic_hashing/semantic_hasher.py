@@ -71,7 +71,6 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.types import ContentHash
 
@@ -91,8 +90,8 @@ class SemanticAwarePythonHasher:
         A short string identifying this hasher version/configuration.
         Embedded in every ContentHash produced.
     type_handler_registry:
-        ``PythonTypeHandlerRegistry`` for MRO-aware lookup of
-        ``PythonTypeHandler`` instances.
+        ``HandlerRegistryProtocol`` for MRO-aware lookup of
+        ``PythonTypeHandlerProtocol`` instances.
         If None, the default registry is used.
     strict:
         When True (default) raises TypeError for unhandled types.
@@ -102,7 +101,7 @@ class SemanticAwarePythonHasher:
     def __init__(
         self,
         hasher_id: str,
-        type_handler_registry: PythonTypeHandlerRegistry | None = None,
+        type_handler_registry: "hp.HandlerRegistryProtocol | None" = None,
         strict: bool = True,
     ) -> None:
         self._hasher_id = hasher_id
@@ -127,8 +126,8 @@ class SemanticAwarePythonHasher:
         return self._strict
 
     @property
-    def type_handler_registry(self) -> PythonTypeHandlerRegistry:
-        """Return the ``PythonTypeHandlerRegistry`` used by this hasher."""
+    def type_handler_registry(self) -> "hp.HandlerRegistryProtocol":
+        """Return the ``HandlerRegistryProtocol`` used by this hasher."""
         return self._registry
 
     def hash_object(
@@ -366,7 +365,7 @@ class SemanticAwarePythonHasher:
         except (TypeError, ValueError) as exc:
             raise TypeError(
                 f"SemanticAwarePythonHasher: failed to JSON-serialise object of type "
-                f"{type(obj).__name__!r}. Ensure all PythonTypeHandler "
+                f"{type(obj).__name__!r}. Ensure all PythonTypeHandlerProtocol "
                 "implementations and identity_structure() return JSON-serialisable "
                 "primitives or structures."
             ) from exc
@@ -389,15 +388,16 @@ class SemanticAwarePythonHasher:
 
         if self._strict:
             raise TypeError(
-                f"SemanticAwarePythonHasher (strict): no PythonTypeHandler "
-                f"registered for type '{qualified}' and it does not implement "
-                "ContentIdentifiableProtocol. Register a PythonTypeHandler "
-                "via the PythonTypeHandlerRegistry or implement "
-                "identity_structure() on the class."
+                f"SemanticAwarePythonHasher (strict): no implementation of "
+                f"PythonTypeHandlerProtocol registered for type '{qualified}' and it "
+                "does not implement ContentIdentifiableProtocol. Register an "
+                "implementation of PythonTypeHandlerProtocol via the "
+                "HandlerRegistryProtocol or implement identity_structure() on the class."
             )
 
         logger.warning(
-            "SemanticAwarePythonHasher (non-strict): no PythonTypeHandler registered for type '%s'. "
+            "SemanticAwarePythonHasher (non-strict): no implementation of "
+            "PythonTypeHandlerProtocol registered for type '%s'. "
             "Falling back to best-effort string representation.",
             qualified,
         )

@@ -656,7 +656,7 @@ class FunctionPodStream(StreamBase):
         return output_table
 
 
-class CallableWithPod(Protocol):
+class CallableWithPodProtocol(Protocol):
     @property
     def pod(self) -> _FunctionPodBase:
         """Return the associated function pod."""
@@ -676,7 +676,7 @@ def function_pod(
     pod_cache_database: ArrowDatabaseProtocol | None = None,
     executor: DataFunctionExecutorProtocol | None = None,
     **kwargs,
-) -> Callable[..., CallableWithPod]:
+) -> Callable[..., CallableWithPodProtocol]:
     """Decorator that attaches a ``FunctionPod`` as a ``pod`` attribute.
 
     Args:
@@ -696,7 +696,7 @@ def function_pod(
         A decorator that adds a ``pod`` attribute to the wrapped function.
     """
 
-    def decorator(func: Callable) -> CallableWithPod:
+    def decorator(func: Callable) -> CallableWithPodProtocol:
         if func.__name__ == "<lambda>":
             raise ValueError("Lambda functions cannot be used with function_pod")
 
@@ -736,7 +736,7 @@ def function_pod(
             return func(*args, **kwargs)
 
         setattr(wrapper, "pod", pod)
-        return cast(CallableWithPod, wrapper)
+        return cast(CallableWithPodProtocol, wrapper)
 
     return decorator
 

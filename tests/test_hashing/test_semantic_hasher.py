@@ -299,7 +299,7 @@ class Unhandled:
 
 class TestStrictMode:
     def test_strict_raises_on_unknown_type(self, hasher):
-        with pytest.raises(TypeError, match="no PythonTypeHandler registered"):
+        with pytest.raises(TypeError, match="no implementation of PythonTypeHandlerProtocol registered"):
             hasher.hash_object(Unhandled(1))
 
     def test_non_strict_returns_content_hash(self, lenient_hasher):
