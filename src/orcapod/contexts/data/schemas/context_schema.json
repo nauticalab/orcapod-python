@@ -61,9 +61,9 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the file content hasher (used by PathHandler)"
         },
-        "function_info_extractor": {
+        "function_semantic_hasher": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the function info extractor (used by FunctionHandler)"
+            "description": "ObjectSpec for the function semantic hasher (used by FunctionHandler)"
         },
         "metadata": {
             "type": "object",
