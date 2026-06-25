@@ -32,7 +32,8 @@ Simple usage with the global default hasher::
 
 With an injected hasher (e.g. in tests)::
 
-    hasher = SemanticHasherProtocol(hasher_id="test", strict=True)
+    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
+    hasher = SemanticAwarePythonHasher(hasher_id="test", strict=True)
     record = MyRecord("foo", 42)
     record._semantic_hasher = hasher
     print(record.content_hash())

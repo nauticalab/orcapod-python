@@ -29,13 +29,11 @@ from upath import UPath
 from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
-    from orcapod.hashing.semantic_hashing.type_handler_registry import (
-        PythonTypeHandlerRegistry,
-    )
-    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
     from orcapod.protocols.hashing_protocols import (
         ArrowHasherProtocol,
         FileContentHasherProtocol,
+        HandlerRegistryProtocol,
+        SemanticHasherProtocol,
     )
 
 logger = logging.getLogger(__name__)
@@ -51,7 +49,7 @@ class PathHandler:
     def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
         self.file_hasher = file_hasher
 
-    def handle(self, obj: PathLike, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def handle(self, obj: PathLike, hasher: "SemanticHasherProtocol") -> ContentHash:
         path: Path = Path(obj)
         if not path.exists():
             raise FileNotFoundError(
@@ -77,7 +75,7 @@ class UPathHandler:
     def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
         self.file_hasher = file_hasher
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
         if not isinstance(obj, UPath):
             raise TypeError(
                 f"UPathHandler: expected a UPath, got {type(obj)!r}."
@@ -97,14 +95,14 @@ class UPathHandler:
 class UUIDHandler:
     """Hasher for ``uuid.UUID`` objects — returns the raw 16-byte binary representation."""
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         return obj.bytes
 
 
 class BytesHandler:
     """Hasher for bytes and bytearray objects — returns the lowercase hex string."""
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if isinstance(obj, (bytes, bytearray)):
             return obj.hex()
         raise TypeError(
@@ -123,7 +121,7 @@ class FunctionHandler:
     def __init__(self, function_info_extractor: Any) -> None:
         self.function_info_extractor = function_info_extractor
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not (callable(obj) and hasattr(obj, "__code__")):
             raise TypeError(
                 f"FunctionHandler: expected a callable with __code__, got {type(obj)!r}"
@@ -140,7 +138,7 @@ class TypeObjectHandler:
     Returns a stable string of the form ``"type:<module>.<qualname>"``.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, type):
             raise TypeError(
                 f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
@@ -153,7 +151,7 @@ class TypeObjectHandler:
 class SpecialFormHandler:
     """Hasher for ``typing._SpecialForm`` objects such as ``typing.Union``."""
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         name = getattr(obj, "_name", None) or repr(obj)
         return f"special_form:typing.{name}"
 
@@ -161,7 +159,7 @@ class SpecialFormHandler:
 class GenericAliasHandler:
     """Hasher for generic alias type annotations (``dict[int, str]``, ``Optional[X]``, etc.)."""
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         import typing
 
         origin = getattr(obj, "__origin__", None)
@@ -181,7 +179,7 @@ class GenericAliasHandler:
 class UnionTypeHandler:
     """Hasher for ``types.UnionType`` objects (Python 3.10+ ``X | Y`` syntax)."""
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         args = getattr(obj, "__args__", None) or ()
         hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
         return {"__type__": "union", "args": hashed_args}
@@ -206,7 +204,7 @@ class ArrowTableHandler:
         from orcapod.contexts import get_default_context
         return get_default_context().arrow_hasher  # type: ignore[return-value]
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> ContentHash:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
         import pyarrow as _pa
 
         if isinstance(obj, _pa.RecordBatch):
@@ -221,7 +219,7 @@ class ArrowTableHandler:
 class SchemaHandler:
     """Hasher for ``Schema`` objects."""
 
-    def handle(self, obj: Any, hasher: "SemanticAwarePythonHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, Schema):
             raise TypeError(
                 f"SchemaHandler: expected a Schema, got {type(obj)!r}"
@@ -230,7 +228,7 @@ class SchemaHandler:
 
 
 def register_builtin_python_type_handlers(
-    registry: "PythonTypeHandlerRegistry",
+    registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
@@ -244,7 +242,7 @@ def register_builtin_python_type_handlers(
     hash time, breaking the construction-time circular dependency.
 
     Args:
-        registry: The ``PythonTypeHandlerRegistry`` to populate.
+        registry: The ``HandlerRegistryProtocol`` instance to populate.
         file_hasher: Optional ``FileContentHasherProtocol`` for path hashing.
             Defaults to ``BasicFileHasher(sha256)``.
         function_info_extractor: Optional ``FunctionInfoExtractorProtocol``.
