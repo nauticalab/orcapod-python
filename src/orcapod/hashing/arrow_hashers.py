@@ -11,7 +11,7 @@ from orcapod.types import ContentHash
 
 if TYPE_CHECKING:
     from orcapod.semantic_types.universal_converter import UniversalTypeConverter
-    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
+    from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 
 
 class StarfixArrowHasher:
@@ -35,7 +35,7 @@ class StarfixArrowHasher:
         ``UniversalTypeConverter`` used to resolve extension types to Python
         types and convert storage values back to Python objects.
     semantic_hasher:
-        ``SemanticAwarePythonHasher`` used to hash Python objects extracted
+        ``SemanticHasherProtocol`` used to hash Python objects extracted
         from extension-typed columns.
     hasher_id:
         String identifier embedded in every ``ContentHash`` produced by this
@@ -45,7 +45,7 @@ class StarfixArrowHasher:
     def __init__(
         self,
         type_converter: "UniversalTypeConverter",
-        semantic_hasher: "SemanticAwarePythonHasher",
+        semantic_hasher: "SemanticHasherProtocol",
         hasher_id: str,
     ) -> None:
         self._type_converter = type_converter

@@ -13,7 +13,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
     from orcapod.semantic_types.universal_converter import UniversalTypeConverter
-    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
+    from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -180,14 +180,14 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
     Args:
         type_converter: The active ``UniversalTypeConverter`` for resolving
             extension type → Python type and storage → Python conversion.
-        python_hasher: The active ``SemanticAwarePythonHasher`` for hashing
+        python_hasher: The active ``SemanticHasherProtocol`` for hashing
             Python objects.
     """
 
     def __init__(
         self,
         type_converter: "UniversalTypeConverter",
-        python_hasher: "SemanticAwarePythonHasher",
+        python_hasher: "SemanticHasherProtocol",
     ) -> None:
         self._type_converter = type_converter
         self._python_hasher = python_hasher

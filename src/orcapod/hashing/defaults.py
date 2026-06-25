@@ -19,7 +19,7 @@ def get_default_python_type_handler_registry() -> PythonTypeHandlerRegistry:
     Return the ``PythonTypeHandlerRegistry`` from the default data context's
     semantic hasher.
 
-    The registry is owned by the active ``SemanticAwarePythonHasher``, which is itself
+    The registry is owned by the active ``SemanticHasherProtocol``, which is itself
     versioned inside the active ``DataContext``.
 
     Returns:
