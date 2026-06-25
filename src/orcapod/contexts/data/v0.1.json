@@ -50,7 +50,7 @@
             }
         }
     },
-    "function_info_extractor": {
+    "function_semantic_hasher": {
         "_class": "orcapod.hashing.semantic_hashing.function_info_extractors.FunctionSignatureExtractor",
         "_config": {
             "include_module": true,
@@ -66,9 +66,9 @@
                 [{"_type": "pathlib.Path"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathHandler",         "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
                 [{"_type": "upath.core.UPath"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathHandler",        "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
                 [{"_type": "uuid.UUID"},               {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDHandler",         "_config": {}}],
-                [{"_type": "types.FunctionType"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "types.BuiltinFunctionType"},{"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",    "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
-                [{"_type": "types.MethodType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
+                [{"_type": "types.FunctionType"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
+                [{"_type": "types.BuiltinFunctionType"},{"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",    "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
+                [{"_type": "types.MethodType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "builtins.type"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",   "_config": {}}],
                 [{"_type": "types.GenericAlias"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler", "_config": {}}],
                 [{"_type": "types.UnionType"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeHandler",    "_config": {}}],
