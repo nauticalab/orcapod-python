@@ -271,22 +271,22 @@ class TestSemanticAwarePythonHasherCollisionResistance:
 
 
 # ===================================================================
-# PythonTypeHandlerRegistry -- register/get_semantic_hasher roundtrip
+# PythonTypeHandlerRegistry -- register/get_handler roundtrip
 # ===================================================================
 
 
 class TestPythonTypeHandlerRegistryBasics:
-    """register() + get_semantic_hasher() roundtrip."""
+    """register() + get_handler() roundtrip."""
 
-    def test_register_and_get_semantic_hasher(self, registry: PythonTypeHandlerRegistry) -> None:
+    def test_register_and_get_handler(self, registry: PythonTypeHandlerRegistry) -> None:
         handler = _FakeHandler()
         registry.register(int, handler)
-        assert registry.get_semantic_hasher(42) is handler
+        assert registry.get_handler(42) is handler
 
-    def test_get_semantic_hasher_returns_none_for_unregistered(
+    def test_get_handler_returns_none_for_unregistered(
         self, registry: PythonTypeHandlerRegistry
     ) -> None:
-        assert registry.get_semantic_hasher("hello") is None
+        assert registry.get_handler("hello") is None
 
 
 # ===================================================================
@@ -308,7 +308,7 @@ class TestPythonTypeHandlerRegistryMRO:
 
         handler = _FakeHandler()
         registry.register(Base, handler)
-        assert registry.get_semantic_hasher(Child()) is handler
+        assert registry.get_handler(Child()) is handler
 
     def test_specific_handler_overrides_parent(
         self, registry: PythonTypeHandlerRegistry
@@ -323,8 +323,8 @@ class TestPythonTypeHandlerRegistryMRO:
         child_handler = _FakeHandler("child")
         registry.register(Base, parent_handler)
         registry.register(Child, child_handler)
-        assert registry.get_semantic_hasher(Child()) is child_handler
-        assert registry.get_semantic_hasher(Base()) is parent_handler
+        assert registry.get_handler(Child()) is child_handler
+        assert registry.get_handler(Base()) is parent_handler
 
 
 # ===================================================================
@@ -340,7 +340,7 @@ class TestPythonTypeHandlerRegistryUnregister:
         registry.register(int, handler)
         result = registry.unregister(int)
         assert result is True
-        assert registry.get_semantic_hasher(42) is None
+        assert registry.get_handler(42) is None
 
     def test_unregister_nonexistent(self, registry: PythonTypeHandlerRegistry) -> None:
         result = registry.unregister(float)
@@ -348,21 +348,21 @@ class TestPythonTypeHandlerRegistryUnregister:
 
 
 # ===================================================================
-# PythonTypeHandlerRegistry -- has_semantic_hasher
+# PythonTypeHandlerRegistry -- has_handler
 # ===================================================================
 
 
-class TestPythonTypeHandlerRegistryHasSemanticHasher:
-    """has_semantic_hasher() boolean check."""
+class TestPythonTypeHandlerRegistryHasHandler:
+    """has_handler() boolean check."""
 
-    def test_has_semantic_hasher_true(self, registry: PythonTypeHandlerRegistry) -> None:
+    def test_has_handler_true(self, registry: PythonTypeHandlerRegistry) -> None:
         registry.register(int, _FakeHandler())
-        assert registry.has_semantic_hasher(int) is True
+        assert registry.has_handler(int) is True
 
-    def test_has_semantic_hasher_false(self, registry: PythonTypeHandlerRegistry) -> None:
-        assert registry.has_semantic_hasher(str) is False
+    def test_has_handler_false(self, registry: PythonTypeHandlerRegistry) -> None:
+        assert registry.has_handler(str) is False
 
-    def test_has_semantic_hasher_via_mro(self, registry: PythonTypeHandlerRegistry) -> None:
+    def test_has_handler_via_mro(self, registry: PythonTypeHandlerRegistry) -> None:
         class Base:
             pass
 
@@ -370,7 +370,7 @@ class TestPythonTypeHandlerRegistryHasSemanticHasher:
             pass
 
         registry.register(Base, _FakeHandler())
-        assert registry.has_semantic_hasher(Child) is True
+        assert registry.has_handler(Child) is True
 
 
 # ===================================================================
@@ -413,9 +413,9 @@ class TestPythonTypeHandlerRegistryThreadSafety:
         def lookup_types() -> None:
             try:
                 for _ in range(100):
-                    registry.get_semantic_hasher(42)
+                    registry.get_handler(42)
                     registry.registered_types()
-                    registry.has_semantic_hasher(int)
+                    registry.has_handler(int)
             except Exception as exc:
                 errors.append(exc)
 

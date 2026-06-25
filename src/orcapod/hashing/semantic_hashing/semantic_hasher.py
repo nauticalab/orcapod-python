@@ -180,14 +180,14 @@ class SemanticAwarePythonHasher:
         # Semantic hasher dispatch: handler returns a representative Python structure
         # (or a ContentHash as terminal); feed the result back into hash_object so
         # that returning a plain structure is equivalent to calling hash_object on it.
-        semantic_hasher = self._registry.get_semantic_hasher(obj)
-        if semantic_hasher is not None:
+        handler = self._registry.get_handler(obj)
+        if handler is not None:
             logger.debug(
-                "hash_object: dispatching %s to semantic hasher %s",
+                "hash_object: dispatching %s to handler %s",
                 type(obj).__name__,
-                type(semantic_hasher).__name__,
+                type(handler).__name__,
             )
-            result = semantic_hasher.handle(obj, self)
+            result = handler.handle(obj, self)
             return self.hash_object(result, resolver=resolver)
 
         # ContentIdentifiableProtocol: use resolver if provided, else content_hash().
