@@ -144,3 +144,60 @@ class TestSemanticHashingVisitorExtension:
         # Should be completely unchanged since UUID has no semantic hasher
         assert new_type == arrow_type
         assert new_data == storage_val
+
+
+class TestCrossPathConsistency:
+    """Verify that the Arrow visitor path and the direct Python hasher path produce
+    identical hash tokens for the same underlying file content.
+
+    The Arrow path (SemanticHashingVisitor.visit_extension) converts the extension
+    storage value back to a Python object and calls semantic_hasher.hash_object —
+    exactly the same call as the direct Python path. These tests make that
+    structural guarantee explicit and regression-proof.
+
+    Hash encoding:
+    - Arrow path produces: b"<type_name>::<method>:<raw_digest>"
+    - Python path produces: ContentHash with to_prefixed_digest() → b"<method>:<raw_digest>"
+    Stripping the type-name prefix from the Arrow encoding yields an identical
+    b"<method>:<raw_digest>" byte string.
+    """
+
+    def test_arrow_and_semantic_hash_same_file_content(self, ctx, tmp_path):
+        """Arrow visitor path and direct Python hasher path embed the same digest."""
+        file = tmp_path / "shared.txt"
+        file.write_text("shared content for both paths")
+
+        arrow_type = ctx.type_converter.register_python_class(Path)
+        storage_val = ctx.type_converter.python_to_storage(Path(file), Path)
+
+        # Arrow path: visit_extension encodes as b"<type_name>::<method>:<digest>"
+        visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
+        _, arrow_hash_bytes = visitor.visit(arrow_type, storage_val)
+        # Strip the "orcapod:path::" type prefix to get b"<method>:<digest>"
+        prefixed_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
+
+        # Python path: hash_object returns ContentHash directly
+        python_content_hash = ctx.semantic_hasher.hash_object(Path(file))
+        prefixed_from_python = python_content_hash.to_prefixed_digest()
+
+        assert prefixed_from_arrow == prefixed_from_python
+
+    def test_same_content_two_files_cross_path(self, ctx, tmp_path):
+        """Two files with identical content: Arrow path and Python path agree."""
+        file_arrow = tmp_path / "file_arrow.txt"
+        file_python = tmp_path / "file_python.txt"
+        content = "same content for cross-path test"
+        file_arrow.write_text(content)
+        file_python.write_text(content)
+
+        arrow_type = ctx.type_converter.register_python_class(Path)
+        storage_val = ctx.type_converter.python_to_storage(Path(file_arrow), Path)
+
+        visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
+        _, arrow_hash_bytes = visitor.visit(arrow_type, storage_val)
+        prefixed_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
+
+        python_content_hash = ctx.semantic_hasher.hash_object(Path(file_python))
+        prefixed_from_python = python_content_hash.to_prefixed_digest()
+
+        assert prefixed_from_arrow == prefixed_from_python
