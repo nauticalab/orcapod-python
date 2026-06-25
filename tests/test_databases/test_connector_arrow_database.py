@@ -18,6 +18,7 @@ Test sections:
 11. Flush behaviour (pending cleared, connector receives data)
 12. Config (to_config shape, from_config raises NotImplementedError)
 13. at() method and base_path attribute
+14. Extension-type write guard
 """
 from __future__ import annotations
 
@@ -783,3 +784,107 @@ class TestAtMethod:
     def test_at_rejects_empty_component(self, db):
         with pytest.raises(ValueError):
             db.at("")
+
+
+# ---------------------------------------------------------------------------
+# 14. Extension-type write guard
+# ---------------------------------------------------------------------------
+
+
+class TestExtensionTypeWriteGuard:
+    """add_records() rejects extension-typed columns.
+
+    SQL connectors do not preserve ``ARROW:extension:*`` field metadata.
+    Writing extension-typed columns would cause silent type loss on read.
+    The guard fires at write time so the problem is surfaced immediately
+    rather than discovered when reading back corrupted data.
+
+    Two representations are tested:
+    - In-memory ``pa.ExtensionType`` (the type is registered in this process).
+    - Metadata-only columns (plain storage type + ``ARROW:extension:name``
+      field metadata, as produced when reading Parquet from a process that
+      had the type registered).
+    """
+
+    @pytest.fixture
+    def db(self):
+        return ConnectorArrowDatabase(MockDBConnector())
+
+    def test_rejects_in_memory_extension_type_column(self, db):
+        """add_records raises ValueError when a column carries a pa.ExtensionType."""
+        import pyarrow as pa
+
+        # Build a minimal custom extension type for testing.
+        class _DummyExt(pa.ExtensionType):
+            def __init__(self):
+                super().__init__(pa.large_string(), "test.dummy")
+
+            def __arrow_ext_serialize__(self):
+                return b""
+
+            @classmethod
+            def __arrow_ext_deserialize__(cls, storage_type, serialized):
+                return cls()
+
+        pa.register_extension_type(_DummyExt())
+        try:
+            ext_array = pa.array(["hello"], type=_DummyExt())
+            rid_array = pa.array([b"id1"], type=pa.large_binary())
+            table = pa.table(
+                {"__record_id": rid_array, "payload": ext_array},
+            )
+            with pytest.raises(ValueError, match="extension"):
+                db.add_records(
+                    ("results",),
+                    table,
+                    record_id_column="__record_id",
+                )
+        finally:
+            pa.unregister_extension_type("test.dummy")
+
+    def test_rejects_metadata_only_extension_column(self, db):
+        """add_records raises ValueError when a column has ARROW:extension:name field metadata.
+
+        This is the "unregistered read" representation: the column type is a plain
+        storage type (e.g. large_string) but the field metadata contains the
+        ``b"ARROW:extension:name"`` key, as happens when reading a Parquet file that
+        was written with an extension type that is not registered in the current process.
+        """
+        import pyarrow as pa
+
+        ext_field = pa.field(
+            "payload",
+            pa.large_string(),
+            metadata={
+                b"ARROW:extension:name": b"orcapod.path",
+                b"ARROW:extension:metadata": b"",
+            },
+        )
+        rid_field = pa.field("__record_id", pa.large_binary())
+        schema = pa.schema([rid_field, ext_field])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "payload": pa.array(["/tmp/test"], type=pa.large_string()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="extension"):
+            db.add_records(
+                ("results",),
+                table,
+                record_id_column="__record_id",
+            )
+
+    def test_plain_column_not_rejected(self, db):
+        """add_records accepts tables with no extension-typed columns."""
+        import pyarrow as pa
+
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "value": pa.array([42], type=pa.int64()),
+            }
+        )
+        # Should not raise
+        db.add_records(("results",), table, record_id_column="__record_id")

@@ -999,6 +999,124 @@ Open questions:
 
 ---
 
+## `src/orcapod/extension_types/`
+
+### ET1 — `make_polars_extension_type` cannot accept a storage type containing nested extension types
+**Status:** open
+**Severity:** medium
+
+`make_polars_extension_type` computes the Polars storage dtype by calling:
+```python
+pl.from_arrow(pa.array([], type=arrow_storage_type)).dtype
+```
+This fails with `ArrowNotImplementedError: extension` when `arrow_storage_type` is a struct
+(or list) whose fields include any `pa.ExtensionType` node — for example, a dataclass whose
+fields include `uuid.UUID` (stored as `orcapod.uuid` extension over `pa.large_binary()`).
+
+Polars's Arrow IPC bridge handles top-level extension types via `pl.BaseExtension`, but has no
+path for extension types *nested inside* a struct at dtype-inference time.
+
+**Workaround:** `register_python_class` and `register_storage_type` both uphold a
+*storage-safe* invariant: the returned type may be a `pa.ExtensionType` at the top level,
+but struct fields and list value types at any depth are always plain (non-extension) types.
+`DataclassLogicalTypeFactory.create_for_python_type` strips the top-level extension type
+with a one-liner (`if isinstance(arrow_type, pa.ExtensionType): arrow_type = arrow_type.storage_type`)
+before inserting it into the struct, so the struct passed to `make_polars_extension_type`
+and `pa.Table.from_pylist` never contains nested extension types. The private
+`_strip_ext_to_storage` recursive helper was removed in PLT-1720; the stripping is now
+trivially correct because the storage-safe invariant guarantees `.storage_type` is always
+already clean.
+
+**Also affects `pa.Table.from_pylist`:** the same restriction applies to PyArrow's
+`pa.Table.from_pylist` (and `pa.array`) — neither can build an array from a struct type
+whose fields are `pa.ExtensionType` nodes, for the same underlying reason. The stripping
+in `create_for_python_type` fixes both issues simultaneously.
+
+**Polars round-trip fidelity:** once the storage struct contains only plain types (no
+nested extension types), the full Arrow → Polars → Arrow round-trip for the *outermost*
+extension type is faithful: extension name, metadata bytes, and storage struct are all
+preserved. Only the inner field schema (already stripped) is absent.
+
+**Fix needed:** Once PyArrow (and Polars) support nested extension types natively in struct
+construction and Arrow↔Polars conversion, the stripping one-liner in `create_for_python_type`
+can be removed and `make_polars_extension_type` can accept extension-typed storage directly.
+Track upstream PyArrow / Polars issues.
+
+### ET2 — Top-level `list[T]` / `dict[K, V]` columns lose extension-type schema metadata when `T`/`V` is a logical type
+**Status:** open
+**Severity:** medium
+**Issue:** PLT-1732
+
+When a logical type (e.g. `UUID`, a dataclass) appears as the element type of a `list[T]`
+or `dict[K, V]` annotation, `register_python_class` now raises `ValueError` at
+schema-construction time rather than silently stripping the extension type. The underlying
+cause is that PyArrow does not allow extension types inside list value fields or struct
+fields (ET1): `pa.array([], type=pa.large_list(extension_type))` raises
+`ArrowNotImplementedError: extension`. If a caller manually strips to storage types and
+writes `large_list(large_binary)` for `list[UUID]`, the stored Arrow schema carries no
+`orcapod.uuid` marker; on a fresh read `register_storage_type` finds nothing to register,
+and value conversion with `storage_to_python(..., list[UUID])` fails unless `UUID` was
+registered manually beforehand.
+
+**This does NOT affect logical types that are fields of a registered outer dataclass.**
+Those are discovered and registered transitively: `register_discovered_extensions` finds
+the outer dataclass extension type → `reconstruct_from_arrow` → `register_python_class`
+per field annotation → inner type registered. The limitation applies only when the
+outermost container (`list[T]`, `dict[K, V]`) is the top-level column type with no outer
+dataclass wrapper.
+
+**Empirically confirmed** (2026-06-17): `pa.array([], type=pa.large_list(extension_type))`
+raises `ArrowNotImplementedError: extension` — identical to the ET1 struct-field
+restriction. The `replace_logical_type` flag approach (preserving extension type inside
+list value field) is therefore infeasible at the PyArrow level.
+
+**Current behaviour:** `register_python_class(list[T])` raises `ValueError` when `T`
+resolves to a logical type, pointing to this entry and PLT-1732. Use a direct `T` column
+(no list wrapper) or wrap the list inside a dataclass field — the outer dataclass extension
+type carries the annotation into the schema, and `reconstruct_from_arrow` re-registers `T`
+transitively on read.
+
+**Planned fix (PLT-1732, target v0.2):** Introduce `ListLogicalType` /
+`ListLogicalTypeFactory` and `StructLogicalType` / `StructLogicalTypeFactory`. A
+`list[UUID]` top-level column would be wrapped as a new extension type
+`orcapod.list[orcapod.uuid]` with storage `large_list(large_binary)`. The extension type
+sits at the outermost (list) level, not inside the list value field, so it satisfies ET1.
+`register_storage_type` would dispatch to the new factory on read, auto-registering the
+element type. See PLT-1732 for full design.
+
+---
+
+## `src/orcapod/databases/connector_arrow_database.py`
+
+### CA1 — SQL connectors silently lose Arrow extension-type field metadata on round-trip
+**Status:** in progress
+**Severity:** high
+**Issue:** PLT-1795
+
+`SQLiteConnector` (and any `DBConnectorProtocol` implementation that maps Arrow → SQL types)
+does not preserve `ARROW:extension:name` / `ARROW:extension:metadata` field metadata. When a
+column whose Arrow type is a `pa.ExtensionType` (e.g. `orcapod.path`, `orcapod.uuid`, or any
+dataclass extension type) is written via `ConnectorArrowDatabase.add_records()` and then read
+back, the column is returned as the raw storage type (e.g. `large_string`, `large_binary`,
+`struct`) with no extension marker. This makes SQL connector round-trips impossible and causes silent data-type loss.
+
+**Interim fix (PLT-1659):** `ConnectorArrowDatabase.add_records()` now raises `ValueError`
+immediately when any column is extension-typed, surfacing the issue at write
+time rather than on a confusing read. Two representations are rejected:
+- In-memory extension types: `isinstance(field.type, pa.ExtensionType)`.
+- Metadata-only columns: plain storage type whose field metadata contains
+  `b"ARROW:extension:name"` (the representation produced when reading a Parquet/IPC file
+  with an unregistered extension type).
+
+**Full fix (PLT-1795, target v0.2):** Preserve extension-type metadata in the SQL schema via
+a companion metadata table (one row per column: `table_name`, `column_name`,
+`extension_name`, `extension_metadata`). On `create_table_if_not_exists`, write rows for any
+extension-typed columns; on `iter_batches`, join the metadata table and reconstruct the
+`pa.ExtensionType` for affected columns before returning the batch. Once implemented, the
+`ValueError` guard in `add_records()` can be lifted.
+
+---
+
 ## `src/orcapod/semantic_types/universal_converter.py`
 
 ### UC1 — `python_type_to_arrow_type` raised on `typing.Any` from empty-container inference

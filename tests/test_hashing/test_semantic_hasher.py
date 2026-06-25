@@ -1,17 +1,17 @@
 """
-Comprehensive test suite for the BaseSemanticHasher system.
+Comprehensive test suite for the SemanticAwarePythonHasher system.
 
 Covers:
-  - BaseSemanticHasher: primitives, container type-tagging, determinism,
+  - SemanticAwarePythonHasher: primitives, container type-tagging, determinism,
     circular references, strict vs non-strict mode
   - ContentIdentifiableProtocol protocol: independent hashing, composability
-  - TypeHandlerRegistry: registration, MRO-aware lookup, unregister
-  - Built-in handlers: bytes, UUID, Path, functions, type objects
+  - PythonTypeHandlerRegistry: registration, MRO-aware lookup, unregister
+  - Built-in hashers: bytes, UUID, Path, functions, type objects
   - ContentHash as terminal: returned as-is without re-hashing
   - ContentIdentifiableMixin: content_hash, __eq__, __hash__, caching,
     cache invalidation, injectable hasher
-  - Custom type handler registration and extension
-  - get_default_semantic_hasher / get_default_type_handler_registry
+  - Custom type hasher registration and extension
+  - get_default_semantic_hasher / get_default_python_type_handler_registry
 """
 
 from __future__ import annotations
@@ -27,17 +27,19 @@ from uuid import UUID
 import pytest
 
 from orcapod.hashing.defaults import get_default_semantic_hasher
-from orcapod.hashing.semantic_hashing.builtin_handlers import register_builtin_handlers
+from orcapod.hashing.semantic_hashing.builtin_handlers import (
+    register_builtin_python_type_handlers,
+)
 from orcapod.hashing.semantic_hashing.content_identifiable_mixin import (
     ContentIdentifiableMixin,
 )
 from orcapod.hashing.semantic_hashing.semantic_hasher import (
-    BaseSemanticHasher,
+    SemanticAwarePythonHasher,
     _is_namedtuple,
 )
 from orcapod.hashing.semantic_hashing.type_handler_registry import (
-    TypeHandlerRegistry,
-    get_default_type_handler_registry,
+    PythonTypeHandlerRegistry,
+    get_default_python_type_handler_registry,
 )
 from orcapod.types import ContentHash
 
@@ -46,22 +48,22 @@ from orcapod.types import ContentHash
 # ---------------------------------------------------------------------------
 
 
-def make_hasher(strict: bool = True) -> BaseSemanticHasher:
-    """Create a fresh BaseSemanticHasher with an isolated registry."""
-    registry = TypeHandlerRegistry()
-    register_builtin_handlers(registry)
-    return BaseSemanticHasher(
+def make_hasher(strict: bool = True) -> SemanticAwarePythonHasher:
+    """Create a fresh SemanticAwarePythonHasher with an isolated registry."""
+    registry = PythonTypeHandlerRegistry()
+    register_builtin_python_type_handlers(registry)
+    return SemanticAwarePythonHasher(
         hasher_id="test_v1", type_handler_registry=registry, strict=strict
     )
 
 
 @pytest.fixture
-def hasher() -> BaseSemanticHasher:
+def hasher() -> SemanticAwarePythonHasher:
     return make_hasher(strict=True)
 
 
 @pytest.fixture
-def lenient_hasher() -> BaseSemanticHasher:
+def lenient_hasher() -> SemanticAwarePythonHasher:
     return make_hasher(strict=False)
 
 
@@ -108,7 +110,7 @@ class ListRecord(ContentIdentifiableMixin):
 
 
 # ---------------------------------------------------------------------------
-# 1. BaseSemanticHasher: primitives
+# 1. SemanticAwarePythonHasher: primitives
 # ---------------------------------------------------------------------------
 
 
@@ -152,7 +154,7 @@ class TestPrimitives:
 
 
 # ---------------------------------------------------------------------------
-# 2. BaseSemanticHasher: container type-tagging and determinism
+# 2. SemanticAwarePythonHasher: container type-tagging and determinism
 # ---------------------------------------------------------------------------
 
 
@@ -213,7 +215,7 @@ class TestContainers:
 
 
 # ---------------------------------------------------------------------------
-# 3. BaseSemanticHasher: namedtuples
+# 3. SemanticAwarePythonHasher: namedtuples
 # ---------------------------------------------------------------------------
 
 
@@ -249,7 +251,7 @@ class TestNamedTuples:
 
 
 # ---------------------------------------------------------------------------
-# 4. BaseSemanticHasher: circular references
+# 4. SemanticAwarePythonHasher: circular references
 # ---------------------------------------------------------------------------
 
 
@@ -284,7 +286,7 @@ class TestCircularReferences:
 
 
 # ---------------------------------------------------------------------------
-# 5. BaseSemanticHasher: strict vs non-strict mode
+# 5. SemanticAwarePythonHasher: strict vs non-strict mode
 # ---------------------------------------------------------------------------
 
 
@@ -297,7 +299,7 @@ class Unhandled:
 
 class TestStrictMode:
     def test_strict_raises_on_unknown_type(self, hasher):
-        with pytest.raises(TypeError, match="no TypeHandlerProtocol registered"):
+        with pytest.raises(TypeError, match="no implementation of PythonTypeHandlerProtocol registered"):
             hasher.hash_object(Unhandled(1))
 
     def test_non_strict_returns_content_hash(self, lenient_hasher):
@@ -310,8 +312,8 @@ class TestStrictMode:
         assert h1 == h2
 
     def test_strict_mode_flag(self):
-        strict = BaseSemanticHasher(hasher_id="s", strict=True)
-        lenient = BaseSemanticHasher(hasher_id="s", strict=False)
+        strict = SemanticAwarePythonHasher(hasher_id="s", strict=True)
+        lenient = SemanticAwarePythonHasher(hasher_id="s", strict=False)
         assert strict.strict is True
         assert lenient.strict is False
 
@@ -795,7 +797,7 @@ class TestContentIdentifiableMixin:
         assert len(s) == 2
 
     def test_injectable_hasher(self):
-        custom_hasher = BaseSemanticHasher(hasher_id="injected_v9")
+        custom_hasher = SemanticAwarePythonHasher(hasher_id="injected_v9")
         rec = SimpleRecord("foo", 1, semantic_hasher=custom_hasher)
         assert rec.content_hash().method == "injected_v9"
 
@@ -820,15 +822,16 @@ class TestContentIdentifiableMixin:
 
 
 # ---------------------------------------------------------------------------
-# 14. TypeHandlerRegistry
+# 14. PythonTypeHandlerRegistry
 # ---------------------------------------------------------------------------
 
 
-class _DummyHandler:
+class _DummySemanticHasher:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
     def handle(self, obj: Any, hasher: Any) -> Any:
+        # Returns a representative Python structure; outer hasher performs final hashing
         return f"{self.tag}:{obj}"
 
 
@@ -844,95 +847,95 @@ class GrandChild(Child):
     pass
 
 
-class TestTypeHandlerRegistry:
+class TestPythonTypeHandlerRegistry:
     def test_register_and_get_exact(self):
-        reg = TypeHandlerRegistry()
-        h = _DummyHandler("base")
+        reg = PythonTypeHandlerRegistry()
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.get_handler(Base()) is h
 
     def test_mro_lookup_child(self):
-        reg = TypeHandlerRegistry()
-        h = _DummyHandler("base")
+        reg = PythonTypeHandlerRegistry()
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.get_handler(Child()) is h
 
     def test_mro_lookup_grandchild(self):
-        reg = TypeHandlerRegistry()
-        h = _DummyHandler("base")
+        reg = PythonTypeHandlerRegistry()
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.get_handler(GrandChild()) is h
 
     def test_more_specific_handler_wins(self):
-        reg = TypeHandlerRegistry()
-        h_base = _DummyHandler("base")
-        h_child = _DummyHandler("child")
+        reg = PythonTypeHandlerRegistry()
+        h_base = _DummySemanticHasher("base")
+        h_child = _DummySemanticHasher("child")
         reg.register(Base, h_base)
         reg.register(Child, h_child)
         assert reg.get_handler(Child()) is h_child
         assert reg.get_handler(GrandChild()) is h_child
 
     def test_unregistered_returns_none(self):
-        reg = TypeHandlerRegistry()
+        reg = PythonTypeHandlerRegistry()
         assert reg.get_handler(Base()) is None
 
     def test_unregister_removes_handler(self):
-        reg = TypeHandlerRegistry()
-        h = _DummyHandler("base")
+        reg = PythonTypeHandlerRegistry()
+        h = _DummySemanticHasher("base")
         reg.register(Base, h)
         assert reg.unregister(Base) is True
         assert reg.get_handler(Base()) is None
 
     def test_unregister_nonexistent_returns_false(self):
-        reg = TypeHandlerRegistry()
+        reg = PythonTypeHandlerRegistry()
         assert reg.unregister(Base) is False
 
     def test_replace_existing_handler(self):
-        reg = TypeHandlerRegistry()
-        h1 = _DummyHandler("first")
-        h2 = _DummyHandler("second")
+        reg = PythonTypeHandlerRegistry()
+        h1 = _DummySemanticHasher("first")
+        h2 = _DummySemanticHasher("second")
         reg.register(Base, h1)
         reg.register(Base, h2)
         assert reg.get_handler(Base()) is h2
 
     def test_register_non_type_raises(self):
-        reg = TypeHandlerRegistry()
+        reg = PythonTypeHandlerRegistry()
         with pytest.raises(TypeError):
-            reg.register("not_a_type", _DummyHandler("x"))  # type: ignore[arg-type]
+            reg.register("not_a_type", _DummySemanticHasher("x"))  # type: ignore[arg-type]
 
     def test_has_handler_exact(self):
-        reg = TypeHandlerRegistry()
-        reg.register(Base, _DummyHandler("b"))
+        reg = PythonTypeHandlerRegistry()
+        reg.register(Base, _DummySemanticHasher("b"))
         assert reg.has_handler(Base) is True
 
     def test_has_handler_via_mro(self):
-        reg = TypeHandlerRegistry()
-        reg.register(Base, _DummyHandler("b"))
+        reg = PythonTypeHandlerRegistry()
+        reg.register(Base, _DummySemanticHasher("b"))
         assert reg.has_handler(Child) is True
 
     def test_has_handler_false(self):
-        reg = TypeHandlerRegistry()
+        reg = PythonTypeHandlerRegistry()
         assert reg.has_handler(Base) is False
 
     def test_registered_types_snapshot(self):
-        reg = TypeHandlerRegistry()
-        reg.register(Base, _DummyHandler("b"))
-        reg.register(Child, _DummyHandler("c"))
+        reg = PythonTypeHandlerRegistry()
+        reg.register(Base, _DummySemanticHasher("b"))
+        reg.register(Child, _DummySemanticHasher("c"))
         types = reg.registered_types()
         assert Base in types
         assert Child in types
 
     def test_len(self):
-        reg = TypeHandlerRegistry()
+        reg = PythonTypeHandlerRegistry()
         assert len(reg) == 0
-        reg.register(Base, _DummyHandler("b"))
+        reg.register(Base, _DummySemanticHasher("b"))
         assert len(reg) == 1
-        reg.register(Child, _DummyHandler("c"))
+        reg.register(Child, _DummySemanticHasher("c"))
         assert len(reg) == 2
 
     def test_get_handler_for_type(self):
-        reg = TypeHandlerRegistry()
-        h = _DummyHandler("b")
+        reg = PythonTypeHandlerRegistry()
+        h = _DummySemanticHasher("b")
         reg.register(Base, h)
         assert reg.get_handler_for_type(Base) is h
         assert reg.get_handler_for_type(Child) is h  # via MRO
@@ -956,19 +959,19 @@ class CelsiusHandler:
 
 class TestCustomHandlerRegistration:
     def test_register_custom_type(self):
-        registry = TypeHandlerRegistry()
-        register_builtin_handlers(registry)
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
         registry.register(Celsius, CelsiusHandler())
-        custom_hasher = BaseSemanticHasher(
+        custom_hasher = SemanticAwarePythonHasher(
             hasher_id="custom_v1", type_handler_registry=registry, strict=True
         )
         assert isinstance(custom_hasher.hash_object(Celsius(100.0)), ContentHash)
 
     def test_custom_handler_determinism(self):
-        registry = TypeHandlerRegistry()
-        register_builtin_handlers(registry)
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
         registry.register(Celsius, CelsiusHandler())
-        custom_hasher = BaseSemanticHasher(
+        custom_hasher = SemanticAwarePythonHasher(
             hasher_id="custom_v1", type_handler_registry=registry
         )
         h1 = custom_hasher.hash_object(Celsius(37.5))
@@ -976,10 +979,10 @@ class TestCustomHandlerRegistration:
         assert h1 == h2
 
     def test_custom_handler_different_values_differ(self):
-        registry = TypeHandlerRegistry()
-        register_builtin_handlers(registry)
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
         registry.register(Celsius, CelsiusHandler())
-        custom_hasher = BaseSemanticHasher(
+        custom_hasher = SemanticAwarePythonHasher(
             hasher_id="custom_v1", type_handler_registry=registry
         )
         assert custom_hasher.hash_object(Celsius(0.0)) != custom_hasher.hash_object(
@@ -987,15 +990,15 @@ class TestCustomHandlerRegistration:
         )
 
     def test_unregistered_type_still_strict(self):
-        hasher = BaseSemanticHasher(hasher_id="strict_v1", strict=True)
+        hasher = SemanticAwarePythonHasher(hasher_id="strict_v1", strict=True)
         with pytest.raises(TypeError):
             hasher.hash_object(Celsius(42.0))
 
     def test_custom_handler_in_nested_structure(self):
-        registry = TypeHandlerRegistry()
-        register_builtin_handlers(registry)
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
         registry.register(Celsius, CelsiusHandler())
-        custom_hasher = BaseSemanticHasher(
+        custom_hasher = SemanticAwarePythonHasher(
             hasher_id="custom_v1", type_handler_registry=registry
         )
         h = custom_hasher.hash_object({"temp": Celsius(36.6), "unit": "C"})
@@ -1008,10 +1011,10 @@ class TestCustomHandlerRegistration:
             def handle(self, obj: Any, hasher: Any) -> ContentHash:
                 return ContentHash("direct", b"\xaa" * 32)
 
-        registry = TypeHandlerRegistry()
-        register_builtin_handlers(registry)
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
         registry.register(Celsius, DirectHashHandler())
-        custom_hasher = BaseSemanticHasher(
+        custom_hasher = SemanticAwarePythonHasher(
             hasher_id="custom_v1", type_handler_registry=registry
         )
         result = custom_hasher.hash_object(Celsius(0.0))
@@ -1022,10 +1025,10 @@ class TestCustomHandlerRegistration:
         class FancyCelsius(Celsius):
             pass
 
-        registry = TypeHandlerRegistry()
-        register_builtin_handlers(registry)
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
         registry.register(Celsius, CelsiusHandler())
-        custom_hasher = BaseSemanticHasher(
+        custom_hasher = SemanticAwarePythonHasher(
             hasher_id="custom_v1", type_handler_registry=registry
         )
         h = custom_hasher.hash_object(FancyCelsius(20.0))
@@ -1042,7 +1045,7 @@ class TestCustomHandlerRegistration:
             def handle(self, obj: Any, hasher: Any) -> Any:
                 return {"__type__": "Kelvin", "k": obj.k}
 
-        global_registry = get_default_type_handler_registry()
+        global_registry = get_default_python_type_handler_registry()
         global_registry.register(Kelvin, KelvinHandler())
         try:
             default_hasher = get_default_semantic_hasher()
@@ -1058,14 +1061,14 @@ class TestCustomHandlerRegistration:
 
 class TestGlobalSingletons:
     def test_get_default_semantic_hasher_returns_semantic_hasher(self):
-        assert isinstance(get_default_semantic_hasher(), BaseSemanticHasher)
+        assert isinstance(get_default_semantic_hasher(), SemanticAwarePythonHasher)
 
     def test_get_default_semantic_hasher_has_versioned_id(self):
         assert get_default_semantic_hasher().hasher_id == "semantic_v0.1"
 
     def test_get_default_type_handler_registry_is_singleton(self):
-        r1 = get_default_type_handler_registry()
-        r2 = get_default_type_handler_registry()
+        r1 = get_default_python_type_handler_registry()
+        r2 = get_default_python_type_handler_registry()
         assert r1 is r2
 
     def test_default_registry_has_builtin_handlers(self):
@@ -1073,7 +1076,7 @@ class TestGlobalSingletons:
 
         import typing as _typing
 
-        reg = get_default_type_handler_registry()
+        reg = get_default_python_type_handler_registry()
         assert reg.has_handler(bytes)
         assert reg.has_handler(bytearray)
         assert reg.has_handler(UUID)
@@ -1087,7 +1090,7 @@ class TestGlobalSingletons:
 
     def test_default_registry_has_no_content_hash_handler(self):
         """ContentHash is handled as a terminal -- no registry entry needed."""
-        reg = get_default_type_handler_registry()
+        reg = get_default_python_type_handler_registry()
         assert not reg.has_handler(ContentHash)
 
     def test_default_hasher_can_hash_common_types(self):
@@ -1118,7 +1121,7 @@ class TestGlobalSingletons:
 
 
 def _sha256_json(obj: Any, hasher_id: str) -> "ContentHash":
-    """Manually JSON-serialize *obj* with the same settings as BaseSemanticHasher
+    """Manually JSON-serialize *obj* with the same settings as SemanticAwarePythonHasher
     and return the resulting ContentHash."""
     json_bytes = json.dumps(
         obj,
@@ -1134,7 +1137,7 @@ class TestJsonNormalizationConsistency:
     """Verify that hash_object produces hashes identical to directly SHA-256
     hashing the canonical tagged-JSON form that _expand_structure produces.
 
-    These tests treat BaseSemanticHasher as a black box and anchor its output to
+    These tests treat SemanticAwarePythonHasher as a black box and anchor its output to
     a human-verifiable serialization format, ensuring the algorithm is
     transparent and reproducible without the library.
     """
@@ -1142,7 +1145,7 @@ class TestJsonNormalizationConsistency:
     HASHER_ID = "test_v1"
 
     @pytest.fixture
-    def h(self) -> BaseSemanticHasher:
+    def h(self) -> SemanticAwarePythonHasher:
         return make_hasher(strict=True)
 
     # ------------------------------------------------------------------
@@ -1284,7 +1287,7 @@ class TestResolver:
         """Without a resolver hash_object returns obj.content_hash() -- using
         the object's own hasher."""
         calling_hasher = make_hasher(strict=True)
-        obj_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="obj_hasher_v1")
         rec = SimpleRecord("hello", 1, semantic_hasher=obj_hasher)
 
         result = calling_hasher.hash_object(rec)
@@ -1294,7 +1297,7 @@ class TestResolver:
     def test_resolver_overrides_default(self):
         """When a resolver is provided it takes priority over obj.content_hash()."""
         calling_hasher = make_hasher(strict=True)
-        obj_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="obj_hasher_v1")
         rec = SimpleRecord("hello", 1, semantic_hasher=obj_hasher)
 
         # Resolver that uses the calling hasher instead of the object's own hasher
@@ -1307,7 +1310,7 @@ class TestResolver:
     def test_resolver_differs_from_no_resolver_when_hashers_differ(self):
         """When the object's hasher differs from the calling hasher, resolver and
         no-resolver produce different results."""
-        obj_hasher = BaseSemanticHasher(hasher_id="obj_v99")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="obj_v99")
         calling_hasher = make_hasher(strict=True)
         rec = SimpleRecord("data", 42, semantic_hasher=obj_hasher)
 
@@ -1324,7 +1327,7 @@ class TestResolver:
     def test_resolver_propagates_through_list(self):
         """Resolver is applied to CI objects nested inside a list."""
         calling_hasher = make_hasher(strict=True)
-        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="inner_v1")
         inner = SimpleRecord("inner", 99, semantic_hasher=obj_hasher)
 
         # With no resolver the embedded token uses inner's own hasher_id
@@ -1344,7 +1347,7 @@ class TestResolver:
     def test_resolver_propagates_through_tuple(self):
         """Resolver is applied to CI objects nested inside a tuple."""
         calling_hasher = make_hasher(strict=True)
-        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="inner_v1")
         inner = SimpleRecord("x", 1, semantic_hasher=obj_hasher)
 
         resolver = lambda obj: calling_hasher.hash_object(obj.identity_structure())
@@ -1356,7 +1359,7 @@ class TestResolver:
     def test_resolver_propagates_through_dict(self):
         """Resolver is applied to CI objects nested inside a dict value."""
         calling_hasher = make_hasher(strict=True)
-        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="inner_v1")
         inner = SimpleRecord("v", 2, semantic_hasher=obj_hasher)
 
         resolver = lambda obj: calling_hasher.hash_object(obj.identity_structure())
@@ -1388,7 +1391,7 @@ class TestResolver:
         """When a registered handler returns a ContentIdentifiable, the resolver
         is applied to that result."""
         calling_hasher = make_hasher(strict=True)
-        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="inner_v1")
         inner = SimpleRecord("inner", 5, semantic_hasher=obj_hasher)
 
         resolved = []
@@ -1406,7 +1409,7 @@ class TestResolver:
     def test_cached_result_reused_across_calls(self):
         """content_hash() caches by hasher_id -- the same ContentHash object is
         returned on repeated calls with the same hasher."""
-        obj_hasher = BaseSemanticHasher(hasher_id="cached_v1")
+        obj_hasher = SemanticAwarePythonHasher(hasher_id="cached_v1")
         rec = SimpleRecord("y", 5, semantic_hasher=obj_hasher)
 
         first = rec.content_hash()
@@ -1432,8 +1435,8 @@ class TestUniformHasherPropagation:
     def test_entry_point_hasher_overrides_nested_hasher(self):
         """outer.content_hash() uses outer's hasher for inner, even though inner
         holds a different hasher."""
-        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
-        hasher_b = BaseSemanticHasher(hasher_id="hasher_b")
+        hasher_a = SemanticAwarePythonHasher(hasher_id="hasher_a")
+        hasher_b = SemanticAwarePythonHasher(hasher_id="hasher_b")
 
         inner = SimpleRecord("inner", 1, semantic_hasher=hasher_a)
         outer = NestedRecord("outer", inner, semantic_hasher=hasher_b)
@@ -1461,9 +1464,9 @@ class TestUniformHasherPropagation:
     def test_three_level_chain_uses_entry_hasher_throughout(self):
         """In a three-level chain A→B→C, calling C.content_hash() uses C's hasher
         for A and B as well, even though each holds a different hasher."""
-        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
-        hasher_b = BaseSemanticHasher(hasher_id="hasher_b")
-        hasher_c = BaseSemanticHasher(hasher_id="hasher_c")
+        hasher_a = SemanticAwarePythonHasher(hasher_id="hasher_a")
+        hasher_b = SemanticAwarePythonHasher(hasher_id="hasher_b")
+        hasher_c = SemanticAwarePythonHasher(hasher_id="hasher_c")
 
         a = SimpleRecord("a", 1, semantic_hasher=hasher_a)
         b = NestedRecord("b", a, semantic_hasher=hasher_b)
@@ -1494,8 +1497,8 @@ class TestUniformHasherPropagation:
     def test_independent_call_still_uses_own_hasher(self):
         """When an intermediate object is called directly (not as part of a larger
         chain), it uses its own stored hasher as before."""
-        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
-        hasher_b = BaseSemanticHasher(hasher_id="hasher_b")
+        hasher_a = SemanticAwarePythonHasher(hasher_id="hasher_a")
+        hasher_b = SemanticAwarePythonHasher(hasher_id="hasher_b")
 
         inner = SimpleRecord("inner", 1, semantic_hasher=hasher_a)
         outer = NestedRecord("outer", inner, semantic_hasher=hasher_b)
@@ -1507,8 +1510,8 @@ class TestUniformHasherPropagation:
     def test_cache_keyed_by_hasher_id_avoids_recomputation(self):
         """The cache is keyed by hasher_id, so a nested object computed under
         hasher_c is cached and reused on a second call with hasher_c."""
-        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
-        hasher_c = BaseSemanticHasher(hasher_id="hasher_c")
+        hasher_a = SemanticAwarePythonHasher(hasher_id="hasher_a")
+        hasher_c = SemanticAwarePythonHasher(hasher_id="hasher_c")
 
         inner = SimpleRecord("inner", 42, semantic_hasher=hasher_a)
 

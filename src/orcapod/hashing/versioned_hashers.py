@@ -14,14 +14,13 @@ get_versioned_semantic_hasher()
     recursive hasher that replaces BasicObjectHasher).
 
 get_versioned_semantic_arrow_hasher()
-    Return the current-version SemanticArrowHasher (Arrow table hasher
-    with semantic-type support).
+    Return the current-version StarfixArrowHasher (Arrow table hasher
+    with extension-type semantic support).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from orcapod.protocols import hashing_protocols as hp
 
@@ -49,50 +48,36 @@ _CURRENT_ARROW_HASHER_ID = "arrow_v0.1"
 def get_versioned_semantic_hasher(
     hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
     strict: bool = True,
-    type_handler_registry: "hp.TypeHandlerRegistry | None" = None,  # type: ignore[name-defined]
+    type_handler_registry: "hp.HandlerRegistryProtocol | None" = None,
 ) -> hp.SemanticHasherProtocol:
-    """
-    Return a SemanticHasherProtocol configured for the current version.
-
-    The returned hasher uses the global default TypeHandlerRegistry (which
-    is pre-populated with all built-in handlers) unless an explicit registry
-    is supplied.
+    """Return a SemanticHasherProtocol configured for the current version.
 
     Parameters
     ----------
     hasher_id:
         Identifier embedded in every ContentHash produced by this hasher.
-        Defaults to the current version constant.  Override only when
-        producing hashes that must be tagged with a specific version string.
     strict:
-        When True (the default) the hasher raises TypeError on encountering
-        an object of an unhandled type.  When False it falls back to a
-        best-effort string representation with a logged warning.
+        When True raises TypeError for unhandled types. When False falls back
+        to a best-effort string representation.
     type_handler_registry:
-        Optional TypeHandlerRegistry to inject.  When None the global
-        default registry is used (recommended for production code).
-
-    Returns
-    -------
-    SemanticHasherProtocol
-        A fully configured SemanticHasherProtocol instance.
+        Optional ``HandlerRegistryProtocol`` to inject. When None the
+        global default registry is used.
     """
-    from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
+    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 
     if type_handler_registry is None:
         from orcapod.hashing.semantic_hashing.type_handler_registry import (
-            get_default_type_handler_registry,
+            get_default_python_type_handler_registry,
         )
-
-        type_handler_registry = get_default_type_handler_registry()
+        type_handler_registry = get_default_python_type_handler_registry()
 
     logger.debug(
-        "get_versioned_semantic_hasher: creating BaseSemanticHasher "
+        "get_versioned_semantic_hasher: creating SemanticAwarePythonHasher "
         "(hasher_id=%r, strict=%r)",
         hasher_id,
         strict,
     )
-    return BaseSemanticHasher(
+    return SemanticAwarePythonHasher(
         hasher_id=hasher_id,
         type_handler_registry=type_handler_registry,
         strict=strict,
@@ -100,55 +85,30 @@ def get_versioned_semantic_hasher(
 
 
 # ---------------------------------------------------------------------------
-# SemanticArrowHasher factory
+# StarfixArrowHasher factory
 # ---------------------------------------------------------------------------
 
 
 def get_versioned_semantic_arrow_hasher(
     hasher_id: str = _CURRENT_ARROW_HASHER_ID,
 ) -> hp.ArrowHasherProtocol:
-    """
-    Return a SemanticArrowHasher configured for the current version.
+    """Return a StarfixArrowHasher configured for the current version.
 
-    The arrow hasher handles Arrow table / RecordBatch hashing with
-    semantic-type awareness (e.g. Path columns are hashed by file content).
-
-    Parameters
-    ----------
-    hasher_id:
-        Identifier embedded in every ContentHash produced by this hasher.
-
-    Returns
-    -------
-    ArrowHasherProtocol
-        A fully configured SemanticArrowHasher instance.
+    Sources ``type_converter`` and ``semantic_hasher`` from the default
+    ``DataContext`` so that the arrow hasher is consistent with all other
+    versioned components.
     """
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
-    from orcapod.hashing.file_hashers import BasicFileHasher
-    from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
-    from orcapod.semantic_types.semantic_struct_converters import (
-        PythonPathStructConverter,
-        UUIDStructConverter,
-    )
+    from orcapod.contexts import resolve_context
 
-    # Build a default semantic registry populated with the standard converters.
-    # We use Any-typed locals here to side-step type-checker false positives
-    # that arise from the protocol definition of SemanticStructConverterProtocol having
-    # a slightly different hash_struct_dict signature than the concrete class.
-    registry: Any = SemanticTypeRegistry()
-    file_hasher = BasicFileHasher(algorithm="sha256")
-    path_converter: Any = PythonPathStructConverter(file_hasher=file_hasher)
-    registry.register_converter("path", path_converter)
-    uuid_converter: Any = UUIDStructConverter()
-    registry.register_converter("uuid", uuid_converter)
-
+    ctx = resolve_context(None)  # default context
     logger.debug(
         "get_versioned_semantic_arrow_hasher: creating StarfixArrowHasher "
         "(hasher_id=%r)",
         hasher_id,
     )
-    hasher: Any = StarfixArrowHasher(
+    return StarfixArrowHasher(
         hasher_id=hasher_id,
-        semantic_registry=registry,
+        type_converter=ctx.type_converter,
+        semantic_hasher=ctx.semantic_hasher,
     )
-    return hasher

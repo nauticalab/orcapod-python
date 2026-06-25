@@ -1,5 +1,6 @@
 from .connector_arrow_database import ConnectorArrowDatabase
 from .delta_lake_databases import DeltaTableDatabase
+from .extension_aware_database import ExtensionAwareDatabase
 from .in_memory_databases import InMemoryArrowDatabase
 from .noop_database import NoOpArrowDatabase
 from .spiraldb_connector import SpiralDBConnector
@@ -9,6 +10,7 @@ from .postgresql_connector import PostgreSQLConnector
 __all__ = [
     "ConnectorArrowDatabase",
     "DeltaTableDatabase",
+    "ExtensionAwareDatabase",
     "InMemoryArrowDatabase",
     "NoOpArrowDatabase",
     "SpiralDBConnector",

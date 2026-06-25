@@ -56,6 +56,7 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
+
 class _FunctionPodBase(TraceableBase):
     """Base pod that applies a data function to each input data."""
 
@@ -74,6 +75,10 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
+        self.data_context.type_converter.ensure_types_registered_for_schemas(
+            data_function.input_data_schema,
+            data_function.output_data_schema,
+        )
 
     def computed_label(self) -> str | None:
         """Use the data function's canonical name as the default label."""
@@ -651,7 +656,7 @@ class FunctionPodStream(StreamBase):
         return output_table
 
 
-class CallableWithPod(Protocol):
+class CallableWithPodProtocol(Protocol):
     @property
     def pod(self) -> _FunctionPodBase:
         """Return the associated function pod."""
@@ -671,7 +676,7 @@ def function_pod(
     pod_cache_database: ArrowDatabaseProtocol | None = None,
     executor: DataFunctionExecutorProtocol | None = None,
     **kwargs,
-) -> Callable[..., CallableWithPod]:
+) -> Callable[..., CallableWithPodProtocol]:
     """Decorator that attaches a ``FunctionPod`` as a ``pod`` attribute.
 
     Args:
@@ -691,7 +696,7 @@ def function_pod(
         A decorator that adds a ``pod`` attribute to the wrapped function.
     """
 
-    def decorator(func: Callable) -> CallableWithPod:
+    def decorator(func: Callable) -> CallableWithPodProtocol:
         if func.__name__ == "<lambda>":
             raise ValueError("Lambda functions cannot be used with function_pod")
 
@@ -731,7 +736,7 @@ def function_pod(
             return func(*args, **kwargs)
 
         setattr(wrapper, "pod", pod)
-        return cast(CallableWithPod, wrapper)
+        return cast(CallableWithPodProtocol, wrapper)
 
     return decorator
 

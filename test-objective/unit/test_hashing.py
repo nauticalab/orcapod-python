@@ -1,4 +1,4 @@
-"""Tests for BaseSemanticHasher and TypeHandlerRegistry.
+"""Tests for SemanticAwarePythonHasher and PythonTypeHandlerRegistry.
 
 Specification-derived tests covering deterministic hashing of primitives,
 structures, ContentHash pass-through, identity_structure resolution,
@@ -13,10 +13,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
+from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.hashing.semantic_hashing.type_handler_registry import (
-    BuiltinTypeHandlerRegistry,
-    TypeHandlerRegistry,
+    BuiltinPythonTypeHandlerRegistry,
+    PythonTypeHandlerRegistry,
 )
 from orcapod.types import ContentHash
 
@@ -27,15 +27,15 @@ from orcapod.types import ContentHash
 
 
 @pytest.fixture
-def registry() -> TypeHandlerRegistry:
-    """An empty TypeHandlerRegistry."""
-    return TypeHandlerRegistry()
+def registry() -> PythonTypeHandlerRegistry:
+    """An empty PythonTypeHandlerRegistry."""
+    return PythonTypeHandlerRegistry()
 
 
 @pytest.fixture
-def hasher(registry: TypeHandlerRegistry) -> BaseSemanticHasher:
-    """A strict BaseSemanticHasher backed by an empty registry."""
-    return BaseSemanticHasher(
+def hasher(registry: PythonTypeHandlerRegistry) -> SemanticAwarePythonHasher:
+    """A strict SemanticAwarePythonHasher backed by an empty registry."""
+    return SemanticAwarePythonHasher(
         hasher_id="test_v1",
         type_handler_registry=registry,
         strict=True,
@@ -43,9 +43,9 @@ def hasher(registry: TypeHandlerRegistry) -> BaseSemanticHasher:
 
 
 @pytest.fixture
-def lenient_hasher(registry: TypeHandlerRegistry) -> BaseSemanticHasher:
-    """A non-strict BaseSemanticHasher backed by an empty registry."""
-    return BaseSemanticHasher(
+def lenient_hasher(registry: PythonTypeHandlerRegistry) -> SemanticAwarePythonHasher:
+    """A non-strict SemanticAwarePythonHasher backed by an empty registry."""
+    return SemanticAwarePythonHasher(
         hasher_id="test_v1",
         type_handler_registry=registry,
         strict=False,
@@ -58,13 +58,13 @@ def lenient_hasher(registry: TypeHandlerRegistry) -> BaseSemanticHasher:
 
 
 class _FakeHandler:
-    """Minimal object satisfying TypeHandlerProtocol for testing."""
+    """Minimal object satisfying PythonTypeHandlerProtocol for testing."""
 
     def __init__(self, return_value: Any = "handled") -> None:
         self._return_value = return_value
 
-    def handle(self, obj: Any, hasher: BaseSemanticHasher) -> Any:
-        return self._return_value
+    def handle(self, obj: Any, hasher: SemanticAwarePythonHasher) -> Any:
+        return str(self._return_value)
 
 
 class _IdentityObj:
@@ -79,18 +79,18 @@ class _IdentityObj:
     def content_hash(self, hasher: Any = None) -> ContentHash:
         if hasher is not None:
             return hasher.hash_object(self.identity_structure())
-        h = BaseSemanticHasher(
-            "test_v1", type_handler_registry=TypeHandlerRegistry(), strict=False
+        h = SemanticAwarePythonHasher(
+            "test_v1", type_handler_registry=PythonTypeHandlerRegistry(), strict=False
         )
         return h.hash_object(self.identity_structure())
 
 
 # ===================================================================
-# BaseSemanticHasher -- primitive hashing
+# SemanticAwarePythonHasher -- primitive hashing
 # ===================================================================
 
 
-class TestBaseSemanticHasherPrimitives:
+class TestSemanticAwarePythonHasherPrimitives:
     """Primitives (int, str, float, bool, None) are hashed deterministically."""
 
     @pytest.mark.parametrize(
@@ -99,21 +99,21 @@ class TestBaseSemanticHasherPrimitives:
         ids=lambda v: f"{type(v).__name__}({v!r})",
     )
     def test_primitive_produces_content_hash(
-        self, hasher: BaseSemanticHasher, value: Any
+        self, hasher: SemanticAwarePythonHasher, value: Any
     ) -> None:
         result = hasher.hash_object(value)
         assert isinstance(result, ContentHash)
 
     @pytest.mark.parametrize("value", [42, "hello", 3.14, True, None])
     def test_primitive_deterministic(
-        self, hasher: BaseSemanticHasher, value: Any
+        self, hasher: SemanticAwarePythonHasher, value: Any
     ) -> None:
         """Same input always produces the same hash."""
         h1 = hasher.hash_object(value)
         h2 = hasher.hash_object(value)
         assert h1 == h2
 
-    def test_different_primitives_differ(self, hasher: BaseSemanticHasher) -> None:
+    def test_different_primitives_differ(self, hasher: SemanticAwarePythonHasher) -> None:
         """Different inputs produce different hashes (collision resistance)."""
         h_int = hasher.hash_object(42)
         h_str = hasher.hash_object("42")
@@ -121,48 +121,48 @@ class TestBaseSemanticHasherPrimitives:
 
 
 # ===================================================================
-# BaseSemanticHasher -- structures
+# SemanticAwarePythonHasher -- structures
 # ===================================================================
 
 
-class TestBaseSemanticHasherStructures:
+class TestSemanticAwarePythonHasherStructures:
     """Structures (list, dict, tuple, set) are expanded and hashed."""
 
-    def test_list_hashed(self, hasher: BaseSemanticHasher) -> None:
+    def test_list_hashed(self, hasher: SemanticAwarePythonHasher) -> None:
         result = hasher.hash_object([1, 2, 3])
         assert isinstance(result, ContentHash)
 
-    def test_dict_hashed(self, hasher: BaseSemanticHasher) -> None:
+    def test_dict_hashed(self, hasher: SemanticAwarePythonHasher) -> None:
         result = hasher.hash_object({"a": 1, "b": 2})
         assert isinstance(result, ContentHash)
 
-    def test_tuple_hashed(self, hasher: BaseSemanticHasher) -> None:
+    def test_tuple_hashed(self, hasher: SemanticAwarePythonHasher) -> None:
         result = hasher.hash_object((1, 2, 3))
         assert isinstance(result, ContentHash)
 
-    def test_set_hashed(self, hasher: BaseSemanticHasher) -> None:
+    def test_set_hashed(self, hasher: SemanticAwarePythonHasher) -> None:
         result = hasher.hash_object({1, 2, 3})
         assert isinstance(result, ContentHash)
 
-    def test_list_and_tuple_differ(self, hasher: BaseSemanticHasher) -> None:
+    def test_list_and_tuple_differ(self, hasher: SemanticAwarePythonHasher) -> None:
         """list and tuple with same elements produce different hashes."""
         h_list = hasher.hash_object([1, 2, 3])
         h_tuple = hasher.hash_object((1, 2, 3))
         assert h_list != h_tuple
 
-    def test_set_order_independent(self, hasher: BaseSemanticHasher) -> None:
+    def test_set_order_independent(self, hasher: SemanticAwarePythonHasher) -> None:
         """Sets with the same elements hash identically regardless of insertion order."""
         h1 = hasher.hash_object({3, 1, 2})
         h2 = hasher.hash_object({1, 2, 3})
         assert h1 == h2
 
-    def test_dict_key_order_independent(self, hasher: BaseSemanticHasher) -> None:
+    def test_dict_key_order_independent(self, hasher: SemanticAwarePythonHasher) -> None:
         """Dicts with the same key-value pairs hash identically regardless of order."""
         h1 = hasher.hash_object({"b": 2, "a": 1})
         h2 = hasher.hash_object({"a": 1, "b": 2})
         assert h1 == h2
 
-    def test_nested_structures(self, hasher: BaseSemanticHasher) -> None:
+    def test_nested_structures(self, hasher: SemanticAwarePythonHasher) -> None:
         """Nested structures are hashed correctly."""
         nested = {"key": [1, (2, 3)], "other": {"inner": True}}
         result = hasher.hash_object(nested)
@@ -170,48 +170,48 @@ class TestBaseSemanticHasherStructures:
         # Determinism
         assert result == hasher.hash_object(nested)
 
-    def test_different_structures_differ(self, hasher: BaseSemanticHasher) -> None:
+    def test_different_structures_differ(self, hasher: SemanticAwarePythonHasher) -> None:
         h1 = hasher.hash_object([1, 2])
         h2 = hasher.hash_object([1, 2, 3])
         assert h1 != h2
 
 
 # ===================================================================
-# BaseSemanticHasher -- ContentHash passthrough
+# SemanticAwarePythonHasher -- ContentHash passthrough
 # ===================================================================
 
 
-class TestBaseSemanticHasherContentHash:
+class TestSemanticAwarePythonHasherContentHash:
     """ContentHash inputs are returned as-is (terminal)."""
 
-    def test_content_hash_passthrough(self, hasher: BaseSemanticHasher) -> None:
+    def test_content_hash_passthrough(self, hasher: SemanticAwarePythonHasher) -> None:
         ch = ContentHash(method="sha256", digest=b"\x00" * 32)
         result = hasher.hash_object(ch)
         assert result is ch
 
 
 # ===================================================================
-# BaseSemanticHasher -- identity_structure resolution
+# SemanticAwarePythonHasher -- identity_structure resolution
 # ===================================================================
 
 
-class TestBaseSemanticHasherIdentityStructure:
+class TestSemanticAwarePythonHasherIdentityStructure:
     """Objects implementing identity_structure() are resolved via it."""
 
-    def test_identity_structure_object(self, hasher: BaseSemanticHasher) -> None:
+    def test_identity_structure_object(self, hasher: SemanticAwarePythonHasher) -> None:
         obj = _IdentityObj(structure={"name": "test", "version": 1})
         result = hasher.hash_object(obj)
         assert isinstance(result, ContentHash)
 
     def test_identity_structure_deterministic(
-        self, hasher: BaseSemanticHasher
+        self, hasher: SemanticAwarePythonHasher
     ) -> None:
         obj1 = _IdentityObj(structure=[1, 2, 3])
         obj2 = _IdentityObj(structure=[1, 2, 3])
         assert hasher.hash_object(obj1) == hasher.hash_object(obj2)
 
     def test_different_identity_structures_differ(
-        self, hasher: BaseSemanticHasher
+        self, hasher: SemanticAwarePythonHasher
     ) -> None:
         obj1 = _IdentityObj(structure="alpha")
         obj2 = _IdentityObj(structure="beta")
@@ -219,22 +219,22 @@ class TestBaseSemanticHasherIdentityStructure:
 
 
 # ===================================================================
-# BaseSemanticHasher -- strict mode
+# SemanticAwarePythonHasher -- strict mode
 # ===================================================================
 
 
-class TestBaseSemanticHasherStrictMode:
+class TestSemanticAwarePythonHasherStrictMode:
     """Unknown type in strict mode raises TypeError."""
 
-    def test_unknown_type_strict_raises(self, hasher: BaseSemanticHasher) -> None:
+    def test_unknown_type_strict_raises(self, hasher: SemanticAwarePythonHasher) -> None:
         class Unknown:
             pass
 
-        with pytest.raises(TypeError, match="no TypeHandlerProtocol registered"):
+        with pytest.raises(TypeError, match="no implementation of PythonTypeHandlerProtocol registered"):
             hasher.hash_object(Unknown())
 
     def test_unknown_type_lenient_succeeds(
-        self, lenient_hasher: BaseSemanticHasher
+        self, lenient_hasher: SemanticAwarePythonHasher
     ) -> None:
         class Unknown:
             pass
@@ -244,26 +244,26 @@ class TestBaseSemanticHasherStrictMode:
 
 
 # ===================================================================
-# BaseSemanticHasher -- collision resistance
+# SemanticAwarePythonHasher -- collision resistance
 # ===================================================================
 
 
-class TestBaseSemanticHasherCollisionResistance:
+class TestSemanticAwarePythonHasherCollisionResistance:
     """Different inputs produce different hashes."""
 
-    def test_int_vs_string(self, hasher: BaseSemanticHasher) -> None:
+    def test_int_vs_string(self, hasher: SemanticAwarePythonHasher) -> None:
         assert hasher.hash_object(1) != hasher.hash_object("1")
 
-    def test_empty_list_vs_empty_tuple(self, hasher: BaseSemanticHasher) -> None:
+    def test_empty_list_vs_empty_tuple(self, hasher: SemanticAwarePythonHasher) -> None:
         assert hasher.hash_object([]) != hasher.hash_object(())
 
-    def test_empty_dict_vs_empty_list(self, hasher: BaseSemanticHasher) -> None:
+    def test_empty_dict_vs_empty_list(self, hasher: SemanticAwarePythonHasher) -> None:
         assert hasher.hash_object({}) != hasher.hash_object([])
 
-    def test_none_vs_string_none(self, hasher: BaseSemanticHasher) -> None:
+    def test_none_vs_string_none(self, hasher: SemanticAwarePythonHasher) -> None:
         assert hasher.hash_object(None) != hasher.hash_object("None")
 
-    def test_true_vs_one(self, hasher: BaseSemanticHasher) -> None:
+    def test_true_vs_one(self, hasher: SemanticAwarePythonHasher) -> None:
         """bool True and int 1 produce different hashes due to JSON encoding."""
         h_true = hasher.hash_object(True)
         h_one = hasher.hash_object(1)
@@ -271,34 +271,34 @@ class TestBaseSemanticHasherCollisionResistance:
 
 
 # ===================================================================
-# TypeHandlerRegistry -- register/get_handler roundtrip
+# PythonTypeHandlerRegistry -- register/get_handler roundtrip
 # ===================================================================
 
 
-class TestTypeHandlerRegistryBasics:
+class TestPythonTypeHandlerRegistryBasics:
     """register() + get_handler() roundtrip."""
 
-    def test_register_and_get_handler(self, registry: TypeHandlerRegistry) -> None:
+    def test_register_and_get_handler(self, registry: PythonTypeHandlerRegistry) -> None:
         handler = _FakeHandler()
         registry.register(int, handler)
         assert registry.get_handler(42) is handler
 
     def test_get_handler_returns_none_for_unregistered(
-        self, registry: TypeHandlerRegistry
+        self, registry: PythonTypeHandlerRegistry
     ) -> None:
         assert registry.get_handler("hello") is None
 
 
 # ===================================================================
-# TypeHandlerRegistry -- MRO-aware lookup
+# PythonTypeHandlerRegistry -- MRO-aware lookup
 # ===================================================================
 
 
-class TestTypeHandlerRegistryMRO:
+class TestPythonTypeHandlerRegistryMRO:
     """MRO-aware lookup: handler for parent class matches subclass."""
 
     def test_subclass_inherits_parent_handler(
-        self, registry: TypeHandlerRegistry
+        self, registry: PythonTypeHandlerRegistry
     ) -> None:
         class Base:
             pass
@@ -311,7 +311,7 @@ class TestTypeHandlerRegistryMRO:
         assert registry.get_handler(Child()) is handler
 
     def test_specific_handler_overrides_parent(
-        self, registry: TypeHandlerRegistry
+        self, registry: PythonTypeHandlerRegistry
     ) -> None:
         class Base:
             pass
@@ -328,41 +328,41 @@ class TestTypeHandlerRegistryMRO:
 
 
 # ===================================================================
-# TypeHandlerRegistry -- unregister
+# PythonTypeHandlerRegistry -- unregister
 # ===================================================================
 
 
-class TestTypeHandlerRegistryUnregister:
+class TestPythonTypeHandlerRegistryUnregister:
     """unregister() removes handler."""
 
-    def test_unregister_existing(self, registry: TypeHandlerRegistry) -> None:
+    def test_unregister_existing(self, registry: PythonTypeHandlerRegistry) -> None:
         handler = _FakeHandler()
         registry.register(int, handler)
         result = registry.unregister(int)
         assert result is True
         assert registry.get_handler(42) is None
 
-    def test_unregister_nonexistent(self, registry: TypeHandlerRegistry) -> None:
+    def test_unregister_nonexistent(self, registry: PythonTypeHandlerRegistry) -> None:
         result = registry.unregister(float)
         assert result is False
 
 
 # ===================================================================
-# TypeHandlerRegistry -- has_handler
+# PythonTypeHandlerRegistry -- has_handler
 # ===================================================================
 
 
-class TestTypeHandlerRegistryHasHandler:
+class TestPythonTypeHandlerRegistryHasHandler:
     """has_handler() boolean check."""
 
-    def test_has_handler_true(self, registry: TypeHandlerRegistry) -> None:
+    def test_has_handler_true(self, registry: PythonTypeHandlerRegistry) -> None:
         registry.register(int, _FakeHandler())
         assert registry.has_handler(int) is True
 
-    def test_has_handler_false(self, registry: TypeHandlerRegistry) -> None:
+    def test_has_handler_false(self, registry: PythonTypeHandlerRegistry) -> None:
         assert registry.has_handler(str) is False
 
-    def test_has_handler_via_mro(self, registry: TypeHandlerRegistry) -> None:
+    def test_has_handler_via_mro(self, registry: PythonTypeHandlerRegistry) -> None:
         class Base:
             pass
 
@@ -374,17 +374,17 @@ class TestTypeHandlerRegistryHasHandler:
 
 
 # ===================================================================
-# TypeHandlerRegistry -- registered_types
+# PythonTypeHandlerRegistry -- registered_types
 # ===================================================================
 
 
-class TestTypeHandlerRegistryRegisteredTypes:
+class TestPythonTypeHandlerRegistryRegisteredTypes:
     """registered_types() lists types."""
 
-    def test_registered_types_empty(self, registry: TypeHandlerRegistry) -> None:
+    def test_registered_types_empty(self, registry: PythonTypeHandlerRegistry) -> None:
         assert registry.registered_types() == []
 
-    def test_registered_types_populated(self, registry: TypeHandlerRegistry) -> None:
+    def test_registered_types_populated(self, registry: PythonTypeHandlerRegistry) -> None:
         registry.register(int, _FakeHandler())
         registry.register(str, _FakeHandler())
         types = registry.registered_types()
@@ -392,14 +392,14 @@ class TestTypeHandlerRegistryRegisteredTypes:
 
 
 # ===================================================================
-# TypeHandlerRegistry -- thread safety
+# PythonTypeHandlerRegistry -- thread safety
 # ===================================================================
 
 
-class TestTypeHandlerRegistryThreadSafety:
+class TestPythonTypeHandlerRegistryThreadSafety:
     """Concurrent register/lookup doesn't crash."""
 
-    def test_concurrent_register_lookup(self, registry: TypeHandlerRegistry) -> None:
+    def test_concurrent_register_lookup(self, registry: PythonTypeHandlerRegistry) -> None:
         errors: list[Exception] = []
 
         def register_types(start: int, count: int) -> None:
@@ -435,13 +435,13 @@ class TestTypeHandlerRegistryThreadSafety:
 
 
 # ===================================================================
-# BuiltinTypeHandlerRegistry
+# BuiltinPythonTypeHandlerRegistry
 # ===================================================================
 
 
-class TestBuiltinTypeHandlerRegistry:
-    """BuiltinTypeHandlerRegistry is pre-populated with built-in handlers."""
+class TestBuiltinPythonTypeHandlerRegistry:
+    """BuiltinPythonTypeHandlerRegistry is pre-populated with built-in handlers."""
 
     def test_construction(self) -> None:
-        reg = BuiltinTypeHandlerRegistry()
+        reg = BuiltinPythonTypeHandlerRegistry()
         assert len(reg.registered_types()) > 0

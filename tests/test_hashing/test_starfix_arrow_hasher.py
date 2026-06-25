@@ -32,7 +32,6 @@ from orcapod.hashing.versioned_hashers import (
     _CURRENT_ARROW_HASHER_ID,
     get_versioned_semantic_arrow_hasher,
 )
-from orcapod.semantic_types import SemanticTypeRegistry
 from orcapod.types import ContentHash
 
 
@@ -46,8 +45,11 @@ _DIGEST_LEN = 35  # 3 version bytes + 32 SHA-256 bytes
 
 
 def _make_hasher() -> StarfixArrowHasher:
+    from orcapod.contexts import get_default_context
+    ctx = get_default_context()
     return StarfixArrowHasher(
-        semantic_registry=SemanticTypeRegistry(),
+        type_converter=ctx.type_converter,
+        semantic_hasher=ctx.semantic_hasher,
         hasher_id=HASHER_ID,
     )
 
