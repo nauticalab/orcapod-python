@@ -1,5 +1,10 @@
 """Regression tests for ITL-432: pydantic/dataclass models as pipeline columns.
 
+These tests cover the exact scenarios described in bug report #184:
+
+    "Pydantic and dataclass models cannot flow through Orcapod pipelines as
+    columns, even though Parquet/IPC serialization works correctly."
+
 Bug A — extension type reaching ArrowDigester:
     Before the fix, hashing a table with a pydantic or dataclass column raised
     ``TypeError: unhashable type: '_ArrowExt_...'`` inside starfix because
@@ -7,11 +12,24 @@ Bug A — extension type reaching ArrowDigester:
     columns intact, and ``ArrowDigester._primitive_data_type_string`` uses the
     type as a dict key.
 
+    Impact from the bug report: "Building any source that carries a Pydantic or
+    dataclass column crashes, because starfix requires hashable types for schema
+    operations."
+
 Bug B — metadata loss on Polars round-trip:
     Before the fix, ``pl.DataFrame(table).to_arrow()`` raised
     ``ValueError: Arrow extension type '...': expected metadata ... but got b''``
     because the synthesized Polars extension types were built without the
     ``metadata`` argument, so ``__arrow_ext_deserialize__`` received empty bytes.
+
+    Impact from the bug report: "Join operations that round-trip through
+    pl.DataFrame(table).to_arrow() fail when processing model columns."
+
+Test coverage:
+    1. Low-level: direct ``StarfixArrowHasher.hash_table`` on extension-type tables.
+    2. End-to-end pipeline: ``DictSource``, ``ArrowTableStream.content_hash()``,
+       ``PolarsFilter``, and ``Join`` — all operators that trigger the two bugs in
+       real usage.
 """
 
 from __future__ import annotations
@@ -24,6 +42,9 @@ import pytest
 from pydantic import BaseModel
 
 from orcapod.contexts import get_default_context
+from orcapod.core.operators import Join, PolarsFilter
+from orcapod.core.sources import DictSource
+from orcapod.core.streams import ArrowTableStream
 from orcapod.hashing.arrow_hashers import StarfixArrowHasher
 from orcapod.types import ContentHash
 
@@ -48,7 +69,7 @@ def hasher(ctx):
 
 
 # ---------------------------------------------------------------------------
-# Model definitions
+# Model definitions — must be at module level so their FQCNs are importable
 # ---------------------------------------------------------------------------
 
 
@@ -61,6 +82,19 @@ class _Point(BaseModel):
 class _Vec:
     a: float
     b: float
+
+
+# Models for DictSource pipeline tests.  Separate names to keep registrations
+# independent of the hashing-level model registrations above.
+class _Cfg(BaseModel):
+    lr: float
+    epochs: int
+
+
+@dataclasses.dataclass
+class _Run:
+    seed: int
+    batch_size: int
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +126,34 @@ def _make_dataclass_table(ctx) -> pa.Table:
         arrow_type, pa.array(storage_vals, type=arrow_type.storage_type)
     )
     return pa.table({"v": ext_arr, "id": pa.array([1, 2], type=pa.int64())})
+
+
+def _make_pydantic_stream(ctx) -> ArrowTableStream:
+    """Return a stream with tag ``id`` and pydantic model data column ``pt``."""
+    arrow_type = ctx.type_converter.register_python_class(_Point)
+    storage_vals = [
+        ctx.type_converter.python_to_storage(_Point(x=1, y=2), _Point),
+        ctx.type_converter.python_to_storage(_Point(x=3, y=4), _Point),
+    ]
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_type, pa.array(storage_vals, type=arrow_type.storage_type)
+    )
+    table = pa.table({"id": pa.array([1, 2], type=pa.int64()), "pt": ext_arr})
+    return ArrowTableStream(table, tag_columns=["id"])
+
+
+def _make_dataclass_stream(ctx) -> ArrowTableStream:
+    """Return a stream with tag ``id`` and dataclass data column ``v``."""
+    arrow_type = ctx.type_converter.register_python_class(_Vec)
+    storage_vals = [
+        ctx.type_converter.python_to_storage(_Vec(a=1.0, b=2.0), _Vec),
+        ctx.type_converter.python_to_storage(_Vec(a=3.0, b=4.0), _Vec),
+    ]
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_type, pa.array(storage_vals, type=arrow_type.storage_type)
+    )
+    table = pa.table({"id": pa.array([1, 2], type=pa.int64()), "v": ext_arr})
+    return ArrowTableStream(table, tag_columns=["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -180,3 +242,196 @@ class TestBugBPolarsRoundtrip:
         table = _make_dataclass_table(ctx)
         round_tripped = pl.DataFrame(table).to_arrow()
         assert hasher.hash_table(table) == hasher.hash_table(round_tripped)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end pipeline tests — replicating the exact usage scenario from #184
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEndPipelineWithModelColumns:
+    """End-to-end pipeline tests matching the bug report scenarios.
+
+    The bug report states:
+    - "Building any source that carries a Pydantic or dataclass column crashes,
+      because starfix requires hashable types for schema operations." (Bug A)
+    - "Join operations that round-trip through pl.DataFrame(table).to_arrow()
+      fail when processing model columns." (Bug B)
+
+    These tests replicate those exact paths through the real pipeline API.
+    """
+
+    # ------------------------------------------------------------------
+    # DictSource — the natural way to build a source with model columns
+    # ------------------------------------------------------------------
+
+    def test_dict_source_pydantic_column_content_hash(self, ctx):
+        """DictSource with pydantic column: content_hash must not crash (Bug A).
+
+        This is the primary bug-report scenario: a user puts pydantic model
+        instances into a source and tries to hash it.
+        """
+        # Register _Cfg with the default context's type converter so that
+        # DictSource can resolve it when building the Arrow schema.
+        ctx.type_converter.register_python_class(_Cfg)
+        src = DictSource(
+            data=[
+                {"run_id": 1, "cfg": _Cfg(lr=0.01, epochs=10)},
+                {"run_id": 2, "cfg": _Cfg(lr=0.001, epochs=20)},
+            ],
+            tag_columns=["run_id"],
+            data_schema={"run_id": int, "cfg": _Cfg},
+        )
+        # DictSource IS the stream — content_hash() is called directly on it.
+        result = src.content_hash()
+        assert isinstance(result, ContentHash)
+
+    def test_dict_source_dataclass_column_content_hash(self, ctx):
+        """DictSource with dataclass column: content_hash must not crash (Bug A)."""
+        # Register _Run with the default context's type converter so that
+        # DictSource can resolve it when building the Arrow schema.
+        ctx.type_converter.register_python_class(_Run)
+        src = DictSource(
+            data=[
+                {"run_id": 1, "run": _Run(seed=42, batch_size=32)},
+                {"run_id": 2, "run": _Run(seed=7, batch_size=64)},
+            ],
+            tag_columns=["run_id"],
+            data_schema={"run_id": int, "run": _Run},
+        )
+        result = src.content_hash()
+        assert isinstance(result, ContentHash)
+
+    def test_dict_source_pydantic_hash_reflects_model_values(self, ctx):
+        """Different model values produce different content hashes."""
+        # Register _Cfg so DictSource's Arrow schema conversion succeeds.
+        ctx.type_converter.register_python_class(_Cfg)
+
+        def _src(lr):
+            return DictSource(
+                data=[{"run_id": 1, "cfg": _Cfg(lr=lr, epochs=10)}],
+                tag_columns=["run_id"],
+                data_schema={"run_id": int, "cfg": _Cfg},
+            )
+
+        assert _src(0.01).content_hash() != _src(0.1).content_hash()
+
+    # ------------------------------------------------------------------
+    # ArrowTableStream.content_hash — stream-level Bug A trigger
+    # ------------------------------------------------------------------
+
+    def test_stream_with_pydantic_column_content_hash(self, ctx):
+        """ArrowTableStream.content_hash on a pydantic column must not crash (Bug A)."""
+        stream = _make_pydantic_stream(ctx)
+        result = stream.content_hash()
+        assert isinstance(result, ContentHash)
+
+    def test_stream_with_dataclass_column_content_hash(self, ctx):
+        """ArrowTableStream.content_hash on a dataclass column must not crash (Bug A)."""
+        stream = _make_dataclass_stream(ctx)
+        result = stream.content_hash()
+        assert isinstance(result, ContentHash)
+
+    def test_stream_content_hash_is_deterministic(self, ctx):
+        """content_hash is stable across repeated calls."""
+        stream = _make_pydantic_stream(ctx)
+        assert stream.content_hash() == stream.content_hash()
+
+    # ------------------------------------------------------------------
+    # PolarsFilter — Bug B trigger via pl.DataFrame(table).filter().to_arrow()
+    # ------------------------------------------------------------------
+
+    def test_pydantic_column_through_polars_filter(self, ctx):
+        """PolarsFilter on a stream with a pydantic column must not crash (Bug B).
+
+        PolarsFilter calls pl.DataFrame(table).filter(...).to_arrow() internally.
+        Before the fix this raised ValueError from __arrow_ext_deserialize__.
+        """
+        stream = _make_pydantic_stream(ctx)
+        filtered = PolarsFilter().process(stream)
+        result = filtered.as_table()
+        assert len(result) == 2
+
+    def test_dataclass_column_through_polars_filter(self, ctx):
+        """PolarsFilter on a stream with a dataclass column must not crash (Bug B)."""
+        stream = _make_dataclass_stream(ctx)
+        filtered = PolarsFilter().process(stream)
+        result = filtered.as_table()
+        assert len(result) == 2
+
+    def test_polars_filter_with_constraint_on_pydantic_stream(self, ctx):
+        """PolarsFilter with an id constraint correctly filters rows and preserves model column."""
+        stream = _make_pydantic_stream(ctx)
+        # Filter to only keep id == 1
+        filtered = PolarsFilter(constraints={"id": 1}).process(stream)
+        result = filtered.as_table()
+        assert len(result) == 1
+
+    def test_polars_filter_no_op_preserves_all_rows(self, ctx):
+        """A no-op PolarsFilter (no constraints) returns all rows with all columns intact.
+
+        Note: content_hash() will differ between the raw stream and the filtered
+        stream because they have different producers (different identity_structure),
+        but the underlying data must be identical.
+        """
+        stream = _make_pydantic_stream(ctx)
+        filtered = PolarsFilter().process(stream)
+        original_table = stream.as_table()
+        filtered_table = filtered.as_table()
+        assert len(filtered_table) == len(original_table)
+        assert "pt" in filtered_table.column_names
+        assert "id" in filtered_table.column_names
+
+    # ------------------------------------------------------------------
+    # Join — Bug B trigger via pl.DataFrame(table).join(...).to_arrow()
+    # ------------------------------------------------------------------
+
+    def test_pydantic_column_through_join(self, ctx):
+        """Join on a stream with a pydantic column must not crash (Bug B).
+
+        Join calls pl.DataFrame(table).join(...).to_arrow() internally.
+        Before the fix this raised ValueError from __arrow_ext_deserialize__.
+        """
+        pydantic_stream = _make_pydantic_stream(ctx)
+        # Second stream shares the "id" tag but has a plain score column.
+        plain_table = pa.table({
+            "id": pa.array([1, 2], type=pa.int64()),
+            "score": pa.array([0.9, 0.8], type=pa.float64()),
+        })
+        plain_stream = ArrowTableStream(plain_table, tag_columns=["id"])
+
+        out = Join().process(pydantic_stream, plain_stream)
+        result = out.as_table()
+        assert len(result) == 2
+        # Both the pydantic column and the score column should be present
+        assert "pt" in result.column_names
+        assert "score" in result.column_names
+
+    def test_dataclass_column_through_join(self, ctx):
+        """Join on a stream with a dataclass column must not crash (Bug B)."""
+        dataclass_stream = _make_dataclass_stream(ctx)
+        plain_table = pa.table({
+            "id": pa.array([1, 2], type=pa.int64()),
+            "score": pa.array([0.9, 0.8], type=pa.float64()),
+        })
+        plain_stream = ArrowTableStream(plain_table, tag_columns=["id"])
+
+        out = Join().process(dataclass_stream, plain_stream)
+        result = out.as_table()
+        assert len(result) == 2
+        assert "v" in result.column_names
+        assert "score" in result.column_names
+
+    def test_join_partial_overlap_with_pydantic_column(self, ctx):
+        """Join with partial tag overlap correctly returns only matched rows."""
+        pydantic_stream = _make_pydantic_stream(ctx)
+        # Second stream only has id=1 — join result should be 1 row.
+        plain_table = pa.table({
+            "id": pa.array([1], type=pa.int64()),
+            "score": pa.array([0.9], type=pa.float64()),
+        })
+        plain_stream = ArrowTableStream(plain_table, tag_columns=["id"])
+
+        out = Join().process(pydantic_stream, plain_stream)
+        result = out.as_table()
+        assert len(result) == 1
