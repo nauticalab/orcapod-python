@@ -107,7 +107,7 @@ Remove any optional sections that don't apply rather than leaving them empty.
 When working on a feature, create and checkout a git branch using the `gitBranchName`
 returned by the primary Linear issue (e.g. `eywalker/plt-911-add-documentation-for-orcapod-python`).
 
-**Feature branch PRs always target the `extension-type-system` branch.** The `extension-type-system` → `dev` → `main` PRs are used for integration and releases.
+**Feature branch PRs always target `main`.** Create a feature branch from `main` and open PRs against `main`.
 
 If a feature branch / PR corresponds to multiple Linear issues, list all of them in the
 PR description body so that Linear's GitHub integration auto-tracks the PR against each
