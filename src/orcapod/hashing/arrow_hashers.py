@@ -68,7 +68,7 @@ class StarfixArrowHasher:
         in field metadata — so that ``ArrowDigester`` can hash them without encountering
         a live ``pa.ExtensionType``, which is unhashable.
         """
-        new_columns: list[pa.Array] = []
+        new_columns: list[pa.Array | pa.ChunkedArray] = []
         new_fields: list[pa.Field] = []
 
         for i, field in enumerate(table.schema):

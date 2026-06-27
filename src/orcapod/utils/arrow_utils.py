@@ -321,8 +321,8 @@ def normalize_extension_columns(table: "pa.Table") -> "pa.Table":
     if not any(isinstance(field.type, pa.ExtensionType) for field in table.schema):
         return table
 
-    new_columns = []
-    new_fields = []
+    new_columns: list[pa.ChunkedArray] = []
+    new_fields: list[pa.Field] = []
     for i, field in enumerate(table.schema):
         if isinstance(field.type, pa.ExtensionType):
             ext_type = field.type
