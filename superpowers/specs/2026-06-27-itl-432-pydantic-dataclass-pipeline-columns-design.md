@@ -6,9 +6,30 @@
 ## Overview
 
 Pydantic models and dataclasses cannot flow through Orcapod pipelines as column
-types. Two independent defects in the Arrow/Polars extension type machinery are
-responsible. Both bugs are self-contained and addressed by surgical changes to
-the hashing handler registry and Polars extension type construction.
+types. Two independent defects are responsible:
+
+- **Bug A** — Extension-typed columns crash `ArrowDigester` because no
+  normalization step converts live `pa.ExtensionType` columns to the
+  storage-type-plus-Arrow-metadata representation that starfix expects.
+- **Bug B** — `pl.DataFrame(table).to_arrow()` raises `ValueError` because
+  the synthesized Polars extension types carry no metadata, so
+  `__arrow_ext_deserialize__` receives `b''` instead of the expected category
+  bytes.
+
+Both bugs are self-contained and addressed by surgical changes to
+`StarfixArrowHasher` and the two logical type `__init__` methods.
+
+---
+
+## Why the extension type data is already fully captured
+
+Pydantic models and dataclasses are stored as Arrow extension types whose
+storage type is a `pa.struct` of the model/dataclass fields, with each field
+recursively resolved to an Arrow type. The entirety of the model's data content
+is therefore already captured in the extension type's storage value. No
+separate semantic handler is needed to hash pydantic/dataclass columns — the
+Arrow hashing layer already handles the underlying struct data once the
+extension type wrapper is stripped.
 
 ---
 
@@ -22,102 +43,63 @@ TypeError: unhashable type: '_ArrowExt___main___Cfg'
 
 ### Root cause
 
-No semantic handlers are registered for `pydantic.BaseModel` subclasses or
-dataclasses. In `SemanticHashingVisitor.visit_extension()`, when
-`type_handler_registry.has_handler(python_type)` returns False, the visitor
-returns the extension type and its storage value unchanged (the passthrough
-path). That extension-typed column flows directly into `ArrowDigester.hash_table`.
+`SemanticHashingVisitor.visit_extension()` has a passthrough path: when no
+semantic handler is registered for the resolved Python type, it returns the
+extension type and storage value unchanged. The extension-typed column then
+flows through `StarfixArrowHasher._process_table_columns` as-is and reaches
+`ArrowDigester.hash_table`.
 
-`ArrowDigester` is a pure-Python starfix implementation. Its
-`_primitive_data_type_string` function builds a lookup dict with Arrow
-primitive type instances as keys (`if dt in _simple:`). Performing a dict
-membership test on an unhashable extension type raises `TypeError`. Even if
-`__hash__` were added to the extension type, `ArrowDigester` would raise
-`NotImplementedError` because it has no handler for extension types — the
-only correct fix is ensuring extension types never reach it.
+`ArrowDigester` has no `pa.types.is_extension()` branch. Extension types fall
+through all type guards in `_data_type_to_value` and crash at `if dt in
+_simple:` in `_primitive_data_type_string` because `pa.ExtensionType`
+instances are not hashable (they override `__eq__` without `__hash__`).
 
-### Fix: register semantic handlers for pydantic models and dataclasses
+The correct representation for an extension-typed column when stored outside
+Python memory (IPC/Parquet) is: the **storage type** for the data, plus
+`ARROW:extension:name` and `ARROW:extension:metadata` in **field metadata**.
+This is exactly what `ArrowDigester` knows how to process.
 
-**`PythonTypeHandlerProtocol` — add optional `supports_type`**
+### Fix: normalize extension columns to storage type + metadata in `StarfixArrowHasher`
 
-Add an optional `supports_type(target_type: type) -> bool` method,
-mirroring the `supports_class` pattern already used by
-`LogicalTypeFactoryProtocol`. When defined, the handler registry calls it
-after finding a handler via MRO walk; if it returns False the walk continues.
-Handlers without `supports_type` are treated as unconditional matches
-(existing behaviour unchanged).
-
-**`PythonTypeHandlerRegistry` — respect `supports_type` in MRO walk**
-
-Update `get_handler_for_type` to apply `supports_type` at every lookup point —
-both the initial exact-match check and the MRO walk:
+After `SemanticHashingVisitor` processes each column, any column whose
+resulting type is still a `pa.ExtensionType` was not handled by the visitor.
+At that point, `StarfixArrowHasher._process_table_columns` normalizes it to
+the IPC representation: storage type for the array, extension identity in
+field metadata.
 
 ```python
-def _try_handler(handler, target_type):
-    """Return handler if it accepts target_type, else None."""
-    if handler is None:
-        return None
-    if hasattr(handler, "supports_type") and not handler.supports_type(target_type):
-        return None
-    return handler
-
-# exact match
-handler = _try_handler(self._handlers.get(target_type), target_type)
-if handler is not None:
-    return handler
-# MRO walk
-for base in target_type.__mro__[1:]:
-    handler = _try_handler(self._handlers.get(base), target_type)
-    if handler is not None:
-        return handler
-return None
+if isinstance(new_type, pa.ExtensionType):
+    # Extension type was not converted by the visitor.
+    # Normalize to storage type + Arrow extension metadata (IPC representation)
+    # so that ArrowDigester can hash it correctly.
+    ext_type = new_type
+    serialized = ext_type.__arrow_ext_serialize__()
+    new_columns.append(pa.array(processed_data, type=ext_type.storage_type))
+    new_fields.append(pa.field(
+        field.name,
+        ext_type.storage_type,
+        nullable=field.nullable,
+        metadata={
+            b"ARROW:extension:name": ext_type.extension_name.encode("utf-8"),
+            b"ARROW:extension:metadata": serialized,
+        },
+    ))
+else:
+    new_columns.append(pa.array(processed_data, type=new_type))
+    new_fields.append(field.with_type(new_type))
 ```
 
-`get_handler(obj)` delegates to `get_handler_for_type(type(obj))` and
-`has_handler(target_type)` delegates to `get_handler_for_type`, so both
-inherit the fix automatically.
+The existing `has_extension_metadata` check in `hash_table` already detects
+`ARROW:extension:name` in field metadata (not live `pa.ExtensionType` objects),
+so `clean_schema_for_hashing` and `ArrowDigester(include_metadata=True)` are
+invoked correctly after this change.
 
-**New handlers in `builtin_handlers.py`**
-
-```python
-class PydanticModelHandler:
-    """Handler for pydantic BaseModel instances — delegates to model_dump()."""
-
-    def handle(self, obj: Any, hasher: SemanticHasherProtocol) -> Any:
-        return obj.model_dump()
-
-
-class DataclassModelHandler:
-    """Handler for dataclass instances — delegates to dataclasses.asdict()."""
-
-    def supports_type(self, target_type: type) -> bool:
-        import dataclasses
-        return dataclasses.is_dataclass(target_type)
-
-    def handle(self, obj: Any, hasher: SemanticHasherProtocol) -> Any:
-        import dataclasses
-        return dataclasses.asdict(obj)
-```
-
-`model_dump()` and `dataclasses.asdict()` both return plain dicts that
-accurately reflect the model's content. The recursive semantic hasher hashes
-the returned dict, producing a stable content-based hash.
-
-**Registration in `register_builtin_python_type_handlers`**
-
-```python
-from pydantic import BaseModel
-registry.register(BaseModel, PydanticModelHandler())
-
-import dataclasses as _dc
-registry.register(object, DataclassModelHandler())
-```
-
-`PydanticModelHandler` is registered against `pydantic.BaseModel` — MRO
-lookup finds it for any subclass. `DataclassModelHandler` is registered
-against `object` (matching the pattern used by `DataclassLogicalTypeFactory`
-in `v0.1.json`) and gated by `supports_type`, which returns True only for
-actual dataclass types.
+**Why not semantic handlers for pydantic/dataclass?** The model data is already
+captured in the extension type storage value. Adding semantic handlers that call
+`model_dump()` / `dataclasses.asdict()` and re-hash the dict would be redundant.
+The storage struct value IS the dict. The IPC normalization approach is simpler
+and more general — it handles any extension type with a passthrough, not only
+pydantic/dataclass.
 
 ---
 
@@ -136,12 +118,12 @@ b'{"category": "orcapod.pydantic"}' but got b''
 (line 93) both call `make_polars_extension_type(logical_name, storage_type)`
 without passing `metadata`. The Arrow extension type is built with category
 metadata (`b'{"category": "orcapod.pydantic"}'`), but the Polars extension
-type carries no metadata.
+type carries no metadata string.
 
 When `pl.DataFrame(table).to_arrow()` reconstructs the Arrow column, Polars
-calls `__arrow_ext_deserialize__` with the Polars extension's metadata — which
-is empty bytes (`b''`). The strict equality check in `_deserialize` fails
-because `b'' != b'{"category": "orcapod.pydantic"}'`.
+calls `__arrow_ext_deserialize__` with the Polars extension's metadata string
+serialized to bytes — which is empty (`b''`). The strict equality check in
+`_deserialize` fails because `b'' != b'{"category": "orcapod.pydantic"}'`.
 
 ### Fix: pass category metadata to `make_polars_extension_type`
 
@@ -161,9 +143,12 @@ self._polars_ext_class = make_polars_extension_type(
 
 Same change in `DataclassLogicalType.__init__`, using `DATACLASS_CATEGORY`.
 
-After this fix, `pl.DataFrame(table).to_arrow()` passes
-`b'{"category": "orcapod.pydantic"}'` to `__arrow_ext_deserialize__`, which
-matches `_metadata` and succeeds.
+After this fix, the Polars extension type's `metadata_str` is
+`'{"category": "orcapod.pydantic"}'`. When `to_arrow()` calls
+`__arrow_ext_deserialize__`, it passes
+`b'{"category": "orcapod.pydantic"}'`, which matches `_metadata` and
+succeeds. The resulting table has live extension type columns, which Bug A's
+normalization then processes correctly before hashing.
 
 ---
 
@@ -171,9 +156,7 @@ matches `_metadata` and succeeds.
 
 | File | Change |
 |------|--------|
-| `src/orcapod/protocols/hashing_protocols.py` | Add optional `supports_type` to `PythonTypeHandlerProtocol` docstring and protocol stub |
-| `src/orcapod/hashing/semantic_hashing/type_handler_registry.py` | Update `get_handler_for_type` to call `supports_type` when present; `get_handler` inherits the fix via delegation |
-| `src/orcapod/hashing/semantic_hashing/builtin_handlers.py` | Add `PydanticModelHandler`, `DataclassModelHandler`; register both in `register_builtin_python_type_handlers` |
+| `src/orcapod/hashing/arrow_hashers.py` | Normalize extension type columns to storage type + field metadata after visitor passthrough |
 | `src/orcapod/extension_types/pydantic_logical_type_factory.py` | Pass `metadata` to `make_polars_extension_type()` in `PydanticLogicalType.__init__` |
 | `src/orcapod/extension_types/dataclass_logical_type_factory.py` | Pass `metadata` to `make_polars_extension_type()` in `DataclassLogicalType.__init__` |
 | `tests/test_hashing/test_pydantic_dataclass_hashing.py` | New regression tests (see below) |
@@ -200,16 +183,12 @@ Assert no `ValueError` is raised and the hash equals that of the original table.
 **Bug B regression — dataclass Polars round-trip:**
 Same as above with a dataclass column.
 
-**Handler unit tests:**
-- `PydanticModelHandler.handle` returns `model.model_dump()` for a flat model
-- `DataclassModelHandler.handle` returns `dataclasses.asdict(obj)` for a flat dataclass
-- `DataclassModelHandler.supports_type` returns True for dataclasses, False for pydantic models and plain classes
-- Registry MRO walk respects `supports_type`: registering `DataclassModelHandler` against `object` does not intercept non-dataclass lookups
-
 ---
 
 ## Out of scope
 
-- Adding `__hash__` to synthesized extension types (tracked as a follow-up)
-- Schema cleaner changes (no longer needed — the Polars metadata fix resolves the underlying cause)
+- Adding `__hash__` to synthesized extension types (tracked as follow-up in starfix)
+- Semantic handlers for pydantic/dataclass (not needed; storage value IS the data)
+- Schema cleaner changes (not needed; Polars metadata fix resolves the underlying cause)
 - Deserialization relaxation (no backward-compatibility shims; greenfield project)
+- Official starfix extension type support (tracked as separate Linear issue in Starfix v0.4.0)

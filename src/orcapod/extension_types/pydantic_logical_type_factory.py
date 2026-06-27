@@ -90,7 +90,11 @@ class PydanticLogicalType:
         # top-level extension type from each field's Arrow type before inserting it into the
         # struct. On the read path, ``reconstruct_from_arrow`` receives a ``storage_type``
         # already guaranteed storage-safe by ``register_storage_type``.
-        self._polars_ext_class = make_polars_extension_type(logical_name, storage_type)
+        self._polars_ext_class = make_polars_extension_type(
+            logical_name,
+            storage_type,
+            metadata=json.dumps({"category": PYDANTIC_CATEGORY}),
+        )
         self._polars_ext: pl.BaseExtension | None = None
 
     @property

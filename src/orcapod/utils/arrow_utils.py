@@ -285,6 +285,75 @@ def normalize_view_types(arrow_type: "pa.DataType") -> "pa.DataType":
     return arrow_type
 
 
+def normalize_extension_columns(table: "pa.Table") -> "pa.Table":
+    """Return a copy of ``table`` with all extension-typed columns converted to
+    their IPC/Parquet storage representation.
+
+    For each top-level column whose type is a ``pa.ExtensionType``, the column
+    data is replaced with the underlying storage array (via
+    ``ExtensionArray.storage`` — no Python-level materialization) and the field
+    gains ``ARROW:extension:name`` and ``ARROW:extension:metadata`` keys in its
+    metadata, exactly matching the on-disk Arrow IPC/Parquet format.
+
+    Non-extension columns are returned unchanged.  Schema-level metadata and
+    existing per-field metadata are preserved; the two ``ARROW:extension:*``
+    keys are merged in (or added) without touching any other metadata already
+    on the field.
+
+    This is a fast path: for tables with no extension columns the original
+    table object is returned immediately.  For tables that do have extension
+    columns a new table is constructed; the column data itself is not copied —
+    ``ExtensionArray.storage`` returns a zero-copy view of the underlying
+    buffers.
+
+    Note: only **top-level** extension columns are handled.  Extension types
+    nested inside struct fields or list element types are not supported by the
+    orcapod type system (see ET1 in DESIGN_ISSUES.md) and are left unchanged.
+
+    Args:
+        table: Input Arrow table, may contain extension-typed columns.
+
+    Returns:
+        A ``pa.Table`` where every top-level extension-typed column has been
+        replaced by its storage-typed equivalent with extension identity
+        preserved in field metadata.
+    """
+    if not any(isinstance(field.type, pa.ExtensionType) for field in table.schema):
+        return table
+
+    new_columns = []
+    new_fields = []
+    for i, field in enumerate(table.schema):
+        if isinstance(field.type, pa.ExtensionType):
+            ext_type = field.type
+            # combine_chunks() returns a single ExtensionArray; .storage is a
+            # zero-copy view of the underlying buffers with the storage type.
+            storage_arr = table.column(i).combine_chunks().storage
+            serialized = ext_type.__arrow_ext_serialize__()
+            # Merge extension identity into existing field metadata (if any)
+            # so that non-extension keys already on the field are preserved.
+            existing_meta = dict(field.metadata) if field.metadata else {}
+            existing_meta[b"ARROW:extension:name"] = (
+                ext_type.extension_name.encode("utf-8")
+            )
+            existing_meta[b"ARROW:extension:metadata"] = serialized
+            new_fields.append(pa.field(
+                field.name,
+                ext_type.storage_type,
+                nullable=field.nullable,
+                metadata=existing_meta,
+            ))
+            new_columns.append(storage_arr)
+        else:
+            new_columns.append(table.column(i))
+            new_fields.append(field)
+
+    return pa.table(
+        new_columns,
+        schema=pa.schema(new_fields, metadata=table.schema.metadata),
+    )
+
+
 def normalize_table_view_types(table: "pa.Table") -> "pa.Table":
     """Cast a table's view-typed columns to their large variants.
 

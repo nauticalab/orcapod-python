@@ -853,6 +853,27 @@ Should be removed in the next breaking release. Consider adding deprecation warn
 
 ---
 
+### H5 — `_process_table_columns` materializes extension columns to Python even with no handler
+**Status:** open
+**Severity:** medium
+**Issue:** ITL-433
+
+`StarfixArrowHasher._process_table_columns` calls `to_pylist()` on every extension-typed
+column before running `SemanticHashingVisitor`. For columns whose Python type has no registered
+semantic handler (pydantic models, dataclasses, any unhandled extension type), the visitor
+returns the value unchanged and the data is immediately re-serialized back to Arrow. The Python
+roundtrip serves no purpose in this case and is O(rows) deserialization work wasted.
+
+The fix is to short-circuit at the column level: before calling `to_pylist()`, check whether
+`type_handler_registry.has_handler(python_type)` would be True for this column's extension
+type. If not, call `normalize_extension_columns()` directly on the Arrow column (uses
+`ExtensionArray.storage`, no Python materialization) and skip the visitor loop entirely.
+Columns with a registered handler (e.g. `Path`) continue through the existing path unchanged.
+
+The `normalize_extension_columns` utility landed in ITL-432.
+
+---
+
 ## `src/orcapod/utils/`
 
 ### U1 — Source-info column type hard-coded to `large_string`
