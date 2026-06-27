@@ -7,6 +7,7 @@ from starfix import ArrowDigester
 
 from orcapod.hashing.schema_cleaner import clean_schema_for_hashing, has_extension_metadata
 from orcapod.hashing.visitors import SemanticHashingVisitor
+from orcapod.utils.arrow_utils import normalize_extension_columns
 from orcapod.types import ContentHash
 
 if TYPE_CHECKING:
@@ -57,8 +58,17 @@ class StarfixArrowHasher:
         return self._hasher_id
 
     def _process_table_columns(self, table: "pa.Table | pa.RecordBatch") -> "pa.Table":
-        """Replace semantic-typed columns with their content-hash bytes."""
-        new_columns: list[pa.Array] = []
+        """Replace semantic-typed columns with content-hash bytes; normalize extension columns.
+
+        For columns whose Python type has a registered semantic handler (e.g. ``Path``),
+        the extension-typed column is replaced by a ``pa.large_binary()`` column of
+        content-hash tokens.  For all other extension-typed columns (visitor passthrough),
+        the column is normalized to IPC storage representation via
+        ``normalize_extension_columns`` — storage type for the data, extension identity
+        in field metadata — so that ``ArrowDigester`` can hash them without encountering
+        a live ``pa.ExtensionType``, which is unhashable.
+        """
+        new_columns: list[pa.Array | pa.ChunkedArray] = []
         new_fields: list[pa.Field] = []
 
         for i, field in enumerate(table.schema):
@@ -91,6 +101,7 @@ class StarfixArrowHasher:
 
                 if new_type is None:
                     new_type = field.type
+
                 new_columns.append(pa.array(processed_data, type=new_type))
                 new_fields.append(field.with_type(new_type))
 
@@ -99,10 +110,16 @@ class StarfixArrowHasher:
                     f"Failed to process column '{field.name}': {exc}"
                 ) from exc
 
-        return pa.table(
+        intermediate = pa.table(
             new_columns,
             schema=pa.schema(new_fields, metadata=table.schema.metadata),
         )
+        # Normalize any remaining extension-typed columns to their IPC storage
+        # representation (storage type + ARROW:extension:* field metadata).
+        # This handles the visitor passthrough case — extension types with no
+        # registered semantic handler — so that ArrowDigester never receives a
+        # live pa.ExtensionType, which is unhashable and would crash starfix.
+        return normalize_extension_columns(intermediate)
 
     def hash_schema(self, schema: "pa.Schema") -> ContentHash:
         """Hash an Arrow schema using the starfix canonical algorithm."""

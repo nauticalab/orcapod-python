@@ -9,10 +9,58 @@ from orcapod.utils.arrow_utils import (
     apply_column_config,
     infer_schema_nullable,
     make_schema_non_nullable,
+    normalize_extension_columns,
     normalize_table_view_types,
     normalize_view_types,
     prepare_prefixed_columns,
 )
+
+
+# ---------------------------------------------------------------------------
+# Minimal extension types for normalize_extension_columns tests.
+# These are self-contained and do not depend on the orcapod type-converter.
+# ---------------------------------------------------------------------------
+
+
+class _TestIntExt(pa.ExtensionType):
+    """Extension type wrapping int32 storage, used in normalize tests."""
+
+    def __init__(self):
+        super().__init__(pa.int32(), "orcapod.test.int_ext")
+
+    def __arrow_ext_serialize__(self):
+        return b'{"category":"test_int"}'
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type, serialized):
+        return cls()
+
+
+class _TestBinaryExt(pa.ExtensionType):
+    """Extension type wrapping large_binary storage, used in normalize tests."""
+
+    def __init__(self):
+        super().__init__(pa.large_binary(), "orcapod.test.binary_ext")
+
+    def __arrow_ext_serialize__(self):
+        return b'{"category":"test_binary"}'
+
+    @classmethod
+    def __arrow_ext_deserialize__(cls, storage_type, serialized):
+        return cls()
+
+
+# Register once at module import time; guard against re-registration when the
+# test module is reloaded in the same process (e.g. under pytest-xdist or
+# repeated runs inside an interactive session).
+for _ext_instance in (_TestIntExt(), _TestBinaryExt()):
+    try:
+        pa.register_extension_type(_ext_instance)
+    except KeyError:
+        pass  # already registered; existing registration is still valid
+
+_INT_EXT = _TestIntExt()
+_BINARY_EXT = _TestBinaryExt()
 
 
 class TestPreparePrefixedColumnsPreservesNullable:
@@ -450,3 +498,236 @@ class TestNormalizeTableViewTypes:
         result = normalize_table_view_types(tbl)
         assert result.schema.field("s").type == pa.large_string()
         assert result.schema.field("s").nullable is False
+
+
+# ---------------------------------------------------------------------------
+# normalize_extension_columns
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeExtensionColumns:
+    """normalize_extension_columns: pa.ExtensionType columns → IPC storage form.
+
+    Covers:
+    * fast-path identity return when no extension columns are present
+    * storage type substitution for extension columns
+    * correct ARROW:extension:name and ARROW:extension:metadata field metadata
+    * data-value preservation
+    * non-extension column passthrough in mixed tables
+    * column count stability
+    * schema-level metadata preservation
+    * per-field metadata preservation alongside the new ARROW:extension:* keys
+    * nullable flag preservation (both True and False)
+    * multi-chunk column handling: data correctness and chunk-count preservation
+    * multiple extension columns of different types in the same table
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _int_ext_col(self, values: list[int]) -> pa.ChunkedArray:
+        """Build a single-chunk ChunkedArray using _INT_EXT storage."""
+        storage = pa.array(values, type=pa.int32())
+        arr = pa.ExtensionArray.from_storage(_INT_EXT, storage)
+        return pa.chunked_array([arr])
+
+    def _binary_ext_col(self, values: list[bytes]) -> pa.ChunkedArray:
+        """Build a single-chunk ChunkedArray using _BINARY_EXT storage."""
+        storage = pa.array(values, type=pa.large_binary())
+        arr = pa.ExtensionArray.from_storage(_BINARY_EXT, storage)
+        return pa.chunked_array([arr])
+
+    # ------------------------------------------------------------------
+    # Fast-path: no extension columns
+    # ------------------------------------------------------------------
+
+    def test_no_extension_columns_returns_same_object(self):
+        """Table with no extension columns is returned as the exact same object."""
+        table = pa.table({"x": pa.array([1, 2], pa.int64()), "y": pa.array([3.0, 4.0])})
+        result = normalize_extension_columns(table)
+        assert result is table
+
+    # ------------------------------------------------------------------
+    # Type conversion
+    # ------------------------------------------------------------------
+
+    def test_extension_column_type_becomes_storage_type(self):
+        """Normalized field has the extension type's storage type, not the extension type."""
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([10, 20])],
+            schema=pa.schema([pa.field("v", _INT_EXT)]),
+        )
+        result = normalize_extension_columns(table)
+        assert result.schema.field("v").type == pa.int32()
+        assert not isinstance(result.schema.field("v").type, pa.ExtensionType)
+
+    # ------------------------------------------------------------------
+    # Field metadata — extension identity
+    # ------------------------------------------------------------------
+
+    def test_extension_name_written_to_field_metadata(self):
+        """ARROW:extension:name equals the extension type's registered name."""
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1])],
+            schema=pa.schema([pa.field("v", _INT_EXT)]),
+        )
+        result = normalize_extension_columns(table)
+        meta = result.schema.field("v").metadata
+        assert b"ARROW:extension:name" in meta
+        assert meta[b"ARROW:extension:name"] == b"orcapod.test.int_ext"
+
+    def test_extension_metadata_matches_arrow_ext_serialize(self):
+        """ARROW:extension:metadata equals the output of __arrow_ext_serialize__."""
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1])],
+            schema=pa.schema([pa.field("v", _INT_EXT)]),
+        )
+        result = normalize_extension_columns(table)
+        meta = result.schema.field("v").metadata
+        assert b"ARROW:extension:metadata" in meta
+        assert meta[b"ARROW:extension:metadata"] == b'{"category":"test_int"}'
+
+    # ------------------------------------------------------------------
+    # Data preservation
+    # ------------------------------------------------------------------
+
+    def test_data_values_preserved(self):
+        """Storage values in the normalized column match the original extension values."""
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([7, 8, 9])],
+            schema=pa.schema([pa.field("v", _INT_EXT)]),
+        )
+        result = normalize_extension_columns(table)
+        assert result.column("v").to_pylist() == [7, 8, 9]
+
+    # ------------------------------------------------------------------
+    # Non-extension columns (mixed table)
+    # ------------------------------------------------------------------
+
+    def test_non_extension_columns_pass_through_unchanged(self):
+        """Plain columns in a mixed table keep their type and values unchanged."""
+        schema = pa.schema([pa.field("ext", _INT_EXT), pa.field("plain", pa.int64())])
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1, 2]), pa.array([100, 200], type=pa.int64())],
+            schema=schema,
+        )
+        result = normalize_extension_columns(table)
+        assert result.schema.field("plain").type == pa.int64()
+        assert result.column("plain").to_pylist() == [100, 200]
+
+    def test_column_count_unchanged(self):
+        """The result table has the same number of columns as the input."""
+        schema = pa.schema([pa.field("e", _INT_EXT), pa.field("p", pa.int64())])
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1]), pa.array([99], type=pa.int64())],
+            schema=schema,
+        )
+        result = normalize_extension_columns(table)
+        assert result.num_columns == 2
+
+    # ------------------------------------------------------------------
+    # Metadata preservation
+    # ------------------------------------------------------------------
+
+    def test_schema_level_metadata_preserved(self):
+        """Schema-level metadata is carried through to the result unchanged."""
+        schema = pa.schema(
+            [pa.field("v", _INT_EXT)],
+            metadata={b"schema_key": b"schema_val"},
+        )
+        table = pa.Table.from_arrays([self._int_ext_col([1])], schema=schema)
+        result = normalize_extension_columns(table)
+        assert result.schema.metadata[b"schema_key"] == b"schema_val"
+
+    def test_existing_field_metadata_preserved(self):
+        """Pre-existing per-field metadata survives alongside the new ARROW:extension:* keys."""
+        field = pa.field("v", _INT_EXT, metadata={b"custom_key": b"custom_val"})
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1])], schema=pa.schema([field])
+        )
+        result = normalize_extension_columns(table)
+        meta = result.schema.field("v").metadata
+        # Pre-existing key preserved
+        assert meta[b"custom_key"] == b"custom_val"
+        # Extension identity also added
+        assert b"ARROW:extension:name" in meta
+
+    # ------------------------------------------------------------------
+    # Field attributes
+    # ------------------------------------------------------------------
+
+    def test_nullable_false_preserved(self):
+        """Extension column with nullable=False keeps nullable=False after normalization."""
+        field = pa.field("v", _INT_EXT, nullable=False)
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1, 2])], schema=pa.schema([field])
+        )
+        result = normalize_extension_columns(table)
+        assert result.schema.field("v").nullable is False
+
+    def test_nullable_true_preserved(self):
+        """Extension column with nullable=True keeps nullable=True after normalization."""
+        field = pa.field("v", _INT_EXT, nullable=True)
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1, 2])], schema=pa.schema([field])
+        )
+        result = normalize_extension_columns(table)
+        assert result.schema.field("v").nullable is True
+
+    # ------------------------------------------------------------------
+    # Multi-chunk columns (zero-copy guarantee)
+    # ------------------------------------------------------------------
+
+    def _multi_chunk_int_ext_col(self) -> pa.ChunkedArray:
+        """Two-chunk ChunkedArray of _INT_EXT values [1, 2] | [3, 4]."""
+        arr1 = pa.ExtensionArray.from_storage(_INT_EXT, pa.array([1, 2], pa.int32()))
+        arr2 = pa.ExtensionArray.from_storage(_INT_EXT, pa.array([3, 4], pa.int32()))
+        return pa.chunked_array([arr1, arr2])
+
+    def test_multi_chunk_data_values_preserved(self):
+        """Multi-chunk extension column: all data values are correct after normalization."""
+        table = pa.Table.from_arrays(
+            [self._multi_chunk_int_ext_col()],
+            schema=pa.schema([pa.field("v", _INT_EXT)]),
+        )
+        result = normalize_extension_columns(table)
+        assert result.column("v").to_pylist() == [1, 2, 3, 4]
+
+    def test_multi_chunk_column_chunk_count_preserved(self):
+        """Multi-chunk extension column: chunk count is preserved (no combine_chunks copy)."""
+        table = pa.Table.from_arrays(
+            [self._multi_chunk_int_ext_col()],
+            schema=pa.schema([pa.field("v", _INT_EXT)]),
+        )
+        result = normalize_extension_columns(table)
+        # Original has 2 chunks; normalization must not collapse them into 1.
+        assert result.column("v").num_chunks == 2
+
+    # ------------------------------------------------------------------
+    # Multiple extension columns
+    # ------------------------------------------------------------------
+
+    def test_multiple_extension_columns_all_normalized(self):
+        """All extension-typed columns in the same table are independently normalized."""
+        schema = pa.schema([pa.field("i", _INT_EXT), pa.field("b", _BINARY_EXT)])
+        table = pa.Table.from_arrays(
+            [self._int_ext_col([1, 2]), self._binary_ext_col([b"x", b"y"])],
+            schema=schema,
+        )
+        result = normalize_extension_columns(table)
+        # Both columns have storage types
+        assert result.schema.field("i").type == pa.int32()
+        assert result.schema.field("b").type == pa.large_binary()
+        # Both carry correct extension names
+        assert (
+            result.schema.field("i").metadata[b"ARROW:extension:name"]
+            == b"orcapod.test.int_ext"
+        )
+        assert (
+            result.schema.field("b").metadata[b"ARROW:extension:name"]
+            == b"orcapod.test.binary_ext"
+        )
+        # Data values correct for both
+        assert result.column("i").to_pylist() == [1, 2]
+        assert result.column("b").to_pylist() == [b"x", b"y"]
