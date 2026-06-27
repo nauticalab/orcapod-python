@@ -302,9 +302,9 @@ def normalize_extension_columns(table: "pa.Table") -> "pa.Table":
 
     This is a fast path: for tables with no extension columns the original
     table object is returned immediately.  For tables that do have extension
-    columns a new table is constructed; the column data itself is not copied —
-    ``ExtensionArray.storage`` returns a zero-copy view of the underlying
-    buffers.
+    columns a new table is constructed; chunking is preserved and the column
+    data itself is not copied — each chunk's ``ExtensionArray.storage``
+    property returns a zero-copy view of the underlying buffers.
 
     Note: only **top-level** extension columns are handled.  Extension types
     nested inside struct fields or list element types are not supported by the
@@ -326,9 +326,16 @@ def normalize_extension_columns(table: "pa.Table") -> "pa.Table":
     for i, field in enumerate(table.schema):
         if isinstance(field.type, pa.ExtensionType):
             ext_type = field.type
-            # combine_chunks() returns a single ExtensionArray; .storage is a
-            # zero-copy view of the underlying buffers with the storage type.
-            storage_arr = table.column(i).combine_chunks().storage
+            # Preserve chunking: convert each ExtensionArray chunk to its
+            # .storage chunk (zero-copy view of the underlying buffers) and
+            # rebuild a ChunkedArray.  Calling combine_chunks() first would
+            # allocate new buffers for multi-chunk columns, defeating the
+            # zero-copy guarantee.
+            col = table.column(i)
+            storage_arr = pa.chunked_array(
+                [chunk.storage for chunk in col.chunks],
+                type=ext_type.storage_type,
+            )
             serialized = ext_type.__arrow_ext_serialize__()
             # Merge extension identity into existing field metadata (if any)
             # so that non-extension keys already on the field are preserved.
