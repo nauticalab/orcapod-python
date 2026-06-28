@@ -8,8 +8,10 @@ from typing import Any
 
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
+from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, ContentHash, Schema
 
 logger = logging.getLogger(__name__)
@@ -148,6 +150,10 @@ class Index(UnaryOperator):
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         """Process the full stream in barrier mode.
 
+        Builds the output table from Python-level dicts to avoid type conflicts
+        when the projected column type differs from the original (e.g. list[int]
+        → int).
+
         Args:
             stream: The fully materialised input stream.
 
@@ -159,11 +165,19 @@ class Index(UnaryOperator):
                 out-of-bounds.
             ValueError: If all packets were skipped (empty output).
         """
-        out_rows: list[tuple[Any, Any]] = []
-        skipped_count = 0
+        tag_columns, data_columns = stream.keys()
+        src_col = f"{constants.SOURCE_PREFIX}{self.column}"
+        out_col = self.out if self.out is not None else self.column
+        out_src_col = f"{constants.SOURCE_PREFIX}{out_col}"
 
-        for tag, data in stream.iter_data():
-            col_val = data[self.column]
+        full_table = stream.as_table(columns={"source": True, "system_tags": True})
+        all_rows = stream.data_context.type_converter.arrow_table_to_python_dicts(full_table)
+
+        skipped_count = 0
+        out_rows: list[dict[str, Any]] = []
+
+        for row in all_rows:
+            col_val = row[self.column]
             length = len(col_val)
             effective_i = self.i if self.i >= 0 else length + self.i
 
@@ -173,23 +187,18 @@ class Index(UnaryOperator):
 
             extracted = col_val[self.i]
 
-            src_token = data.source_info().get(self.column) or ""
-            new_src = f"{src_token}[{self.i}]" if src_token else None
+            old_src = row.get(src_col)
+            new_src = f"{old_src}[{self.i}]" if old_src else None
 
+            new_row = dict(row)
             if self.out is None:
-                new_data = (
-                    data.update(**{self.column: extracted})
-                        .with_source_info(**{self.column: new_src})
-                )
+                new_row[self.column] = extracted
+                new_row[src_col] = new_src
             else:
-                new_data = (
-                    data.with_columns(
-                        column_types={self.out: self._output_type},
-                        **{self.out: extracted},
-                    ).with_source_info(**{self.out: new_src})
-                )
+                new_row[self.out] = extracted
+                new_row[out_src_col] = new_src
 
-            out_rows.append((tag, new_data))
+            out_rows.append(new_row)
 
         if skipped_count:
             if self.fail_on_miss:
@@ -212,7 +221,44 @@ class Index(UnaryOperator):
                 f"{self.column!r})."
             )
 
-        return self._materialize_to_stream(out_rows)
+        # Build source_info from first row (all rows share same source tokens)
+        first = out_rows[0]
+        source_info = {}
+        for col in data_columns:
+            si_key = f"{constants.SOURCE_PREFIX}{col}"
+            if si_key in first:
+                source_info[col] = first[si_key]
+        if self.out is not None and out_src_col in first:
+            source_info[self.out] = first[out_src_col]
+
+        # Strip source/system-tag prefixes from data rows
+        sys_prefix = constants.SYSTEM_TAG_PREFIX
+        src_prefix = constants.SOURCE_PREFIX
+        data_rows = [
+            {k: v for k, v in row.items()
+             if not k.startswith(src_prefix) and not k.startswith(sys_prefix)}
+            for row in out_rows
+        ]
+
+        # Build combined schema (tags + data with updated column type)
+        tag_schema, data_schema = stream.output_schema()
+        out_data_schema = dict(data_schema)
+        if self.out is None:
+            out_data_schema[self.column] = self._output_type
+        else:
+            out_data_schema[self.out] = self._output_type
+        combined_schema = {**dict(tag_schema), **out_data_schema}
+
+        output_table = stream.data_context.type_converter.python_dicts_to_arrow_table(
+            data_rows,
+            python_schema=combined_schema,
+        )
+
+        return ArrowTableStream(
+            output_table,
+            tag_columns=tag_columns,
+            source_info=source_info,
+        )
 
     # ------------------------------------------------------------------
     # Streaming execution
@@ -225,7 +271,7 @@ class Index(UnaryOperator):
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
-        """Process packets one at a time as they arrive.
+        """Barrier-mode: collect all input, run unary_static_process, emit.
 
         Args:
             inputs: Single-element sequence of readable channels.
@@ -233,45 +279,11 @@ class Index(UnaryOperator):
             input_pipeline_hashes: Ignored; present for protocol compliance.
         """
         try:
-            async for tag, data in inputs[0]:
-                col_val = data[self.column]
-                length = len(col_val)
-                effective_i = self.i if self.i >= 0 else length + self.i
-
-                if effective_i < 0 or effective_i >= length:
-                    if self.fail_on_miss:
-                        raise RuntimeError(
-                            f"Index: index {self.i} out of bounds for column "
-                            f"{self.column!r} (length {length}, "
-                            f"fail_on_miss=True). See ITL-439."
-                        )
-                    logger.warning(
-                        "Index: skipping packet — index %d out of bounds for "
-                        "column %r (length %d).",
-                        self.i,
-                        self.column,
-                        length,
-                    )
-                    continue
-
-                extracted = col_val[self.i]
-
-                src_token = data.source_info().get(self.column) or ""
-                new_src = f"{src_token}[{self.i}]" if src_token else None
-
-                if self.out is None:
-                    new_data = (
-                        data.update(**{self.column: extracted})
-                            .with_source_info(**{self.column: new_src})
-                    )
-                else:
-                    new_data = (
-                        data.with_columns(
-                            column_types={self.out: self._output_type},
-                            **{self.out: extracted},
-                        ).with_source_info(**{self.out: new_src})
-                    )
-
-                await output.send((tag, new_data))
+            rows = await inputs[0].collect()
+            if rows:
+                stream = self._materialize_to_stream(rows)
+                result = self.unary_static_process(stream)
+                for tag, data in result.iter_data():
+                    await output.send((tag, data))
         finally:
             await output.close()

@@ -156,3 +156,120 @@ def test_pick_extension_type_not_implemented():
 
     with pytest.raises(NotImplementedError, match="does not yet support pick"):
         Pick("rec", "value")(stream)
+
+
+# ── helpers for Index tests ───────────────────────────────────────────────────
+
+def _make_list_stream(rows: list[dict]) -> ArrowTableStream:
+    """Build a stream with an int tag and a list[int] data column."""
+    from orcapod.contexts import get_default_type_converter
+    converter = get_default_type_converter()
+    table = converter.python_dicts_to_arrow_table(
+        rows,
+        python_schema={"id": int, "items": list[int]},
+    )
+    return ArrowTableStream(table, tag_columns=["id"])
+
+
+# ── build-time validation tests: Index ───────────────────────────────────────
+
+from orcapod.core.operators import Index
+
+
+def test_index_missing_column_raises():
+    stream = _make_list_stream([{"id": 1, "items": [10, 20]}])
+    with pytest.raises(InputValidationError, match="not found in data schema"):
+        Index("nonexistent", 0)(stream)
+
+
+def test_index_out_collision_raises():
+    stream = _make_list_stream([{"id": 1, "items": [10, 20]}])
+    with pytest.raises(InputValidationError, match="already exists"):
+        Index("items", 0, out="items")(stream)
+
+
+# ── functional tests: Index ───────────────────────────────────────────────────
+
+def test_index_list_default_out():
+    """index with out=None replaces the column in-place."""
+    stream = DictSource(
+        [
+            {"grp": "a", "vals": [10, 20, 30]},
+            {"grp": "b", "vals": [40, 50, 60]},
+        ],
+        tag_columns=["grp"],
+        data_schema={"grp": str, "vals": list[int]},
+    )
+    result = Index("vals", 1)(stream)
+    tag_schema, data_schema = result.output_schema()
+
+    assert "vals" in data_schema
+    assert data_schema["vals"] == int
+
+    rows = list(result.iter_data())
+    assert len(rows) == 2
+    assert [data["vals"] for _, data in rows] == [20, 50]
+
+    for _, data in rows:
+        src = data.source_info().get("vals")
+        assert src is not None and src.endswith("[1]"), f"unexpected source: {src}"
+
+
+def test_index_list_explicit_out():
+    """index with out='first' adds a new column; original preserved."""
+    stream = DictSource(
+        [
+            {"grp": "a", "vals": [10, 20, 30]},
+            {"grp": "b", "vals": [40, 50, 60]},
+        ],
+        tag_columns=["grp"],
+        data_schema={"grp": str, "vals": list[int]},
+    )
+    result = Index("vals", 0, out="first")(stream)
+    tag_schema, data_schema = result.output_schema()
+
+    assert "vals" in data_schema       # original preserved
+    assert "first" in data_schema
+    assert data_schema["first"] == int
+
+    rows = list(result.iter_data())
+    assert [data["first"] for _, data in rows] == [10, 40]
+
+    for _, data in rows:
+        src = data.source_info().get("first")
+        assert src is not None and src.endswith("[0]")
+
+
+def test_index_negative_index():
+    """Negative index follows Python semantics (-1 is last element)."""
+    stream = _make_list_stream([
+        {"id": 1, "items": [10, 20, 30]},
+        {"id": 2, "items": [40, 50]},
+    ])
+    result = Index("items", -1)(stream)
+    rows = list(result.iter_data())
+    assert [data["items"] for _, data in rows] == [30, 50]
+
+
+def test_index_oob_skip():
+    """Out-of-bounds packets are skipped when fail_on_miss=False."""
+    stream = _make_list_stream([
+        {"id": 1, "items": [10, 20, 30]},
+        {"id": 2, "items": [40]},          # index 2 is OOB
+        {"id": 3, "items": [70, 80, 90]},
+    ])
+    result = Index("items", 2, fail_on_miss=False)(stream)
+    rows = list(result.iter_data())
+    assert len(rows) == 2
+    ids = [tag["id"] for tag, _ in rows]
+    assert ids == [1, 3]
+
+
+def test_index_oob_fail():
+    """fail_on_miss=True raises RuntimeError on out-of-bounds."""
+    stream = _make_list_stream([
+        {"id": 1, "items": [10, 20, 30]},
+        {"id": 2, "items": [40]},
+    ])
+    with pytest.raises(RuntimeError, match="fail_on_miss=True"):
+        list(Index("items", 2, fail_on_miss=True)(stream).iter_data())
