@@ -273,3 +273,67 @@ def test_index_oob_fail():
     ])
     with pytest.raises(RuntimeError, match="fail_on_miss=True"):
         list(Index("items", 2, fail_on_miss=True)(stream).iter_data())
+
+
+# ── integration tests ──────────────────────────────────────────────────────────
+
+def test_chained_pick_then_index():
+    """stream.pick('col', 'key').index('col', 1) chains correctly end-to-end."""
+    # Use DictSource so that source info tokens are populated from the start.
+    stream = DictSource(
+        [
+            {"id": 1, "data": {"scores": [10, 20, 30]}},
+            {"id": 2, "data": {"scores": [40, 50, 60]}},
+        ],
+        tag_columns=["id"],
+        data_schema={"id": int, "data": dict[str, list[int]]},
+    )
+
+    result = stream.pick("data", "scores").index("data", 1)
+    tag_schema, data_schema = result.output_schema()
+
+    assert "data" in data_schema
+    assert data_schema["data"] == int
+
+    rows = list(result.iter_data())
+    assert [data["data"] for _, data in rows] == [20, 50]
+
+    # Source token should encode both projections
+    for _, data in rows:
+        src = data.source_info().get("data")
+        assert src is not None
+        assert "['scores']" in src
+        assert "[1]" in src
+
+
+def test_composition_with_join():
+    """pick used in a pipeline that also includes join."""
+    from orcapod.contexts import get_default_type_converter
+    converter = get_default_type_converter()
+
+    left_table = converter.python_dicts_to_arrow_table(
+        [
+            {"id": 1, "meta": {"label": "alpha"}},
+            {"id": 2, "meta": {"label": "beta"}},
+        ],
+        python_schema={"id": int, "meta": dict[str, str]},
+    )
+    right_table = converter.python_dicts_to_arrow_table(
+        [
+            {"id": 1, "value": 100},
+            {"id": 2, "value": 200},
+        ],
+        python_schema={"id": int, "value": int},
+    )
+    left = ArrowTableStream(left_table, tag_columns=["id"])
+    right = ArrowTableStream(right_table, tag_columns=["id"])
+
+    result = left.pick("meta", "label").join(right)
+    tag_schema, data_schema = result.output_schema()
+
+    assert "meta" in data_schema    # now holds str, not dict
+    assert "value" in data_schema
+    assert data_schema["meta"] == str
+
+    rows = list(result.iter_data())
+    assert len(rows) == 2
