@@ -428,3 +428,20 @@ path (`async_execute`) and the batch/static path (`unary_static_process`).
 - Configurable miss policy beyond `fail_on_miss` — tracked in ITL-439.
 - Optimization: fusing chained `pick`/`index` into a single Arrow extraction.
 - Tuple indexing, string slicing.
+
+## Follow-up Issues to File After Working Implementation
+
+Once the core `Pick` and `Index` operators are working (as part of ITL-140), file two
+follow-up issues before closing the issue:
+
+1. **Add `pick_field` support to `DataclassLogicalType`** — implement `pick_field(key)`
+   on `DataclassLogicalType` to enable static type resolution and runtime Python-object
+   field access for dataclass-typed columns.
+
+2. **Add `pick_field` / `index_element` support to `PydanticLogicalType`** — implement
+   both methods on `PydanticLogicalType` to enable static type resolution and runtime
+   Python-object field access for Pydantic-model-typed columns.
+
+Both issues should reference ITL-140 as the parent work and include tests for the static
+type-resolution path (correct output type at build time, hard error on missing field) and
+the runtime path (indexing directly on the Python object).
