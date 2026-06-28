@@ -29,13 +29,14 @@ import polars as pl
 import pyarrow as pa
 from upath import UPath
 
+from orcapod.extension_types.base_logical_type import BaseLogicalType
 from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
 
 if TYPE_CHECKING:
     from orcapod.extension_types.protocols import TypeConverterProtocol
 
 
-class LogicalPath:
+class LogicalPath(BaseLogicalType):
     """Logical type for ``pathlib.Path``.
 
     Stores paths as Arrow large strings using the custom extension type
@@ -108,7 +109,7 @@ class LogicalPath:
         return pathlib.Path(storage_value)
 
 
-class LogicalUPath:
+class LogicalUPath(BaseLogicalType):
     """Logical type for ``upath.UPath``.
 
     Stores paths as Arrow large strings using the custom extension type
@@ -181,7 +182,7 @@ class LogicalUPath:
         return UPath(storage_value)
 
 
-class LogicalUUID:
+class LogicalUUID(BaseLogicalType):
     """Logical type for ``uuid.UUID``.
 
     Stores UUIDs as Arrow binary (16 bytes) using the custom extension type

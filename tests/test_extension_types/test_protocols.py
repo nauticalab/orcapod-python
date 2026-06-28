@@ -40,6 +40,12 @@ class _StubLogicalType:
     def storage_to_python(self, storage_value, converter):  # converter param added
         return storage_value
 
+    def pick_field(self, key: str) -> type:
+        raise NotImplementedError
+
+    def index_element(self) -> type:
+        raise NotImplementedError
+
 
 class _StubFactory:
     """Minimal conforming implementation of LogicalTypeFactoryProtocol for use in tests."""
@@ -100,6 +106,8 @@ def test_logical_type_python_to_storage_accepts_converter():
         def get_polars_extension_type(self): pass
         def python_to_storage(self, value, converter): return value
         def storage_to_python(self, storage_value, converter): return storage_value
+        def pick_field(self, key: str) -> type: raise NotImplementedError
+        def index_element(self) -> type: raise NotImplementedError
 
     assert isinstance(_GoodLT(), LogicalTypeProtocol)
 

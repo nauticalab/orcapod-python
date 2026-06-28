@@ -143,6 +143,32 @@ class LogicalTypeProtocol(Protocol):
         """
         ...
 
+    def pick_field(self, key: str) -> type:
+        """Return the Python type of field ``key`` in this structured logical type.
+
+        Args:
+            key: Name of the field to project into.
+
+        Returns:
+            The Python type of the requested field.
+
+        Raises:
+            InputValidationError: If the field does not exist in the type's schema.
+            NotImplementedError: If this logical type does not support keyed access.
+        """
+        ...
+
+    def index_element(self) -> type:
+        """Return the Python element type for positional list access.
+
+        Returns:
+            The Python type of elements in this list-like logical type.
+
+        Raises:
+            NotImplementedError: If this logical type does not support positional access.
+        """
+        ...
+
 
 @runtime_checkable
 class LogicalTypeFactoryProtocol(Protocol):
