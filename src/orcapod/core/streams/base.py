@@ -213,6 +213,65 @@ class StreamBase(TraceableBase):
 
         return DropDataColumns(data_columns, strict=strict)(self, label=label)
 
+    def pick(
+        self,
+        column: str,
+        key: str,
+        out: str | None = None,
+        fail_on_miss: bool = False,
+        label: str | None = None,
+    ) -> StreamBase:
+        """Extract a value from a struct- or dict-typed data column by key.
+
+        For ``dict[K, V]`` columns the lookup is per-packet; if the key is absent
+        the packet is skipped (or an error is raised when ``fail_on_miss=True``).
+
+        Args:
+            column: Name of the data column to project into.
+            key: Dict key or struct field name to extract.
+            out: Output column name. ``None`` (default) replaces ``column``
+                in-place; a string adds a new column alongside the original.
+            fail_on_miss: If ``True``, raise ``RuntimeError`` when the key is
+                absent in a packet instead of skipping.
+            label: Optional label for the operator node.
+
+        Returns:
+            A new stream with the projected column.
+        """
+        from orcapod.core.operators import Pick
+
+        return Pick(column, key, out=out, fail_on_miss=fail_on_miss)(self, label=label)
+
+    def index(
+        self,
+        column: str,
+        i: int,
+        out: str | None = None,
+        fail_on_miss: bool = False,
+        label: str | None = None,
+    ) -> StreamBase:
+        """Extract an element from a list-typed data column by position.
+
+        Out-of-bounds access causes the packet to be skipped (or an error
+        when ``fail_on_miss=True``). Negative indices follow Python semantics
+        (``-1`` is the last element).
+
+        Args:
+            column: Name of the data column to project into.
+            i: Position to extract. Negative indices follow Python semantics.
+            out: Output column name. ``None`` (default) replaces ``column``
+                in-place; a string adds a new column alongside the original.
+            fail_on_miss: If ``True``, raise ``RuntimeError`` on out-of-bounds
+                instead of skipping.
+            label: Optional label for the operator node.
+
+        Returns:
+            A new stream with the projected column.
+        """
+        from orcapod.core.operators import Index
+
+        return Index(column, i, out=out, fail_on_miss=fail_on_miss)(self, label=label)
+
     @abstractmethod
     def keys(
         self,
