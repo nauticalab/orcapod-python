@@ -69,6 +69,43 @@ def test_pick_out_collision_raises(dict_stream):
 
 # ── functional tests: Pick ────────────────────────────────────────────────────
 
+def test_pick_dict_str_int_type_resolution():
+    """Picking a key from dict[str, int] yields int in the output schema and as values.
+
+    This test saves a dict[str, int] column into a stream, applies Pick to
+    extract one entry, and asserts that:
+    - the output schema records the column type as ``int`` (not dict or Any)
+    - the actual extracted values are Python ints
+    """
+    from orcapod.contexts import get_default_type_converter
+    converter = get_default_type_converter()
+    table = converter.python_dicts_to_arrow_table(
+        [
+            {"id": 1, "counts": {"apples": 3, "bananas": 7}},
+            {"id": 2, "counts": {"apples": 5, "bananas": 2}},
+        ],
+        python_schema={"id": int, "counts": dict[str, int]},
+    )
+    stream = ArrowTableStream(table, tag_columns=["id"])
+
+    result = Pick("counts", "apples")(stream)
+
+    # Schema: output column must be int, not dict
+    tag_schema, data_schema = result.output_schema()
+    assert data_schema["counts"] == int, (
+        f"Expected int output type but got {data_schema['counts']}"
+    )
+
+    # Values: extracted entries must be Python ints
+    rows = list(result.iter_data())
+    assert len(rows) == 2
+    values = [data["counts"] for _, data in rows]
+    assert values == [3, 5]
+    assert all(isinstance(v, int) for v in values), (
+        f"Expected all values to be int, got types: {[type(v) for v in values]}"
+    )
+
+
 def test_pick_dict_default_out(dict_stream):
     """pick with out=None replaces the column in-place, source token updated."""
     result = Pick("scores", "speed")(dict_stream)
