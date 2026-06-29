@@ -295,6 +295,22 @@ class UniversalTypeConverter:
                 f"{annotation!r}. Only Optional[T] (T | None) is allowed."
             )
 
+        # typing.Literal[v1, v2, ...] → Arrow type of the literal values' type.
+        # None members are stripped (treat as optional/nullable); mixed non-None types raise.
+        if origin is typing.Literal:
+            value_types = {type(a) for a in args if a is not None}
+            if not value_types:
+                raise ValueError(
+                    f"Literal[None] is not supported as an Arrow type. "
+                    f"Use Optional[T] to express nullability instead."
+                )
+            if len(value_types) != 1:
+                raise ValueError(
+                    f"Mixed-type Literal is not supported: {annotation!r}. "
+                    f"All members must share one type (e.g. Literal['a', 'b'])."
+                )
+            return self.register_python_class(next(iter(value_types)))
+
         # list[T] → pa.large_list(T).
         # Raise if T resolves to an extension type: Arrow forbids extension types inside
         # list value fields (ET1/ET2 in DESIGN_ISSUES.md). Fail loudly now rather than

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import uuid as _uuid_module
 
@@ -175,6 +175,31 @@ class _OuterModel(BaseModel):
 class _ModelWithPrivateAttr(BaseModel):
     name: str
     _cache: str = PrivateAttr(default="")
+
+
+class _LiteralStrModel(BaseModel):
+    method: Literal["a", "b"]
+
+
+class _LiteralIntModel(BaseModel):
+    count: Literal[1, 2, 3]
+
+
+class _LiteralNoneModel(BaseModel):
+    status: Literal["active", None]
+
+
+class _LiteralNoneOnlyModel(BaseModel):
+    x: Literal[None]
+
+
+class _MixedLiteralModel(BaseModel):
+    val: Literal["a", 1]  # type: ignore[assignment]
+
+
+class _LiteralRoundTripModel(BaseModel):
+    method: Literal["a", "b"]
+    count: int
 
 
 # ── Module-level models for read-path and round-trip tests ───────────────────
@@ -458,3 +483,62 @@ def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
     assert isinstance(reconstructed.inner, _InnerModel)
     assert reconstructed.inner.value == 42
     assert reconstructed.label == "hello"
+
+
+# ── typing.Literal support tests (ITL-442) ───────────────────────────────────
+
+
+def test_factory_create_model_with_literal_str_field():
+    """Literal["a", "b"] field → large_string in the Arrow struct."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralStrModel, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    assert storage.field("method").type == pa.large_string()
+
+
+def test_factory_create_model_with_literal_int_field():
+    """Literal[1, 2, 3] field → int64 in the Arrow struct."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralIntModel, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    assert storage.field("count").type == pa.int64()
+
+
+def test_factory_create_model_with_literal_none_field():
+    """Literal["active", None] strips None → resolves to large_string."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralNoneModel, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    assert storage.field("status").type == pa.large_string()
+
+
+def test_factory_rejects_literal_none_only():
+    """Literal[None] has no concrete value type — raises ValueError."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    with pytest.raises(ValueError, match="Literal\\[None\\]"):
+        factory.create_for_python_type(_LiteralNoneOnlyModel, converter=converter)
+
+
+def test_factory_rejects_mixed_literal():
+    """Literal["a", 1] mixes str and int — raises ValueError."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    with pytest.raises(ValueError, match="Mixed-type Literal"):
+        factory.create_for_python_type(_MixedLiteralModel, converter=converter)
