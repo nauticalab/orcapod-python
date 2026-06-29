@@ -16,7 +16,7 @@ import os
 import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from types import UnionType
 from typing import TYPE_CHECKING, Any, Generic, Self, TypeAlias, TypeVar
@@ -42,20 +42,19 @@ PathLike: TypeAlias = str | os.PathLike
 """Convenience alias for any filesystem-path-like object (``str`` or
 ``os.PathLike``)."""
 
-# TODO: accomodate other common data types such as datetime
-TagValue: TypeAlias = int | str | None | Collection["TagValue"]
-"""A tag metadata value: an int, string, ``None``, or an arbitrarily nested
-collection thereof. Tags are used to label and organise data and
-datagrams."""
+TagValue: TypeAlias = int | str | date | datetime | None | Collection["TagValue"]
+"""A tag metadata value: an int, string, date, datetime, ``None``, or an
+arbitrarily nested collection thereof. Tags are used to label and organise
+data and datagrams."""
 
 PathSet: TypeAlias = PathLike | Collection[PathLike | None]
 """A single path or an arbitrarily nested collection of paths (with optional
 ``None`` entries). Used when operations need to address multiple files at
 once, e.g. batch hashing."""
 
-SupportedNativePythonData: TypeAlias = str | int | float | bool | bytes
+SupportedNativePythonData: TypeAlias = str | int | float | bool | bytes | date | datetime
 """The simple Python scalar types that have a direct Arrow / Polars
-correspondence."""
+correspondence, including temporal types (date and datetime)."""
 
 ExtendedSupportedPythonData: TypeAlias = SupportedNativePythonData | PathSet
 """Native scalar types extended with filesystem paths."""

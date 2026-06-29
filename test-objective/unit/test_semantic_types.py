@@ -6,6 +6,8 @@ documented behavior in protocols and design specification.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
+
 import pyarrow as pa
 import pytest
 
@@ -51,6 +53,10 @@ class TestPythonToArrowType:
         result = converter.python_type_to_arrow_type(list[int])
         assert pa.types.is_list(result) or pa.types.is_large_list(result)
 
+    def test_date_to_date32(self, converter):
+        result = converter.python_type_to_arrow_type(date)
+        assert result == pa.date32()
+
 
 class TestArrowToPythonType:
     """Per the TypeConverterProtocol, arrow_type_to_python_type converts
@@ -72,6 +78,10 @@ class TestArrowToPythonType:
         result = converter.arrow_type_to_python_type(pa.bool_())
         assert result is bool
 
+    def test_date32_to_date(self, converter):
+        result = converter.arrow_type_to_python_type(pa.date32())
+        assert result is date
+
 
 class TestSchemaConversionRoundtrip:
     """Python Schema → Arrow Schema → Python Schema should preserve types."""
@@ -87,6 +97,13 @@ class TestSchemaConversionRoundtrip:
         assert set(roundtripped.keys()) == set(python_schema.keys())
         for key in python_schema:
             assert roundtripped[key] == python_schema[key]
+
+    def test_date_datetime_schema_roundtrip(self, converter):
+        original = Schema({"dob": date, "ts": datetime})
+        arrow_schema = converter.python_schema_to_arrow_schema(original)
+        recovered = converter.arrow_schema_to_python_schema(arrow_schema)
+        assert recovered["dob"] is date
+        assert recovered["ts"] is datetime
 
 
 class TestPythonDictsToArrowTable:

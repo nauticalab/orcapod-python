@@ -17,7 +17,7 @@ import logging
 import types
 import typing
 from collections.abc import Callable, Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 # Handle generic types
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
@@ -89,6 +89,7 @@ def _get_python_to_arrow_map() -> dict:
         "date": pa.date32(),
         "datetime": pa.timestamp("us", tz="UTC"),
         datetime: pa.timestamp("us", tz="UTC"),
+        date: pa.date32(),
     }
 
     # Add numpy types if available
@@ -1201,6 +1202,8 @@ class UniversalTypeConverter:
             else:
                 return typing.Union[tuple(child_types)]
 
+        elif pa.types.is_date(arrow_type):
+            return date
         elif pa.types.is_timestamp(arrow_type):
             return datetime
 
