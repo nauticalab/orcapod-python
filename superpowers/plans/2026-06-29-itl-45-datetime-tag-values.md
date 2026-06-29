@@ -203,7 +203,7 @@
 
   Find:
   ```python
-  # TODO: accomodate other common data types such as datetime
+  # TODO: accommodate other common data types such as datetime
   TagValue: TypeAlias = int | str | None | Collection["TagValue"]
   ```
   Replace with:

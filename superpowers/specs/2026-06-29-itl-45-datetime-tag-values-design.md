@@ -108,7 +108,7 @@ from datetime import date, datetime
 TagValue: TypeAlias = int | str | date | datetime | None | Collection["TagValue"]
 ```
 
-Remove the `# TODO: accomodate other common data types such as datetime` comment above it.
+Remove the `# TODO: accommodate other common data types such as datetime` comment above it.
 
 #### `SupportedNativePythonData`
 

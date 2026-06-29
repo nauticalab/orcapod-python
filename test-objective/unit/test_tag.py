@@ -183,7 +183,7 @@ class TestTagDatetimeValues:
         ctx = _make_context()
         tag = Tag({"dob": date(2024, 1, 15)}, data_context=ctx)
         table = tag.as_table()
-        assert pa.types.is_date(table.schema.field("dob").type)
+        assert table.schema.field("dob").type == pa.date32()
 
     def test_date_tag_content_hash(self):
         ctx = _make_context()
@@ -210,7 +210,7 @@ class TestTagDatetimeValues:
         dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
         tag = Tag({"ts": dt}, data_context=ctx)
         table = tag.as_table()
-        assert pa.types.is_timestamp(table.schema.field("ts").type)
+        assert table.schema.field("ts").type == pa.timestamp("us", tz="UTC")
 
     def test_datetime_tag_content_hash(self):
         ctx = _make_context()
