@@ -130,7 +130,7 @@ jobs:
 
   linear-complete:
     name: Complete Linear release
-    needs: [publish-pypi]
+    needs: [publish-pypi, linear-sync]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

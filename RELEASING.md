@@ -62,7 +62,7 @@ handled by two GitHub Actions jobs that call `linear/linear-release-action`:
 | Trigger | Job | Action | Effect |
 |---------|-----|--------|--------|
 | Push to `main` | `release-sync.yml / sync` | `sync` (no version) | Associates the merged PR with the open Linear release draft |
-| Tag push `v*` | `publish.yml / linear-sync` | `sync --version <tag>` | Finalises the commit set for this release version in Linear |
+| Tag push `v[0-9]*.[0-9]*.[0-9]*` | `publish.yml / linear-sync` | `sync --version <tag>` | Finalises the commit set for this release version in Linear |
 | After `publish-pypi` succeeds | `publish.yml / linear-complete` | `complete --version <tag>` | Marks the release done in Linear; triggers Merged → Done |
 
 ### Prerequisites
@@ -77,8 +77,10 @@ Before cutting the first release with this system active, a workspace admin must
    set the release name, which statuses count as "included" (at minimum: Merged), and
    the target state for the transition (Done).
 
-If `LINEAR_ACCESS_KEY` is not set, the `linear-sync` and `linear-complete` jobs will
-fail but will not block the PyPI publish (they have no dependents).
+If `LINEAR_ACCESS_KEY` is not set: the `release-sync` workflow silently skips on every
+push to `main` (gated by an `if:` condition); the `linear-sync` and `linear-complete`
+jobs fail on tag push but do not block the PyPI publish (they have no dependents in the
+publish chain).
 
 ### Replicating for other orcapod repos
 
