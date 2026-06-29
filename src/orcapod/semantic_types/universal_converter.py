@@ -139,6 +139,25 @@ def _is_optional_type(python_type: DataType) -> bool:
     return False
 
 
+def _unwrap_literal(python_type: DataType) -> DataType:
+    """Map ``typing.Literal[v1, v2, ...]`` to the Python type of its values.
+
+    Literal members are constants, so a Literal-typed field is stored as its
+    underlying scalar type (e.g. ``Literal["a", "b"]`` → ``str`` → ``large_string``)
+    and pydantic re-validates the allowed set on model reconstruction. Returns
+    ``python_type`` unchanged when it is not a ``Literal``.
+    """
+    if get_origin(python_type) is typing.Literal:
+        value_types = {type(v) for v in get_args(python_type)}
+        if len(value_types) != 1:
+            raise ValueError(
+                f"Mixed-type Literal is not supported: {python_type!r}. All members "
+                f"must share a single type (e.g. Literal['a', 'b'])."
+            )
+        return next(iter(value_types))
+    return python_type
+
+
 class UniversalTypeConverter:
     """
     Universal engine for Python ↔ Arrow type conversion with cached conversion functions.
@@ -276,6 +295,9 @@ class UniversalTypeConverter:
         import types as _types_mod
 
         type_map = _get_python_to_arrow_map()
+
+        # typing.Literal[...] → the Arrow type of its (single) value type.
+        annotation = _unwrap_literal(annotation)
 
         # Primitive map hit
         if annotation in type_map:
@@ -981,6 +1003,9 @@ class UniversalTypeConverter:
     def _convert_python_to_arrow(self, python_type: DataType) -> pa.DataType:
         """Core Python → Arrow type conversion logic."""
 
+        # typing.Literal[...] → the Arrow type of its (single) value type.
+        python_type = _unwrap_literal(python_type)
+
         type_map = _get_python_to_arrow_map()
         if python_type in type_map:
             return type_map[python_type]
@@ -1274,6 +1299,9 @@ class UniversalTypeConverter:
         self, python_type: DataType
     ) -> Callable[[Any], Any]:
         """Create a cached conversion function for Python → Arrow values."""
+
+        # typing.Literal[...] → reuse the converter for its (single) value type.
+        python_type = _unwrap_literal(python_type)
 
         # Check LogicalTypeRegistry first — extension-type identity takes priority.
         # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;

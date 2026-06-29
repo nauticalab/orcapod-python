@@ -35,6 +35,7 @@ Test coverage:
 from __future__ import annotations
 
 import dataclasses
+from typing import Literal
 
 import pyarrow as pa
 import polars as pl
@@ -95,6 +96,18 @@ class _Cfg(BaseModel):
 class _Run:
     seed: int
     batch_size: int
+
+
+# #187 follow-up: models whose fields use typing.Literal (a very common pydantic
+# config pattern). A Literal field is stored as its underlying scalar type.
+class _LiteralCfg(BaseModel):
+    method: Literal["dredge", "iterative", "medicine"]
+    peak_sign: Literal["neg", "pos", "both"]
+    threshold: float
+
+
+class _MixedLiteralCfg(BaseModel):
+    bad: Literal["a", 1]            # members span multiple types — unsupported
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +448,54 @@ class TestEndToEndPipelineWithModelColumns:
         out = Join().process(pydantic_stream, plain_stream)
         result = out.as_table()
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# #187: typing.Literal fields in a model column
+# ---------------------------------------------------------------------------
+
+
+class TestLiteralFields:
+    """A model whose fields use ``typing.Literal`` must flow as a pipeline column.
+
+    Follow-up to ITL-432/#184: the generic pydantic-column support landed, but a
+    ``Literal`` field raised ``Unsupported annotation: typing.Literal[...]`` while
+    building the Arrow struct. A ``Literal`` is stored as its underlying scalar
+    type, and pydantic re-validates the allowed set on reconstruction.
+    """
+
+    def test_literal_model_registers(self, ctx):
+        """register_python_class succeeds; Literal[str] fields → large_string storage."""
+        arrow_type = ctx.type_converter.register_python_class(_LiteralCfg)
+        storage = arrow_type.storage_type
+        assert pa.types.is_large_string(storage.field("method").type)
+        assert pa.types.is_large_string(storage.field("peak_sign").type)
+
+    def test_literal_field_roundtrips(self, ctx):
+        """python_to_storage → storage_to_python preserves the Literal value."""
+        ctx.type_converter.register_python_class(_LiteralCfg)
+        original = _LiteralCfg(method="iterative", peak_sign="both", threshold=0.5)
+        storage = ctx.type_converter.python_to_storage(original, _LiteralCfg)
+        restored = ctx.type_converter.storage_to_python(storage, _LiteralCfg)
+        assert restored == original
+        assert restored.method == "iterative"
+
+    def test_dict_source_literal_column_content_hash(self, ctx):
+        """DictSource with a Literal-bearing column hashes and reflects values."""
+        ctx.type_converter.register_python_class(_LiteralCfg)
+
+        def _src(method):
+            return DictSource(
+                data=[{"run_id": 1,
+                       "cfg": _LiteralCfg(method=method, peak_sign="neg", threshold=0.5)}],
+                tag_columns=["run_id"],
+                data_schema={"run_id": int, "cfg": _LiteralCfg},
+            )
+
+        assert isinstance(_src("dredge").content_hash(), ContentHash)
+        assert _src("dredge").content_hash() != _src("medicine").content_hash()
+
+    def test_mixed_type_literal_rejected(self, ctx):
+        """A Literal whose members span multiple types is rejected clearly."""
+        with pytest.raises(ValueError, match="Mixed-type Literal"):
+            ctx.type_converter.register_python_class(_MixedLiteralCfg)
