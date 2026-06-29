@@ -183,5 +183,6 @@ Tests covering:
 
 ## Out of Scope
 
-- `datetime.time`, `datetime.timedelta`, `pa.time32`, `pa.time64`, `pa.duration`
-- Configurable precision or timezone for dates
+- `datetime.time` and Arrow `time32`/`time64` — deferred to ITL-443 (v0.2).
+- `datetime.timedelta` and Arrow `duration` — deferred to ITL-444 (v0.2).
+- Configurable precision or timezone for dates.
