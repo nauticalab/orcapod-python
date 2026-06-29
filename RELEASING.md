@@ -50,3 +50,41 @@ the stable vs pre-release distinction natively:
 | Beta | `vMAJOR.MINOR.PATCHbN` | `v0.1.0b1` |
 
 All of the above trigger the publish workflow. PyPI classifies them automatically.
+
+## Linear Release System
+
+When a release tag is pushed, the CI automatically transitions all Linear issues in
+**"Merged"** status (whose PRs were included in the release) to **"Done"**. This is
+handled by two GitHub Actions jobs that call `linear/linear-release-action`:
+
+### How it works
+
+| Trigger | Job | Action | Effect |
+|---------|-----|--------|--------|
+| Push to `main` | `release-sync.yml / sync` | `sync` (no version) | Associates the merged PR with the open Linear release draft |
+| Tag push `v*` | `publish.yml / linear-sync` | `sync --version <tag>` | Finalises the commit set for this release version in Linear |
+| After `publish-pypi` succeeds | `publish.yml / linear-complete` | `complete --version <tag>` | Marks the release done in Linear; triggers Merged → Done |
+
+### Prerequisites
+
+Before cutting the first release with this system active, a workspace admin must:
+
+1. **Set the `LINEAR_ACCESS_KEY` repo secret** in `nauticalab/orcapod-python` GitHub
+   settings (`Settings → Secrets and variables → Actions → New repository secret`).
+   Use the same Linear API key as `metamorphic-brain/axon`.
+
+2. **Configure a Linear release** in the workspace for orcapod-python via the Linear UI:
+   set the release name, which statuses count as "included" (at minimum: Merged), and
+   the target state for the transition (Done).
+
+If `LINEAR_ACCESS_KEY` is not set, the `linear-sync` and `linear-complete` jobs will
+fail but will not block the PyPI publish (they have no dependents).
+
+### Replicating for other orcapod repos
+
+1. Copy `.github/workflows/release-sync.yml` verbatim.
+2. Add `linear-sync` and `linear-complete` jobs to the repo's publish/release workflow,
+   adjusting `needs:` in `linear-complete` to point at whichever job creates the GitHub
+   Release.
+3. Set the `LINEAR_ACCESS_KEY` repo secret.
+4. Configure a Linear release in the workspace for the new repo.
