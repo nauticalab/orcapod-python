@@ -24,6 +24,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from orcapod.extension_types.base_logical_type import BaseLogicalType
 from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
 from orcapod.utils.lazy_module import LazyModule
 
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 DATACLASS_CATEGORY = "orcapod.dataclass"
 
 
-class DataclassLogicalType:
+class DataclassLogicalType(BaseLogicalType):
     """Logical type binding a Python dataclass to its Arrow extension type representation.
 
     Stores the dataclass's fully-qualified class name as the Arrow extension name

@@ -1,5 +1,7 @@
 """Specification-derived tests for Tag."""
 
+from datetime import date, datetime, timezone
+
 import pyarrow as pa
 import pytest
 
@@ -155,3 +157,87 @@ class TestTagAsDatagram:
         dg = tag.as_datagram()
         assert dg["x"] == 1
         assert dg["y"] == "hello"
+
+
+# ---------------------------------------------------------------------------
+# date and datetime tag values
+# ---------------------------------------------------------------------------
+
+class TestTagDatetimeValues:
+    """Tags accept date and datetime values and round-trip them correctly."""
+
+    def test_date_tag_construction(self):
+        ctx = _make_context()
+        tag = Tag({"dob": date(2024, 1, 15)}, data_context=ctx)
+        assert "dob" in tag.keys()
+
+    def test_date_tag_as_dict_roundtrip(self):
+        ctx = _make_context()
+        d = date(2024, 1, 15)
+        tag = Tag({"dob": d}, data_context=ctx)
+        result = tag.as_dict()
+        assert result["dob"] == d
+        assert type(result["dob"]) is date
+
+    def test_date_tag_as_table_schema(self):
+        ctx = _make_context()
+        tag = Tag({"dob": date(2024, 1, 15)}, data_context=ctx)
+        table = tag.as_table()
+        assert table.schema.field("dob").type == pa.date32()
+
+    def test_date_tag_content_hash(self):
+        ctx = _make_context()
+        tag = Tag({"dob": date(2024, 1, 15)}, data_context=ctx)
+        h = tag.content_hash()
+        assert h is not None
+
+    def test_datetime_tag_construction(self):
+        ctx = _make_context()
+        dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        tag = Tag({"ts": dt}, data_context=ctx)
+        assert "ts" in tag.keys()
+
+    def test_datetime_tag_as_dict_roundtrip(self):
+        ctx = _make_context()
+        dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        tag = Tag({"ts": dt}, data_context=ctx)
+        result = tag.as_dict()
+        assert result["ts"] == dt
+        assert type(result["ts"]) is datetime
+
+    def test_datetime_tag_as_table_schema(self):
+        ctx = _make_context()
+        dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        tag = Tag({"ts": dt}, data_context=ctx)
+        table = tag.as_table()
+        assert table.schema.field("ts").type == pa.timestamp("us", tz="UTC")
+
+    def test_datetime_tag_content_hash(self):
+        ctx = _make_context()
+        dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        tag = Tag({"ts": dt}, data_context=ctx)
+        h = tag.content_hash()
+        assert h is not None
+
+    def test_naive_datetime_raises(self):
+        ctx = _make_context()
+        with pytest.raises(ValueError, match="[Nn]aive datetime"):
+            tag = Tag({"ts": datetime(2024, 1, 15)}, data_context=ctx)
+            tag.as_table()  # conversion is lazy; trigger it
+
+    def test_date_tag_schema_inference(self):
+        """Schema inferred from an Arrow-backed Tag preserves date type."""
+        ctx = _make_context()
+        tag = Tag({"dob": date(2024, 1, 15)}, data_context=ctx)
+        arrow_table = tag.as_table()
+        tag2 = Tag(arrow_table, data_context=ctx)
+        assert tag2.schema()["dob"] is date
+
+    def test_datetime_tag_schema_inference(self):
+        """Schema inferred from an Arrow-backed Tag preserves datetime type."""
+        ctx = _make_context()
+        dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+        tag = Tag({"ts": dt}, data_context=ctx)
+        arrow_table = tag.as_table()
+        tag2 = Tag(arrow_table, data_context=ctx)
+        assert tag2.schema()["ts"] is datetime

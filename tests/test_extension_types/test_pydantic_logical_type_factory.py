@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import uuid as _uuid_module
 
@@ -175,6 +175,31 @@ class _OuterModel(BaseModel):
 class _ModelWithPrivateAttr(BaseModel):
     name: str
     _cache: str = PrivateAttr(default="")
+
+
+class _LiteralStrModel(BaseModel):
+    method: Literal["a", "b"]
+
+
+class _LiteralIntModel(BaseModel):
+    count: Literal[1, 2, 3]
+
+
+class _LiteralNoneModel(BaseModel):
+    status: Literal["active", None]
+
+
+class _LiteralNoneOnlyModel(BaseModel):
+    x: Literal[None]
+
+
+class _MixedLiteralModel(BaseModel):
+    val: Literal["a", 1]  # type: ignore[assignment]
+
+
+class _LiteralRoundTripModel(BaseModel):
+    method: Literal["a", "b"]
+    count: int
 
 
 # ── Module-level models for read-path and round-trip tests ───────────────────
@@ -458,3 +483,163 @@ def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
     assert isinstance(reconstructed.inner, _InnerModel)
     assert reconstructed.inner.value == 42
     assert reconstructed.label == "hello"
+
+
+# ── typing.Literal support tests (ITL-442) ───────────────────────────────────
+
+
+def test_factory_create_model_with_literal_str_field():
+    """Literal["a", "b"] field → large_string in the Arrow struct."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralStrModel, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    assert storage.field("method").type == pa.large_string()
+
+
+def test_factory_create_model_with_literal_int_field():
+    """Literal[1, 2, 3] field → int64 in the Arrow struct."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralIntModel, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    assert storage.field("count").type == pa.int64()
+
+
+def test_factory_create_model_with_literal_none_field():
+    """Literal["active", None] strips None → resolves to large_string."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralNoneModel, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    assert storage.field("status").type == pa.large_string()
+
+
+def test_factory_rejects_literal_none_only():
+    """Literal[None] has no concrete value type — raises ValueError."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    with pytest.raises(ValueError, match="Literal\\[None\\]"):
+        factory.create_for_python_type(_LiteralNoneOnlyModel, converter=converter)
+
+
+def test_factory_rejects_mixed_literal():
+    """Literal["a", 1] mixes str and int — raises ValueError."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    with pytest.raises(ValueError, match="Mixed-type Literal"):
+        factory.create_for_python_type(_MixedLiteralModel, converter=converter)
+
+
+def test_literal_model_round_trip():
+    """python_to_storage → storage_to_python round-trip for a model with Literal fields."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    converter = _make_full_converter()
+    factory = PydanticLogicalTypeFactory()
+    lt = factory.create_for_python_type(_LiteralRoundTripModel, converter=converter)
+    converter.register_logical_type(lt)
+
+    instance = _LiteralRoundTripModel(method="a", count=42)
+    storage_value = lt.python_to_storage(instance, converter)
+    assert storage_value == {"method": "a", "count": 42}
+
+    reconstructed = lt.storage_to_python(storage_value, converter)
+    assert isinstance(reconstructed, _LiteralRoundTripModel)
+    assert reconstructed.method == "a"
+    assert reconstructed.count == 42
+
+
+def test_literal_model_as_dictsource_column():
+    """Full Arrow table round-trip for a model with a Literal field (ITL-442 repro).
+
+    Exercises the complete path: register_python_class → python_dicts_to_arrow_table →
+    arrow_table_to_python_dicts. This is the same sequence DictSource executes internally.
+    Before the fix, register_python_class raised:
+        ValueError: Unsupported annotation: typing.Literal['a', 'b']
+    """
+    converter = _make_full_converter()
+
+    # Step A: register the model — previously raised ValueError
+    converter.register_python_class(_LiteralStrModel)
+
+    # Step B: convert Python dicts to Arrow table (mirrors DictSource.__init__)
+    rows = [{"config": _LiteralStrModel(method="a")}]
+    arrow_schema = converter.python_schema_to_arrow_schema({"config": _LiteralStrModel})
+    table = converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    assert table.num_rows == 1
+    assert "config" in table.schema.names
+
+    # Step C: round-trip back to Python dicts
+    result = converter.arrow_table_to_python_dicts(table)
+    assert len(result) == 1
+    assert isinstance(result[0]["config"], _LiteralStrModel)
+    assert result[0]["config"].method == "a"
+
+
+def test_literal_none_schema_field_is_nullable():
+    """python_schema_to_arrow_schema: Literal["a", None] top-level field → nullable=True.
+
+    Exercises the _is_optional_type fix: a Literal containing None must produce
+    a nullable Arrow field, identical to Optional[str]. Before the fix,
+    _is_optional_type only recognised Union/Optional, so Literal[..., None]
+    would yield nullable=False and crash on serialisation of None values.
+    """
+    converter = _make_full_converter()
+    schema = converter.python_schema_to_arrow_schema({"status": Literal["active", None]})
+    field = schema.field("status")
+    assert field.type == pa.large_string()
+    assert field.nullable is True
+
+
+def test_literal_model_polars_dataframe_round_trip():
+    """Arrow table → Polars DataFrame → Arrow table round-trip for a Literal-field pydantic model.
+
+    Verifies three things:
+    - ``register_python_class`` registers a Polars extension type for the model so that
+      ``pl.from_arrow`` recognises the column as an extension series (not a plain struct).
+    - The Polars extension type carries the correct fully-qualified class name.
+    - ``df.to_arrow()`` recovers an Arrow table whose extension type is intact, and
+      ``arrow_table_to_python_dicts`` reconstructs the original model instance — including
+      the ``Literal``-typed field — without error.
+    """
+    import polars as pl
+
+    converter = _make_full_converter()
+    converter.register_python_class(_LiteralRoundTripModel)
+
+    # Build Arrow table
+    rows = [{"config": _LiteralRoundTripModel(method="a", count=42)}]
+    arrow_schema = converter.python_schema_to_arrow_schema({"config": _LiteralRoundTripModel})
+    table = converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    # Convert Arrow table → Polars DataFrame
+    df = pl.from_arrow(table)
+
+    # Polars column must carry the correct extension type
+    fqcn = f"{_LiteralRoundTripModel.__module__}.{_LiteralRoundTripModel.__qualname__}"
+    assert isinstance(df.dtypes[0], pl.BaseExtension)
+    assert df.dtypes[0].ext_name() == fqcn
+
+    # Convert back to Arrow and reconstruct Python objects
+    table_back = df.to_arrow()
+    rows_back = converter.arrow_table_to_python_dicts(table_back)
+    assert len(rows_back) == 1
+    reconstructed = rows_back[0]["config"]
+    assert isinstance(reconstructed, _LiteralRoundTripModel)
+    assert reconstructed.method == "a"
+    assert reconstructed.count == 42

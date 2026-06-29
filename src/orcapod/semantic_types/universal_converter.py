@@ -17,7 +17,7 @@ import logging
 import types
 import typing
 from collections.abc import Callable, Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 # Handle generic types
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
@@ -89,6 +89,7 @@ def _get_python_to_arrow_map() -> dict:
         "date": pa.date32(),
         "datetime": pa.timestamp("us", tz="UTC"),
         datetime: pa.timestamp("us", tz="UTC"),
+        date: pa.date32(),
     }
 
     # Add numpy types if available
@@ -123,19 +124,21 @@ _ARROW_NATIVE_TYPE_KEYS: frozenset[type] | None = None
 
 
 def _is_optional_type(python_type: DataType) -> bool:
-    """Return True if python_type is T | None (Optional[T]).
+    """Return True if python_type is T | None (Optional[T]) or Literal[..., None].
 
     Args:
         python_type: A Python type annotation.
 
     Returns:
-        True if the type has ``None`` as one of its union arms,
-        False otherwise (including for plain types and complex
-        non-optional unions).
+        True if the type has ``None`` as one of its union arms (``Union``/``Optional``)
+        or ``None`` as one of its literal members (``Literal[..., None]``),
+        False otherwise.
     """
     origin = get_origin(python_type)
     if origin is typing.Union or origin is types.UnionType:
         return type(None) in get_args(python_type)
+    if origin is typing.Literal:
+        return None in get_args(python_type)
     return False
 
 
@@ -315,6 +318,26 @@ class UniversalTypeConverter:
                 f"Complex unions with multiple non-None types are not supported: "
                 f"{annotation!r}. Only Optional[T] (T | None) is allowed."
             )
+
+        # typing.Literal[v1, v2, ...] → Arrow type of the literal values' type.
+        # None members are stripped (treat as optional/nullable); mixed non-None types raise.
+        if origin is typing.Literal:
+            if not args:
+                raise ValueError(
+                    "Bare typing.Literal (no arguments) is not a valid type annotation."
+                )
+            value_types = {type(a) for a in args if a is not None}
+            if not value_types:
+                raise ValueError(
+                    "Literal[None] is not supported as an Arrow type. "
+                    "Use Optional[T] to express nullability instead."
+                )
+            if len(value_types) != 1:
+                raise ValueError(
+                    f"Mixed-type Literal is not supported: {annotation!r}. "
+                    f"All members must share one type (e.g. Literal['a', 'b'])."
+                )
+            return self.register_python_class(next(iter(value_types)))
 
         # list[T] → pa.large_list(T).
         # Raise if T resolves to an extension type: Arrow forbids extension types inside
@@ -727,6 +750,22 @@ class UniversalTypeConverter:
         converter_fn = self.get_arrow_to_python_converter(arrow_type)
         return converter_fn(storage_value)
 
+    def get_logical_type(self, python_type: type) -> "LogicalTypeProtocol | None":
+        """Return the registered ``LogicalTypeProtocol`` for a Python type.
+
+        Pass-through to the internal ``LogicalTypeRegistry``.
+
+        Args:
+            python_type: The Python class to look up.
+
+        Returns:
+            The registered ``LogicalTypeProtocol`` instance, or ``None`` if the
+            type is not registered or no registry is configured.
+        """
+        if self._logical_type_registry is None:
+            return None
+        return self._logical_type_registry.get_by_python_type(python_type)
+
     def register_logical_type(self, lt: "LogicalTypeProtocol") -> None:
         """Register a ``LogicalTypeProtocol`` instance.
 
@@ -1083,6 +1122,26 @@ class UniversalTypeConverter:
                     f"Only Optional[T] (i.e., T | None) is allowed."
                 )
 
+        # typing.Literal[v1, v2, ...] → Arrow type of the literal values' type.
+        # None members are stripped; mixed non-None types raise.
+        elif origin is typing.Literal:
+            if not args:
+                raise ValueError(
+                    "Bare typing.Literal (no arguments) is not a valid type annotation."
+                )
+            value_types = {type(a) for a in args if a is not None}
+            if not value_types:
+                raise ValueError(
+                    "Literal[None] is not supported as an Arrow type. "
+                    "Use Optional[T] to express nullability instead."
+                )
+            if len(value_types) != 1:
+                raise ValueError(
+                    f"Mixed-type Literal is not supported: {python_type!r}. "
+                    f"All members must share one type (e.g. Literal['a', 'b'])."
+                )
+            return self.python_type_to_arrow_type(next(iter(value_types)))
+
         # Handle set types → lists
         elif origin is set:
             if len(args) != 1:
@@ -1210,6 +1269,8 @@ class UniversalTypeConverter:
             else:
                 return typing.Union[tuple(child_types)]
 
+        elif pa.types.is_date(arrow_type):
+            return date
         elif pa.types.is_timestamp(arrow_type):
             return datetime
 
