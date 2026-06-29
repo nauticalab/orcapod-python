@@ -604,3 +604,42 @@ def test_literal_none_schema_field_is_nullable():
     field = schema.field("status")
     assert field.type == pa.large_string()
     assert field.nullable is True
+
+
+def test_literal_model_polars_dataframe_round_trip():
+    """Arrow table → Polars DataFrame → Arrow table round-trip for a Literal-field pydantic model.
+
+    Verifies three things:
+    - ``register_python_class`` registers a Polars extension type for the model so that
+      ``pl.from_arrow`` recognises the column as an extension series (not a plain struct).
+    - The Polars extension type carries the correct fully-qualified class name.
+    - ``df.to_arrow()`` recovers an Arrow table whose extension type is intact, and
+      ``arrow_table_to_python_dicts`` reconstructs the original model instance — including
+      the ``Literal``-typed field — without error.
+    """
+    import polars as pl
+
+    converter = _make_full_converter()
+    converter.register_python_class(_LiteralRoundTripModel)
+
+    # Build Arrow table
+    rows = [{"config": _LiteralRoundTripModel(method="a", count=42)}]
+    arrow_schema = converter.python_schema_to_arrow_schema({"config": _LiteralRoundTripModel})
+    table = converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    # Convert Arrow table → Polars DataFrame
+    df = pl.from_arrow(table)
+
+    # Polars column must carry the correct extension type
+    fqcn = f"{_LiteralRoundTripModel.__module__}.{_LiteralRoundTripModel.__qualname__}"
+    assert isinstance(df.dtypes[0], pl.BaseExtension)
+    assert df.dtypes[0].ext_name() == fqcn
+
+    # Convert back to Arrow and reconstruct Python objects
+    table_back = df.to_arrow()
+    rows_back = converter.arrow_table_to_python_dicts(table_back)
+    assert len(rows_back) == 1
+    reconstructed = rows_back[0]["config"]
+    assert isinstance(reconstructed, _LiteralRoundTripModel)
+    assert reconstructed.method == "a"
+    assert reconstructed.count == 42
