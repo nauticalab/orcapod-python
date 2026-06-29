@@ -1,6 +1,8 @@
 """Base class for all orcapod logical types."""
 from __future__ import annotations
 
+from orcapod.types import DataType
+
 
 class BaseLogicalType:
     """Shared base for all logical types.
@@ -10,7 +12,7 @@ class BaseLogicalType:
     override these methods.
     """
 
-    def pick_field(self, key: str) -> type:
+    def pick_field(self, key: str) -> DataType:
         """Return the Python type of field ``key``.
 
         Args:
@@ -20,23 +22,21 @@ class BaseLogicalType:
             The Python type of the requested field.
 
         Raises:
-            NotImplementedError: Until implemented for this logical type.
+            NotImplementedError: If this logical type does not support keyed access.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} does not yet support pick (keyed field access). "
-            "Support for this extension type is planned for a future issue."
+            f"{type(self).__name__} does not support pick (keyed field access)."
         )
 
-    def index_element(self) -> type:
+    def index_element(self) -> DataType:
         """Return the Python element type for positional list access.
 
         Returns:
             The Python type of elements in this list-like logical type.
 
         Raises:
-            NotImplementedError: Until implemented for this logical type.
+            NotImplementedError: If this logical type does not support positional access.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} does not yet support index (positional access). "
-            "Support for this extension type is planned for a future issue."
+            f"{type(self).__name__} does not support index (positional access)."
         )

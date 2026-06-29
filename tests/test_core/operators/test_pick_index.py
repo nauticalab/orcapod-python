@@ -13,13 +13,13 @@ class ConcreteLogicalType(BaseLogicalType):
 
 def test_base_logical_type_pick_field_raises():
     lt = ConcreteLogicalType()
-    with pytest.raises(NotImplementedError, match="does not yet support pick"):
+    with pytest.raises(NotImplementedError, match="does not support pick"):
         lt.pick_field("some_key")
 
 
 def test_base_logical_type_index_element_raises():
     lt = ConcreteLogicalType()
-    with pytest.raises(NotImplementedError, match="does not yet support index"):
+    with pytest.raises(NotImplementedError, match="does not support index"):
         lt.index_element()
 
 
@@ -191,7 +191,7 @@ def test_pick_extension_type_not_implemented():
     )
     stream = ArrowTableStream(table, tag_columns=["id"])
 
-    with pytest.raises(NotImplementedError, match="does not yet support pick"):
+    with pytest.raises(NotImplementedError, match="does not support pick"):
         Pick("rec", "value")(stream)
 
 

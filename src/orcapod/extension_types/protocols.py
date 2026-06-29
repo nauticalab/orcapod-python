@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from orcapod.types import DataType
+
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
@@ -143,14 +145,14 @@ class LogicalTypeProtocol(Protocol):
         """
         ...
 
-    def pick_field(self, key: str) -> type:
+    def pick_field(self, key: str) -> DataType:
         """Return the Python type of field ``key`` in this structured logical type.
 
         Args:
             key: Name of the field to project into.
 
         Returns:
-            The Python type of the requested field.
+            The Python ``DataType`` of the requested field.
 
         Raises:
             InputValidationError: If the field does not exist in the type's schema.
@@ -158,11 +160,11 @@ class LogicalTypeProtocol(Protocol):
         """
         ...
 
-    def index_element(self) -> type:
+    def index_element(self) -> DataType:
         """Return the Python element type for positional list access.
 
         Returns:
-            The Python type of elements in this list-like logical type.
+            The Python ``DataType`` of elements in this list-like logical type.
 
         Raises:
             NotImplementedError: If this logical type does not support positional access.
