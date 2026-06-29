@@ -561,3 +561,31 @@ def test_literal_model_round_trip():
     assert isinstance(reconstructed, _LiteralRoundTripModel)
     assert reconstructed.method == "a"
     assert reconstructed.count == 42
+
+
+def test_literal_model_as_dictsource_column():
+    """Full Arrow table round-trip for a model with a Literal field (ITL-442 repro).
+
+    Exercises the complete path: register_python_class → python_dicts_to_arrow_table →
+    arrow_table_to_python_dicts. This is the same sequence DictSource executes internally.
+    Before the fix, register_python_class raised:
+        ValueError: Unsupported annotation: typing.Literal['a', 'b']
+    """
+    converter = _make_full_converter()
+
+    # Step A: register the model — previously raised ValueError
+    converter.register_python_class(_LiteralStrModel)
+
+    # Step B: convert Python dicts to Arrow table (mirrors DictSource.__init__)
+    rows = [{"config": _LiteralStrModel(method="a")}]
+    arrow_schema = converter.python_schema_to_arrow_schema({"config": _LiteralStrModel})
+    table = converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
+
+    assert table.num_rows == 1
+    assert "config" in table.schema.names
+
+    # Step C: round-trip back to Python dicts
+    result = converter.arrow_table_to_python_dicts(table)
+    assert len(result) == 1
+    assert isinstance(result[0]["config"], _LiteralStrModel)
+    assert result[0]["config"].method == "a"
