@@ -301,8 +301,8 @@ class UniversalTypeConverter:
             value_types = {type(a) for a in args if a is not None}
             if not value_types:
                 raise ValueError(
-                    f"Literal[None] is not supported as an Arrow type. "
-                    f"Use Optional[T] to express nullability instead."
+                    "Literal[None] is not supported as an Arrow type. "
+                    "Use Optional[T] to express nullability instead."
                 )
             if len(value_types) != 1:
                 raise ValueError(
@@ -1090,6 +1090,22 @@ class UniversalTypeConverter:
                     f"Complex unions with multiple non-None types are not supported: {python_type}. "
                     f"Only Optional[T] (i.e., T | None) is allowed."
                 )
+
+        # typing.Literal[v1, v2, ...] → Arrow type of the literal values' type.
+        # None members are stripped; mixed non-None types raise.
+        elif origin is typing.Literal:
+            value_types = {type(a) for a in args if a is not None}
+            if not value_types:
+                raise ValueError(
+                    "Literal[None] is not supported as an Arrow type. "
+                    "Use Optional[T] to express nullability instead."
+                )
+            if len(value_types) != 1:
+                raise ValueError(
+                    f"Mixed-type Literal is not supported: {python_type!r}. "
+                    f"All members must share one type (e.g. Literal['a', 'b'])."
+                )
+            return self.python_type_to_arrow_type(next(iter(value_types)))
 
         # Handle set types → lists
         elif origin is set:

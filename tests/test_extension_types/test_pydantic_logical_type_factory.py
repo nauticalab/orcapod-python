@@ -542,3 +542,22 @@ def test_factory_rejects_mixed_literal():
     converter = _make_full_converter()
     with pytest.raises(ValueError, match="Mixed-type Literal"):
         factory.create_for_python_type(_MixedLiteralModel, converter=converter)
+
+
+def test_literal_model_round_trip():
+    """python_to_storage → storage_to_python round-trip for a model with Literal fields."""
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_LiteralRoundTripModel, converter=converter)
+    converter.register_logical_type(lt)
+
+    instance = _LiteralRoundTripModel(method="a", count=42)
+    storage_value = lt.python_to_storage(instance, converter)
+    assert storage_value == {"method": "a", "count": 42}
+
+    reconstructed = lt.storage_to_python(storage_value, converter)
+    assert isinstance(reconstructed, _LiteralRoundTripModel)
+    assert reconstructed.method == "a"
+    assert reconstructed.count == 42
