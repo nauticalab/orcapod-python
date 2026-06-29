@@ -705,6 +705,22 @@ class UniversalTypeConverter:
         converter_fn = self.get_arrow_to_python_converter(arrow_type)
         return converter_fn(storage_value)
 
+    def get_logical_type(self, python_type: type) -> "LogicalTypeProtocol | None":
+        """Return the registered ``LogicalTypeProtocol`` for a Python type.
+
+        Pass-through to the internal ``LogicalTypeRegistry``.
+
+        Args:
+            python_type: The Python class to look up.
+
+        Returns:
+            The registered ``LogicalTypeProtocol`` instance, or ``None`` if the
+            type is not registered or no registry is configured.
+        """
+        if self._logical_type_registry is None:
+            return None
+        return self._logical_type_registry.get_by_python_type(python_type)
+
     def register_logical_type(self, lt: "LogicalTypeProtocol") -> None:
         """Register a ``LogicalTypeProtocol`` instance.
 

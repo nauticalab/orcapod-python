@@ -24,6 +24,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from orcapod.extension_types.base_logical_type import BaseLogicalType
 from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
 from orcapod.utils.lazy_module import LazyModule
 
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 PYDANTIC_CATEGORY = "orcapod.pydantic"
 
 
-class PydanticLogicalType:
+class PydanticLogicalType(BaseLogicalType):
     """Logical type binding a pydantic ``BaseModel`` subclass to its Arrow extension type.
 
     Stores the model's fully-qualified class name as the Arrow extension name
