@@ -25,8 +25,6 @@ def test_base_logical_type_index_element_raises():
 
 import dataclasses
 
-import pyarrow as pa
-
 from orcapod.core.operators import Pick
 from orcapod.core.sources import DictSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream

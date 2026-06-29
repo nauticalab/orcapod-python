@@ -252,7 +252,11 @@ class Index(UnaryOperator):
             empty_table = stream.data_context.type_converter.python_dicts_to_arrow_table(
                 [], python_schema=combined_schema
             )
-            return ArrowTableStream(empty_table, tag_columns=tag_columns)
+            return ArrowTableStream(
+                empty_table,
+                tag_columns=tag_columns,
+                data_context=stream.data_context,
+            )
 
         return self._materialize_to_stream(out_rows)
 
