@@ -589,3 +589,18 @@ def test_literal_model_as_dictsource_column():
     assert len(result) == 1
     assert isinstance(result[0]["config"], _LiteralStrModel)
     assert result[0]["config"].method == "a"
+
+
+def test_literal_none_schema_field_is_nullable():
+    """python_schema_to_arrow_schema: Literal["a", None] top-level field → nullable=True.
+
+    Exercises the _is_optional_type fix: a Literal containing None must produce
+    a nullable Arrow field, identical to Optional[str]. Before the fix,
+    _is_optional_type only recognised Union/Optional, so Literal[..., None]
+    would yield nullable=False and crash on serialisation of None values.
+    """
+    converter = _make_full_converter()
+    schema = converter.python_schema_to_arrow_schema({"status": Literal["active", None]})
+    field = schema.field("status")
+    assert field.type == pa.large_string()
+    assert field.nullable is True

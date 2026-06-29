@@ -124,19 +124,21 @@ _ARROW_NATIVE_TYPE_KEYS: frozenset[type] | None = None
 
 
 def _is_optional_type(python_type: DataType) -> bool:
-    """Return True if python_type is T | None (Optional[T]).
+    """Return True if python_type is T | None (Optional[T]) or Literal[..., None].
 
     Args:
         python_type: A Python type annotation.
 
     Returns:
-        True if the type has ``None`` as one of its union arms,
-        False otherwise (including for plain types and complex
-        non-optional unions).
+        True if the type has ``None`` as one of its union arms (``Union``/``Optional``)
+        or ``None`` as one of its literal members (``Literal[..., None]``),
+        False otherwise.
     """
     origin = get_origin(python_type)
     if origin is typing.Union or origin is types.UnionType:
         return type(None) in get_args(python_type)
+    if origin is typing.Literal:
+        return None in get_args(python_type)
     return False
 
 
@@ -298,6 +300,10 @@ class UniversalTypeConverter:
         # typing.Literal[v1, v2, ...] → Arrow type of the literal values' type.
         # None members are stripped (treat as optional/nullable); mixed non-None types raise.
         if origin is typing.Literal:
+            if not args:
+                raise ValueError(
+                    "Bare typing.Literal (no arguments) is not a valid type annotation."
+                )
             value_types = {type(a) for a in args if a is not None}
             if not value_types:
                 raise ValueError(
@@ -1094,6 +1100,10 @@ class UniversalTypeConverter:
         # typing.Literal[v1, v2, ...] → Arrow type of the literal values' type.
         # None members are stripped; mixed non-None types raise.
         elif origin is typing.Literal:
+            if not args:
+                raise ValueError(
+                    "Bare typing.Literal (no arguments) is not a valid type annotation."
+                )
             value_types = {type(a) for a in args if a is not None}
             if not value_types:
                 raise ValueError(
