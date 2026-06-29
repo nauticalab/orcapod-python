@@ -548,8 +548,8 @@ def test_literal_model_round_trip():
     """python_to_storage → storage_to_python round-trip for a model with Literal fields."""
     from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
 
-    factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
+    factory = PydanticLogicalTypeFactory()
     lt = factory.create_for_python_type(_LiteralRoundTripModel, converter=converter)
     converter.register_logical_type(lt)
 
