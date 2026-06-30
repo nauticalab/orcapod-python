@@ -209,9 +209,10 @@ def get_function_signature(
     # type objects before we check for union types.
     try:
         sig = inspect.signature(func, eval_str=True)
-    except Exception:
-        # Fall back to unresolved signatures if evaluation fails (e.g. forward
-        # references that cannot be resolved in the function's module scope).
+    except (NameError, TypeError, AttributeError, SyntaxError):
+        # Fall back to unresolved signatures when annotation evaluation fails
+        # (e.g. forward references that cannot be resolved in the function's
+        # module scope).
         sig = inspect.signature(func)
     parts: dict[str, object] = {}
 
