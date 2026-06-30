@@ -218,6 +218,12 @@ class UniversalTypeConverter:
         resolves nested types and synthesises via factory if needed.
         When no ``LogicalTypeRegistry`` is configured, this is a no-op.
 
+        Union-typed annotations (e.g. ``str | Path``) are handled by registering
+        each non-``None`` branch individually. Arrow has no union storage type,
+        so the union itself is never registered; instead each concrete branch's
+        ``LogicalType`` is made available so it is ready when a stream of that
+        type is bound.
+
         Args:
             *schemas: One or more ``Schema`` mappings (column name → Python type).
 
@@ -229,7 +235,18 @@ class UniversalTypeConverter:
             return
         for schema in schemas:
             for annotation in schema.values():
-                self.register_python_class(annotation)
+                origin = get_origin(annotation)
+                if origin is typing.Union or origin is types.UnionType:
+                    # Union types (e.g. str | Path) are valid in function input
+                    # schemas — they express that the pod accepts either concrete
+                    # type. Register each non-None branch so its LogicalType is
+                    # available when a stream is bound; the union itself has no
+                    # Arrow representation.
+                    for branch in get_args(annotation):
+                        if branch is not type(None):
+                            self.register_python_class(branch)
+                else:
+                    self.register_python_class(annotation)
 
     def register_python_class(self, annotation: Any) -> "pa.DataType":
         """Register a Python type annotation and return its Arrow type.
@@ -292,6 +309,11 @@ class UniversalTypeConverter:
             non_none = [a for a in args if a is not type(None)]
             if len(non_none) == 1:
                 return self.register_python_class(non_none[0])
+            # Direct callers must not pass complex unions here — there is no
+            # Arrow type for str | Path.  For schema-level registration
+            # (where union-typed input args are valid), use
+            # ensure_types_registered_for_schemas(), which registers each
+            # non-None branch individually.
             raise ValueError(
                 f"Complex unions with multiple non-None types are not supported: "
                 f"{annotation!r}. Only Optional[T] (T | None) is allowed."
