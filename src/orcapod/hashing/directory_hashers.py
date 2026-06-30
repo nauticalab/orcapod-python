@@ -56,7 +56,7 @@ def _hash_dir(
         buffer_size: Read buffer size in bytes for file content.
 
     Returns:
-        The raw 32-byte SHA-256 digest for this directory node.
+        The raw digest bytes for this directory node (length depends on the algorithm).
     """
     entries: list[tuple[bytes, bytes]] = []
 

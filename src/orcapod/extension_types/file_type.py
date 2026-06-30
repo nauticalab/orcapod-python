@@ -170,7 +170,17 @@ class LogicalFile(BaseLogicalType):
             A ``File`` instance.
 
         Raises:
+            ValueError: If ``storage_value`` is not valid JSON or lacks the
+                ``"path"`` key.
             FileNotFoundError: If the path no longer exists.
             IsADirectoryError: If the path is now a directory.
         """
-        return File(json.loads(storage_value)["path"])
+        try:
+            path = json.loads(storage_value)["path"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(
+                f"LogicalFile: cannot deserialise storage value {storage_value!r}; "
+                'expected a JSON object with a "path" key, '
+                'e.g. {"path": "/some/file.csv"}.'
+            ) from exc
+        return File(path)

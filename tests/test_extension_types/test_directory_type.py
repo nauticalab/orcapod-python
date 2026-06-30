@@ -193,6 +193,34 @@ class TestLogicalDirectory:
         with pytest.raises(FileNotFoundError):
             lt.storage_to_python(json.dumps({"path": str(tmp_path / "gone")}))
 
+    def test_storage_to_python_raises_value_error_on_bad_json(self):
+        lt = LogicalDirectory()
+        with pytest.raises(ValueError, match="LogicalDirectory"):
+            lt.storage_to_python("not-json-at-all")
+
+    def test_storage_to_python_raises_value_error_on_missing_path_key(self):
+        lt = LogicalDirectory()
+        with pytest.raises(ValueError, match="LogicalDirectory"):
+            lt.storage_to_python(json.dumps({"wrong_key": "/some/dir"}))
+
+    def test_python_to_storage_with_tuple_ignore(self, tmp_path):
+        d = tmp_path / "d"
+        d.mkdir()
+        obj = Directory(d, ignore=("*.pyc", ".git"))
+        lt = LogicalDirectory()
+        storage = lt.python_to_storage(obj)
+        data = json.loads(storage)
+        assert data == {"path": str(d), "ignore": [".git", "*.pyc"]}
+
+    def test_round_trip_tuple_ignore(self, tmp_path):
+        d = tmp_path / "d"
+        d.mkdir()
+        obj = Directory(d, ignore=("*.pyc", ".git"))
+        lt = LogicalDirectory()
+        recovered = lt.storage_to_python(lt.python_to_storage(obj))
+        assert str(recovered) == str(obj)
+        assert recovered._ignore == [".git", "*.pyc"]  # sorted, stored as list
+
 
 class TestTryImportCallable:
     def test_imports_known_function(self):
@@ -213,4 +241,10 @@ class TestTryImportCallable:
     def test_returns_none_on_bad_format(self):
         with pytest.warns(UserWarning):
             result = _try_import_callable("no_colon_separator")
+        assert result is None
+
+    def test_returns_none_when_attribute_is_not_callable(self):
+        # json.encoder.INFINITY is a float attribute — not callable
+        with pytest.warns(UserWarning, match="not callable"):
+            result = _try_import_callable("json.encoder:INFINITY")
         assert result is None

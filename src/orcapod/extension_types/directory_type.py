@@ -14,7 +14,7 @@ from __future__ import annotations
 import importlib
 import json
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Self
 
 import polars as pl
@@ -44,7 +44,7 @@ class Directory(ProxyUPath):
     Args:
         *args: Positional path arguments forwarded to ``UPath``.
         ignore: Optional filter for excluding entries from the content hash.
-            Accepts a list of glob patterns matched against entry names (via
+            Accepts an iterable of glob patterns matched against entry names (via
             ``fnmatch``), or a callable ``(UPath) -> bool`` returning ``True`` to
             exclude an entry. Applied at every level of recursion during hashing.
             Defaults to ``None`` (all entries included).
@@ -66,7 +66,7 @@ class Directory(ProxyUPath):
     def __init__(
         self,
         *args: Any,
-        ignore: Callable[[UPath], bool] | list[str] | None = None,
+        ignore: Callable[[UPath], bool] | Iterable[str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -125,7 +125,6 @@ def _try_import_callable(full_name: str) -> Callable[..., Any] | None:
         obj: Any = mod
         for attr in qualname.split("."):
             obj = getattr(obj, attr)
-        return obj  # type: ignore[return-value]
     except (ImportError, AttributeError) as exc:
         warnings.warn(
             f"Directory: cannot recover ignore callable {full_name!r}: {exc}. "
@@ -134,6 +133,15 @@ def _try_import_callable(full_name: str) -> Callable[..., Any] | None:
             stacklevel=2,
         )
         return None
+    if not callable(obj):
+        warnings.warn(
+            f"Directory: recovered attribute {full_name!r} is not callable "
+            f"(got {type(obj)!r}). Falling back to ignore=None.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+    return obj  # type: ignore[return-value]
 
 
 class LogicalDirectory(BaseLogicalType):
@@ -195,7 +203,7 @@ class LogicalDirectory(BaseLogicalType):
         The ``ignore`` parameter is serialised as follows:
 
         * ``None`` → ``{"path": "..."}``
-        * ``list[str]`` → ``{"path": "...", "ignore": [...]}`` (patterns sorted)
+        * Any non-callable iterable (``list``, ``tuple``, etc.) → ``{"path": "...", "ignore": [...]}`` (patterns sorted)
         * Named callable → ``{"path": "...", "ignore_callable": "module:qualname"}``
         * Lambda / closure / built-in → ``{"path": "..."}`` + ``UserWarning``
 
@@ -212,7 +220,8 @@ class LogicalDirectory(BaseLogicalType):
         if ignore is None:
             return json.dumps({"path": path_str})
 
-        if isinstance(ignore, list):
+        if not callable(ignore):
+            # Any non-callable iterable (list, tuple, set, …) — pattern spec.
             # Sort by base name (strip leading glob chars) for deterministic storage order;
             # secondary sort by the full pattern ensures canonical output when base names collide.
             return json.dumps({"path": path_str, "ignore": sorted(ignore, key=lambda x: (x.lstrip("*."), x))})
@@ -249,11 +258,20 @@ class LogicalDirectory(BaseLogicalType):
             A ``Directory`` instance.
 
         Raises:
+            ValueError: If ``storage_value`` is not valid JSON or lacks the
+                ``"path"`` key.
             FileNotFoundError: If the path no longer exists.
             NotADirectoryError: If the path is now a non-directory.
         """
-        data = json.loads(storage_value)
-        path = data["path"]
+        try:
+            data = json.loads(storage_value)
+            path = data["path"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(
+                f"LogicalDirectory: cannot deserialise storage value {storage_value!r}; "
+                'expected a JSON object with a "path" key, '
+                'e.g. {"path": "/some/dir"}.'
+            ) from exc
 
         if "ignore_callable" in data:
             fn = _try_import_callable(data["ignore_callable"])

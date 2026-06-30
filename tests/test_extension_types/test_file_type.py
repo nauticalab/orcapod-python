@@ -113,3 +113,13 @@ class TestLogicalFile:
     def test_arrow_extension_type_is_cached(self):
         lt = LogicalFile()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
+
+    def test_storage_to_python_raises_value_error_on_bad_json(self):
+        lt = LogicalFile()
+        with pytest.raises(ValueError, match="LogicalFile"):
+            lt.storage_to_python("not-json-at-all")
+
+    def test_storage_to_python_raises_value_error_on_missing_path_key(self):
+        lt = LogicalFile()
+        with pytest.raises(ValueError, match="LogicalFile"):
+            lt.storage_to_python(json.dumps({"wrong_key": "/some/file.txt"}))
