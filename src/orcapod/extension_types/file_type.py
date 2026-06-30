@@ -10,6 +10,7 @@ paths that may not yet exist.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, Self
 
 import polars as pl
@@ -144,25 +145,25 @@ class LogicalFile(BaseLogicalType):
         return LogicalFile._polars_ext
 
     def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> str:
-        """Convert a ``File`` to its string path representation.
+        """Convert a ``File`` to its JSON storage representation.
 
         Args:
             value: A ``File`` instance.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
-            The string form of the path (e.g. ``"/tmp/data.csv"``).
+            A JSON string ``{"path": "<path>"}`` encoding the file path.
         """
-        return str(value)
+        return json.dumps({"path": str(value)})
 
     def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> File:
-        """Reconstruct a ``File`` from its stored string path.
+        """Reconstruct a ``File`` from its stored JSON string.
 
         Re-validates existence on read — raises ``FileNotFoundError`` if the file
         no longer exists at the stored path.
 
         Args:
-            storage_value: A string path as stored in Arrow.
+            storage_value: A JSON string as stored in Arrow.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
@@ -172,4 +173,4 @@ class LogicalFile(BaseLogicalType):
             FileNotFoundError: If the path no longer exists.
             IsADirectoryError: If the path is now a directory.
         """
-        return File(storage_value)
+        return File(json.loads(storage_value)["path"])
