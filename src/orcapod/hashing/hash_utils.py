@@ -13,6 +13,52 @@ from orcapod.types import ContentHash, PathLike
 logger = logging.getLogger(__name__)
 
 
+def _is_union_annotation(annotation: object) -> bool:
+    """Return ``True`` if *annotation* is a union type.
+
+    Detects both PEP 604 ``X | Y`` (``types.UnionType``) and
+    ``typing.Union[X, Y]`` / ``typing.Optional[X]``.
+
+    Args:
+        annotation: Any Python object (type annotation or otherwise).
+
+    Returns:
+        ``True`` if the annotation is a union; ``False`` otherwise.
+    """
+    import types as _types
+    import typing
+
+    if isinstance(annotation, _types.UnionType):
+        return True
+    return getattr(annotation, "__origin__", None) is typing.Union
+
+
+def _canonical_annotation_str(annotation: object) -> str:
+    """Return a stable, canonical string for a type annotation.
+
+    For union types (both PEP 604 ``X | Y`` and ``typing.Union[X, Y]``),
+    members are sorted byte-wise so that ``str | Path`` and ``Path | str``
+    produce the same canonical string.  Non-union types fall through to
+    ``inspect.formatannotation``, preserving existing behaviour exactly.
+
+    The canonical ordering key is the fully qualified type name produced by
+    ``inspect.formatannotation`` (e.g. ``"pathlib.Path"``, ``"str"``),
+    sorted lexicographically.  This is stable across Python versions and
+    machines and does not depend on ``id()`` or ``__hash__``.
+
+    Args:
+        annotation: A type annotation object.
+
+    Returns:
+        A canonical string representation.
+    """
+    if _is_union_annotation(annotation):
+        args = getattr(annotation, "__args__", ()) or ()
+        member_strs = sorted(_canonical_annotation_str(a) for a in args)
+        return " | ".join(member_strs)
+    return inspect.formatannotation(annotation)
+
+
 def combine_hashes(
     *hashes: str,
     order: bool = False,
@@ -170,6 +216,13 @@ def get_function_signature(
     param_strs = []
     for name, param in sig.parameters.items():
         param_str = str(param)
+        annotation = param.annotation
+        if annotation is not inspect.Parameter.empty and _is_union_annotation(annotation):
+            old_ann = inspect.formatannotation(annotation)
+            new_ann = _canonical_annotation_str(annotation)
+            # Replace ": <old_ann>" with ": <new_ann>" (first occurrence only).
+            # The ": " prefix distinguishes the annotation from the default value.
+            param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
         if not include_defaults and "=" in param_str:
             param_str = param_str.split("=")[0].strip()
         param_strs.append(param_str)
@@ -184,7 +237,11 @@ def get_function_signature(
         f"{parts['name']}{parts['params']}"
     )
     if "returns" in parts:
-        fn_string += f"-> {parts['returns']}"
+        ret = parts["returns"]
+        if _is_union_annotation(ret):
+            fn_string += f"-> {_canonical_annotation_str(ret)}"
+        else:
+            fn_string += f"-> {ret}"
     return fn_string
 
 

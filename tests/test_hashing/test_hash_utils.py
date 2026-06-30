@@ -75,7 +75,7 @@ class TestGetFunctionSignatureUnionCanonical:
         def foo2(x: Path | str) -> str:
             return str(x)
 
-        assert get_function_signature(foo1) == get_function_signature(foo2)
+        assert get_function_signature(foo1, name_override="foo") == get_function_signature(foo2, name_override="foo")
 
     def test_param_three_member_union_order_independent(self):
         """All permutations of a 3-member union param produce the same signature string."""
@@ -88,9 +88,9 @@ class TestGetFunctionSignatureUnionCanonical:
         def f3(x: Path | bytes | str) -> str:
             return str(x)
 
-        sig1 = get_function_signature(f1)
-        assert get_function_signature(f2) == sig1
-        assert get_function_signature(f3) == sig1
+        sig1 = get_function_signature(f1, name_override="f")
+        assert get_function_signature(f2, name_override="f") == sig1
+        assert get_function_signature(f3, name_override="f") == sig1
 
     def test_return_union_order_independent(self):
         """get_function_signature returns the same string for str|Path and Path|str returns."""
@@ -100,7 +100,7 @@ class TestGetFunctionSignatureUnionCanonical:
         def foo2(x: int) -> Path | str:
             return str(x)
 
-        assert get_function_signature(foo1) == get_function_signature(foo2)
+        assert get_function_signature(foo1, name_override="foo") == get_function_signature(foo2, name_override="foo")
 
     def test_non_union_param_unchanged(self):
         """Non-union param signatures are byte-for-byte identical before and after."""
