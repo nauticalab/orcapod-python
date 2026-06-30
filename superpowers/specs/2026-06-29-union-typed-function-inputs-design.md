@@ -33,8 +33,10 @@ typed stream is fed in.
 
 ### Core principle
 
-- **Pod construction:** union-typed input args are accepted. No Arrow
-  registration is attempted for the union type itself.
+- **Pod construction:** union-typed input args are accepted. Each non-`None`
+  branch of the union is registered individually (so their LogicalTypes are
+  available at bind time); no registration is attempted for the union type as
+  a whole, since Arrow has no union storage type.
 - **Stream binding:** the incoming stream's concrete type is validated against
   the declared union via `check_schema_compatibility` / `beartype.door.is_subhint`,
   which already handles this correctly (`is_subhint(str, str | Path)` → True;
