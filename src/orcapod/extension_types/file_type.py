@@ -3,22 +3,14 @@
 ``File`` wraps a ``upath.UPath`` and validates that the path points to a readable,
 non-directory file at construction time. Use ``pathlib.Path`` / ``upath.UPath`` for
 paths that may not yet exist.
-
-``LogicalFile`` is the Arrow extension type that serialises ``File`` instances as
-``large_string`` columns tagged with the ``"orcapod.file"`` extension name.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
-import polars as pl
-import pyarrow as pa
 from upath import UPath
 from upath.extensions import ProxyUPath
-
-from orcapod.extension_types.base_logical_type import BaseLogicalType
-from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
 
 if TYPE_CHECKING:
     from orcapod.extension_types.protocols import TypeConverterProtocol
@@ -77,7 +69,7 @@ class File(ProxyUPath):
             )
 
     @classmethod
-    def _from_upath(cls, upath: UPath) -> "File":
+    def _from_upath(cls, upath: UPath, /) -> Self:
         """Create a ``File`` from an existing ``UPath`` without validation.
 
         Used internally by ``ProxyUPath`` for derived paths (e.g. ``.parent``,
