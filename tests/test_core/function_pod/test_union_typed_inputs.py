@@ -21,6 +21,8 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.streams import ArrowTableStream
 
+from ..conftest import make_int_stream
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,22 +59,6 @@ def make_path_stream(n: int = 2) -> ArrowTableStream:
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": path_array,
-        },
-        schema=schema,
-    )
-    return ArrowTableStream(table, tag_columns=["id"])
-
-
-def make_int_stream(n: int = 2) -> ArrowTableStream:
-    """Stream with tag=id (int64), data=x (int64) — incompatible with str | Path."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("x", pa.int64(), nullable=False),
-    ])
-    table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
         },
         schema=schema,
     )
