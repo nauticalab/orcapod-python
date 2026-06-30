@@ -46,21 +46,11 @@ def make_str_stream(n: int = 2) -> ArrowTableStream:
 
 
 def make_path_stream(n: int = 2) -> ArrowTableStream:
-    """Stream with tag=id (int64), data=x (orcapod.path / Path)."""
+    """Stream with tag=id (int64), data=x (Path)."""
     ctx = get_default_context()
-    path_arrow_type = ctx.type_converter.python_type_to_arrow_type(Path)
-    storage = pa.array([f"/tmp/test_{i}" for i in range(n)], type=pa.large_string())
-    path_array = pa.ExtensionArray.from_storage(path_arrow_type, storage)
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("x", path_arrow_type, nullable=False),
-    ])
-    table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": path_array,
-        },
-        schema=schema,
+    rows = [{"id": i, "x": Path(f"/tmp/test_{i}")} for i in range(n)]
+    table = ctx.type_converter.python_dicts_to_arrow_table(
+        rows, python_schema={"id": int, "x": Path}
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
