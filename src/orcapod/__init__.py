@@ -23,14 +23,16 @@ from . import types  # noqa: F401
 #
 # These aliases are the recommended way to reference these types in orcapod user code.
 # Even if an upstream library is renamed or restructured, these symbols remain stable
-# at ``orcapod.Path``, ``orcapod.UPath``, ``orcapod.UUID``, and ``orcapod.File``. Their
-# Arrow extension types are registered under the ``orcapod.*`` namespace (``"orcapod.path"``,
-# ``"orcapod.upath"``, ``"orcapod.uuid"``, ``"orcapod.file"``), so on-disk identity is also
-# decoupled from upstream module paths.
+# at ``orcapod.Path``, ``orcapod.UPath``, ``orcapod.UUID``, ``orcapod.File``, and
+# ``orcapod.Directory``. Their Arrow extension types are registered under the
+# ``orcapod.*`` namespace (``"orcapod.path"``, ``"orcapod.upath"``, ``"orcapod.uuid"``,
+# ``"orcapod.file"``, ``"orcapod.directory"``), so on-disk identity is also decoupled
+# from upstream module paths.
 from pathlib import Path
 from upath import UPath
 from uuid import UUID
 from orcapod.extension_types.file_type import File
+from orcapod.extension_types.directory_type import Directory
 
 __all__ = [
     "DEFAULT_CONFIG",
@@ -50,6 +52,7 @@ __all__ = [
     "streams",
     "types",
     # Stable type aliases
+    "Directory",
     "File",
     "Path",
     "UPath",

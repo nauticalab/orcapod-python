@@ -61,6 +61,10 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the file content hasher (used by FileHandler)"
         },
+        "directory_hasher": {
+            "$ref": "#/$defs/objectspec",
+            "description": "ObjectSpec for the directory content hasher (used by DirectoryHandler)"
+        },
         "function_semantic_hasher": {
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the function semantic hasher (used by FunctionHandler)"
