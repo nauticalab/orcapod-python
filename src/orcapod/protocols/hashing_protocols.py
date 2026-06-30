@@ -139,6 +139,16 @@ class FileContentHasherProtocol(Protocol):
     def hash_file(self, file_path: PathLike) -> ContentHash: ...
 
 
+class DirectoryHasherProtocol(Protocol):
+    """Protocol for directory tree hashing."""
+
+    def hash_directory(
+        self,
+        directory_path: PathLike,
+        ignore: "Callable | list[str] | None" = None,
+    ) -> ContentHash: ...
+
+
 @runtime_checkable
 class ArrowHasherProtocol(Protocol):
     """Protocol for hashing arrow data."""
