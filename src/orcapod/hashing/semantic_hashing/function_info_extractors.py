@@ -2,6 +2,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Literal
 
+from orcapod.hashing.hash_utils import canonical_annotation_str, is_union_annotation
 from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from orcapod.types import Schema
 
@@ -45,7 +46,16 @@ class FunctionSignatureExtractor:
         if not callable(func):
             raise TypeError("Provided object is not callable")
 
-        sig = inspect.signature(func)
+        # Use eval_str=True so that string annotations produced by
+        # ``from __future__ import annotations`` (PEP 563) are resolved to live
+        # type objects before we check for union types.
+        try:
+            sig = inspect.signature(func, eval_str=True)
+        except (NameError, TypeError, AttributeError, SyntaxError):
+            # Fall back to unresolved signatures when annotation evaluation fails
+            # (e.g. forward references that cannot be resolved in the function's
+            # module scope).
+            sig = inspect.signature(func)
 
         # Build the signature string
         parts = {}
@@ -61,9 +71,15 @@ class FunctionSignatureExtractor:
         param_strs = []
         for name, param in sig.parameters.items():
             param_str = str(param)
+            annotation = param.annotation
+            if annotation is not inspect.Parameter.empty and is_union_annotation(annotation):
+                old_ann = inspect.formatannotation(annotation)
+                new_ann = canonical_annotation_str(annotation)
+                # Replace ": <old_ann>" with ": <new_ann>" (first occurrence only).
+                # The ": " prefix distinguishes the annotation from the default value.
+                param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
             if not self.include_defaults and "=" in param_str:
                 param_str = param_str.split("=")[0].strip()
-
             param_strs.append(param_str)
 
         parts["params"] = ", ".join(param_strs)
