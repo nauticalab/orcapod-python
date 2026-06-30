@@ -52,7 +52,7 @@ def _hash_dir(
     Args:
         path: The directory to hash.
         filter_fn: Optional filter callable; return ``True`` to exclude an entry.
-        algorithm: Hash algorithm name passed to ``hash_file`` for file leaves.
+        algorithm: Hash algorithm name used for all structural and file-leaf hashing.
         buffer_size: Read buffer size in bytes for file content.
 
     Returns:
@@ -81,13 +81,13 @@ def _hash_dir(
             logger.debug("BasicDirectoryHasher: skipping special file %s", child)
             continue
 
-        entry_digest = hashlib.sha256(entry_bytes).digest()
+        entry_digest = hashlib.new(algorithm, entry_bytes).digest()
         entries.append((name_bytes, entry_digest))
 
     # Sort byte-wise by name — locale-independent, deterministic.
     entries.sort(key=lambda x: x[0])
 
-    h = hashlib.sha256()
+    h = hashlib.new(algorithm)
     h.update(b"directory\x00")
     for _, entry_digest in entries:
         h.update(entry_digest)
@@ -103,7 +103,7 @@ class BasicDirectoryHasher:
     without dereferencing — cycle-safe and deterministic.
 
     Args:
-        algorithm: Hash algorithm for file-content leaves. Defaults to ``"sha256"``.
+        algorithm: Hash algorithm for all structural and file-leaf hashing. Defaults to ``"sha256"``.
         buffer_size: Read buffer size in bytes for file content. Defaults to 65536.
 
     Example:

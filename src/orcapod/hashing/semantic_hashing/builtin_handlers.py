@@ -203,9 +203,11 @@ class FileHandler:
 class DirectoryHandler:
     """Hasher for ``orcapod.Directory`` objects — hashes directory *content* via Merkle tree.
 
-    By the time ``handle`` is called, ``Directory``'s constructor has already validated
-    that the path exists and is a traversable directory. The hash is produced by
-    ``BasicDirectoryHasher`` using a recursive Merkle scheme.
+    When a ``Directory`` is created via its normal constructor, existence and
+    traversability are validated at construction time. Derived ``Directory`` instances
+    created by path-navigation operations (e.g. ``.parent``, ``/`` operator) bypass that
+    validation via ``_from_upath`` — so existence is not guaranteed at ``handle`` time.
+    The hash is produced by ``BasicDirectoryHasher`` using a recursive Merkle scheme.
 
     Args:
         directory_hasher: Any object with a
@@ -232,9 +234,9 @@ class DirectoryHandler:
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
-    directory_hasher: Any = None,
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
+    directory_hasher: Any = None,
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
@@ -258,12 +260,12 @@ def register_builtin_python_type_handlers(
         registry: The ``HandlerRegistryProtocol`` instance to populate.
         file_hasher: Optional ``FileContentHasherProtocol`` for file content hashing.
             Defaults to ``BasicFileHasher(sha256)``.
-        directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
-            Defaults to ``BasicDirectoryHasher(sha256)``.
         function_info_extractor: Optional ``FunctionInfoExtractorProtocol``.
             Defaults to ``FunctionSignatureExtractor``.
         arrow_hasher: Optional ``ArrowHasherProtocol`` for nested table hashing.
             When ``None``, lazy resolution via the default context is used.
+        directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
+            Defaults to ``BasicDirectoryHasher(sha256)``.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import BasicFileHasher
