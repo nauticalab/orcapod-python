@@ -3,14 +3,22 @@
 ``File`` wraps a ``upath.UPath`` and validates that the path points to a readable,
 non-directory file at construction time. Use ``pathlib.Path`` / ``upath.UPath`` for
 paths that may not yet exist.
+
+``LogicalFile`` is the Arrow extension type that serialises ``File`` instances as
+``large_string`` columns tagged with the ``"orcapod.file"`` extension name.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Self
 
+import polars as pl
+import pyarrow as pa
 from upath import UPath
 from upath.extensions import ProxyUPath
+
+from orcapod.extension_types.base_logical_type import BaseLogicalType
+from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
 
 if TYPE_CHECKING:
     from orcapod.extension_types.protocols import TypeConverterProtocol
@@ -80,3 +88,88 @@ class File(ProxyUPath):
         obj = object.__new__(cls)
         obj.__wrapped__ = upath
         return obj
+
+
+class LogicalFile(BaseLogicalType):
+    """Logical type for ``orcapod.File``.
+
+    Stores ``File`` instances as Arrow large strings using the custom extension
+    type ``"orcapod.file"``. The stored value is the path string (e.g.
+    ``"/tmp/data.csv"`` or ``"s3://bucket/key"``).
+
+    On read (``storage_to_python``), the path is used to reconstruct a ``File``
+    instance, which re-validates existence. Reading an Arrow table with
+    ``"orcapod.file"`` columns will raise ``FileNotFoundError`` if the underlying
+    files have been moved or deleted — this is the correct semantic for a
+    content-identified type.
+
+    Example:
+        >>> import tempfile
+        >>> lt = LogicalFile()
+        >>> with tempfile.NamedTemporaryFile(delete=False) as f:
+        ...     _ = f.write(b"hello")
+        ...     tmp = f.name
+        >>> file = File(tmp)
+        >>> lt.storage_to_python(lt.python_to_storage(file)) == file
+        True
+    """
+
+    _arrow_ext_class = make_arrow_extension_type("orcapod.file", pa.large_string())
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("orcapod.file", pa.large_string())
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "orcapod.file"
+    python_type: type = File
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the Arrow extension type for ``File``.
+
+        Returns:
+            A cached ``pa.ExtensionType`` with extension name ``"orcapod.file"``
+            and storage type ``pa.large_string()``.
+        """
+        if LogicalFile._arrow_ext is None:
+            LogicalFile._arrow_ext = LogicalFile._arrow_ext_class()
+        return LogicalFile._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the Polars extension type for ``File``.
+
+        Returns:
+            A cached ``pl.BaseExtension`` registered under ``"orcapod.file"``.
+        """
+        if LogicalFile._polars_ext is None:
+            LogicalFile._polars_ext = LogicalFile._polars_ext_class()
+        return LogicalFile._polars_ext
+
+    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None" = None) -> str:
+        """Convert a ``File`` to its string path representation.
+
+        Args:
+            value: A ``File`` instance.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            The string form of the path (e.g. ``"/tmp/data.csv"``).
+        """
+        return str(value)
+
+    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None" = None) -> File:
+        """Reconstruct a ``File`` from its stored string path.
+
+        Re-validates existence on read — raises ``FileNotFoundError`` if the file
+        no longer exists at the stored path.
+
+        Args:
+            storage_value: A string path as stored in Arrow.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``File`` instance.
+
+        Raises:
+            FileNotFoundError: If the path no longer exists.
+            IsADirectoryError: If the path is now a directory.
+        """
+        return File(storage_value)
