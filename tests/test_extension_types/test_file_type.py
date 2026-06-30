@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import pyarrow as pa
 
@@ -77,20 +79,20 @@ class TestLogicalFile:
         lt = LogicalFile()
         assert lt.get_arrow_extension_type().storage_type == pa.large_string()
 
-    def test_python_to_storage_returns_string(self, tmp_path):
+    def test_python_to_storage_returns_json_string(self, tmp_path):
         p = tmp_path / "f.txt"
         p.write_text("x")
         f = File(p)
         lt = LogicalFile()
         result = lt.python_to_storage(f)
-        assert result == str(p)
-        assert isinstance(result, str)
+        data = json.loads(result)
+        assert data == {"path": str(p)}
 
-    def test_storage_to_python_returns_file(self, tmp_path):
+    def test_storage_to_python_accepts_json_string(self, tmp_path):
         p = tmp_path / "f.txt"
         p.write_text("x")
         lt = LogicalFile()
-        result = lt.storage_to_python(str(p))
+        result = lt.storage_to_python(json.dumps({"path": str(p)}))
         assert isinstance(result, File)
         assert str(result) == str(p)
 
@@ -106,8 +108,18 @@ class TestLogicalFile:
     def test_storage_to_python_raises_if_file_missing(self, tmp_path):
         lt = LogicalFile()
         with pytest.raises(FileNotFoundError):
-            lt.storage_to_python(str(tmp_path / "gone.txt"))
+            lt.storage_to_python(json.dumps({"path": str(tmp_path / "gone.txt")}))
 
     def test_arrow_extension_type_is_cached(self):
         lt = LogicalFile()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
+
+    def test_storage_to_python_raises_value_error_on_bad_json(self):
+        lt = LogicalFile()
+        with pytest.raises(ValueError, match="LogicalFile"):
+            lt.storage_to_python("not-json-at-all")
+
+    def test_storage_to_python_raises_value_error_on_missing_path_key(self):
+        lt = LogicalFile()
+        with pytest.raises(ValueError, match="LogicalFile"):
+            lt.storage_to_python(json.dumps({"wrong_key": "/some/file.txt"}))

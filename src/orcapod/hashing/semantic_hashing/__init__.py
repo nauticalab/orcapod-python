@@ -12,6 +12,7 @@ Built-in PythonTypeHandlerProtocol implementations:
   FunctionHandler      -- callable      → via FunctionInfoExtractorProtocol
   TypeObjectHandler    -- type objects  → "type:<module>.<qualname>"
   FileHandler          -- orcapod.File  → file content hash
+  DirectoryHandler     -- orcapod.Directory → recursive Merkle tree hash
   register_builtin_python_type_handlers -- populate a registry with all of the above
 
 Function info extractors (used by FunctionHandler):
@@ -22,6 +23,7 @@ Function info extractors (used by FunctionHandler):
 
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
     BytesHandler,
+    DirectoryHandler,
     FileHandler,
     FunctionHandler,
     TypeObjectHandler,
@@ -52,6 +54,7 @@ __all__ = [
     "FunctionHandler",
     "TypeObjectHandler",
     "FileHandler",
+    "DirectoryHandler",
     "register_builtin_python_type_handlers",
     "FunctionNameExtractor",
     "FunctionSignatureExtractor",

@@ -16,6 +16,7 @@ Built-in hashers (importable for custom registry setup):
   FunctionHandler
   TypeObjectHandler
   FileHandler
+  DirectoryHandler                     -- built-in handler for orcapod.Directory
   register_builtin_python_type_handlers
 
 Utility:
@@ -23,6 +24,8 @@ Utility:
   StringCacherProtocol
   FunctionInfoExtractorProtocol
   ArrowHasherProtocol
+  BasicDirectoryHasher                 -- recursive Merkle tree directory hasher
+  DirectoryHasherProtocol              -- protocol for directory hashers
 """
 
 from orcapod.hashing.defaults import (
@@ -31,9 +34,11 @@ from orcapod.hashing.defaults import (
     get_default_semantic_hasher,
 )
 from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher
+from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
     BytesHandler,
+    DirectoryHandler,
     FileHandler,
     FunctionHandler,
     TypeObjectHandler,
@@ -51,6 +56,7 @@ from orcapod.hashing.semantic_hashing.type_handler_registry import (
 from orcapod.protocols.hashing_protocols import (
     ArrowHasherProtocol,
     ContentIdentifiableProtocol,
+    DirectoryHasherProtocol,
     FileContentHasherProtocol,
     FunctionInfoExtractorProtocol,
     PythonTypeHandlerProtocol,
@@ -94,6 +100,7 @@ __all__ = [
     "FunctionHandler",
     "TypeObjectHandler",
     "FileHandler",
+    "DirectoryHandler",
     "register_builtin_python_type_handlers",
     "SemanticHasherProtocol",
     "ContentIdentifiableProtocol",
@@ -105,6 +112,8 @@ __all__ = [
     "SemanticTypeHasherProtocol",
     "BasicFileHasher",
     "CachedFileHasher",
+    "BasicDirectoryHasher",
+    "DirectoryHasherProtocol",
     "hash_file",
     "get_default_arrow_hasher",
     "HashableMixin",

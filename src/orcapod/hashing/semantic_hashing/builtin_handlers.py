@@ -11,6 +11,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   ArrowTableHandler     -- pa.Table / pa.RecordBatch
   SchemaHandler         -- Schema objects
   FileHandler       -- orcapod.File: file content hash
+  DirectoryHandler  -- orcapod.Directory: recursive Merkle tree hash
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
 with all of the above.
@@ -27,6 +28,7 @@ from orcapod.types import ContentHash, Schema
 if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import (
         ArrowHasherProtocol,
+        DirectoryHasherProtocol,
         FileContentHasherProtocol,
         HandlerRegistryProtocol,
         SemanticHasherProtocol,
@@ -198,11 +200,43 @@ class FileHandler:
         return self.file_hasher.hash_file(wrapped)
 
 
+class DirectoryHandler:
+    """Hasher for ``orcapod.Directory`` objects — hashes directory *content* via Merkle tree.
+
+    When a ``Directory`` is created via its normal constructor, existence and
+    traversability are validated at construction time. Derived ``Directory`` instances
+    created by path-navigation operations (e.g. ``.parent``, ``/`` operator) bypass that
+    validation via ``_from_upath`` — so existence is not guaranteed at ``handle`` time.
+    The hash is produced by ``BasicDirectoryHasher`` using a recursive Merkle scheme.
+
+    Args:
+        directory_hasher: Any object with a
+            ``hash_directory(path, ignore) -> ContentHash`` method.
+    """
+
+    def __init__(self, directory_hasher: "DirectoryHasherProtocol") -> None:
+        self.directory_hasher = directory_hasher
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
+        # Deferred import breaks the circular dependency between this module and
+        # directory_type.py — the same pattern used by FileHandler.
+        from orcapod.extension_types.directory_type import Directory
+        if not isinstance(obj, Directory):
+            raise TypeError(
+                f"DirectoryHandler: expected an orcapod.Directory, got {type(obj)!r}"
+            )
+        wrapped = getattr(obj, "__wrapped__")
+        ignore = getattr(obj, "_ignore", None)
+        logger.debug("DirectoryHandler: hashing directory content at %s", wrapped)
+        return self.directory_hasher.hash_directory(wrapped, ignore=ignore)
+
+
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
+    directory_hasher: Any = None,
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
@@ -213,13 +247,14 @@ def register_builtin_python_type_handlers(
     hash time, breaking the construction-time circular dependency.
 
     ``orcapod.File`` is registered via ``FileHandler`` for content-based file
-    hashing. ``pathlib.Path`` and ``upath.UPath`` are NOT registered here.
-    When these types appear in pipeline columns they are handled at the Arrow
-    level through their ``LogicalPath`` / ``LogicalUPath`` extension types,
-    which store the path string in ``large_string()`` storage. The Arrow hasher
-    then operates directly on that string storage — no Python-level roundtrip
-    and no file I/O occurs. Passing a raw ``Path`` or ``UPath`` directly to the
-    Python semantic hasher raises ``TypeError`` in strict mode (the default).
+    hashing. ``orcapod.Directory`` is registered via ``DirectoryHandler`` for
+    recursive Merkle tree directory hashing. ``pathlib.Path`` and ``upath.UPath``
+    are NOT registered here. When these types appear in pipeline columns they are
+    handled at the Arrow level through their ``LogicalPath`` / ``LogicalUPath``
+    extension types, which store the path string in ``large_string()`` storage.
+    The Arrow hasher then operates directly on that string storage — no Python-level
+    roundtrip and no file I/O occurs. Passing a raw ``Path`` or ``UPath`` directly to
+    the Python semantic hasher raises ``TypeError`` in strict mode (the default).
 
     Args:
         registry: The ``HandlerRegistryProtocol`` instance to populate.
@@ -229,10 +264,16 @@ def register_builtin_python_type_handlers(
             Defaults to ``FunctionSignatureExtractor``.
         arrow_hasher: Optional ``ArrowHasherProtocol`` for nested table hashing.
             When ``None``, lazy resolution via the default context is used.
+        directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
+            Defaults to ``BasicDirectoryHasher(sha256)``.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import BasicFileHasher
         file_hasher = BasicFileHasher(algorithm="sha256")
+
+    if directory_hasher is None:
+        from orcapod.hashing.directory_hashers import BasicDirectoryHasher
+        directory_hasher = BasicDirectoryHasher(algorithm="sha256")
 
     if function_info_extractor is None:
         from orcapod.hashing.semantic_hashing.function_info_extractors import (
@@ -251,6 +292,9 @@ def register_builtin_python_type_handlers(
 
     from orcapod.extension_types.file_type import File
     registry.register(File, FileHandler(file_hasher))
+
+    from orcapod.extension_types.directory_type import Directory
+    registry.register(Directory, DirectoryHandler(directory_hasher))
 
     import types as _types
 

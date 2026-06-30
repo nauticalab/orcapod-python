@@ -26,6 +26,7 @@ from .database_hooks import apply_extension_types, register_discovered_extension
 from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
 from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalType, PydanticLogicalTypeFactory
 from .file_type import LogicalFile  # ITL-450
+from .directory_type import LogicalDirectory  # ITL-451
 
 __all__ = [
     "LogicalTypeProtocol",
@@ -50,4 +51,6 @@ __all__ = [
     "PydanticLogicalTypeFactory",
     # ITL-450
     "LogicalFile",
+    # ITL-451
+    "LogicalDirectory",
 ]

@@ -10,6 +10,7 @@ paths that may not yet exist.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, Self
 
 import polars as pl
@@ -94,8 +95,8 @@ class LogicalFile(BaseLogicalType):
     """Logical type for ``orcapod.File``.
 
     Stores ``File`` instances as Arrow large strings using the custom extension
-    type ``"orcapod.file"``. The stored value is the path string (e.g.
-    ``"/tmp/data.csv"`` or ``"s3://bucket/key"``).
+    type ``"orcapod.file"``. The stored value is a JSON string of the form
+    ``{"path": "/tmp/data.csv"}`` encoding the file path.
 
     On read (``storage_to_python``), the path is used to reconstruct a ``File``
     instance, which re-validates existence. Reading an Arrow table with
@@ -144,32 +145,42 @@ class LogicalFile(BaseLogicalType):
         return LogicalFile._polars_ext
 
     def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> str:
-        """Convert a ``File`` to its string path representation.
+        """Convert a ``File`` to its JSON storage representation.
 
         Args:
             value: A ``File`` instance.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
-            The string form of the path (e.g. ``"/tmp/data.csv"``).
+            A JSON string ``{"path": "<path>"}`` encoding the file path.
         """
-        return str(value)
+        return json.dumps({"path": str(value)})
 
     def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> File:
-        """Reconstruct a ``File`` from its stored string path.
+        """Reconstruct a ``File`` from its stored JSON string.
 
         Re-validates existence on read — raises ``FileNotFoundError`` if the file
         no longer exists at the stored path.
 
         Args:
-            storage_value: A string path as stored in Arrow.
+            storage_value: A JSON string as stored in Arrow.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
             A ``File`` instance.
 
         Raises:
+            ValueError: If ``storage_value`` is not valid JSON or lacks the
+                ``"path"`` key.
             FileNotFoundError: If the path no longer exists.
             IsADirectoryError: If the path is now a directory.
         """
-        return File(storage_value)
+        try:
+            path = json.loads(storage_value)["path"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(
+                f"LogicalFile: cannot deserialise storage value {storage_value!r}; "
+                'expected a JSON object with a "path" key, '
+                'e.g. {"path": "/some/file.csv"}.'
+            ) from exc
+        return File(path)
