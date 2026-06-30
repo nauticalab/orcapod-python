@@ -178,6 +178,11 @@ class TestTryImportCallable:
             result = _try_import_callable("nonexistent_module_xyz:some_fn")
         assert result is None
 
+    def test_returns_none_on_bad_attribute(self):
+        with pytest.warns(UserWarning):
+            result = _try_import_callable("json:nonexistent_fn_xyz")
+        assert result is None
+
     def test_returns_none_on_bad_format(self):
         with pytest.warns(UserWarning):
             result = _try_import_callable("no_colon_separator")

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import logging
 import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Self
@@ -28,8 +27,6 @@ from orcapod.extension_types.registry import make_arrow_extension_type, make_pol
 
 if TYPE_CHECKING:
     from orcapod.extension_types.protocols import TypeConverterProtocol
-
-logger = logging.getLogger(__name__)
 
 
 class Directory(ProxyUPath):
@@ -83,10 +80,10 @@ class Directory(ProxyUPath):
             )
         try:
             next(iter(self.__wrapped__.iterdir()), None)
-        except PermissionError:
+        except PermissionError as exc:
             raise PermissionError(
                 f"Directory: path is not traversable: {self.__wrapped__!r}"
-            )
+            ) from exc
         self._ignore = ignore
 
     @classmethod
@@ -216,6 +213,7 @@ class LogicalDirectory(BaseLogicalType):
             return json.dumps({"path": path_str})
 
         if isinstance(ignore, list):
+            # Sort by base name (strip leading glob chars) for deterministic storage order.
             return json.dumps({"path": path_str, "ignore": sorted(ignore, key=lambda x: x.lstrip("*."))})
 
         # Callable — attempt best-effort serialisation via module:qualname.
@@ -261,7 +259,6 @@ class LogicalDirectory(BaseLogicalType):
             return Directory(path, ignore=fn)
 
         if "ignore" in data:
-            patterns = data["ignore"] or None
-            return Directory(path, ignore=patterns)
+            return Directory(path, ignore=data["ignore"])
 
         return Directory(path)
