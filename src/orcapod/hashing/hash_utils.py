@@ -204,7 +204,15 @@ def get_function_signature(
     Returns:
         A string representation of the function signature.
     """
-    sig = inspect.signature(func)
+    # Use eval_str=True so that string annotations produced by
+    # ``from __future__ import annotations`` (PEP 563) are resolved to live
+    # type objects before we check for union types.
+    try:
+        sig = inspect.signature(func, eval_str=True)
+    except Exception:
+        # Fall back to unresolved signatures if evaluation fails (e.g. forward
+        # references that cannot be resolved in the function's module scope).
+        sig = inspect.signature(func)
     parts: dict[str, object] = {}
 
     if include_module and hasattr(func, "__module__"):
