@@ -75,6 +75,7 @@ class TestGetFunctionSignatureUnionCanonical:
         def foo2(x: Path | str) -> str:
             return str(x)
 
+        # name_override makes function names identical so only annotation order is under test
         assert get_function_signature(foo1, name_override="foo") == get_function_signature(foo2, name_override="foo")
 
     def test_param_three_member_union_order_independent(self):
@@ -88,6 +89,7 @@ class TestGetFunctionSignatureUnionCanonical:
         def f3(x: Path | bytes | str) -> str:
             return str(x)
 
+        # name_override makes function names identical so only annotation order is under test
         sig1 = get_function_signature(f1, name_override="f")
         assert get_function_signature(f2, name_override="f") == sig1
         assert get_function_signature(f3, name_override="f") == sig1
@@ -100,6 +102,7 @@ class TestGetFunctionSignatureUnionCanonical:
         def foo2(x: int) -> Path | str:
             return str(x)
 
+        # name_override makes function names identical so only annotation order is under test
         assert get_function_signature(foo1, name_override="foo") == get_function_signature(foo2, name_override="foo")
 
     def test_non_union_param_unchanged(self):

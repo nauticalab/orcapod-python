@@ -1,6 +1,8 @@
 import hashlib
 import inspect
 import logging
+import types as _types
+import typing
 import zlib
 from collections.abc import Callable, Collection
 from pathlib import Path
@@ -25,9 +27,6 @@ def _is_union_annotation(annotation: object) -> bool:
     Returns:
         ``True`` if the annotation is a union; ``False`` otherwise.
     """
-    import types as _types
-    import typing
-
     if isinstance(annotation, _types.UnionType):
         return True
     return getattr(annotation, "__origin__", None) is typing.Union
