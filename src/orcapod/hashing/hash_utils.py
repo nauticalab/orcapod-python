@@ -15,7 +15,7 @@ from orcapod.types import ContentHash, PathLike
 logger = logging.getLogger(__name__)
 
 
-def _is_union_annotation(annotation: object) -> bool:
+def is_union_annotation(annotation: object) -> bool:
     """Return ``True`` if *annotation* is a union type.
 
     Detects both PEP 604 ``X | Y`` (``types.UnionType``) and
@@ -32,7 +32,7 @@ def _is_union_annotation(annotation: object) -> bool:
     return getattr(annotation, "__origin__", None) is typing.Union
 
 
-def _canonical_annotation_str(annotation: object) -> str:
+def canonical_annotation_str(annotation: object) -> str:
     """Return a stable, canonical string for a type annotation.
 
     For union types (both PEP 604 ``X | Y`` and ``typing.Union[X, Y]``),
@@ -51,9 +51,9 @@ def _canonical_annotation_str(annotation: object) -> str:
     Returns:
         A canonical string representation.
     """
-    if _is_union_annotation(annotation):
+    if is_union_annotation(annotation):
         args = getattr(annotation, "__args__", ()) or ()
-        member_strs = sorted(_canonical_annotation_str(a) for a in args)
+        member_strs = sorted(canonical_annotation_str(a) for a in args)
         return " | ".join(member_strs)
     return inspect.formatannotation(annotation)
 
@@ -225,9 +225,9 @@ def get_function_signature(
     for name, param in sig.parameters.items():
         param_str = str(param)
         annotation = param.annotation
-        if annotation is not inspect.Parameter.empty and _is_union_annotation(annotation):
+        if annotation is not inspect.Parameter.empty and is_union_annotation(annotation):
             old_ann = inspect.formatannotation(annotation)
-            new_ann = _canonical_annotation_str(annotation)
+            new_ann = canonical_annotation_str(annotation)
             # Replace ": <old_ann>" with ": <new_ann>" (first occurrence only).
             # The ": " prefix distinguishes the annotation from the default value.
             param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
@@ -246,8 +246,8 @@ def get_function_signature(
     )
     if "returns" in parts:
         ret = parts["returns"]
-        if _is_union_annotation(ret):
-            fn_string += f"-> {_canonical_annotation_str(ret)}"
+        if is_union_annotation(ret):
+            fn_string += f"-> {canonical_annotation_str(ret)}"
         else:
             fn_string += f"-> {ret}"
     return fn_string

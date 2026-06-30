@@ -3,66 +3,66 @@ import inspect
 from pathlib import Path
 
 from orcapod.hashing.hash_utils import (
-    _canonical_annotation_str,
-    _is_union_annotation,
+    canonical_annotation_str,
     get_function_signature,
+    is_union_annotation,
 )
 
 
 class TestIsUnionAnnotation:
     def test_pep604_union_detected(self):
-        assert _is_union_annotation(str | Path) is True
+        assert is_union_annotation(str | Path) is True
 
     def test_pep604_three_member_union_detected(self):
-        assert _is_union_annotation(str | Path | bytes) is True
+        assert is_union_annotation(str | Path | bytes) is True
 
     def test_typing_union_detected(self):
         import typing
-        assert _is_union_annotation(typing.Union[str, int]) is True
+        assert is_union_annotation(typing.Union[str, int]) is True
 
     def test_typing_optional_detected(self):
         import typing
-        assert _is_union_annotation(typing.Optional[str]) is True
+        assert is_union_annotation(typing.Optional[str]) is True
 
     def test_plain_type_not_union(self):
-        assert _is_union_annotation(int) is False
+        assert is_union_annotation(int) is False
 
     def test_generic_alias_not_union(self):
-        assert _is_union_annotation(list[str]) is False
+        assert is_union_annotation(list[str]) is False
 
     def test_none_type_not_union(self):
-        assert _is_union_annotation(type(None)) is False
+        assert is_union_annotation(type(None)) is False
 
 
 class TestCanonicalAnnotationStr:
     def test_pep604_two_member_order_independent(self):
         """str | Path and Path | str produce the same canonical string."""
-        assert _canonical_annotation_str(str | Path) == _canonical_annotation_str(Path | str)
+        assert canonical_annotation_str(str | Path) == canonical_annotation_str(Path | str)
 
     def test_pep604_canonical_form(self):
         """str | Path canonicalizes to 'pathlib.Path | str' (P before s)."""
-        assert _canonical_annotation_str(str | Path) == "pathlib.Path | str"
+        assert canonical_annotation_str(str | Path) == "pathlib.Path | str"
 
     def test_pep604_three_member_order_independent(self):
         """All permutations of str | Path | bytes produce the same canonical string."""
-        canonical = _canonical_annotation_str(str | Path | bytes)
-        assert _canonical_annotation_str(bytes | str | Path) == canonical
-        assert _canonical_annotation_str(Path | bytes | str) == canonical
+        canonical = canonical_annotation_str(str | Path | bytes)
+        assert canonical_annotation_str(bytes | str | Path) == canonical
+        assert canonical_annotation_str(Path | bytes | str) == canonical
 
     def test_pep604_three_member_canonical_form(self):
         """str | Path | bytes canonicalizes to 'bytes | pathlib.Path | str'."""
-        assert _canonical_annotation_str(str | Path | bytes) == "bytes | pathlib.Path | str"
+        assert canonical_annotation_str(str | Path | bytes) == "bytes | pathlib.Path | str"
 
     def test_non_union_matches_formatannotation(self):
         """Non-union types fall through to inspect.formatannotation."""
         for t in (int, str, bytes, Path):
-            assert _canonical_annotation_str(t) == inspect.formatannotation(t)
+            assert canonical_annotation_str(t) == inspect.formatannotation(t)
 
     def test_typing_union_order_independent(self):
         import typing
         assert (
-            _canonical_annotation_str(typing.Union[str, int])
-            == _canonical_annotation_str(typing.Union[int, str])
+            canonical_annotation_str(typing.Union[str, int])
+            == canonical_annotation_str(typing.Union[int, str])
         )
 
 
