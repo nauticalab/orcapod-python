@@ -75,6 +75,10 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
+        # Union-typed input args (e.g. x: str | Path) are deliberately accepted
+        # at construction time. ensure_types_registered_for_schemas registers
+        # each non-None branch individually; the union is only resolved to a
+        # concrete branch when a stream is bound — see _validate_input_schema.
         self.data_context.type_converter.ensure_types_registered_for_schemas(
             data_function.input_data_schema,
             data_function.output_data_schema,
@@ -128,6 +132,10 @@ class _FunctionPodBase(TraceableBase):
 
     def _validate_input_schema(self, input_schema: Schema) -> None:
         expected_data_schema = self.data_function.input_data_schema
+        # When expected_data_schema contains a union type (e.g. str | Path),
+        # check_schema_compatibility uses beartype.door.is_subhint which accepts
+        # any concrete branch: is_subhint(str, str | Path) → True,
+        # is_subhint(int, str | Path) → False.
         if not schema_utils.check_schema_compatibility(
             input_schema, expected_data_schema
         ):
