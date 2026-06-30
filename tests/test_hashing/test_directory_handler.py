@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from orcapod.extension_types.directory_type import Directory
@@ -178,6 +180,20 @@ class TestBasicDirectoryHasher:
         (d2 / "sub" / "app.pyc").write_bytes(b"compiled")  # nested .pyc, should be excluded
         hasher = BasicDirectoryHasher()
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="mkfifo not available on this platform")
+    def test_special_files_skipped(self, tmp_path):
+        """Named pipes (FIFOs) and other special files are silently skipped."""
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        (d1 / "file.txt").write_bytes(b"content")
+        (d2 / "file.txt").write_bytes(b"content")
+        os.mkfifo(str(d2 / "myfifo"))  # special file — should be silently skipped
+        hasher = BasicDirectoryHasher()
+        # The FIFO is excluded from the hash, so both directories are identical
+        assert hasher.hash_directory(d1) == hasher.hash_directory(d2)
 
 
 class TestDirectoryHandler:

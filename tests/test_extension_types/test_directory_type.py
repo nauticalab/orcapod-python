@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 import pyarrow as pa
@@ -53,6 +54,28 @@ class TestDirectoryConstructor:
         obj = Directory(d)
         assert obj._ignore is None
 
+    @pytest.mark.skipif(
+        not hasattr(os, "getuid") or os.getuid() == 0,
+        reason="root bypasses permission checks",
+    )
+    def test_permission_error_on_untraversable_directory(self, tmp_path):
+        d = tmp_path / "locked"
+        d.mkdir()
+        d.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                Directory(d)
+        finally:
+            d.chmod(0o755)
+
+    def test_from_upath_creates_directory_via_parent(self, tmp_path):
+        d = tmp_path / "child"
+        d.mkdir()
+        obj = Directory(d)
+        parent = obj.parent  # ProxyUPath invokes _from_upath for derived paths
+        assert isinstance(parent, Directory)
+        assert parent._ignore is None
+
 
 class TestLogicalDirectory:
     def test_logical_type_name(self):
@@ -74,6 +97,10 @@ class TestLogicalDirectory:
     def test_arrow_extension_type_is_cached(self):
         lt = LogicalDirectory()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
+
+    def test_polars_extension_type_is_cached(self):
+        lt = LogicalDirectory()
+        assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
 
     def test_python_to_storage_no_ignore(self, tmp_path):
         d = tmp_path / "d"
