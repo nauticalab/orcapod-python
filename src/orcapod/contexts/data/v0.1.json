@@ -26,6 +26,10 @@
                         {
                             "_class": "orcapod.extension_types.builtin_logical_types.LogicalUUID",
                             "_config": {}
+                        },
+                        {
+                            "_class": "orcapod.extension_types.file_type.LogicalFile",
+                            "_config": {}
                         }
                     ],
                     "factories": [
@@ -63,9 +67,8 @@
             "handlers": [
                 [{"_type": "builtins.bytes"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",        "_config": {}}],
                 [{"_type": "builtins.bytearray"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",        "_config": {}}],
-                [{"_type": "pathlib.Path"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathHandler",         "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
-                [{"_type": "upath.core.UPath"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathHandler",        "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
                 [{"_type": "uuid.UUID"},               {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDHandler",         "_config": {}}],
+                [{"_type": "orcapod.extension_types.file_type.File"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FileHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
                 [{"_type": "types.FunctionType"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "types.BuiltinFunctionType"},{"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",    "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "types.MethodType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
@@ -104,7 +107,8 @@
             "Basic SHA-256 hashing for files and objects",
             "Arrow logical serialization method",
             "Introduced arrow_v0.1 StarfixArrowHasher using starfix ArrowDigester for cross-language-compatible Arrow hashing",
-            "Hard cut: replaced shape-based SemanticTypeRegistry with extension-type hashing; renamed all hashing classes to cleaner names"
+            "Hard cut: replaced shape-based SemanticTypeRegistry with extension-type hashing; renamed all hashing classes to cleaner names",
+            "Removed PathHandler and UPathHandler; registered FileHandler for orcapod.File content hashing (ITL-450)"
         ]
     }
 }

@@ -7,11 +7,11 @@ orcapod.hashing.semantic_hashing
   ContentIdentifiableMixin            -- convenience mixin for content-identifiable objects
 
 Built-in PythonTypeHandlerProtocol implementations:
-  PathHandler          -- pathlib.Path  → file-content hash
   UUIDHandler          -- uuid.UUID     → canonical bytes
   BytesHandler         -- bytes/bytearray → hex string
   FunctionHandler      -- callable      → via FunctionInfoExtractorProtocol
   TypeObjectHandler    -- type objects  → "type:<module>.<qualname>"
+  FileHandler          -- orcapod.File  → file content hash
   register_builtin_python_type_handlers -- populate a registry with all of the above
 
 Function info extractors (used by FunctionHandler):
@@ -22,8 +22,8 @@ Function info extractors (used by FunctionHandler):
 
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
     BytesHandler,
+    FileHandler,
     FunctionHandler,
-    PathHandler,
     TypeObjectHandler,
     UUIDHandler,
     register_builtin_python_type_handlers,
@@ -47,11 +47,11 @@ __all__ = [
     "PythonTypeHandlerRegistry",
     "BuiltinPythonTypeHandlerRegistry",
     "ContentIdentifiableMixin",
-    "PathHandler",
     "UUIDHandler",
     "BytesHandler",
     "FunctionHandler",
     "TypeObjectHandler",
+    "FileHandler",
     "register_builtin_python_type_handlers",
     "FunctionNameExtractor",
     "FunctionSignatureExtractor",

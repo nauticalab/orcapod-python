@@ -11,11 +11,11 @@ Public API
   ContentIdentifiableMixin             -- convenience mixin for content-identifiable objects
 
 Built-in hashers (importable for custom registry setup):
-  PathHandler
   UUIDHandler
   BytesHandler
   FunctionHandler
   TypeObjectHandler
+  FileHandler
   register_builtin_python_type_handlers
 
 Utility:
@@ -34,8 +34,8 @@ from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
     BytesHandler,
+    FileHandler,
     FunctionHandler,
-    PathHandler,
     TypeObjectHandler,
     UUIDHandler,
     register_builtin_python_type_handlers,
@@ -89,11 +89,11 @@ __all__ = [
     "get_default_python_type_handler_registry",
     "get_default_semantic_hasher",
     "ContentIdentifiableMixin",
-    "PathHandler",
     "UUIDHandler",
     "BytesHandler",
     "FunctionHandler",
     "TypeObjectHandler",
+    "FileHandler",
     "register_builtin_python_type_handlers",
     "SemanticHasherProtocol",
     "ContentIdentifiableProtocol",

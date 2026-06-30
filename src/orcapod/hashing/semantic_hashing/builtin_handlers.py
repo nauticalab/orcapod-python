@@ -1,8 +1,6 @@
 """
 Built-in PythonTypeHandlerProtocol implementations.
 
-  PathHandler       -- pathlib.Path: file content hash
-  UPathHandler      -- upath.UPath: file content hash (remote-aware)
   UUIDHandler       -- uuid.UUID: 16-byte binary representation
   BytesHandler      -- bytes/bytearray: hex string representation
   FunctionHandler   -- callable with __code__: via FunctionInfoExtractorProtocol
@@ -12,6 +10,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   UnionTypeHandler      -- types.UnionType (Python 3.10+ X | Y syntax)
   ArrowTableHandler     -- pa.Table / pa.RecordBatch
   SchemaHandler         -- Schema objects
+  FileHandler       -- orcapod.File: file content hash
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
 with all of the above.
@@ -20,13 +19,10 @@ with all of the above.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from upath import UPath
-
-from orcapod.types import ContentHash, PathLike, Schema
+from orcapod.types import ContentHash, Schema
 
 if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import (
@@ -37,59 +33,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-
-class PathHandler:
-    """Hasher for pathlib.Path objects — hashes file *content*.
-
-    Args:
-        file_hasher: Any object with a ``hash_file(path) -> ContentHash`` method.
-    """
-
-    def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
-        self.file_hasher = file_hasher
-
-    def handle(self, obj: PathLike, hasher: "SemanticHasherProtocol") -> ContentHash:
-        path: Path = Path(obj)
-        if not path.exists():
-            raise FileNotFoundError(
-                f"PathHandler: path does not exist: {path!r}. "
-                "Paths must refer to existing files for content-based hashing."
-            )
-        if path.is_dir():
-            raise IsADirectoryError(
-                f"PathHandler: path is a directory: {path!r}. "
-                "Only regular files are supported for content-based hashing."
-            )
-        logger.debug("PathHandler: hashing file content at %s", path)
-        return self.file_hasher.hash_file(path)
-
-
-class UPathHandler:
-    """Hasher for universal_pathlib.UPath objects — hashes file content.
-
-    Args:
-        file_hasher: Any object with a ``hash_file(path) -> ContentHash`` method.
-    """
-
-    def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
-        self.file_hasher = file_hasher
-
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
-        if not isinstance(obj, UPath):
-            raise TypeError(
-                f"UPathHandler: expected a UPath, got {type(obj)!r}."
-            )
-        if not obj.exists():
-            raise FileNotFoundError(
-                f"UPathHandler: path does not exist: {obj!r}."
-            )
-        if obj.is_dir():
-            raise IsADirectoryError(
-                f"UPathHandler: path is a directory: {obj!r}."
-            )
-        logger.debug("UPathHandler: hashing file content at %s", obj)
-        return self.file_hasher.hash_file(obj)
 
 
 class UUIDHandler:
@@ -227,6 +170,34 @@ class SchemaHandler:
         raise NotImplementedError("SchemaHandler is not yet implemented.")
 
 
+class FileHandler:
+    """Hasher for ``orcapod.File`` objects — hashes file *content*.
+
+    By the time ``handle`` is called, ``File``'s constructor has already validated
+    that the path exists and is a non-directory file (and is not a symlink when
+    ``follow_symlinks=False``). The hash is produced by reading file bytes through
+    the wrapped ``UPath``, which follows symlinks by default.
+
+    Args:
+        file_hasher: Any object with a ``hash_file(path) -> ContentHash`` method.
+    """
+
+    def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
+        self.file_hasher = file_hasher
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
+        # Deferred import breaks the circular dependency between this module and
+        # file_type.py — the same pattern used by ArrowTableHandler.
+        from orcapod.extension_types.file_type import File
+        if not isinstance(obj, File):
+            raise TypeError(
+                f"FileHandler: expected an orcapod.File, got {type(obj)!r}"
+            )
+        wrapped = getattr(obj, "__wrapped__")
+        logger.debug("FileHandler: hashing file content at %s", wrapped)
+        return self.file_hasher.hash_file(wrapped)
+
+
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
@@ -241,9 +212,18 @@ def register_builtin_python_type_handlers(
     resolves the active arrow hasher lazily via ``get_default_context()`` at
     hash time, breaking the construction-time circular dependency.
 
+    ``orcapod.File`` is registered via ``FileHandler`` for content-based file
+    hashing. ``pathlib.Path`` and ``upath.UPath`` are NOT registered here.
+    When these types appear in pipeline columns they are handled at the Arrow
+    level through their ``LogicalPath`` / ``LogicalUPath`` extension types,
+    which store the path string in ``large_string()`` storage. The Arrow hasher
+    then operates directly on that string storage — no Python-level roundtrip
+    and no file I/O occurs. Passing a raw ``Path`` or ``UPath`` directly to the
+    Python semantic hasher raises ``TypeError`` in strict mode (the default).
+
     Args:
         registry: The ``HandlerRegistryProtocol`` instance to populate.
-        file_hasher: Optional ``FileContentHasherProtocol`` for path hashing.
+        file_hasher: Optional ``FileContentHasherProtocol`` for file content hashing.
             Defaults to ``BasicFileHasher(sha256)``.
         function_info_extractor: Optional ``FunctionInfoExtractorProtocol``.
             Defaults to ``FunctionSignatureExtractor``.
@@ -267,9 +247,10 @@ def register_builtin_python_type_handlers(
     registry.register(bytes, bytes_hasher)
     registry.register(bytearray, bytes_hasher)
 
-    registry.register(Path, PathHandler(file_hasher))
-    registry.register(UPath, UPathHandler(file_hasher))
     registry.register(UUID, UUIDHandler())
+
+    from orcapod.extension_types.file_type import File
+    registry.register(File, FileHandler(file_hasher))
 
     import types as _types
 
