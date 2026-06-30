@@ -2,6 +2,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Literal
 
+# Private helpers — imported directly because no public API exists for these yet.
 from orcapod.hashing.hash_utils import _canonical_annotation_str, _is_union_annotation
 from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from orcapod.types import Schema
