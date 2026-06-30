@@ -107,7 +107,8 @@
             "Basic SHA-256 hashing for files and objects",
             "Arrow logical serialization method",
             "Introduced arrow_v0.1 StarfixArrowHasher using starfix ArrowDigester for cross-language-compatible Arrow hashing",
-            "Hard cut: replaced shape-based SemanticTypeRegistry with extension-type hashing; renamed all hashing classes to cleaner names"
+            "Hard cut: replaced shape-based SemanticTypeRegistry with extension-type hashing; renamed all hashing classes to cleaner names",
+            "Removed PathHandler and UPathHandler; registered FileHandler for orcapod.File content hashing (ITL-450)"
         ]
     }
 }

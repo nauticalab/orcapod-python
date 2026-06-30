@@ -146,7 +146,7 @@ class TestSemanticHashingVisitorExtension:
         assert new_type == arrow_type
         assert new_data == storage_val
 
-    def test_path_column_hashes_path_string_not_content(self, ctx):
+    def test_path_column_passthrough_when_no_handler_registered(self, ctx):
         """Path extension columns pass through unchanged (no file reading).
 
         Since PathHandler is not registered, the visitor has no semantic hasher
