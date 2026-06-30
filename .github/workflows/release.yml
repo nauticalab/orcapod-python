@@ -12,6 +12,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: true
       matrix:
@@ -40,6 +41,7 @@ jobs:
     name: Build distribution
     needs: [test, license-check]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write  # required to push the release tag
     outputs:
@@ -91,6 +93,7 @@ jobs:
     name: Publish → TestPyPI
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: testpypi
       url: https://test.pypi.org/p/orcapod
@@ -113,6 +116,7 @@ jobs:
     name: Publish → PyPI
     needs: [build, publish-testpypi]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/p/orcapod
