@@ -5,7 +5,16 @@ Note: TestDirectoryHandler is added in Task 5 when DirectoryHandler is implement
 
 from __future__ import annotations
 
+import pytest
+
+from orcapod.extension_types.directory_type import Directory
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
+from orcapod.hashing.semantic_hashing.builtin_handlers import (
+    DirectoryHandler,
+    register_builtin_python_type_handlers,
+)
+from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
+from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
 from orcapod.types import ContentHash
 
 
@@ -172,3 +181,64 @@ class TestBasicDirectoryHasher:
         (d2 / "sub" / "app.pyc").write_bytes(b"compiled")  # nested .pyc, should be excluded
         hasher = BasicDirectoryHasher()
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
+
+
+class TestDirectoryHandler:
+    @pytest.fixture
+    def handler(self):
+        return DirectoryHandler(BasicDirectoryHasher())
+
+    @pytest.fixture
+    def hasher(self):
+        registry = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(registry)
+        return SemanticAwarePythonHasher(
+            hasher_id="test_directory_v0",
+            type_handler_registry=registry,
+        )
+
+    def test_returns_content_hash(self, handler, hasher, tmp_path):
+        d = tmp_path / "d"
+        d.mkdir()
+        (d / "file.txt").write_bytes(b"content")
+        result = handler.handle(Directory(d), hasher)
+        assert isinstance(result, ContentHash)
+
+    def test_rejects_non_directory_object(self, handler, hasher):
+        with pytest.raises(TypeError, match="DirectoryHandler"):
+            handler.handle("not_a_directory", hasher)
+
+    def test_same_content_same_hash(self, handler, hasher, tmp_path):
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        (d1 / "a.txt").write_bytes(b"identical")
+        (d2 / "a.txt").write_bytes(b"identical")
+        h1 = handler.handle(Directory(d1), hasher)
+        h2 = handler.handle(Directory(d2), hasher)
+        assert h1 == h2
+
+    def test_different_content_different_hash(self, handler, hasher, tmp_path):
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        (d1 / "a.txt").write_bytes(b"content A")
+        (d2 / "a.txt").write_bytes(b"content B")
+        h1 = handler.handle(Directory(d1), hasher)
+        h2 = handler.handle(Directory(d2), hasher)
+        assert h1 != h2
+
+    def test_passes_ignore_to_hasher(self, handler, hasher, tmp_path):
+        """ignore on the Directory instance is forwarded to the hasher."""
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        (d1 / "app.py").write_bytes(b"code")
+        (d2 / "app.py").write_bytes(b"code")
+        (d2 / "app.pyc").write_bytes(b"compiled")  # extra .pyc, should be excluded
+        h1 = handler.handle(Directory(d1), hasher)
+        h2 = handler.handle(Directory(d2, ignore=["*.pyc"]), hasher)
+        assert h1 == h2
