@@ -213,8 +213,9 @@ class LogicalDirectory(BaseLogicalType):
             return json.dumps({"path": path_str})
 
         if isinstance(ignore, list):
-            # Sort by base name (strip leading glob chars) for deterministic storage order.
-            return json.dumps({"path": path_str, "ignore": sorted(ignore, key=lambda x: x.lstrip("*."))})
+            # Sort by base name (strip leading glob chars) for deterministic storage order;
+            # secondary sort by the full pattern ensures canonical output when base names collide.
+            return json.dumps({"path": path_str, "ignore": sorted(ignore, key=lambda x: (x.lstrip("*."), x))})
 
         # Callable — attempt best-effort serialisation via module:qualname.
         qualname = getattr(ignore, "__qualname__", "")

@@ -1,7 +1,4 @@
-"""Tests for BasicDirectoryHasher and DirectoryHandler.
-
-Note: TestDirectoryHandler is added in Task 5 when DirectoryHandler is implemented.
-"""
+"""Tests for BasicDirectoryHasher and DirectoryHandler."""
 
 from __future__ import annotations
 
