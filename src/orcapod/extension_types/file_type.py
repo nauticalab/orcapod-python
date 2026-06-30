@@ -143,7 +143,7 @@ class LogicalFile(BaseLogicalType):
             LogicalFile._polars_ext = LogicalFile._polars_ext_class()
         return LogicalFile._polars_ext
 
-    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None" = None) -> str:
+    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> str:
         """Convert a ``File`` to its string path representation.
 
         Args:
@@ -155,7 +155,7 @@ class LogicalFile(BaseLogicalType):
         """
         return str(value)
 
-    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None" = None) -> File:
+    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> File:
         """Reconstruct a ``File`` from its stored string path.
 
         Re-validates existence on read — raises ``FileNotFoundError`` if the file
