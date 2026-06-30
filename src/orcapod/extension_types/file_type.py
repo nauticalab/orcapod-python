@@ -95,8 +95,8 @@ class LogicalFile(BaseLogicalType):
     """Logical type for ``orcapod.File``.
 
     Stores ``File`` instances as Arrow large strings using the custom extension
-    type ``"orcapod.file"``. The stored value is the path string (e.g.
-    ``"/tmp/data.csv"`` or ``"s3://bucket/key"``).
+    type ``"orcapod.file"``. The stored value is a JSON string of the form
+    ``{"path": "/tmp/data.csv"}`` encoding the file path.
 
     On read (``storage_to_python``), the path is used to reconstruct a ``File``
     instance, which re-validates existence. Reading an Arrow table with
