@@ -227,6 +227,33 @@ class SchemaHandler:
         raise NotImplementedError("SchemaHandler is not yet implemented.")
 
 
+class FileHandler:
+    """Hasher for ``orcapod.File`` objects — hashes file *content*.
+
+    By the time ``handle`` is called, ``File``'s constructor has already validated
+    that the path exists and is a non-directory file (and is not a symlink when
+    ``follow_symlinks=False``). The hash is produced by reading file bytes through
+    the wrapped ``UPath``, which follows symlinks by default.
+
+    Args:
+        file_hasher: Any object with a ``hash_file(path) -> ContentHash`` method.
+    """
+
+    def __init__(self, file_hasher: "FileContentHasherProtocol") -> None:
+        self.file_hasher = file_hasher
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
+        # Deferred import breaks the circular dependency between this module and
+        # file_type.py — the same pattern used by ArrowTableHandler.
+        from orcapod.extension_types.file_type import File
+        if not isinstance(obj, File):
+            raise TypeError(
+                f"FileHandler: expected an orcapod.File, got {type(obj)!r}"
+            )
+        logger.debug("FileHandler: hashing file content at %s", obj.__wrapped__)
+        return self.file_hasher.hash_file(obj.__wrapped__)
+
+
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
