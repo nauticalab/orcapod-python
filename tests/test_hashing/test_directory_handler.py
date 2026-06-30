@@ -1,8 +1,9 @@
-"""Tests for BasicDirectoryHasher and DirectoryHandler."""
+"""Tests for BasicDirectoryHasher and DirectoryHandler.
+
+Note: TestDirectoryHandler is added in Task 5 when DirectoryHandler is implemented.
+"""
 
 from __future__ import annotations
-
-import pytest
 
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.types import ContentHash
@@ -146,3 +147,28 @@ class TestBasicDirectoryHasher:
         hasher = BasicDirectoryHasher()
         result = hasher.hash_directory(tmp_path)
         assert isinstance(result, ContentHash)
+
+    def test_rename_changes_hash(self, tmp_path):
+        """Same content, different name → different hash."""
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        (d1 / "original.txt").write_bytes(b"content")
+        (d2 / "renamed.txt").write_bytes(b"content")  # same content, different name
+        hasher = BasicDirectoryHasher()
+        assert hasher.hash_directory(d1) != hasher.hash_directory(d2)
+
+    def test_ignore_applied_recursively(self, tmp_path):
+        """ignore filter is applied to entries inside nested subdirectories."""
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+        (d1 / "sub").mkdir()
+        (d2 / "sub").mkdir()
+        (d1 / "sub" / "app.py").write_bytes(b"code")
+        (d2 / "sub" / "app.py").write_bytes(b"code")
+        (d2 / "sub" / "app.pyc").write_bytes(b"compiled")  # nested .pyc, should be excluded
+        hasher = BasicDirectoryHasher()
+        assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])

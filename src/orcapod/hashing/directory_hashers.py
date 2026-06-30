@@ -7,7 +7,6 @@ import hashlib
 import logging
 import os
 from collections.abc import Callable
-from typing import Any
 
 from upath import UPath
 
@@ -50,7 +49,14 @@ def _hash_dir(
 ) -> bytes:
     """Recursively compute the Merkle hash of a directory.
 
-    Returns the raw 32-byte SHA-256 digest for the directory node.
+    Args:
+        path: The directory to hash.
+        filter_fn: Optional filter callable; return ``True`` to exclude an entry.
+        algorithm: Hash algorithm name passed to ``hash_file`` for file leaves.
+        buffer_size: Read buffer size in bytes for file content.
+
+    Returns:
+        The raw 32-byte SHA-256 digest for this directory node.
     """
     entries: list[tuple[bytes, bytes]] = []
 
@@ -125,9 +131,14 @@ class BasicDirectoryHasher:
                 names via ``fnmatch``. Applied at every level of recursion.
 
         Returns:
-            A ``ContentHash`` with ``method="merkle_sha256"``.
+            A ``ContentHash`` with ``method="merkle_{algorithm}"``.
+
+        Raises:
+            FileNotFoundError: If ``directory_path`` does not exist.
+            NotADirectoryError: If ``directory_path`` is not a directory.
+            PermissionError: If the directory is not traversable.
         """
         path = UPath(directory_path)
         filter_fn = _compile_ignore(ignore)
         digest = _hash_dir(path, filter_fn, self.algorithm, self.buffer_size)
-        return ContentHash(method="merkle_sha256", digest=digest)
+        return ContentHash(method=f"merkle_{self.algorithm}", digest=digest)
