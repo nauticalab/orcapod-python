@@ -2,8 +2,6 @@
 import inspect
 from pathlib import Path
 
-import pytest
-
 from orcapod.hashing.hash_utils import (
     _canonical_annotation_str,
     _is_union_annotation,
