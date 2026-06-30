@@ -85,6 +85,5 @@ class TestFileHandler:
         assert handler_result == direct_result
 
     def test_rejects_non_file_object(self, handler, hasher):
-        from pathlib import Path
         with pytest.raises(TypeError, match="FileHandler"):
-            handler.handle(Path("/tmp"), hasher)
+            handler.handle("not_a_file", hasher)
