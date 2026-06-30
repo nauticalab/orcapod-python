@@ -6,7 +6,7 @@ import pytest
 
 from orcapod.extension_types.file_type import File
 from orcapod.hashing.file_hashers import BasicFileHasher
-from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler
+from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler, register_builtin_python_type_handlers
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
 from orcapod.types import ContentHash
@@ -23,9 +23,9 @@ def handler(file_hasher):
 
 
 @pytest.fixture
-def hasher(handler):
+def hasher():
     registry = PythonTypeHandlerRegistry()
-    registry.register(File, handler)
+    register_builtin_python_type_handlers(registry)
     return SemanticAwarePythonHasher(
         hasher_id="test_file_v0",
         type_handler_registry=registry,

@@ -6,7 +6,7 @@ Covers:
     circular references, strict vs non-strict mode
   - ContentIdentifiableProtocol protocol: independent hashing, composability
   - PythonTypeHandlerRegistry: registration, MRO-aware lookup, unregister
-  - Built-in hashers: bytes, UUID, Path, functions, type objects
+  - Built-in hashers: bytes, UUID, functions, type objects
   - ContentHash as terminal: returned as-is without re-hashing
   - ContentIdentifiableMixin: content_hash, __eq__, __hash__, caching,
     cache invalidation, injectable hasher
@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
 from collections import OrderedDict, namedtuple
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -363,63 +361,6 @@ class TestUUIDHandler:
         u1 = UUID("550e8400-e29b-41d4-a716-446655440000")
         u2 = UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
         assert hasher.hash_object(u1) != hasher.hash_object(u2)
-
-
-# ---------------------------------------------------------------------------
-# 8. Built-in handlers: Path (content-based)
-# ---------------------------------------------------------------------------
-
-
-class TestPathHandler:
-    def test_path_hashes_file_content(self, hasher):
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f:
-            f.write(b"hello world")
-            tmp_path = Path(f.name)
-
-        try:
-            h = hasher.hash_object(tmp_path)
-            assert isinstance(h, ContentHash)
-        finally:
-            tmp_path.unlink()
-
-    def test_path_same_content_same_hash(self, hasher):
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f1:
-            f1.write(b"identical content")
-            p1 = Path(f1.name)
-
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f2:
-            f2.write(b"identical content")
-            p2 = Path(f2.name)
-
-        try:
-            assert hasher.hash_object(p1) == hasher.hash_object(p2)
-        finally:
-            p1.unlink()
-            p2.unlink()
-
-    def test_path_different_content_different_hash(self, hasher):
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f1:
-            f1.write(b"content A")
-            p1 = Path(f1.name)
-
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=".txt") as f2:
-            f2.write(b"content B")
-            p2 = Path(f2.name)
-
-        try:
-            assert hasher.hash_object(p1) != hasher.hash_object(p2)
-        finally:
-            p1.unlink()
-            p2.unlink()
-
-    def test_missing_path_raises(self, hasher):
-        with pytest.raises(FileNotFoundError):
-            hasher.hash_object(Path("/nonexistent/path/file.txt"))
-
-    def test_directory_raises(self, hasher):
-        with tempfile.TemporaryDirectory() as d:
-            with pytest.raises(IsADirectoryError):
-                hasher.hash_object(Path(d))
 
 
 # ---------------------------------------------------------------------------
@@ -1076,11 +1017,13 @@ class TestGlobalSingletons:
 
         import typing as _typing
 
+        from orcapod.extension_types.file_type import File
+
         reg = get_default_python_type_handler_registry()
         assert reg.has_handler(bytes)
         assert reg.has_handler(bytearray)
         assert reg.has_handler(UUID)
-        assert reg.has_handler(Path)
+        assert reg.has_handler(File)
         assert reg.has_handler(_types.FunctionType)
         assert reg.has_handler(type)
         assert reg.has_handler(_types.GenericAlias)

@@ -59,7 +59,7 @@
         },
         "file_hasher": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the file content hasher (used by PathHandler)"
+            "description": "ObjectSpec for the file content hasher (used by FileHandler)"
         },
         "function_semantic_hasher": {
             "$ref": "#/$defs/objectspec",
