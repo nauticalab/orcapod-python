@@ -2,6 +2,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any, Literal
 
+from orcapod.hashing.hash_utils import _canonical_annotation_str, _is_union_annotation
 from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from orcapod.types import Schema
 
@@ -61,9 +62,15 @@ class FunctionSignatureExtractor:
         param_strs = []
         for name, param in sig.parameters.items():
             param_str = str(param)
+            annotation = param.annotation
+            if annotation is not inspect.Parameter.empty and _is_union_annotation(annotation):
+                old_ann = inspect.formatannotation(annotation)
+                new_ann = _canonical_annotation_str(annotation)
+                # Replace ": <old_ann>" with ": <new_ann>" (first occurrence only).
+                # The ": " prefix distinguishes the annotation from the default value.
+                param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
             if not self.include_defaults and "=" in param_str:
                 param_str = param_str.split("=")[0].strip()
-
             param_strs.append(param_str)
 
         parts["params"] = ", ".join(param_strs)
