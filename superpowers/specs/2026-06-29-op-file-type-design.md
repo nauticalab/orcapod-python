@@ -40,8 +40,12 @@ not inherit from `UPath`. This is the accepted trade-off for using `ProxyUPath`.
 
 ```python
 class File(ProxyUPath):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, follow_symlinks: bool = True, **kwargs):
         super().__init__(*args, **kwargs)   # builds self.__wrapped__ (a UPath)
+        if not follow_symlinks and self.__wrapped__.is_symlink():
+            raise ValueError(
+                f"File: path is a symlink and follow_symlinks=False: {self.__wrapped__!r}"
+            )
         if not self.__wrapped__.exists():
             raise FileNotFoundError(...)
         if self.__wrapped__.is_dir():
@@ -52,8 +56,16 @@ class File(ProxyUPath):
 
 - Existence and file-ness are validated eagerly in `__init__`. Construction fails fast
   for nonexistent or non-file paths.
-- Symlinks are **followed** (hash = hash of the resolved file's content), consistent
-  with `open()`-style semantics.
+- `follow_symlinks=True` (default): symlinks are followed; hash = hash of the resolved
+  target's content, consistent with `open()`-style semantics.
+- `follow_symlinks=False`: raises `ValueError` if the path is a symlink. Treating a
+  symlink as an invalid argument is safer than silently hashing the link itself or its
+  target under a setting that explicitly opted out of following.
+- `_follow_symlinks` does **not** need to be stored or forwarded to `FileHandler`. By
+  the time a `File` instance reaches `FileHandler.handle()`, the constructor invariant
+  guarantees that either the path is not a symlink (`follow_symlinks=False`) or symlinks
+  are being followed (`follow_symlinks=True`). In both cases `path.open("rb")` produces
+  the correct bytes without any extra flag.
 - Zero-byte files are valid and produce a well-defined hash.
 
 **`_from_upath` override:**
@@ -67,6 +79,7 @@ navigation are not re-validated because they may not exist yet:
 def _from_upath(cls, upath):
     obj = object.__new__(cls)
     obj.__wrapped__ = upath
+    obj._follow_symlinks = True   # derived paths default to following symlinks
     return obj
 ```
 
@@ -196,8 +209,9 @@ identified during exploration:
 - Constructor rejects nonexistent path → `FileNotFoundError`
 - Constructor rejects directory → `IsADirectoryError`
 - Constructor rejects symlink-to-directory → `IsADirectoryError`
+- Constructor with `follow_symlinks=False` on a symlink → `ValueError`
+- Constructor with `follow_symlinks=True` (default) on symlink to real file → succeeds
 - Constructor accepts zero-byte file → succeeds
-- Constructor follows symlinks: symlink to real file → succeeds, hashes target content
 - Roundtrip: `File(path) → python_to_storage → storage_to_python → File` preserves path
 - Arrow extension name is `"orcapod.file"`, storage type is `pa.large_string()`
 - `LogicalFile.python_type` is `File`
@@ -228,6 +242,7 @@ identified during exploration:
 | Re-validation on Arrow read raises if files moved/deleted | Correct semantic for content-identified type; document in API docs |
 | Circular import between `file_type.py` and `builtin_handlers.py` | Deferred import inside `FileHandler.handle()`, mirroring `ArrowTableHandler` pattern |
 | `_from_upath` skip of validation for derived paths | Intentional and documented; only `__init__` validates |
+| `follow_symlinks` flag not preserved through `_from_upath` | `_from_upath` explicitly sets `_follow_symlinks = True` on derived instances; documented that path-navigation results always follow symlinks |
 
 ---
 
