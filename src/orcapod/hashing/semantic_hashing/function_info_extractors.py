@@ -46,14 +46,16 @@ class FunctionSignatureExtractor:
         if not callable(func):
             raise TypeError("Provided object is not callable")
 
-        # Note: unlike ``get_function_signature`` in ``hash_utils``, this call
-        # does not use ``eval_str=True``.  ``FunctionSignatureExtractor`` is
-        # only invoked when a function *object* is passed directly to
-        # ``hash_object()``, which is a less common path.  The primary
-        # production path for ``_function_signature_hash`` goes through
-        # ``get_function_signature`` (in ``PythonDataFunction.__init__``), which
-        # does use ``eval_str=True``.
-        sig = inspect.signature(func)
+        # Use eval_str=True so that string annotations produced by
+        # ``from __future__ import annotations`` (PEP 563) are resolved to live
+        # type objects before we check for union types.
+        try:
+            sig = inspect.signature(func, eval_str=True)
+        except (NameError, TypeError, AttributeError, SyntaxError):
+            # Fall back to unresolved signatures when annotation evaluation fails
+            # (e.g. forward references that cannot be resolved in the function's
+            # module scope).
+            sig = inspect.signature(func)
 
         # Build the signature string
         parts = {}
