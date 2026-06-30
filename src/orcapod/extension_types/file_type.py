@@ -86,7 +86,7 @@ class File(ProxyUPath):
         all derived instances.
         """
         obj = object.__new__(cls)
-        obj.__wrapped__ = upath
+        object.__setattr__(obj, "__wrapped__", upath)
         return obj
 
 

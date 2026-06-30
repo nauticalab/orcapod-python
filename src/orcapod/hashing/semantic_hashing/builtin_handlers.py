@@ -193,8 +193,9 @@ class FileHandler:
             raise TypeError(
                 f"FileHandler: expected an orcapod.File, got {type(obj)!r}"
             )
-        logger.debug("FileHandler: hashing file content at %s", obj.__wrapped__)
-        return self.file_hasher.hash_file(obj.__wrapped__)
+        wrapped = getattr(obj, "__wrapped__")
+        logger.debug("FileHandler: hashing file content at %s", wrapped)
+        return self.file_hasher.hash_file(wrapped)
 
 
 def register_builtin_python_type_handlers(
@@ -212,8 +213,13 @@ def register_builtin_python_type_handlers(
     hash time, breaking the construction-time circular dependency.
 
     ``orcapod.File`` is registered via ``FileHandler`` for content-based file
-    hashing. ``pathlib.Path`` and ``upath.UPath`` are NOT registered — they
-    hash as pure path strings via the standard string fallback.
+    hashing. ``pathlib.Path`` and ``upath.UPath`` are NOT registered here.
+    When these types appear in pipeline columns they are handled at the Arrow
+    level through their ``LogicalPath`` / ``LogicalUPath`` extension types,
+    which store the path string in ``large_string()`` storage. The Arrow hasher
+    then operates directly on that string storage — no Python-level roundtrip
+    and no file I/O occurs. Passing a raw ``Path`` or ``UPath`` directly to the
+    Python semantic hasher raises ``TypeError`` in strict mode (the default).
 
     Args:
         registry: The ``HandlerRegistryProtocol`` instance to populate.
