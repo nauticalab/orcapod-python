@@ -47,6 +47,13 @@ class FunctionSignatureExtractor:
         if not callable(func):
             raise TypeError("Provided object is not callable")
 
+        # Note: unlike ``get_function_signature`` in ``hash_utils``, this call
+        # does not use ``eval_str=True``.  ``FunctionSignatureExtractor`` is
+        # only invoked when a function *object* is passed directly to
+        # ``hash_object()``, which is a less common path.  The primary
+        # production path for ``_function_signature_hash`` goes through
+        # ``get_function_signature`` (in ``PythonDataFunction.__init__``), which
+        # does use ``eval_str=True``.
         sig = inspect.signature(func)
 
         # Build the signature string
