@@ -12,6 +12,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   SchemaHandler         -- Schema objects
   FileHandler       -- orcapod.File: file content hash
   DirectoryHandler  -- orcapod.Directory: recursive Merkle tree hash
+  NumpyArrayHandler -- numpy.ndarray: .npy binary format
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
 with all of the above.
@@ -365,6 +366,9 @@ def register_builtin_python_type_handlers(
     arrow_table_hasher = ArrowTableHandler(arrow_hasher)
     registry.register(_pa.Table, arrow_table_hasher)
     registry.register(_pa.RecordBatch, arrow_table_hasher)
+
+    import numpy as _np
+    registry.register(_np.ndarray, NumpyArrayHandler())
 
     logger.debug(
         "register_builtin_python_type_handlers: registered %d hashers",
