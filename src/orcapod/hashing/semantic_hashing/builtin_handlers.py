@@ -388,6 +388,12 @@ class PandasSeriesHandler:
             raise TypeError(
                 f"PandasSeriesHandler: expected pd.Series, got {type(obj)!r}"
             )
+        if obj.name == self._UNNAMED_SENTINEL:
+            raise ValueError(
+                f"PandasSeriesHandler: Series name {self._UNNAMED_SENTINEL!r} is "
+                "reserved by orcapod for unnamed Series storage. "
+                "Rename the Series before hashing it."
+            )
         col_name = obj.name if obj.name is not None else self._UNNAMED_SENTINEL
         df = obj.to_frame(name=col_name)
         try:

@@ -93,29 +93,35 @@ arrow storage     = pa.large_binary()
 
 **`python_to_storage(s, converter=None) → bytes`**
 
-1. Wrap the Series as a single-column DataFrame: `df = s.to_frame(name=s.name or "__value__")`.
-   The series name is stored as the column name; the index is preserved.
-2. Apply the same IPC stream serialisation as `LogicalPandasDataFrame`.
+1. If `s.name == "__orcapod:unnamed__"` raise `ValueError` — the sentinel is reserved.
+2. Wrap the Series as a single-column DataFrame: use `s.name` as the column name when it
+   is not `None`, otherwise use the internal sentinel `"__orcapod:unnamed__"`.
+   The index is preserved.
+3. Apply the same IPC stream serialisation as `LogicalPandasDataFrame`.
 
 **`storage_to_python(buf, converter=None) → pd.Series`**
 
 1. Deserialise IPC bytes → Arrow Table → `table.to_pandas()`.
 2. Extract the single column: `series = df.iloc[:, 0]`. Restore the series name:
-   if the column name is `"__value__"`, set `series.name = None`.
+   if the column name equals the sentinel `"__orcapod:unnamed__"`, set `series.name = None`.
 
 ## Hashing Handlers
 
 ### `PandasDataFrameHandler`
 
-Produces a `ContentHash` via SHA-256 of the IPC stream bytes for the DataFrame.
-Identical path to `python_to_storage` (using `preserve_index=True`) so the hash
-input always matches what is stored in Arrow. Returns `ContentHash` directly —
-same rationale as `NumpyArrayHandler`: avoids hex-expansion overhead for large frames.
+Converts the DataFrame to a `pa.Table` (with `preserve_index=True`) and delegates
+to the configured Arrow hasher (default: `StarfixArrowHasher`, which produces
+`ContentHash(method="arrow_v0.1", ...)`). This keeps `pd.DataFrame` hashing
+consistent with `pa.Table` hashing throughout orcapod: a DataFrame with identical
+content and index produces the same hash as the equivalent Arrow table. Like
+`ArrowTableHandler`, the arrow hasher is resolved lazily via `get_default_context()`
+when none is provided at construction time.
 
 ### `PandasSeriesHandler`
 
-Identical approach: wrap as a single-column DataFrame (same name-preservation logic
-as `LogicalPandasSeries.python_to_storage`) → IPC bytes → SHA-256 → `ContentHash`.
+Identical approach: guard against the reserved sentinel name, wrap as a single-column
+DataFrame (same name-preservation logic as `LogicalPandasSeries.python_to_storage`),
+convert to `pa.Table`, then delegate to the Arrow hasher → `ContentHash(method="arrow_v0.1")`.
 
 ## Registration (`v0.1.json`)
 

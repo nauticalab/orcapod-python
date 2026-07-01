@@ -192,3 +192,9 @@ class TestLogicalPandasSeriesRoundTrip:
     def test_empty_series(self):
         s = pd.Series([], dtype=float, name="empty")
         pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_reserved_name_raises_value_error(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        s = pd.Series([1.0, 2.0], name="__orcapod:unnamed__")
+        with pytest.raises(ValueError, match="reserved"):
+            LogicalPandasSeries().python_to_storage(s)

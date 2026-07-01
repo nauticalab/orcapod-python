@@ -1,7 +1,6 @@
 """Tests for PandasDataFrameHandler and PandasSeriesHandler."""
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -98,3 +97,9 @@ class TestPandasSeriesHandler:
         from orcapod.hashing.semantic_hashing.builtin_handlers import PandasSeriesHandler
         with pytest.raises(TypeError, match="PandasSeriesHandler"):
             PandasSeriesHandler().handle(42, hasher=None)
+
+    def test_reserved_name_raises_value_error(self):
+        from orcapod.hashing.semantic_hashing.builtin_handlers import PandasSeriesHandler
+        s = pd.Series([1.0, 2.0], name="__orcapod:unnamed__")
+        with pytest.raises(ValueError, match="reserved"):
+            PandasSeriesHandler().handle(s, hasher=None)

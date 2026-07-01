@@ -206,15 +206,24 @@ class LogicalPandasSeries(BaseLogicalType):
         Args:
             value: A ``pd.Series`` instance. The series name and index are
                 preserved. An unnamed series (``name=None``) is stored under
-                the sentinel column name ``"__orcapod:unnamed__"``.
+                the internal sentinel column name ``"__orcapod:unnamed__"``.
+                Passing a Series whose ``name`` is exactly that sentinel raises
+                ``ValueError`` to prevent silent round-trip corruption.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
             Raw bytes in Arrow IPC stream format.
 
         Raises:
-            ValueError: If the Series values cannot be converted to an Arrow type.
+            ValueError: If ``value.name`` equals the reserved sentinel, or if
+                the Series values cannot be converted to an Arrow type.
         """
+        if value.name == _SERIES_UNNAMED_SENTINEL:
+            raise ValueError(
+                f"LogicalPandasSeries: Series name {_SERIES_UNNAMED_SENTINEL!r} is "
+                "reserved by orcapod for unnamed Series storage. "
+                "Rename the Series before storing it."
+            )
         col_name = value.name if value.name is not None else _SERIES_UNNAMED_SENTINEL
         df = value.to_frame(name=col_name)
         try:
