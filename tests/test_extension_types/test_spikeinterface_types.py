@@ -74,3 +74,68 @@ def test_in_memory_recording_raises():
     # The error message must distinguish in-memory from lazy file-backed recordings
     with pytest.raises(ValueError, match="file-backed"):
         lt.python_to_storage(rec)
+
+
+def test_folder_recording_round_trip(tmp_path):
+    """Binary-folder-backed recording round-trips through python_to_storage / storage_to_python."""
+    from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
+
+    saved = _make_numpy_recording().save_to_folder(str(tmp_path / "rec"))
+    lt = LogicalSIRecording()
+
+    storage = lt.python_to_storage(saved)
+    assert isinstance(storage, str)
+    data = json.loads(storage)
+    assert "class" in data  # SI dict always has a "class" key
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        saved.get_traces(segment_index=0),
+        recovered.get_traces(segment_index=0),
+    )
+
+
+def test_zarr_recording_round_trip(tmp_path):
+    """Zarr-backed recording round-trips through python_to_storage / storage_to_python."""
+    from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
+
+    saved = _make_numpy_recording().save_to_zarr(str(tmp_path / "rec.zarr"))
+    lt = LogicalSIRecording()
+
+    storage = lt.python_to_storage(saved)
+    assert isinstance(storage, str)
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        saved.get_traces(segment_index=0),
+        recovered.get_traces(segment_index=0),
+    )
+
+
+def test_ephemeral_recording_round_trip(tmp_path):
+    """A lazy preprocessing chain on a file-backed recording round-trips correctly.
+
+    The preprocessed recording is NOT materialized to zarr/folder but IS
+    JSON-serializable because its root is file-backed.  On reload,
+    SpikeInterface re-applies the preprocessing chain lazily (using zscore
+    which requires no optional dependencies and is fully deterministic).
+    """
+    import spikeinterface.preprocessing as spre
+    from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
+
+    # Save the source to disk; apply a lazy preprocessing step on top
+    source = _make_numpy_recording().save_to_folder(str(tmp_path / "source"))
+    preprocessed = spre.zscore(source)
+
+    assert preprocessed.check_serializability("json"), (
+        "Preprocessed recording on folder-backed source must be JSON-serializable"
+    )
+
+    lt = LogicalSIRecording()
+    storage = lt.python_to_storage(preprocessed)
+    recovered = lt.storage_to_python(storage)
+
+    np.testing.assert_array_equal(
+        preprocessed.get_traces(segment_index=0),
+        recovered.get_traces(segment_index=0),
+    )

@@ -125,7 +125,15 @@ class LogicalSIRecording(BaseLogicalType):
                 "recording.save_to_zarr(path) or recording.save_to_folder(path) "
                 "first, then pass the returned extractor to the pod."
             )
-        return json.dumps(value.to_dict(recursive=True))
+        from spikeinterface.core.core_tools import SIJsonEncoder
+        return json.dumps(
+            value.to_dict(
+                include_annotations=True,
+                include_properties=False,
+                recursive=True,
+            ),
+            cls=SIJsonEncoder,
+        )
 
     def storage_to_python(
         self, storage_value: Any, converter: TypeConverterProtocol | None = None
@@ -145,7 +153,7 @@ class LogicalSIRecording(BaseLogicalType):
             FileNotFoundError: If the backing zarr/folder no longer exists
                 (raised by SpikeInterface, propagated as-is).
         """
-        from spikeinterface.core import load_extractor
+        from spikeinterface.core import load as si_load
         try:
             si_dict = json.loads(storage_value)
         except (json.JSONDecodeError, TypeError) as exc:
@@ -153,7 +161,7 @@ class LogicalSIRecording(BaseLogicalType):
                 f"LogicalSIRecording: cannot deserialise storage value "
                 f"{storage_value!r}; expected a JSON string."
             ) from exc
-        return load_extractor(si_dict)
+        return si_load(si_dict)
 
 
 class SIRecordingHandler:
@@ -194,7 +202,11 @@ class SIRecordingHandler:
                 "Save it to disk first with save_to_zarr() or save_to_folder()."
             )
         # TODO(ITL-467): phase 2 — also hash backing source directory contents
-        json_bytes = json.dumps(obj.to_dict(recursive=True)).encode()
+        from spikeinterface.core.core_tools import SIJsonEncoder
+        json_bytes = json.dumps(
+            obj.to_dict(include_annotations=True, include_properties=False, recursive=True),
+            cls=SIJsonEncoder,
+        ).encode()
         logger.debug("SIRecordingHandler: hashing %d JSON bytes", len(json_bytes))
         return ContentHash(
             method="sha256",
