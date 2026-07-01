@@ -150,7 +150,7 @@ class LogicalSIRecording(BaseLogicalType):
 
         Returns:
             A `BaseRecording` instance reconstructed via
-            `spikeinterface.core.load_extractor`.
+            `spikeinterface.core.load`.
 
         Raises:
             ValueError: If `storage_value` is not valid JSON.
@@ -240,7 +240,7 @@ def register_spikeinterface_types(context: Any = None) -> None:
         context = get_default_context()
 
     lt = LogicalSIRecording()
-    context.type_converter._logical_type_registry.register_logical_type(lt)
+    context.type_converter.register_logical_type(lt)
     context.semantic_hasher.type_handler_registry.register(BaseRecording, SIRecordingHandler())
     logger.debug(
         "register_spikeinterface_types: registered LogicalSIRecording and SIRecordingHandler"
