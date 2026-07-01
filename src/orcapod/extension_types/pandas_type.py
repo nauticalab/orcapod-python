@@ -7,8 +7,8 @@ that all index kinds (RangeIndex, named index, MultiIndex) round-trip losslessly
 ``LogicalPandasSeries`` maps ``pd.Series`` <-> Arrow ``large_binary`` by wrapping
 the Series as a single-column DataFrame before applying the same IPC path. The
 Series name and index are both preserved. An unnamed Series (``name=None``) uses
-the sentinel column name ``"__orcapod:unnamed__"`` to distinguish it from a Series
-genuinely named ``"__orcapod:unnamed__"`` (the latter would be a bug in user code).
+the sentinel column name ``"__orcapod:unnamed__"`` so the series name survives
+the DataFrame round-trip.
 """
 
 from __future__ import annotations

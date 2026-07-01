@@ -28,6 +28,7 @@ from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalTyp
 from .file_type import LogicalFile  # ITL-450
 from .directory_type import LogicalDirectory  # ITL-451
 from .numpy_type import LogicalNumpyArray  # ITL-460
+from .pandas_type import LogicalPandasDataFrame, LogicalPandasSeries  # PLT-1869
 
 __all__ = [
     "LogicalTypeProtocol",
@@ -56,4 +57,7 @@ __all__ = [
     "LogicalDirectory",
     # ITL-460
     "LogicalNumpyArray",
+    # PLT-1869
+    "LogicalPandasDataFrame",
+    "LogicalPandasSeries",
 ]
