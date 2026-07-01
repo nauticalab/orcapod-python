@@ -1,9 +1,10 @@
 """SpikeInterface LogicalType and handler for orcapod (ITL-459).
 
 `LogicalSIRecording` maps `spikeinterface.core.BaseRecording` ↔ Arrow
-`large_string` using SpikeInterface's own `to_dict(recursive=True)` JSON
-dump as the storage envelope. `SIRecordingHandler` hashes the same JSON
-bytes via SHA-256 for content identity.
+`large_string` using SpikeInterface's own `to_dict(recursive=True,
+include_annotations=True, include_properties=False)` JSON dump (encoded
+via `SIJsonEncoder`) as the storage envelope. `SIRecordingHandler` hashes
+the same JSON bytes via SHA-256 for content identity.
 
 This module requires the optional `spikeinterface` extras group:
 `pip install orcapod[spikeinterface]`
@@ -46,9 +47,10 @@ class LogicalSIRecording(BaseLogicalType):
 
     Stores `BaseRecording` instances as Arrow `large_string` columns
     tagged with extension name `"spikeinterface.recording"`. The stored
-    value is SpikeInterface's own `to_dict(recursive=True)` output,
-    JSON-serialised. Loading reconstructs the recording via
-    `spikeinterface.core.load_extractor(dict)`.
+    value is SpikeInterface's own `to_dict(recursive=True,
+    include_annotations=True, include_properties=False)` output, encoded
+    via `SIJsonEncoder`. Loading reconstructs the recording via
+    `spikeinterface.core.load(dict)`.
 
     Only recordings whose `check_serializability("json")` returns `True`
     are accepted. Lazy recordings built on top of file-backed data (zarr,
@@ -109,7 +111,9 @@ class LogicalSIRecording(BaseLogicalType):
             converter: Ignored. Present for protocol conformance.
 
         Returns:
-            A JSON string produced by `recording.to_dict(recursive=True)`.
+            A JSON string produced by `recording.to_dict(recursive=True,
+            include_annotations=True, include_properties=False)` encoded
+            via `SIJsonEncoder`.
 
         Raises:
             ValueError: If the recording is not JSON-serialisable (e.g. an
@@ -168,9 +172,10 @@ class SIRecordingHandler:
     """Semantic hash handler for `spikeinterface.core.BaseRecording`.
 
     Computes a SHA-256 `ContentHash` of the JSON bytes produced by
-    `recording.to_dict(recursive=True)`. This is identical to the bytes
-    that `LogicalSIRecording` stores in Arrow, so hash input and storage
-    representation are always consistent.
+    `recording.to_dict(recursive=True, include_annotations=True,
+    include_properties=False)` encoded via `SIJsonEncoder`. This is
+    identical to the bytes that `LogicalSIRecording` stores in Arrow, so
+    hash input and storage representation are always consistent.
 
     The `hasher` argument is accepted for protocol conformance but not used —
     hashing is done directly via `hashlib.sha256` to avoid overhead.
@@ -185,7 +190,9 @@ class SIRecordingHandler:
 
         Returns:
             A `ContentHash` with `method="sha256"` and digest equal to the
-            SHA-256 of `json.dumps(recording.to_dict(recursive=True)).encode()`.
+            SHA-256 of the JSON bytes from `to_dict(recursive=True,
+            include_annotations=True, include_properties=False)` encoded
+            via `SIJsonEncoder`.
 
         Raises:
             TypeError: If `obj` is not a `BaseRecording`.
