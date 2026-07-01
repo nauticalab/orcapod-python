@@ -59,3 +59,18 @@ def test_logical_si_recording_importable():
     assert lt.logical_type_name == "spikeinterface.recording"
     assert lt.python_type is si_core.BaseRecording
     assert lt.get_arrow_extension_type().storage_type == pa.large_string()
+
+
+def test_in_memory_recording_raises():
+    """NumpyRecording (json=False) raises ValueError with clear instructions."""
+    from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
+
+    rec = _make_numpy_recording()
+    lt = LogicalSIRecording()
+
+    with pytest.raises(ValueError, match="not JSON-serializable"):
+        lt.python_to_storage(rec)
+
+    # The error message must distinguish in-memory from lazy file-backed recordings
+    with pytest.raises(ValueError, match="file-backed"):
+        lt.python_to_storage(rec)
