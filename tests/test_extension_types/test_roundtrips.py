@@ -232,6 +232,60 @@ def test_builtin_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Pat
     assert rows[0]["col"] == u
 
 
+def test_builtin_ndarray_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """numpy.ndarray round-trips through storage with extension name ``numpy.ndarray``.
+
+    Tests both a simple 1-D float64 array and a structured (record) array with
+    named fields, since structured arrays are a primary motivation for this type.
+    The read-side converter already knows about ``numpy.ndarray`` because it is
+    registered in the default context (``v0.1.json``).
+    """
+    import numpy as np
+
+    arr_simple = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+    arr_struct = np.array([(1.0, 10), (2.0, 20)], dtype=np.dtype([("x", np.float64), ("y", np.int32)]))
+
+    # Simple 1-D float64 array
+    simple_path = tmp_path / "simple"
+    simple_path.mkdir()
+    result, read_converter = _write_and_read(
+        {"col": np.ndarray},
+        [{"col": arr_simple}],
+        storage_backend,
+        simple_path,
+    )
+
+    field = result.schema.field("col")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on field 'col', got plain type {field.type!r}"
+    )
+    assert field.type.extension_name == "numpy.ndarray"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    assert isinstance(rows[0]["col"], np.ndarray)
+    assert np.array_equal(rows[0]["col"], arr_simple)
+    assert rows[0]["col"].dtype == arr_simple.dtype
+
+    # Structured (record) array
+    struct_path = tmp_path / "struct"
+    struct_path.mkdir()
+    result2, read_converter2 = _write_and_read(
+        {"col": np.ndarray},
+        [{"col": arr_struct}],
+        storage_backend,
+        struct_path,
+    )
+
+    rows2 = read_converter2.arrow_table_to_python_dicts(result2)
+    assert len(rows2) == 1
+    recovered = rows2[0]["col"]
+    assert isinstance(recovered, np.ndarray)
+    assert recovered.dtype == arr_struct.dtype
+    assert np.array_equal(recovered["x"], arr_struct["x"])
+    assert np.array_equal(recovered["y"], arr_struct["y"])
+
+
 # ── Dataclass round-trip tests ────────────────────────────────────────────────
 
 

@@ -40,6 +40,10 @@
                         {
                             "_class": "orcapod.extension_types.directory_type.LogicalDirectory",
                             "_config": {}
+                        },
+                        {
+                            "_class": "orcapod.extension_types.numpy_type.LogicalNumpyArray",
+                            "_config": {}
                         }
                     ],
                     "factories": [
@@ -89,7 +93,8 @@
                 [{"_type": "typing._GenericAlias"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler", "_config": {}}],
                 [{"_type": "typing._SpecialForm"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",  "_config": {}}],
                 [{"_type": "pyarrow.Table"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
-                [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}]
+                [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
+                [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",   "_config": {}}]
             ]
         }
     },
@@ -121,7 +126,8 @@
             "Hard cut: replaced shape-based SemanticTypeRegistry with extension-type hashing; renamed all hashing classes to cleaner names",
             "Removed PathHandler and UPathHandler; registered FileHandler for orcapod.File content hashing (ITL-450)",
             "Migrated LogicalFile Arrow storage from plain path string to JSON {\"path\": \"...\"} for consistency with LogicalDirectory (ITL-451)",
-            "Added orcapod.Directory content-identified type with recursive Merkle tree hashing, LogicalDirectory Arrow extension, ignore filter support, and DirectoryHandler (ITL-451)"
+            "Added orcapod.Directory content-identified type with recursive Merkle tree hashing, LogicalDirectory Arrow extension, ignore filter support, and DirectoryHandler (ITL-451)",
+            "Added numpy.ndarray as a native value type via LogicalNumpyArray (large_binary/.npy) and NumpyArrayHandler; object-dtype arrays are rejected eagerly (ITL-460)"
         ]
     }
 }

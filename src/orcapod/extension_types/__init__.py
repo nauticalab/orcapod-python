@@ -27,6 +27,7 @@ from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogical
 from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalType, PydanticLogicalTypeFactory
 from .file_type import LogicalFile  # ITL-450
 from .directory_type import LogicalDirectory  # ITL-451
+from .numpy_type import LogicalNumpyArray  # ITL-460
 
 __all__ = [
     "LogicalTypeProtocol",
@@ -53,4 +54,6 @@ __all__ = [
     "LogicalFile",
     # ITL-451
     "LogicalDirectory",
+    # ITL-460
+    "LogicalNumpyArray",
 ]
