@@ -13,15 +13,11 @@ Built-in PythonTypeHandlerProtocol implementations.
   FileHandler           -- orcapod.File: file content hash
   DirectoryHandler      -- orcapod.Directory: recursive Merkle tree hash
   NumpyArrayHandler     -- numpy.ndarray: SHA-256 ContentHash of .npy bytes
-  PandasDataFrameHandler -- pd.DataFrame: Arrow Table via an explicitly provided Arrow hasher
-  PandasSeriesHandler   -- pd.Series: Arrow Table via an explicitly provided Arrow hasher
-  PandasHandlerRegistrar -- registers PandasDataFrameHandler and PandasSeriesHandler into an
-                            existing registry with an explicitly provided arrow_hasher; used by
-                            the v0.1 context JSON to wire the handlers after arrow_hasher is built
+  PandasDataFrameHandler -- pd.DataFrame: Arrow Table via Arrow hasher (lazy default-context fallback)
+  PandasSeriesHandler   -- pd.Series: Arrow Table via Arrow hasher (lazy default-context fallback)
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
-with all of the above except the pandas handlers, which require an explicit
-arrow_hasher and are registered separately via ``PandasHandlerRegistrar``.
+with all of the above handlers.
 """
 
 from __future__ import annotations
@@ -290,24 +286,30 @@ class NumpyArrayHandler:
 
 
 class PandasDataFrameHandler:
-    """Hasher for ``pd.DataFrame`` — converts to Arrow Table and hashes via an explicit Arrow hasher.
+    """Hasher for ``pd.DataFrame`` — converts to Arrow Table and hashes via an Arrow hasher.
 
     Converts the DataFrame to a ``pa.Table`` (with ``preserve_index=True``) and
-    delegates to the Arrow hasher provided at construction. This keeps
-    ``pd.DataFrame`` hashing consistent with ``pa.Table`` hashing throughout
-    orcapod — a DataFrame with identical content and index produces the same hash
-    as the equivalent Arrow table.
+    delegates to the Arrow hasher. This keeps ``pd.DataFrame`` hashing consistent
+    with ``pa.Table`` hashing throughout orcapod — a DataFrame with identical
+    content and index produces the same hash as the equivalent Arrow table.
 
-    ``arrow_hasher`` must be explicitly provided at construction; there is no
-    default-context fallback. Use ``PandasHandlerRegistrar`` to register this
-    handler into a registry from the data context JSON.
+    When ``arrow_hasher`` is ``None``, the default data context's ``arrow_hasher``
+    is resolved lazily at call time (breaking the circular dependency that would
+    arise if the registry were constructed before the arrow hasher).
 
     Args:
-        arrow_hasher: An object satisfying ``ArrowHasherProtocol``. Required.
+        arrow_hasher: An object satisfying ``ArrowHasherProtocol``. When ``None``,
+            lazy resolution via the default context is used.
     """
 
-    def __init__(self, arrow_hasher: "ArrowHasherProtocol") -> None:
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
         self._arrow_hasher = arrow_hasher
+
+    def _get_arrow_hasher(self) -> "ArrowHasherProtocol":
+        if self._arrow_hasher is not None:
+            return self._arrow_hasher
+        from orcapod.contexts import get_default_context
+        return get_default_context().arrow_hasher  # type: ignore[return-value]
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
         """Return a ``ContentHash`` of ``obj`` via the Arrow hasher.
@@ -339,28 +341,35 @@ class PandasDataFrameHandler:
                 f"Check for columns with mixed or non-Arrow-serialisable types. "
                 f"Original error: {exc}"
             ) from exc
-        return self._arrow_hasher.hash_table(table)
+        return self._get_arrow_hasher().hash_table(table)
 
 
 class PandasSeriesHandler:
-    """Hasher for ``pd.Series`` — converts to Arrow Table and hashes via an explicit Arrow hasher.
+    """Hasher for ``pd.Series`` — converts to Arrow Table and hashes via an Arrow hasher.
 
     Wraps the Series as a single-column DataFrame (using the sentinel column name
     ``"__pandas_series_unnamed__"`` for an unnamed Series, matching
     ``LogicalPandasSeries.python_to_storage``) then delegates to the Arrow hasher.
 
-    ``arrow_hasher`` must be explicitly provided at construction; there is no
-    default-context fallback. Use ``PandasHandlerRegistrar`` to register this
-    handler into a registry from the data context JSON.
+    When ``arrow_hasher`` is ``None``, the default data context's ``arrow_hasher``
+    is resolved lazily at call time (breaking the circular dependency that would
+    arise if the registry were constructed before the arrow hasher).
 
     Args:
-        arrow_hasher: An object satisfying ``ArrowHasherProtocol``. Required.
+        arrow_hasher: An object satisfying ``ArrowHasherProtocol``. When ``None``,
+            lazy resolution via the default context is used.
     """
 
     _UNNAMED_SENTINEL = "__pandas_series_unnamed__"
 
-    def __init__(self, arrow_hasher: "ArrowHasherProtocol") -> None:
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
         self._arrow_hasher = arrow_hasher
+
+    def _get_arrow_hasher(self) -> "ArrowHasherProtocol":
+        if self._arrow_hasher is not None:
+            return self._arrow_hasher
+        from orcapod.contexts import get_default_context
+        return get_default_context().arrow_hasher  # type: ignore[return-value]
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
         """Return a ``ContentHash`` of ``obj`` via the Arrow hasher.
@@ -400,7 +409,7 @@ class PandasSeriesHandler:
                 f"Check for non-Arrow-serialisable values. "
                 f"Original error: {exc}"
             ) from exc
-        return self._arrow_hasher.hash_table(table)
+        return self._get_arrow_hasher().hash_table(table)
 
 
 def register_builtin_python_type_handlers(
@@ -412,11 +421,12 @@ def register_builtin_python_type_handlers(
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
-    ``pa.Table`` and ``pa.RecordBatch`` are always registered via
-    ``ArrowTableHandler``. When ``arrow_hasher`` is provided it is
-    passed through for immediate use; when ``None``, ``ArrowTableHandler``
-    resolves the active arrow hasher lazily via ``get_default_context()`` at
-    hash time, breaking the construction-time circular dependency.
+    ``pa.Table`` and ``pa.RecordBatch`` are registered via ``ArrowTableHandler``.
+    ``pd.DataFrame`` and ``pd.Series`` are registered via ``PandasDataFrameHandler``
+    and ``PandasSeriesHandler``. When ``arrow_hasher`` is provided it is passed
+    through for immediate use; when ``None``, these handlers resolve the active arrow
+    hasher lazily via ``get_default_context()`` at hash time, breaking the
+    construction-time circular dependency.
 
     ``orcapod.File`` is registered via ``FileHandler`` for content-based file
     hashing. ``orcapod.Directory`` is registered via ``DirectoryHandler`` for
@@ -497,49 +507,11 @@ def register_builtin_python_type_handlers(
     import numpy as _np
     registry.register(_np.ndarray, NumpyArrayHandler())
 
+    import pandas as _pd
+    registry.register(_pd.DataFrame, PandasDataFrameHandler(arrow_hasher))
+    registry.register(_pd.Series, PandasSeriesHandler(arrow_hasher))
+
     logger.debug(
         "register_builtin_python_type_handlers: registered %d hashers",
         len(registry),
     )
-
-
-class PandasHandlerRegistrar:
-    """Registers ``PandasDataFrameHandler`` and ``PandasSeriesHandler`` into an existing registry.
-
-    ``PandasDataFrameHandler`` and ``PandasSeriesHandler`` require an explicit
-    ``ArrowHasherProtocol`` instance at construction time.  Because the data
-    context JSON (``v0.1.json``) builds ``python_type_handler_registry`` before
-    ``arrow_hasher`` (the arrow hasher depends on the semantic hasher which depends
-    on the type handler registry), the pandas handlers cannot be wired up inside the
-    ``python_type_handler_registry`` block without introducing a forward-reference
-    error.  Instead, a ``PandasHandlerRegistrar`` entry is placed in the JSON
-    *after* the ``arrow_hasher`` entry so that both ``python_type_handler_registry``
-    and ``arrow_hasher`` are already resolved when this class is instantiated.
-
-    The side-effect of construction (registering the handlers) is the purpose of
-    this class; callers do not need to retain the instance.
-
-    Args:
-        registry: An existing ``HandlerRegistryProtocol`` instance to extend.
-        arrow_hasher: An ``ArrowHasherProtocol`` instance. Required.
-
-    Example:
-        >>> # In data context JSON — placed after "arrow_hasher":
-        >>> # {
-        >>> #   "_class": "...PandasHandlerRegistrar",
-        >>> #   "_config": {
-        >>> #     "registry":      {"_ref": "python_type_handler_registry"},
-        >>> #     "arrow_hasher":  {"_ref": "arrow_hasher"}
-        >>> #   }
-        >>> # }
-    """
-
-    def __init__(
-        self,
-        registry: "HandlerRegistryProtocol",
-        arrow_hasher: "ArrowHasherProtocol",
-    ) -> None:
-        import pandas as _pd
-        registry.register(_pd.DataFrame, PandasDataFrameHandler(arrow_hasher))
-        registry.register(_pd.Series, PandasSeriesHandler(arrow_hasher))
-        logger.debug("PandasHandlerRegistrar: registered DataFrame and Series handlers")
