@@ -428,3 +428,54 @@ def test_delta_polars_read_delta(tmp_path: Path) -> None:
     assert col_dtype.ext_name() == fqcn, (
         f"Expected extension name {fqcn!r}, got {col_dtype.ext_name()!r}"
     )
+
+
+def test_builtin_dataframe_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """pd.DataFrame round-trips through storage with extension name ``pandas.dataframe``."""
+    import pandas as pd
+    df = pd.DataFrame(
+        {"x": [1.0, 2.0, 3.0], "label": ["a", "b", "c"]},
+        index=pd.Index([10, 20, 30], name="row_id"),
+    )
+    result, read_converter = _write_and_read(
+        {"frame": pd.DataFrame},
+        [{"frame": df}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("frame")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on field 'frame', got plain type {field.type!r}"
+    )
+    assert field.type.extension_name == "pandas.dataframe"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    recovered = rows[0]["frame"]
+    assert isinstance(recovered, pd.DataFrame)
+    pd.testing.assert_frame_equal(recovered, df)
+
+
+def test_builtin_series_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """pd.Series round-trips through storage with extension name ``pandas.series``."""
+    import pandas as pd
+    s = pd.Series([10.0, 20.0, 30.0], name="metric", index=pd.Index([1, 2, 3], name="id"))
+    result, read_converter = _write_and_read(
+        {"series": pd.Series},
+        [{"series": s}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("series")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on field 'series', got plain type {field.type!r}"
+    )
+    assert field.type.extension_name == "pandas.series"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    recovered = rows[0]["series"]
+    assert isinstance(recovered, pd.Series)
+    pd.testing.assert_series_equal(recovered, s)
