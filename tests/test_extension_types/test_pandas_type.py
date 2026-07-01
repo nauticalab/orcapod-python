@@ -113,3 +113,82 @@ class TestLogicalPandasDataFrameRoundTrip:
     def test_empty_dataframe(self):
         df = pd.DataFrame({"x": pd.Series([], dtype=float)})
         pd.testing.assert_frame_equal(self._rt(df), df)
+
+
+class TestLogicalPandasSeriesProtocol:
+    def test_isinstance_logical_type(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        assert isinstance(LogicalPandasSeries(), LogicalTypeProtocol)
+
+    def test_logical_type_name(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        assert LogicalPandasSeries().logical_type_name == "pandas.series"
+
+    def test_python_type(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        assert LogicalPandasSeries().python_type is pd.Series
+
+    def test_arrow_ext_name(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        assert LogicalPandasSeries().get_arrow_extension_type().extension_name == "pandas.series"
+
+    def test_arrow_ext_storage_type(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        assert LogicalPandasSeries().get_arrow_extension_type().storage_type == pa.large_binary()
+
+    def test_arrow_ext_is_cached(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        lt = LogicalPandasSeries()
+        assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
+
+    def test_polars_ext_is_cached(self):
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        lt = LogicalPandasSeries()
+        assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
+
+
+class TestLogicalPandasSeriesRoundTrip:
+    def _rt(self, s: pd.Series) -> pd.Series:
+        from orcapod.extension_types.pandas_type import LogicalPandasSeries
+        lt = LogicalPandasSeries()
+        return lt.storage_to_python(lt.python_to_storage(s))
+
+    def test_unnamed_series_name_is_none(self):
+        s = pd.Series([1.0, 2.0, 3.0])
+        result = self._rt(s)
+        pd.testing.assert_series_equal(result, s)
+        assert result.name is None
+
+    def test_named_series(self):
+        s = pd.Series([10, 20, 30], name="count")
+        result = self._rt(s)
+        pd.testing.assert_series_equal(result, s)
+        assert result.name == "count"
+
+    def test_named_index_preserved(self):
+        s = pd.Series([1.0, 2.0], index=pd.Index([10, 20], name="row_id"), name="val")
+        pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_float64_values(self):
+        s = pd.Series(np.array([1.1, 2.2], dtype=np.float64), name="f")
+        pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_int32_values(self):
+        s = pd.Series(np.array([1, 2, 3], dtype=np.int32), name="i")
+        pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_string_values(self):
+        s = pd.Series(["a", "b", None], name="words")
+        pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_bool_values(self):
+        s = pd.Series([True, False, True], name="flags")
+        pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_datetime_values(self):
+        s = pd.Series(pd.to_datetime(["2024-01-01", "2024-06-01"]), name="ts")
+        pd.testing.assert_series_equal(self._rt(s), s)
+
+    def test_empty_series(self):
+        s = pd.Series([], dtype=float, name="empty")
+        pd.testing.assert_series_equal(self._rt(s), s)
