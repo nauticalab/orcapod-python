@@ -69,6 +69,10 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the function semantic hasher (used by FunctionHandler)"
         },
+        "pandas_type_handlers": {
+            "$ref": "#/$defs/objectspec",
+            "description": "ObjectSpec for PandasHandlerRegistrar — wires pandas DataFrame/Series handlers into the python_type_handler_registry with an explicit arrow_hasher reference. Placed after arrow_hasher in the JSON to resolve the forward-reference constraint."
+        },
         "metadata": {
             "type": "object",
             "description": "Optional metadata about this context",

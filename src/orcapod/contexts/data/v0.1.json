@@ -102,9 +102,7 @@
                 [{"_type": "typing._SpecialForm"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",  "_config": {}}],
                 [{"_type": "pyarrow.Table"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
                 [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
-                [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",   "_config": {}}],
-                [{"_type": "pandas.core.frame.DataFrame"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasDataFrameHandler", "_config": {}}],
-                [{"_type": "pandas.core.series.Series"},   {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",    "_config": {}}]
+                [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",   "_config": {}}]
             ]
         }
     },
@@ -123,6 +121,13 @@
             "hasher_id": "arrow_v0.1",
             "type_converter": {"_ref": "type_converter"},
             "semantic_hasher": {"_ref": "semantic_hasher"}
+        }
+    },
+    "pandas_type_handlers": {
+        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasHandlerRegistrar",
+        "_config": {
+            "registry": {"_ref": "python_type_handler_registry"},
+            "arrow_hasher": {"_ref": "arrow_hasher"}
         }
     },
     "metadata": {

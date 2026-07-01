@@ -7,7 +7,7 @@ that all index kinds (RangeIndex, named index, MultiIndex) round-trip losslessly
 ``LogicalPandasSeries`` maps ``pd.Series`` <-> Arrow ``large_binary`` by wrapping
 the Series as a single-column DataFrame before applying the same IPC path. The
 Series name and index are both preserved. An unnamed Series (``name=None``) uses
-the sentinel column name ``"__orcapod:unnamed__"`` so the series name survives
+the sentinel column name ``"__pandas_series_unnamed__"`` so the series name survives
 the DataFrame round-trip.
 """
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from orcapod.extension_types.protocols import TypeConverterProtocol
 
 
-_SERIES_UNNAMED_SENTINEL = "__orcapod:unnamed__"
+_SERIES_UNNAMED_SENTINEL = "__pandas_series_unnamed__"
 
 
 def _table_to_ipc_bytes(table: pa.Table) -> bytes:
@@ -158,8 +158,8 @@ class LogicalPandasSeries(BaseLogicalType):
     which preserves the Series name and index losslessly.
 
     An unnamed Series (``name=None``) uses the internal sentinel column name
-    ``"__orcapod:unnamed__"`` to distinguish it from a Series named with an
-    empty string.
+    ``"__pandas_series_unnamed__"`` to distinguish it from a Series named with
+    an empty string.
 
     The extension name ``"pandas.series"`` is library-qualified.
 
@@ -206,7 +206,7 @@ class LogicalPandasSeries(BaseLogicalType):
         Args:
             value: A ``pd.Series`` instance. The series name and index are
                 preserved. An unnamed series (``name=None``) is stored under
-                the internal sentinel column name ``"__orcapod:unnamed__"``.
+                the internal sentinel column name ``"__pandas_series_unnamed__"``.
                 Passing a Series whose ``name`` is exactly that sentinel raises
                 ``ValueError`` to prevent silent round-trip corruption.
             converter: Ignored. Present for protocol conformance.

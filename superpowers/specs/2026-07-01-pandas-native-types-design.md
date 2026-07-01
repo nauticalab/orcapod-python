@@ -93,9 +93,9 @@ arrow storage     = pa.large_binary()
 
 **`python_to_storage(s, converter=None) → bytes`**
 
-1. If `s.name == "__orcapod:unnamed__"` raise `ValueError` — the sentinel is reserved.
+1. If `s.name == "__pandas_series_unnamed__"` raise `ValueError` — the sentinel is reserved.
 2. Wrap the Series as a single-column DataFrame: use `s.name` as the column name when it
-   is not `None`, otherwise use the internal sentinel `"__orcapod:unnamed__"`.
+   is not `None`, otherwise use the internal sentinel `"__pandas_series_unnamed__"`.
    The index is preserved.
 3. Apply the same IPC stream serialisation as `LogicalPandasDataFrame`.
 
@@ -103,40 +103,59 @@ arrow storage     = pa.large_binary()
 
 1. Deserialise IPC bytes → Arrow Table → `table.to_pandas()`.
 2. Extract the single column: `series = df.iloc[:, 0]`. Restore the series name:
-   if the column name equals the sentinel `"__orcapod:unnamed__"`, set `series.name = None`.
+   if the column name equals the sentinel `"__pandas_series_unnamed__"`, set `series.name = None`.
 
 ## Hashing Handlers
 
 ### `PandasDataFrameHandler`
 
 Converts the DataFrame to a `pa.Table` (with `preserve_index=True`) and delegates
-to the configured Arrow hasher (default: `StarfixArrowHasher`, which produces
-`ContentHash(method="arrow_v0.1", ...)`). This keeps `pd.DataFrame` hashing
-consistent with `pa.Table` hashing throughout orcapod: a DataFrame with identical
-content and index produces the same hash as the equivalent Arrow table. Like
-`ArrowTableHandler`, the arrow hasher is resolved lazily via `get_default_context()`
-when none is provided at construction time.
+to the Arrow hasher provided **explicitly at construction** (must be an
+`ArrowHasherProtocol`; there is no default-context fallback). The default context
+wires `StarfixArrowHasher`, which produces `ContentHash(method="arrow_v0.1", ...)`.
+A DataFrame with identical content and index produces the same hash as the equivalent
+Arrow table.
 
 ### `PandasSeriesHandler`
 
-Identical approach: guard against the reserved sentinel name, wrap as a single-column
+Identical approach: `arrow_hasher` must be explicitly provided at construction.
+Guards against the reserved sentinel name, wraps the Series as a single-column
 DataFrame (same name-preservation logic as `LogicalPandasSeries.python_to_storage`),
-convert to `pa.Table`, then delegate to the Arrow hasher → `ContentHash(method="arrow_v0.1")`.
+converts to `pa.Table`, then delegates to the Arrow hasher → `ContentHash(method="arrow_v0.1")`.
+
+### `PandasHandlerRegistrar`
+
+Because `python_type_handler_registry` is built before `arrow_hasher` in the context
+JSON loading order (the arrow hasher depends on the semantic hasher which depends on
+the type handler registry), pandas handlers cannot be wired directly inside the
+`python_type_handler_registry` block without a forward-reference error.
+
+`PandasHandlerRegistrar` is a lightweight helper that:
+1. Is placed in `v0.1.json` **after** `arrow_hasher`, so both refs are resolved.
+2. Receives `registry` (the already-built `python_type_handler_registry`) and
+   `arrow_hasher` as explicit constructor arguments.
+3. Calls `registry.register()` for `pd.DataFrame` and `pd.Series` with handler
+   instances that hold the explicit arrow hasher.
 
 ## Registration (`v0.1.json`)
 
-Appended to `logical_types`:
+Added to `logical_types`:
 
 ```json
 {"_class": "orcapod.extension_types.pandas_type.LogicalPandasDataFrame", "_config": {}}
 {"_class": "orcapod.extension_types.pandas_type.LogicalPandasSeries",     "_config": {}}
 ```
 
-Appended to `python_type_handler_registry`:
+Added as a top-level entry **after** `arrow_hasher`:
 
 ```json
-[{"_type": "pandas.core.frame.DataFrame"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasDataFrameHandler", "_config": {}}]
-[{"_type": "pandas.core.series.Series"},   {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",    "_config": {}}]
+"pandas_type_handlers": {
+    "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasHandlerRegistrar",
+    "_config": {
+        "registry":     {"_ref": "python_type_handler_registry"},
+        "arrow_hasher": {"_ref": "arrow_hasher"}
+    }
+}
 ```
 
 ## Testing
