@@ -1,18 +1,20 @@
 """
 Built-in PythonTypeHandlerProtocol implementations.
 
-  UUIDHandler       -- uuid.UUID: 16-byte binary representation
-  BytesHandler      -- bytes/bytearray: hex string representation
-  FunctionHandler   -- callable with __code__: via FunctionInfoExtractorProtocol
-  TypeObjectHandler -- type objects: stable "type:<module>.<qualname>" string
+  UUIDHandler           -- uuid.UUID: 16-byte binary representation
+  BytesHandler          -- bytes/bytearray: hex string representation
+  FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
+  TypeObjectHandler     -- type objects: stable "type:<module>.<qualname>" string
   SpecialFormHandler    -- typing._SpecialForm
   GenericAliasHandler   -- generic alias type annotations
   UnionTypeHandler      -- types.UnionType (Python 3.10+ X | Y syntax)
   ArrowTableHandler     -- pa.Table / pa.RecordBatch
   SchemaHandler         -- Schema objects
-  FileHandler       -- orcapod.File: file content hash
-  DirectoryHandler  -- orcapod.Directory: recursive Merkle tree hash
-  NumpyArrayHandler -- numpy.ndarray: SHA-256 ContentHash of .npy bytes
+  FileHandler           -- orcapod.File: file content hash
+  DirectoryHandler      -- orcapod.Directory: recursive Merkle tree hash
+  NumpyArrayHandler     -- numpy.ndarray: SHA-256 ContentHash of .npy bytes
+  PandasDataFrameHandler -- pd.DataFrame: Arrow Table via configured Arrow hasher
+  PandasSeriesHandler   -- pd.Series: Arrow Table via configured Arrow hasher
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
 with all of the above.
@@ -284,107 +286,119 @@ class NumpyArrayHandler:
 
 
 class PandasDataFrameHandler:
-    """Hasher for ``pd.DataFrame`` — content hash via SHA-256 of Arrow IPC stream bytes.
+    """Hasher for ``pd.DataFrame`` — converts to Arrow Table and hashes via the configured Arrow hasher.
 
-    Serialises the DataFrame to Arrow IPC stream format (with ``preserve_index=True``)
-    and returns a ``ContentHash`` produced by SHA-256 of those bytes. The serialisation
-    path is identical to ``LogicalPandasDataFrame.python_to_storage``, so the hash
-    input and storage representation are always consistent.
+    Converts the DataFrame to a ``pa.Table`` (with ``preserve_index=True``) and
+    delegates to the configured Arrow hasher (``StarfixArrowHasher`` by default).
+    This keeps ``pd.DataFrame`` hashing consistent with ``pa.Table`` hashing
+    throughout orcapod — a DataFrame with identical content and index produces the
+    same hash as the equivalent Arrow table.
 
-    Returning ``ContentHash`` directly (rather than the raw bytes) avoids the
-    hex-expansion and JSON-serialisation overhead that the semantic hasher would apply
-    to ``bytes`` returns — important for large DataFrames.
+    Args:
+        arrow_hasher: Any object satisfying ``ArrowHasherProtocol``. When
+            ``None``, the default data context's ``arrow_hasher`` is resolved
+            lazily at call time.
     """
 
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
+        self._arrow_hasher = arrow_hasher
+
+    def _get_arrow_hasher(self) -> "ArrowHasherProtocol":
+        if self._arrow_hasher is not None:
+            return self._arrow_hasher
+        from orcapod.contexts import get_default_context
+        return get_default_context().arrow_hasher  # type: ignore[return-value]
+
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
-        """Return a SHA-256 ``ContentHash`` of the IPC bytes for ``obj``.
+        """Return a ``ContentHash`` of ``obj`` via the Arrow hasher.
 
         Args:
             obj: A ``pd.DataFrame`` instance.
             hasher: Ignored. Present for protocol conformance.
 
         Returns:
-            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
-            SHA-256 of the DataFrame's Arrow IPC stream bytes.
+            A ``ContentHash`` produced by the configured Arrow hasher over
+            the Arrow Table representation of ``obj``.
 
         Raises:
             TypeError: If ``obj`` is not a ``pd.DataFrame``.
             ValueError: If any column cannot be converted to an Arrow type.
         """
-        import hashlib
-        import io
-        import pandas as pd
-        import pyarrow as pa
-        import pyarrow.ipc
+        import pandas as _pd
+        import pyarrow as _pa
 
-        if not isinstance(obj, pd.DataFrame):
+        if not isinstance(obj, _pd.DataFrame):
             raise TypeError(
                 f"PandasDataFrameHandler: expected pd.DataFrame, got {type(obj)!r}"
             )
         try:
-            table = pa.Table.from_pandas(obj, preserve_index=True)
-        except pa.lib.ArrowInvalid as exc:
+            table = _pa.Table.from_pandas(obj, preserve_index=True)
+        except _pa.lib.ArrowInvalid as exc:
             raise ValueError(
                 f"PandasDataFrameHandler: cannot convert DataFrame to Arrow. "
                 f"Check for columns with mixed or non-Arrow-serialisable types. "
                 f"Original error: {exc}"
             ) from exc
-        buf = io.BytesIO()
-        with pa.ipc.new_stream(buf, table.schema) as writer:
-            writer.write_table(table)
-        return ContentHash(method="sha256", digest=hashlib.sha256(buf.getvalue()).digest())
+        return self._get_arrow_hasher().hash_table(table)
 
 
 class PandasSeriesHandler:
-    """Hasher for ``pd.Series`` — content hash via SHA-256 of Arrow IPC stream bytes.
+    """Hasher for ``pd.Series`` — converts to Arrow Table and hashes via the configured Arrow hasher.
 
     Wraps the Series as a single-column DataFrame (using the sentinel column name
-    ``"__orcapod:unnamed__"`` for an unnamed Series) and applies the same IPC
-    serialisation path as ``PandasDataFrameHandler``. The hash input is always
-    consistent with what ``LogicalPandasSeries.python_to_storage`` stores.
+    ``"__orcapod:unnamed__"`` for an unnamed Series, matching
+    ``LogicalPandasSeries.python_to_storage``) then delegates to the Arrow hasher.
+
+    Args:
+        arrow_hasher: Any object satisfying ``ArrowHasherProtocol``. When
+            ``None``, the default data context's ``arrow_hasher`` is resolved
+            lazily at call time.
     """
 
     _UNNAMED_SENTINEL = "__orcapod:unnamed__"
 
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
+        self._arrow_hasher = arrow_hasher
+
+    def _get_arrow_hasher(self) -> "ArrowHasherProtocol":
+        if self._arrow_hasher is not None:
+            return self._arrow_hasher
+        from orcapod.contexts import get_default_context
+        return get_default_context().arrow_hasher  # type: ignore[return-value]
+
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
-        """Return a SHA-256 ``ContentHash`` of the IPC bytes for ``obj``.
+        """Return a ``ContentHash`` of ``obj`` via the Arrow hasher.
 
         Args:
             obj: A ``pd.Series`` instance.
             hasher: Ignored. Present for protocol conformance.
 
         Returns:
-            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
-            SHA-256 of the Series' Arrow IPC stream bytes.
+            A ``ContentHash`` produced by the configured Arrow hasher over
+            the Arrow Table representation of ``obj``.
 
         Raises:
             TypeError: If ``obj`` is not a ``pd.Series``.
             ValueError: If the Series values cannot be converted to an Arrow type.
         """
-        import hashlib
-        import io
-        import pandas as pd
-        import pyarrow as pa
-        import pyarrow.ipc
+        import pandas as _pd
+        import pyarrow as _pa
 
-        if not isinstance(obj, pd.Series):
+        if not isinstance(obj, _pd.Series):
             raise TypeError(
                 f"PandasSeriesHandler: expected pd.Series, got {type(obj)!r}"
             )
         col_name = obj.name if obj.name is not None else self._UNNAMED_SENTINEL
         df = obj.to_frame(name=col_name)
         try:
-            table = pa.Table.from_pandas(df, preserve_index=True)
-        except pa.lib.ArrowInvalid as exc:
+            table = _pa.Table.from_pandas(df, preserve_index=True)
+        except _pa.lib.ArrowInvalid as exc:
             raise ValueError(
                 f"PandasSeriesHandler: cannot convert Series to Arrow. "
                 f"Check for non-Arrow-serialisable values. "
                 f"Original error: {exc}"
             ) from exc
-        buf = io.BytesIO()
-        with pa.ipc.new_stream(buf, table.schema) as writer:
-            writer.write_table(table)
-        return ContentHash(method="sha256", digest=hashlib.sha256(buf.getvalue()).digest())
+        return self._get_arrow_hasher().hash_table(table)
 
 
 def register_builtin_python_type_handlers(
@@ -480,6 +494,12 @@ def register_builtin_python_type_handlers(
 
     import numpy as _np
     registry.register(_np.ndarray, NumpyArrayHandler())
+
+    import pandas as _pd
+    pandas_df_hasher = PandasDataFrameHandler(arrow_hasher)
+    pandas_series_hasher = PandasSeriesHandler(arrow_hasher)
+    registry.register(_pd.DataFrame, pandas_df_hasher)
+    registry.register(_pd.Series, pandas_series_hasher)
 
     logger.debug(
         "register_builtin_python_type_handlers: registered %d hashers",
