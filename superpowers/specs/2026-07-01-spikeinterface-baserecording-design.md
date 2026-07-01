@@ -83,9 +83,11 @@ for `np.ndarray`.
 
 1. Calls `value.check_serializability("json")`. If `False`, raises:
    ```
-   ValueError: BaseRecording is in-memory and cannot be serialized by orcapod.
-   Call recording.save_to_zarr(path) or recording.save_to_folder(path) first,
-   then pass the returned extractor to the pod.
+   ValueError: This BaseRecording is not JSON-serializable and cannot be stored by orcapod.
+   This typically means it holds data in memory (e.g. NumpyRecording). Lazy recordings
+   built on top of file-backed data are fine and do not need to be materialized first.
+   If your recording is in-memory, call recording.save_to_zarr(path) or
+   recording.save_to_folder(path) first, then pass the returned extractor to the pod.
    ```
 2. Calls `value.to_dict(recursive=True)` to obtain the SI dict representation.
    `recursive=True` ensures nested extractors (e.g. a recording composed from multiple
@@ -128,7 +130,7 @@ hashing infrastructure to land first (ITL-467).
 
 | Situation | Behaviour |
 |-----------|-----------|
-| In-memory `NumpyRecording` passed to pod | `ValueError` with save instructions |
+| `NumpyRecording` or any recording with `check_serializability("json") == False` | `ValueError` clarifying that lazy file-backed recordings are fine but in-memory ones are not, with save instructions |
 | `spikeinterface` not installed | `ImportError` on first use of `LogicalSIRecording`, message: `"Install spikeinterface: pip install orcapod[spikeinterface]"` |
 | Backing zarr/folder deleted after storage | SI raises `FileNotFoundError` or similar on `load_extractor()` — propagates as-is |
 | Corrupt JSON in storage | `json.JSONDecodeError` raised with the raw value in the message |
@@ -146,7 +148,8 @@ so they are skipped automatically when SI is not installed.
 |------|----------------|
 | `test_zarr_recording_round_trip` | zarr-backed recording → `python_to_storage` → `storage_to_python` → same data |
 | `test_folder_recording_round_trip` | binary-folder-backed recording → same |
-| `test_in_memory_recording_raises` | `NumpyRecording` → `ValueError` with clear message |
+| `test_ephemeral_recording_round_trip` | lazy preprocessing chain on top of file-backed data (not materialized to zarr/folder) → round-trips correctly; `get_traces()` returns same values |
+| `test_in_memory_recording_raises` | `NumpyRecording` (explicit `json=False`) → `ValueError` with clear message |
 | `test_hash_stability` | same recording hashes identically across two calls |
 | `test_hash_changes_with_content` | different recordings produce different hashes |
 | `test_spikeinterface_not_installed` | `ImportError` raised when SI unavailable (mock import) |
