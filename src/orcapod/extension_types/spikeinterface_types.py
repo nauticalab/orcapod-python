@@ -6,7 +6,7 @@ dump as the storage envelope. `SIRecordingHandler` hashes the same JSON
 bytes via SHA-256 for content identity.
 
 This module requires the optional `spikeinterface` extras group:
-``pip install orcapod[spikeinterface]``
+`pip install orcapod[spikeinterface]`
 
 Register SI types into the default orcapod context before using them in
 pods: call `register_spikeinterface_types()` once at startup.
