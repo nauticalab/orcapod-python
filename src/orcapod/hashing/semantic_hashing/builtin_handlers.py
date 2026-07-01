@@ -231,6 +231,50 @@ class DirectoryHandler:
         return self.directory_hasher.hash_directory(wrapped, ignore=ignore)
 
 
+class NumpyArrayHandler:
+    """Hasher for ``numpy.ndarray`` — content hash via numpy's ``.npy`` binary format.
+
+    Returns the raw ``.npy`` bytes produced by ``np.save``, which encode dtype
+    (including structured/record field names), shape, byte order, and data in
+    numpy's stable on-disk format. This is identical to what ``LogicalNumpyArray``
+    stores in Arrow, so the hash input and storage bytes are always consistent.
+
+    Object-dtype arrays are rejected with ``ValueError`` immediately (before
+    ``np.save`` is called). Structured dtypes containing object-typed fields
+    are caught by ``allow_pickle=False`` in ``np.save``.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> bytes:
+        """Return the ``.npy`` bytes for ``obj``.
+
+        Args:
+            obj: A ``numpy.ndarray`` instance.
+            hasher: Ignored. Present for protocol conformance.
+
+        Returns:
+            Raw ``.npy`` bytes encoding dtype, shape, byte order, and data.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``numpy.ndarray``.
+            ValueError: If ``obj`` has ``dtype.kind == "O"`` (object dtype).
+        """
+        import io
+        import numpy as np
+        if not isinstance(obj, np.ndarray):
+            raise TypeError(
+                f"NumpyArrayHandler: expected numpy.ndarray, got {type(obj)!r}"
+            )
+        if obj.dtype.kind == "O":
+            raise ValueError(
+                f"NumpyArrayHandler does not support object-dtype arrays "
+                f"(dtype={obj.dtype!r}). Object arrays require pickling, "
+                "which is disabled for security."
+            )
+        buf = io.BytesIO()
+        np.save(buf, obj, allow_pickle=False)
+        return buf.getvalue()
+
+
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
