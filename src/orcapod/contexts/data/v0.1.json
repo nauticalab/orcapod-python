@@ -40,6 +40,10 @@
                         {
                             "_class": "orcapod.extension_types.directory_type.LogicalDirectory",
                             "_config": {}
+                        },
+                        {
+                            "_class": "orcapod.extension_types.numpy_type.LogicalNumpyArray",
+                            "_config": {}
                         }
                     ],
                     "factories": [
@@ -89,7 +93,8 @@
                 [{"_type": "typing._GenericAlias"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler", "_config": {}}],
                 [{"_type": "typing._SpecialForm"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",  "_config": {}}],
                 [{"_type": "pyarrow.Table"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
-                [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}]
+                [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
+                [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",   "_config": {}}]
             ]
         }
     },
