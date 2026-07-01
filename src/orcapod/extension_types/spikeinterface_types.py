@@ -1,19 +1,15 @@
 """SpikeInterface LogicalType and handler for orcapod (ITL-459).
 
-``LogicalSIRecording`` maps ``spikeinterface.core.BaseRecording`` ↔ Arrow
-``large_string`` using SpikeInterface's own ``to_dict(recursive=True)`` JSON
-dump as the storage envelope.  ``SIRecordingHandler`` hashes the same JSON
+`LogicalSIRecording` maps `spikeinterface.core.BaseRecording` ↔ Arrow
+`large_string` using SpikeInterface's own `to_dict(recursive=True)` JSON
+dump as the storage envelope. `SIRecordingHandler` hashes the same JSON
 bytes via SHA-256 for content identity.
 
-This module requires the optional ``spikeinterface`` extras group::
-
-    pip install orcapod[spikeinterface]
+This module requires the optional `spikeinterface` extras group:
+``pip install orcapod[spikeinterface]``
 
 Register SI types into the default orcapod context before using them in
-pods::
-
-    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
-    register_spikeinterface_types()
+pods: call `register_spikeinterface_types()` once at startup.
 """
 
 from __future__ import annotations
@@ -46,18 +42,18 @@ logger = logging.getLogger(__name__)
 
 
 class LogicalSIRecording(BaseLogicalType):
-    """Logical type for ``spikeinterface.core.BaseRecording``.
+    """Logical type for `spikeinterface.core.BaseRecording`.
 
-    Stores ``BaseRecording`` instances as Arrow ``large_string`` columns
-    tagged with extension name ``"spikeinterface.recording"``.  The stored
-    value is SpikeInterface's own ``to_dict(recursive=True)`` output,
-    JSON-serialised.  Loading reconstructs the recording via
-    ``spikeinterface.core.load_extractor(dict)``.
+    Stores `BaseRecording` instances as Arrow `large_string` columns
+    tagged with extension name `"spikeinterface.recording"`. The stored
+    value is SpikeInterface's own `to_dict(recursive=True)` output,
+    JSON-serialised. Loading reconstructs the recording via
+    `spikeinterface.core.load_extractor(dict)`.
 
-    Only recordings whose ``check_serializability("json")`` returns ``True``
-    are accepted.  Lazy recordings built on top of file-backed data (zarr,
-    binary folder, etc.) qualify.  In-memory ``NumpyRecording`` objects do
-    not and raise ``ValueError`` with clear save instructions.
+    Only recordings whose `check_serializability("json")` returns `True`
+    are accepted. Lazy recordings built on top of file-backed data (zarr,
+    binary folder, etc.) qualify. In-memory `NumpyRecording` objects do
+    not and raise `ValueError` with clear save instructions.
 
     Example:
         >>> import tempfile, numpy as np
@@ -82,21 +78,21 @@ class LogicalSIRecording(BaseLogicalType):
     python_type: type = BaseRecording
 
     def get_arrow_extension_type(self) -> pa.ExtensionType:
-        """Return the cached Arrow extension type for ``BaseRecording``.
+        """Return the cached Arrow extension type for `BaseRecording`.
 
         Returns:
-            A ``pa.ExtensionType`` with extension name
-            ``"spikeinterface.recording"`` and storage type ``pa.large_string()``.
+            A `pa.ExtensionType` with extension name
+            `"spikeinterface.recording"` and storage type `pa.large_string()`.
         """
         if LogicalSIRecording._arrow_ext is None:
             LogicalSIRecording._arrow_ext = LogicalSIRecording._arrow_ext_class()
         return LogicalSIRecording._arrow_ext
 
     def get_polars_extension_type(self) -> pl.BaseExtension:
-        """Return the cached Polars extension type for ``BaseRecording``.
+        """Return the cached Polars extension type for `BaseRecording`.
 
         Returns:
-            A ``pl.BaseExtension`` registered under ``"spikeinterface.recording"``.
+            A `pl.BaseExtension` registered under `"spikeinterface.recording"`.
         """
         if LogicalSIRecording._polars_ext is None:
             LogicalSIRecording._polars_ext = LogicalSIRecording._polars_ext_class()
@@ -105,19 +101,19 @@ class LogicalSIRecording(BaseLogicalType):
     def python_to_storage(
         self, value: Any, converter: TypeConverterProtocol | None = None
     ) -> str:
-        """Serialise a ``BaseRecording`` to its JSON storage representation.
+        """Serialise a `BaseRecording` to its JSON storage representation.
 
         Args:
-            value: A ``BaseRecording`` instance whose
-                ``check_serializability("json")`` returns ``True``.
+            value: A `BaseRecording` instance whose
+                `check_serializability("json")` returns `True`.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
-            A JSON string produced by ``recording.to_dict(recursive=True)``.
+            A JSON string produced by `recording.to_dict(recursive=True)`.
 
         Raises:
             ValueError: If the recording is not JSON-serialisable (e.g. an
-                in-memory ``NumpyRecording``).
+                in-memory `NumpyRecording`).
         """
         if not value.check_serializability("json"):
             raise ValueError(
@@ -134,18 +130,18 @@ class LogicalSIRecording(BaseLogicalType):
     def storage_to_python(
         self, storage_value: Any, converter: TypeConverterProtocol | None = None
     ) -> BaseRecording:
-        """Reconstruct a ``BaseRecording`` from its JSON storage string.
+        """Reconstruct a `BaseRecording` from its JSON storage string.
 
         Args:
             storage_value: A JSON string as stored in Arrow.
             converter: Ignored. Present for protocol conformance.
 
         Returns:
-            A ``BaseRecording`` instance reconstructed via
-            ``spikeinterface.core.load_extractor``.
+            A `BaseRecording` instance reconstructed via
+            `spikeinterface.core.load_extractor`.
 
         Raises:
-            ValueError: If ``storage_value`` is not valid JSON.
+            ValueError: If `storage_value` is not valid JSON.
             FileNotFoundError: If the backing zarr/folder no longer exists
                 (raised by SpikeInterface, propagated as-is).
         """
@@ -161,33 +157,30 @@ class LogicalSIRecording(BaseLogicalType):
 
 
 class SIRecordingHandler:
-    """Semantic hash handler for ``spikeinterface.core.BaseRecording``.
+    """Semantic hash handler for `spikeinterface.core.BaseRecording`.
 
-    Computes a SHA-256 ``ContentHash`` of the JSON bytes produced by
-    ``recording.to_dict(recursive=True)``.  This is identical to the bytes
-    that ``LogicalSIRecording`` stores in Arrow, so hash input and storage
+    Computes a SHA-256 `ContentHash` of the JSON bytes produced by
+    `recording.to_dict(recursive=True)`. This is identical to the bytes
+    that `LogicalSIRecording` stores in Arrow, so hash input and storage
     representation are always consistent.
 
-    The ``hasher`` argument is accepted for protocol conformance but not used —
-    hashing is done directly via ``hashlib.sha256`` to avoid overhead.
-
-    Phase 2 (deferred — ITL-467): hash will additionally cover backing source
-    directory contents once efficient directory hashing infrastructure lands.
+    The `hasher` argument is accepted for protocol conformance but not used —
+    hashing is done directly via `hashlib.sha256` to avoid overhead.
     """
 
     def handle(self, obj: Any, hasher: SemanticHasherProtocol | None) -> ContentHash:
-        """Return a SHA-256 ``ContentHash`` of the recording's JSON dump.
+        """Return a SHA-256 `ContentHash` of the recording's JSON dump.
 
         Args:
-            obj: A ``BaseRecording`` instance.
+            obj: A `BaseRecording` instance.
             hasher: Accepted for protocol conformance; not used.
 
         Returns:
-            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
-            SHA-256 of ``json.dumps(recording.to_dict(recursive=True)).encode()``.
+            A `ContentHash` with `method="sha256"` and digest equal to the
+            SHA-256 of `json.dumps(recording.to_dict(recursive=True)).encode()`.
 
         Raises:
-            TypeError: If ``obj`` is not a ``BaseRecording``.
+            TypeError: If `obj` is not a `BaseRecording`.
             ValueError: If the recording is not JSON-serialisable (in-memory).
         """
         if not isinstance(obj, BaseRecording):
@@ -200,6 +193,7 @@ class SIRecordingHandler:
                 "(check_serializability('json') is False). "
                 "Save it to disk first with save_to_zarr() or save_to_folder()."
             )
+        # TODO(ITL-467): phase 2 — also hash backing source directory contents
         json_bytes = json.dumps(obj.to_dict(recursive=True)).encode()
         logger.debug("SIRecordingHandler: hashing %d JSON bytes", len(json_bytes))
         return ContentHash(
@@ -209,14 +203,14 @@ class SIRecordingHandler:
 
 
 def register_spikeinterface_types(context: Any = None) -> None:
-    """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
+    """Register SpikeInterface LogicalTypes into an orcapod `DataContext`.
 
     Call this once at startup, before any pods that use SpikeInterface types
-    are declared or executed.  If ``context`` is ``None``, the default context
-    (from ``orcapod.contexts.get_default_context()``) is used.
+    are declared or executed. If `context` is `None`, the default context
+    (from `orcapod.contexts.get_default_context()`) is used.
 
     Args:
-        context: A ``DataContext`` instance, or ``None`` to use the default.
+        context: A `DataContext` instance, or `None` to use the default.
 
     Example:
         >>> from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
