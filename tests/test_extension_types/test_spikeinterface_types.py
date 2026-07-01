@@ -180,3 +180,34 @@ def test_si_recording_handler_in_memory_raises():
     handler = SIRecordingHandler()
     with pytest.raises(ValueError, match="in-memory"):
         handler.handle(rec, hasher=None)
+
+
+def test_register_spikeinterface_types(tmp_path):
+    """register_spikeinterface_types() wires LogicalSIRecording and SIRecordingHandler
+    into the default context so they are found by type lookup."""
+    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
+    from orcapod.contexts import get_default_context
+
+    register_spikeinterface_types()
+    ctx = get_default_context()
+
+    saved = _make_numpy_recording().save_to_folder(str(tmp_path / "rec"))
+
+    # LogicalType registered: type_converter can find it
+    arrow_type = ctx.type_converter.python_type_to_arrow_type(type(saved))
+    assert arrow_type.extension_name == "spikeinterface.recording"
+
+    # Handler registered: semantic_hasher can find it
+    from orcapod.types import ContentHash
+    handler = ctx.semantic_hasher.type_handler_registry.get_handler(saved)
+    assert handler is not None
+    result = handler.handle(saved, hasher=None)
+    assert isinstance(result, ContentHash)
+
+    # Full round-trip through python_to_storage / storage_to_python
+    storage = ctx.type_converter.python_to_storage(saved, type(saved))
+    recovered = ctx.type_converter.storage_to_python(storage, type(saved))
+    np.testing.assert_array_equal(
+        saved.get_traces(segment_index=0),
+        recovered.get_traces(segment_index=0),
+    )
