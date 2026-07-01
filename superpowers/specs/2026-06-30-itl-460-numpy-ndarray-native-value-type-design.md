@@ -56,10 +56,27 @@ same name, enabling interoperability.
 import io
 import numpy as np
 
+if array.dtype.kind == "O":
+    raise ValueError(
+        f"LogicalNumpyArray does not support object-dtype arrays (dtype={array.dtype!r}). "
+        "Object arrays require pickling, which is disabled for security. "
+        "Serialise the array contents manually (e.g. to bytes or a File) before passing "
+        "to orcapod."
+    )
 buf = io.BytesIO()
-np.save(buf, array)
+np.save(buf, array, allow_pickle=False)
 return buf.getvalue()
 ```
+
+Two guards work in concert:
+
+1. **`dtype.kind == "O"` (early, explicit)** — fires before `np.save` is called for plain
+   object arrays (`dtype=object`), producing a clear, actionable error message.
+2. **`allow_pickle=False` in `np.save` (defence-in-depth)** — catches the subtler case of
+   structured (record) arrays that contain object-typed fields (e.g.
+   `dtype=[('label', object), ('value', int)]`). These have `dtype.kind == "V"` (void),
+   so the first guard does not catch them; `allow_pickle=False` is the safety net that
+   rejects them with numpy's own error.
 
 numpy's `.npy` format is a stable, self-describing binary format that encodes dtype
 (including structured/record dtype field names and types), shape, byte order, and the raw
@@ -72,9 +89,10 @@ buf = io.BytesIO(storage_value)
 return np.load(buf, allow_pickle=False)
 ```
 
-`allow_pickle=False` is required for security: it prevents deserializing pickled object
-arrays. Object-dtype arrays (`dtype=object`) are therefore **not supported** — `np.save`
-will raise when attempting to save them. This is documented as a known limitation.
+`allow_pickle=False` is a defence-in-depth guard on the read side. Because the write side
+already rejects object arrays, a well-formed storage value will never require pickling;
+`allow_pickle=False` catches any corrupted or externally crafted bytes that somehow slip
+through.
 
 **Class structure** follows the existing `LogicalPath` / `LogicalUUID` pattern:
 - Class-level `_arrow_ext_class` and `_polars_ext_class` (created once via
@@ -104,8 +122,13 @@ class NumpyArrayHandler:
             raise TypeError(
                 f"NumpyArrayHandler: expected numpy.ndarray, got {type(obj)!r}"
             )
+        if obj.dtype.kind == "O":
+            raise ValueError(
+                f"NumpyArrayHandler does not support object-dtype arrays (dtype={obj.dtype!r}). "
+                "Object arrays require pickling, which is disabled for security."
+            )
         buf = io.BytesIO()
-        np.save(buf, obj)
+        np.save(buf, obj, allow_pickle=False)
         return buf.getvalue()
 ```
 
@@ -169,9 +192,13 @@ implicit dependency explicit.
 
 ## Limitations
 
-- **Object-dtype arrays (`dtype=object`) are not supported.** `np.save` pickles them;
-  `np.load` with `allow_pickle=False` will raise. Users must store object arrays via another
-  mechanism (e.g. serialize manually to `bytes`, or use a `File` value).
+- **Object-dtype arrays are not supported.** Two guards enforce this:
+  `array.dtype.kind == "O"` raises `ValueError` immediately (before `np.save`) for plain
+  object arrays; `np.save(..., allow_pickle=False)` catches the subtler case of structured
+  arrays containing object-typed fields (`dtype.kind == "V"` but with object sub-fields).
+  Both `python_to_storage` and `NumpyArrayHandler.handle` apply the same pair of guards.
+  Users must store object arrays via another mechanism (e.g. serialise manually to `bytes`,
+  or wrap in a `File` value).
 - **Future parameterized types.** `NDArray[np.float64]` and similar typed array annotations
   are not handled by this logical type. A future issue may add `numpy.ndarray[float64]`
   (and similar) as distinct logical types, registered alongside `numpy.ndarray` in the
@@ -191,6 +218,8 @@ implicit dependency explicit.
 - `get_arrow_extension_type()` returns the same cached object on repeated calls
 - `get_polars_extension_type()` returns the same cached object on repeated calls
 - `python_to_storage` returns `bytes`
+- `python_to_storage` raises `ValueError` immediately for object-dtype arrays (`dtype=object`,
+  `dtype=np.dtype([('x', object)])`) — error fires before `np.save` is called
 - Round-trip cases (storage → python → storage produces equal array):
   - 1-D float64 array
   - 2-D int32 array
