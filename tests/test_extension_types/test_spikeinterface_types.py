@@ -139,3 +139,44 @@ def test_ephemeral_recording_round_trip(tmp_path):
         preprocessed.get_traces(segment_index=0),
         recovered.get_traces(segment_index=0),
     )
+
+
+def test_si_recording_handler_hash_stability(tmp_path):
+    """Same recording produces identical ContentHash across two calls."""
+    from orcapod.extension_types.spikeinterface_types import SIRecordingHandler
+    from orcapod.types import ContentHash
+
+    saved = _make_numpy_recording().save_to_folder(str(tmp_path / "rec"))
+    handler = SIRecordingHandler()
+
+    h1 = handler.handle(saved, hasher=None)
+    h2 = handler.handle(saved, hasher=None)
+
+    assert isinstance(h1, ContentHash)
+    assert h1 == h2
+
+
+def test_si_recording_handler_hash_changes_with_content(tmp_path):
+    """Different recordings produce different ContentHash values."""
+    from orcapod.extension_types.spikeinterface_types import SIRecordingHandler
+
+    rng = np.random.default_rng(0)
+    rec_a = si_core.NumpyRecording(
+        [rng.standard_normal((200, 4)).astype("float32")], sampling_frequency=30_000
+    ).save_to_folder(str(tmp_path / "rec_a"))
+    rec_b = si_core.NumpyRecording(
+        [rng.standard_normal((200, 4)).astype("float32")], sampling_frequency=30_000
+    ).save_to_folder(str(tmp_path / "rec_b"))
+
+    handler = SIRecordingHandler()
+    assert handler.handle(rec_a, hasher=None) != handler.handle(rec_b, hasher=None)
+
+
+def test_si_recording_handler_in_memory_raises():
+    """SIRecordingHandler raises ValueError for in-memory recordings."""
+    from orcapod.extension_types.spikeinterface_types import SIRecordingHandler
+
+    rec = _make_numpy_recording()
+    handler = SIRecordingHandler()
+    with pytest.raises(ValueError, match="in-memory"):
+        handler.handle(rec, hasher=None)
