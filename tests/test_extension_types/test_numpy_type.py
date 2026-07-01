@@ -58,7 +58,7 @@ class TestLogicalNumpyArrayStorage:
     def test_structured_with_object_field_raises(self):
         from orcapod.extension_types.numpy_type import LogicalNumpyArray
         arr = np.zeros(3, dtype=[("label", object), ("value", np.int32)])
-        with pytest.raises((ValueError, Exception)):
+        with pytest.raises(ValueError):
             LogicalNumpyArray().python_to_storage(arr)
 
 
@@ -109,3 +109,4 @@ class TestLogicalNumpyArrayRoundTrip:
         arr = np.asfortranarray(np.array([[1, 2], [3, 4]], dtype=np.float64))
         result = self._rt(arr)
         assert np.array_equal(result, arr)
+        assert result.flags["F_CONTIGUOUS"]

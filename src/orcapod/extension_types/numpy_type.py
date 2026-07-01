@@ -120,9 +120,6 @@ class LogicalNumpyArray(BaseLogicalType):
 
         Returns:
             A ``numpy.ndarray`` with dtype and shape as originally stored.
-
-        Raises:
-            ValueError: If ``storage_value`` is not valid ``.npy`` bytes.
         """
         buf = io.BytesIO(bytes(storage_value))
         return np.load(buf, allow_pickle=False)
