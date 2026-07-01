@@ -12,7 +12,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   SchemaHandler         -- Schema objects
   FileHandler       -- orcapod.File: file content hash
   DirectoryHandler  -- orcapod.Directory: recursive Merkle tree hash
-  NumpyArrayHandler -- numpy.ndarray: .npy binary format
+  NumpyArrayHandler -- numpy.ndarray: SHA-256 ContentHash of .npy bytes
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
 with all of the above.
@@ -233,32 +233,39 @@ class DirectoryHandler:
 
 
 class NumpyArrayHandler:
-    """Hasher for ``numpy.ndarray`` — content hash via numpy's ``.npy`` binary format.
+    """Hasher for ``numpy.ndarray`` — content hash via SHA-256 of numpy's ``.npy`` bytes.
 
-    Returns the raw ``.npy`` bytes produced by ``np.save``, which encode dtype
-    (including structured/record field names), shape, byte order, and data in
-    numpy's stable on-disk format. This is identical to what ``LogicalNumpyArray``
-    stores in Arrow, so the hash input and storage bytes are always consistent.
+    Serialises the array to numpy's ``.npy`` binary format (which encodes dtype,
+    including structured/record field names, shape, byte order, and data), then
+    returns a ``ContentHash`` produced by SHA-256 of those bytes. This is identical
+    to what ``LogicalNumpyArray`` stores in Arrow, so the hash input and storage
+    representation are always consistent.
+
+    Returning ``ContentHash`` directly (rather than the raw ``.npy`` bytes) avoids
+    the hex-expansion and JSON-serialisation overhead that the semantic hasher would
+    apply to ``bytes`` returns — important for large arrays.
 
     Object-dtype arrays are rejected with ``ValueError`` immediately (before
     ``np.save`` is called). Structured dtypes containing object-typed fields
     are caught by ``allow_pickle=False`` in ``np.save``.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> bytes:
-        """Return the ``.npy`` bytes for ``obj``.
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
+        """Return a SHA-256 ``ContentHash`` of the ``.npy`` bytes for ``obj``.
 
         Args:
             obj: A ``numpy.ndarray`` instance.
             hasher: Ignored. Present for protocol conformance.
 
         Returns:
-            Raw ``.npy`` bytes encoding dtype, shape, byte order, and data.
+            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
+            SHA-256 of the array's ``.npy`` binary representation.
 
         Raises:
             TypeError: If ``obj`` is not a ``numpy.ndarray``.
             ValueError: If ``obj`` has ``dtype.kind == "O"`` (object dtype).
         """
+        import hashlib
         import io
         import numpy as np
         if not isinstance(obj, np.ndarray):
@@ -273,7 +280,7 @@ class NumpyArrayHandler:
             )
         buf = io.BytesIO()
         np.save(buf, obj, allow_pickle=False)
-        return buf.getvalue()
+        return ContentHash(method="sha256", digest=hashlib.sha256(buf.getvalue()).digest())
 
 
 def register_builtin_python_type_handlers(
