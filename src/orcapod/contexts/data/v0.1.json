@@ -127,7 +127,8 @@
             "Removed PathHandler and UPathHandler; registered FileHandler for orcapod.File content hashing (ITL-450)",
             "Migrated LogicalFile Arrow storage from plain path string to JSON {\"path\": \"...\"} for consistency with LogicalDirectory (ITL-451)",
             "Added orcapod.Directory content-identified type with recursive Merkle tree hashing, LogicalDirectory Arrow extension, ignore filter support, and DirectoryHandler (ITL-451)",
-            "Added numpy.ndarray as a native value type via LogicalNumpyArray (large_binary/.npy) and NumpyArrayHandler; object-dtype arrays are rejected eagerly (ITL-460)"
+            "Added numpy.ndarray as a native value type via LogicalNumpyArray (large_binary/.npy) and NumpyArrayHandler; object-dtype arrays are rejected eagerly (ITL-460)",
+            "Added spikeinterface.BaseRecording as a native value type via LogicalSIRecording (large_string/JSON) and SIRecordingHandler (SHA-256 of JSON bytes); requires pip install orcapod[spikeinterface] and a register_spikeinterface_types() call (ITL-459)"
         ]
     }
 }
