@@ -25,10 +25,13 @@ Example usage:
     versions = get_available_contexts()
 """
 
+import logging as _logging
 from typing import Any
 
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols import semantic_types_protocols as sp
+
+_logger = _logging.getLogger(__name__)
 
 from .core import ContextResolutionError, ContextValidationError, DataContext
 from .registry import JSONDataContextRegistry
@@ -225,6 +228,72 @@ def create_registry(
     return JSONDataContextRegistry(contexts_dir, schema_file, default_version)
 
 
+def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
+    """Enable SQLite-backed file hash caching on the default Orcapod context.
+
+    Wraps the existing ``FileHandler``'s hasher in a ``CachedFileHasher``
+    backed by a ``SqliteHashCacher`` and re-registers it for ``orcapod.File``
+    in the default context's semantic hasher registry.
+
+    Call once at application startup before any file hashing occurs.
+
+    If the handler already wraps a ``CachedFileHasher`` (i.e. this function
+    was already called), a warning is logged, all existing caching layers are
+    unwrapped to reach the original base hasher, and the new cacher is applied
+    around that base hasher. This keeps the system in a well-defined state
+    (exactly one caching layer) regardless of how many times this function
+    is called.
+
+    For intentional multi-layer caching (e.g. in-memory L1 + SQLite L2),
+    construct a ``CachedFileHasher`` manually and register it directly via
+    the context's ``type_handler_registry`` instead.
+
+    Args:
+        db_path: Path to the SQLite cache database. Defaults to
+            ``~/.orcapod/file_hash_cache.db`` or the
+            ``ORCAPOD_HASH_CACHE_DB`` environment variable.
+    """
+    from pathlib import Path  # noqa: F811
+
+    from orcapod.extension_types.file_type import File
+    from orcapod.hashing.file_hashers import CachedFileHasher
+    from orcapod.hashing.hash_cachers import SqliteHashCacher
+    from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler
+
+    context = get_default_context()
+    registry = context.semantic_hasher.type_handler_registry
+
+    existing_handler = registry.get_handler_for_type(File)
+    if existing_handler is None:
+        raise RuntimeError(
+            "enable_file_hash_caching(): no FileHandler registered for "
+            "orcapod.File in the default context. This should not happen "
+            "with the standard v0.1 context."
+        )
+
+    base_hasher = existing_handler.file_hasher
+
+    if isinstance(base_hasher, CachedFileHasher):
+        _logger.warning(
+            "enable_file_hash_caching() called but the default FileHandler "
+            "already has a CachedFileHasher. Unwrapping and replacing with "
+            "the new cacher. If layered caching is intentional, construct a "
+            "CachedFileHasher manually instead."
+        )
+        while isinstance(base_hasher, CachedFileHasher):
+            base_hasher = base_hasher.file_hasher
+
+    registry.register(
+        File,
+        FileHandler(
+            CachedFileHasher(
+                file_hasher=base_hasher,
+                cacher=SqliteHashCacher(db_path),
+            )
+        ),
+    )
+
+
 # Public API
 __all__ = [
     # Core types
@@ -240,6 +309,8 @@ __all__ = [
     "set_default_context_version",
     "validate_all_contexts",
     "reload_contexts",
+    # Caching
+    "enable_file_hash_caching",
     # Advanced usage
     "create_registry",
     "JSONDataContextRegistry",
