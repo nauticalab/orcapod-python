@@ -224,24 +224,45 @@ class SIRecordingHandler:
 def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod `DataContext`.
 
-    Call this once at startup, before any pods that use SpikeInterface types
-    are declared or executed. If `context` is `None`, the default context
-    (from `orcapod.contexts.get_default_context()`) is used.
+    For the default context this is called automatically at startup (the
+    default `v0.1.json` context config lists `LogicalSIRecording` and
+    `SIRecordingHandler` with `"_optional": true`, so they are wired in
+    whenever `spikeinterface` is installed). Call this function explicitly
+    only when you are working with a custom `DataContext` that was not
+    constructed from the default config.
+
+    If `context` is `None`, the default context (from
+    `orcapod.contexts.get_default_context()`) is used. The function is
+    idempotent — calling it more than once on the same context is safe.
 
     Args:
         context: A `DataContext` instance, or `None` to use the default.
 
     Example:
         >>> from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
-        >>> register_spikeinterface_types()  # registers into the default context
+        >>> register_spikeinterface_types()  # no-op if default context already has SI types
     """
     if context is None:
         from orcapod.contexts import get_default_context
         context = get_default_context()
 
     lt = LogicalSIRecording()
-    context.type_converter.register_logical_type(lt)
+    try:
+        context.type_converter.register_logical_type(lt)
+    except ValueError as exc:
+        # A different LogicalSIRecording instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time).  That is
+        # fine — both instances are equivalent.  Any other ValueError propagates.
+        if "already bound to" not in str(exc):
+            raise
+        logger.debug(
+            "register_spikeinterface_types: LogicalSIRecording already registered, skipping"
+        )
+    else:
+        logger.debug(
+            "register_spikeinterface_types: registered LogicalSIRecording and SIRecordingHandler"
+        )
+
+    # SIRecordingHandler registration silently replaces an existing entry, so
+    # this call is always safe regardless of prior registration state.
     context.semantic_hasher.type_handler_registry.register(BaseRecording, SIRecordingHandler())
-    logger.debug(
-        "register_spikeinterface_types: registered LogicalSIRecording and SIRecordingHandler"
-    )

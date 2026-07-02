@@ -36,23 +36,42 @@ def parse_objectspec(
         return obj_spec
 
 
-def _resolve_type_from_spec(spec: dict[str, Any]) -> type:
+def _resolve_type_from_spec(spec: dict[str, Any]) -> type | None:
     """Resolve a ``{"_type": "module.ClassName"}`` spec to the actual Python type.
 
     Bare names without a dot (e.g. ``"bytes"``) are resolved from ``builtins``.
+
+    When ``"_optional": true`` is present in the spec and the module cannot be
+    imported (``ImportError``), returns ``None`` instead of raising.  This
+    allows optional-dependency types to be silently skipped at context
+    construction time.
     """
+    optional: bool = spec.get("_optional", False)
     type_str: str = spec["_type"]
     if "." not in type_str:
         type_str = f"builtins.{type_str}"
     module_name, _, attr_name = type_str.rpartition(".")
-    module = importlib.import_module(module_name)
-    return getattr(module, attr_name)
+    try:
+        module = importlib.import_module(module_name)
+        return getattr(module, attr_name)
+    except ImportError:
+        if optional:
+            return None
+        raise
 
 
 def _create_instance_from_spec(
     spec: dict[str, Any], ref_lut: dict[str, Any], validate: bool
 ) -> Any:
-    """Create instance with better error handling."""
+    """Create instance with better error handling.
+
+    When ``"_optional": true`` is present in the spec and the class module
+    cannot be imported (``ImportError``), returns ``None`` instead of raising.
+    This allows optional-dependency types (e.g. those backed by an extras
+    group such as ``orcapod[spikeinterface]``) to be listed in context JSON
+    without breaking startup for users who have not installed the extras group.
+    """
+    optional: bool = spec.get("_optional", False)
     try:
         class_path = spec["_class"]
         config = spec.get("_config", {})
@@ -71,6 +90,10 @@ def _create_instance_from_spec(
 
         return cls(**processed_config)
 
+    except ImportError:
+        if optional:
+            return None
+        raise
     except Exception as e:
         raise ValueError(f"Failed to create instance from spec {spec}: {e}") from e
 

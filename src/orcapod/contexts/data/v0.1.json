@@ -44,6 +44,11 @@
                         {
                             "_class": "orcapod.extension_types.numpy_type.LogicalNumpyArray",
                             "_config": {}
+                        },
+                        {
+                            "_class": "orcapod.extension_types.spikeinterface_types.LogicalSIRecording",
+                            "_config": {},
+                            "_optional": true
                         }
                     ],
                     "factories": [
@@ -94,7 +99,8 @@
                 [{"_type": "typing._SpecialForm"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",  "_config": {}}],
                 [{"_type": "pyarrow.Table"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
                 [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
-                [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",   "_config": {}}]
+                [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",   "_config": {}}],
+                [{"_type": "spikeinterface.core.BaseRecording", "_optional": true}, {"_class": "orcapod.extension_types.spikeinterface_types.SIRecordingHandler", "_config": {}, "_optional": true}]
             ]
         }
     },
@@ -128,7 +134,7 @@
             "Migrated LogicalFile Arrow storage from plain path string to JSON {\"path\": \"...\"} for consistency with LogicalDirectory (ITL-451)",
             "Added orcapod.Directory content-identified type with recursive Merkle tree hashing, LogicalDirectory Arrow extension, ignore filter support, and DirectoryHandler (ITL-451)",
             "Added numpy.ndarray as a native value type via LogicalNumpyArray (large_binary/.npy) and NumpyArrayHandler; object-dtype arrays are rejected eagerly (ITL-460)",
-            "Added spikeinterface.BaseRecording as a native value type via LogicalSIRecording (large_string/JSON) and SIRecordingHandler (SHA-256 of JSON bytes); requires pip install orcapod[spikeinterface] and a register_spikeinterface_types() call (ITL-459)"
+            "Added spikeinterface.BaseRecording as a native value type via LogicalSIRecording (large_string/JSON) and SIRecordingHandler (SHA-256 of JSON bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json; added _optional flag support to parse_objectspec for optional-extras types (ITL-459)"
         ]
     }
 }

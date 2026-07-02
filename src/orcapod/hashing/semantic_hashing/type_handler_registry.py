@@ -44,8 +44,13 @@ class PythonTypeHandlerRegistry:
         self._handlers: dict[type, "PythonTypeHandlerProtocol"] = {}
         self._lock = threading.RLock()
         if handlers:
-            for target_type, handler in handlers:
-                self.register(target_type, handler)
+            for entry in handlers:
+                # Skip entries where either element resolved to None — this happens
+                # when a handler pair carries "_optional": true and the backing
+                # module (e.g. an extras-group dependency) is not installed.
+                if entry is not None and all(x is not None for x in entry):
+                    target_type, handler = entry
+                    self.register(target_type, handler)
 
     def register(self, target_type: type, handler: "PythonTypeHandlerProtocol") -> None:
         """Register a hasher for a specific Python type.

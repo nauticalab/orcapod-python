@@ -60,11 +60,19 @@ spikeinterface = ["spikeinterface>=0.101"]
 
 ### Registration
 
-`LogicalSIRecording` and `SIRecordingHandler` are **not** registered in
-`contexts/data/v0.1.json` — doing so would break startup for users who have not installed the
-`spikeinterface` extras group. Instead, users opt in explicitly by calling
-`register_spikeinterface_types()` once at application startup. This function accepts an optional
-`DataContext`; when called with no argument it registers into the default context.
+`LogicalSIRecording` and `SIRecordingHandler` are registered in `contexts/data/v0.1.json` with
+`"_optional": true`. The `parse_objectspec` loader catches `ImportError` on optional entries and
+returns `None`; both `LogicalTypeRegistry` and `PythonTypeHandlerRegistry` silently skip `None`
+entries at construction time. This means:
+
+- **SI installed** — types are auto-registered when the default context is first constructed.
+  No explicit call is required.
+- **SI absent** — entries resolve to `None` and are skipped. Context construction succeeds and
+  all non-SI types continue to work normally.
+
+`register_spikeinterface_types()` is retained for custom `DataContext` instances that are not
+constructed from `v0.1.json`. It is idempotent — calling it on a context that already has SI
+types registered (e.g. the default context) is safe and logs a debug message.
 
 ---
 

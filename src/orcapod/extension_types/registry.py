@@ -218,7 +218,8 @@ class LogicalTypeRegistry:
         self._category_factories: dict[str, LogicalTypeFactoryProtocol] = {}
         self._python_class_factories: dict[type, LogicalTypeFactoryProtocol] = {}
         for lt in (logical_types or []):
-            self.register_logical_type(lt)
+            if lt is not None:
+                self.register_logical_type(lt)
         for entry in (factories or []):
             self.register_logical_type_factory(
                 entry["factory"],
