@@ -56,6 +56,11 @@
                             "_optional": true
                         },
                         {
+                            "_class": "orcapod.extension_types.spikeinterface_types.LogicalSIMotion",
+                            "_config": {},
+                            "_optional": true
+                        },
+                        {
                             "_class": "orcapod.extension_types.pandas_type.LogicalPandasDataFrame",
                             "_config": {}
                         },
@@ -114,6 +119,7 @@
                 [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
                 [{"_type": "spikeinterface.core.BaseRecording", "_optional": true}, {"_class": "orcapod.extension_types.spikeinterface_types.SIRecordingHandler", "_config": {}, "_optional": true}],
                 [{"_type": "spikeinterface.core.BaseSorting", "_optional": true}, {"_class": "orcapod.extension_types.spikeinterface_types.SISortingHandler", "_config": {}, "_optional": true}],
+                [{"_type": "spikeinterface.core.motion.Motion", "_optional": true}, {"_class": "orcapod.extension_types.spikeinterface_types.SIMotionHandler", "_config": {}, "_optional": true}],
                 [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",        "_config": {}}],
                 [{"_type": "pandas.DataFrame"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasDataFrameHandler",  "_config": {}}],
                 [{"_type": "pandas.Series"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",      "_config": {}}]
@@ -152,7 +158,8 @@
             "Added numpy.ndarray as a native value type via LogicalNumpyArray (large_binary/.npy) and NumpyArrayHandler; object-dtype arrays are rejected eagerly (ITL-460)",
             "Added spikeinterface.BaseRecording as a native value type via LogicalSIRecording (large_string/JSON) and SIRecordingHandler (SHA-256 of JSON bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json; added _optional flag support to parse_objectspec for optional-extras types (ITL-459)",
             "Added pandas.DataFrame and pandas.Series as native value types via LogicalPandasDataFrame and LogicalPandasSeries (Arrow IPC / large_binary), with index preservation and PandasDataFrameHandler / PandasSeriesHandler for content hashing using StarfixArrowHasher (PLT-1869)",
-            "Added spikeinterface.BaseSorting as a native value type via LogicalSISorting (large_string/JSON) and SISortingHandler (SHA-256 of JSON bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-468)"
+            "Added spikeinterface.BaseSorting as a native value type via LogicalSISorting (large_string/JSON) and SISortingHandler (SHA-256 of JSON bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-468)",
+            "Added spikeinterface.core.motion.Motion as a native value type via LogicalSIMotion (large_binary/.npz) and SIMotionHandler (SHA-256 of .npz bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-470)"
         ]
     }
 }

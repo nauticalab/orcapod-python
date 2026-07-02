@@ -30,11 +30,12 @@ from .directory_type import LogicalDirectory  # ITL-451
 from .numpy_type import LogicalNumpyArray  # ITL-460
 from .pandas_type import LogicalPandasDataFrame, LogicalPandasSeries  # PLT-1869
 
-# ITL-459, ITL-468 — SpikeInterface support (optional; requires pip install orcapod[spikeinterface])
+# ITL-459, ITL-468, ITL-470 — SpikeInterface support (optional; requires pip install orcapod[spikeinterface])
 try:
     from .spikeinterface_types import (
         LogicalSIRecording,
         LogicalSISorting,
+        LogicalSIMotion,
         register_spikeinterface_types,
     )
     _SI_AVAILABLE = True
@@ -68,8 +69,8 @@ __all__ = [
     "LogicalDirectory",
     # ITL-460
     "LogicalNumpyArray",
-    # ITL-459, ITL-468 (conditional — only present when spikeinterface is installed)
-    *( ["LogicalSIRecording", "LogicalSISorting", "register_spikeinterface_types"] if _SI_AVAILABLE else [] ),
+    # ITL-459, ITL-468, ITL-470 (conditional — only present when spikeinterface is installed)
+    *( ["LogicalSIRecording", "LogicalSISorting", "LogicalSIMotion", "register_spikeinterface_types"] if _SI_AVAILABLE else [] ),
     # PLT-1869
     "LogicalPandasDataFrame",
     "LogicalPandasSeries",

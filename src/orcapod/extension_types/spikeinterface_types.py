@@ -1,4 +1,4 @@
-"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468).
+"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468, ITL-470).
 
 ``LogicalSIRecording`` maps ``spikeinterface.core.BaseRecording`` ↔ Arrow
 ``large_string`` using SpikeInterface's own ``to_dict(recursive=True,
@@ -9,6 +9,12 @@ the same JSON bytes via SHA-256 for content identity.
 ``LogicalSISorting`` maps ``spikeinterface.core.BaseSorting`` ↔ Arrow
 ``large_string`` using the same serialization approach. ``SISortingHandler``
 hashes the JSON bytes via SHA-256.
+
+``LogicalSIMotion`` maps ``spikeinterface.core.motion.Motion`` ↔ Arrow
+``large_binary`` using a self-contained NumPy ``.npz`` archive as the storage
+envelope. All displacement arrays, bin arrays, and scalar metadata are embedded
+in the archive — no external folder is required. ``SIMotionHandler`` hashes
+the same ``.npz`` bytes via SHA-256.
 
 This module requires the optional ``spikeinterface`` extras group:
 ``pip install orcapod[spikeinterface]``
@@ -593,8 +599,9 @@ class SISortingHandler:
 def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
 
-    Registers both ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459)
-    and ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468).
+    Registers ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459),
+    ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468), and
+    ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470).
 
     For the default context this is called automatically at startup (the
     default ``v0.1.json`` context config lists all four with ``"_optional": true``,
@@ -654,3 +661,22 @@ def register_spikeinterface_types(context: Any = None) -> None:
 
     # Handler registration silently replaces an existing entry, so always safe.
     context.semantic_hasher.type_handler_registry.register(BaseSorting, SISortingHandler())
+
+    # --- Motion ---
+    lt_motion = LogicalSIMotion()
+    try:
+        context.type_converter.register_logical_type(lt_motion)
+    except ValueError as exc:
+        # A different LogicalSIMotion instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time). That is
+        # fine — both instances are equivalent. Any other ValueError propagates.
+        if "already bound to" not in str(exc):
+            raise
+        logger.debug(
+            "register_spikeinterface_types: LogicalSIMotion already registered, skipping"
+        )
+    else:
+        logger.debug("register_spikeinterface_types: registered LogicalSIMotion")
+
+    # Handler registration silently replaces an existing entry, so always safe.
+    context.semantic_hasher.type_handler_registry.register(Motion, SIMotionHandler())

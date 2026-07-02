@@ -493,3 +493,43 @@ def test_si_motion_handler_type_error():
     handler = SIMotionHandler()
     with pytest.raises(TypeError, match="SIMotionHandler"):
         handler.handle("not a motion", hasher=None)
+
+
+def test_logical_si_motion_python_to_storage_type_error():
+    """LogicalSIMotion.python_to_storage raises TypeError for non-Motion input."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    lt = LogicalSIMotion()
+    with pytest.raises(TypeError, match="LogicalSIMotion"):
+        lt.python_to_storage("not a motion")
+
+
+def test_register_spikeinterface_types_includes_motion():
+    """register_spikeinterface_types() wires LogicalSIMotion and SIMotionHandler
+    into the default context so they are found by type lookup."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
+    from orcapod.contexts import get_default_context
+    from spikeinterface.core.motion import Motion
+    from orcapod.types import ContentHash
+
+    register_spikeinterface_types()
+    ctx = get_default_context()
+
+    motion = _make_motion()
+
+    # LogicalType registered: type_converter can find it by python type
+    arrow_type = ctx.type_converter.python_type_to_arrow_type(Motion)
+    assert arrow_type.extension_name == "spikeinterface.motion"
+
+    # Handler registered: semantic_hasher can find it by instance
+    handler = ctx.semantic_hasher.type_handler_registry.get_handler(motion)
+    assert handler is not None
+    result = handler.handle(motion, hasher=None)
+    assert isinstance(result, ContentHash)
+
+    # Full round-trip through context type_converter
+    storage = ctx.type_converter.python_to_storage(motion, Motion)
+    recovered = ctx.type_converter.storage_to_python(storage, Motion)
+    assert recovered == motion
