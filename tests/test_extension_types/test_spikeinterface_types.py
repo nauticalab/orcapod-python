@@ -1,4 +1,4 @@
-"""Tests for LogicalSIRecording and SIRecordingHandler (ITL-459)."""
+"""Tests for LogicalSIRecording, LogicalSISorting, and their handlers (ITL-459, ITL-468)."""
 
 from __future__ import annotations
 
@@ -54,6 +54,18 @@ def _make_numpy_recording():
     rng = np.random.default_rng(42)
     traces = rng.standard_normal((200, 4)).astype("float32")
     return si_core.NumpyRecording([traces], sampling_frequency=30_000)
+
+
+def _make_numpy_sorting():
+    """Create a small in-memory NumpySorting for use as a test source."""
+    import spikeinterface.core as si_core
+    rng = np.random.default_rng(42)
+    n_samples = 1000
+    spike_trains = {
+        0: np.sort(rng.choice(n_samples, 20, replace=False)),
+        1: np.sort(rng.choice(n_samples, 15, replace=False)),
+    }
+    return si_core.NumpySorting.from_unit_dict(spike_trains, sampling_frequency=30_000)
 
 
 def test_logical_si_recording_importable():
@@ -195,6 +207,118 @@ def test_si_recording_handler_in_memory_raises():
         handler.handle(rec, hasher=None)
 
 
+def test_logical_si_sorting_importable():
+    """``LogicalSISorting`` is importable and exposes the expected extension name and storage type."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+    import pyarrow as pa
+
+    lt = LogicalSISorting()
+    assert lt.logical_type_name == "spikeinterface.sorting"
+    assert lt.python_type is si_core.BaseSorting
+    assert lt.get_arrow_extension_type().storage_type == pa.large_string()
+
+
+def test_si_sorting_handler_hash_stability(tmp_path):
+    """Same sorting produces identical ContentHash across two calls."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingHandler
+    from orcapod.types import ContentHash
+
+    saved = _make_numpy_sorting().save_to_folder(str(tmp_path / "sorting"))
+    handler = SISortingHandler()
+
+    h1 = handler.handle(saved, hasher=None)
+    h2 = handler.handle(saved, hasher=None)
+
+    assert isinstance(h1, ContentHash)
+    assert h1 == h2
+
+
+def test_si_sorting_handler_hash_changes_with_content(tmp_path):
+    """Different sortings produce different ContentHash values."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingHandler
+
+    rng = np.random.default_rng(0)
+    n_samples = 1000
+    sorting_a = si_core.NumpySorting.from_unit_dict(
+        {0: np.sort(rng.choice(n_samples, 20, replace=False))},
+        sampling_frequency=30_000,
+    ).save_to_folder(str(tmp_path / "sorting_a"))
+    sorting_b = si_core.NumpySorting.from_unit_dict(
+        {0: np.sort(rng.choice(n_samples, 20, replace=False))},
+        sampling_frequency=30_000,
+    ).save_to_folder(str(tmp_path / "sorting_b"))
+
+    handler = SISortingHandler()
+    assert handler.handle(sorting_a, hasher=None) != handler.handle(sorting_b, hasher=None)
+
+
+def test_si_sorting_handler_in_memory_raises():
+    """``SISortingHandler`` raises ValueError for in-memory sortings."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingHandler
+
+    sorting = _make_numpy_sorting()
+    handler = SISortingHandler()
+    with pytest.raises(ValueError, match="in-memory"):
+        handler.handle(sorting, hasher=None)
+
+
+def test_in_memory_sorting_raises():
+    """NumpySorting (json=False) raises ValueError with clear instructions."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+
+    sorting = _make_numpy_sorting()
+    lt = LogicalSISorting()
+
+    with pytest.raises(ValueError, match="not JSON-serializable"):
+        lt.python_to_storage(sorting)
+
+    with pytest.raises(ValueError, match="file-backed"):
+        lt.python_to_storage(sorting)
+
+
+def test_folder_sorting_round_trip(tmp_path):
+    """numpy_folder-backed sorting round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+
+    saved = _make_numpy_sorting().save_to_folder(str(tmp_path / "sorting"))
+    lt = LogicalSISorting()
+
+    storage = lt.python_to_storage(saved)
+    assert isinstance(storage, str)
+    data = json.loads(storage)
+    assert "class" in data  # SI dict always has a "class" key
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        saved.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
+def test_zarr_sorting_round_trip(tmp_path):
+    """Zarr-backed sorting round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+
+    saved = _make_numpy_sorting().save_to_zarr(str(tmp_path / "sorting.zarr"))
+    lt = LogicalSISorting()
+
+    storage = lt.python_to_storage(saved)
+    assert isinstance(storage, str)
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        saved.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
 def test_register_spikeinterface_types(tmp_path):
     """register_spikeinterface_types() wires LogicalSIRecording and SIRecordingHandler
     into the default context so they are found by type lookup."""
@@ -224,4 +348,36 @@ def test_register_spikeinterface_types(tmp_path):
     np.testing.assert_array_equal(
         saved.get_traces(segment_index=0),
         recovered.get_traces(segment_index=0),
+    )
+
+
+def test_register_spikeinterface_types_includes_sorting(tmp_path):
+    """``register_spikeinterface_types()`` wires ``LogicalSISorting`` and ``SISortingHandler``
+    into the default context so they are found by type lookup."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
+    from orcapod.contexts import get_default_context
+
+    register_spikeinterface_types()
+    ctx = get_default_context()
+
+    saved = _make_numpy_sorting().save_to_folder(str(tmp_path / "sorting"))
+
+    # LogicalType registered: type_converter can find it
+    arrow_type = ctx.type_converter.python_type_to_arrow_type(type(saved))
+    assert arrow_type.extension_name == "spikeinterface.sorting"
+
+    # Handler registered: semantic_hasher can find it
+    from orcapod.types import ContentHash
+    handler = ctx.semantic_hasher.type_handler_registry.get_handler(saved)
+    assert handler is not None
+    result = handler.handle(saved, hasher=None)
+    assert isinstance(result, ContentHash)
+
+    # Full round-trip through python_to_storage / storage_to_python
+    storage = ctx.type_converter.python_to_storage(saved, type(saved))
+    recovered = ctx.type_converter.storage_to_python(storage, type(saved))
+    np.testing.assert_array_equal(
+        saved.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.get_unit_spike_train(unit_id=0, segment_index=0),
     )
