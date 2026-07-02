@@ -266,6 +266,59 @@ def test_si_sorting_handler_in_memory_raises():
         handler.handle(sorting, hasher=None)
 
 
+def test_in_memory_sorting_raises():
+    """NumpySorting (json=False) raises ValueError with clear instructions."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+
+    sorting = _make_numpy_sorting()
+    lt = LogicalSISorting()
+
+    with pytest.raises(ValueError, match="not JSON-serializable"):
+        lt.python_to_storage(sorting)
+
+    with pytest.raises(ValueError, match="file-backed"):
+        lt.python_to_storage(sorting)
+
+
+def test_folder_sorting_round_trip(tmp_path):
+    """numpy_folder-backed sorting round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+
+    saved = _make_numpy_sorting().save_to_folder(str(tmp_path / "sorting"))
+    lt = LogicalSISorting()
+
+    storage = lt.python_to_storage(saved)
+    assert isinstance(storage, str)
+    data = json.loads(storage)
+    assert "class" in data  # SI dict always has a "class" key
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        saved.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
+def test_zarr_sorting_round_trip(tmp_path):
+    """Zarr-backed sorting round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+
+    saved = _make_numpy_sorting().save_to_zarr(str(tmp_path / "sorting.zarr"))
+    lt = LogicalSISorting()
+
+    storage = lt.python_to_storage(saved)
+    assert isinstance(storage, str)
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        saved.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
 def test_register_spikeinterface_types(tmp_path):
     """register_spikeinterface_types() wires LogicalSIRecording and SIRecordingHandler
     into the default context so they are found by type lookup."""
