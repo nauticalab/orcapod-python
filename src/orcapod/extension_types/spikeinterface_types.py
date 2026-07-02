@@ -438,6 +438,9 @@ def register_spikeinterface_types(context: Any = None) -> None:
     try:
         context.type_converter.register_logical_type(lt_recording)
     except ValueError as exc:
+        # A different LogicalSIRecording instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time). That is
+        # fine — both instances are equivalent. Any other ValueError propagates.
         if "already bound to" not in str(exc):
             raise
         logger.debug(
@@ -446,6 +449,7 @@ def register_spikeinterface_types(context: Any = None) -> None:
     else:
         logger.debug("register_spikeinterface_types: registered LogicalSIRecording")
 
+    # Handler registration silently replaces an existing entry, so always safe.
     context.semantic_hasher.type_handler_registry.register(BaseRecording, SIRecordingHandler())
 
     # --- Sorting ---
@@ -453,6 +457,9 @@ def register_spikeinterface_types(context: Any = None) -> None:
     try:
         context.type_converter.register_logical_type(lt_sorting)
     except ValueError as exc:
+        # A different LogicalSISorting instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time). That is
+        # fine — both instances are equivalent. Any other ValueError propagates.
         if "already bound to" not in str(exc):
             raise
         logger.debug(
@@ -461,4 +468,5 @@ def register_spikeinterface_types(context: Any = None) -> None:
     else:
         logger.debug("register_spikeinterface_types: registered LogicalSISorting")
 
+    # Handler registration silently replaces an existing entry, so always safe.
     context.semantic_hasher.type_handler_registry.register(BaseSorting, SISortingHandler())
