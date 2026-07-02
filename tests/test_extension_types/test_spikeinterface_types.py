@@ -505,6 +505,23 @@ def test_logical_si_motion_python_to_storage_type_error():
         lt.python_to_storage("not a motion")
 
 
+def test_si_motion_storage_to_python_missing_key():
+    """storage_to_python raises ValueError when .npz is missing an expected key."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    import io
+    import numpy as np
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    # Build a valid .npz but deliberately omit 'num_segments'
+    buf = io.BytesIO()
+    np.savez(buf, spatial_bins_um=np.array([0.0, 1.0]), direction=np.array(["y"]))
+    truncated_bytes = buf.getvalue()
+
+    lt = LogicalSIMotion()
+    with pytest.raises(ValueError, match="missing expected key"):
+        lt.storage_to_python(truncated_bytes)
+
+
 def test_register_spikeinterface_types_includes_motion():
     """register_spikeinterface_types() wires LogicalSIMotion and SIMotionHandler
     into the default context so they are found by type lookup."""

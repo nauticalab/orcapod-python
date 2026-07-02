@@ -34,8 +34,11 @@ from .pandas_type import LogicalPandasDataFrame, LogicalPandasSeries  # PLT-1869
 try:
     from .spikeinterface_types import (
         LogicalSIRecording,
+        SIRecordingHandler,
         LogicalSISorting,
+        SISortingHandler,
         LogicalSIMotion,
+        SIMotionHandler,
         register_spikeinterface_types,
     )
     _SI_AVAILABLE = True
@@ -70,7 +73,14 @@ __all__ = [
     # ITL-460
     "LogicalNumpyArray",
     # ITL-459, ITL-468, ITL-470 (conditional — only present when spikeinterface is installed)
-    *( ["LogicalSIRecording", "LogicalSISorting", "LogicalSIMotion", "register_spikeinterface_types"] if _SI_AVAILABLE else [] ),
+    *(
+        [
+            "LogicalSIRecording", "SIRecordingHandler",
+            "LogicalSISorting", "SISortingHandler",
+            "LogicalSIMotion", "SIMotionHandler",
+            "register_spikeinterface_types",
+        ] if _SI_AVAILABLE else []
+    ),
     # PLT-1869
     "LogicalPandasDataFrame",
     "LogicalPandasSeries",
