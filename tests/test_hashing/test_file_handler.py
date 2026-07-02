@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from orcapod.extension_types.file_type import File
-from orcapod.hashing.file_hashers import BasicFileHasher
+from orcapod.hashing.file_hashers import FileHasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler, register_builtin_python_type_handlers
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
@@ -14,7 +14,7 @@ from orcapod.types import ContentHash
 
 @pytest.fixture
 def file_hasher():
-    return BasicFileHasher(algorithm="sha256")
+    return FileHasher(algorithm="sha256")
 
 
 @pytest.fixture
@@ -75,13 +75,13 @@ class TestFileHandler:
         assert h1 == h2
 
     def test_hash_matches_direct_sha256(self, handler, hasher, tmp_path):
-        """FileHandler must produce the same digest as BasicFileHasher(sha256) directly."""
+        """FileHandler must produce the same digest as FileHasher(sha256) directly."""
         content = b"migration compatibility check"
         p = tmp_path / "compat.txt"
         p.write_bytes(content)
         f = File(p)
         handler_result = handler.handle(f, hasher)
-        direct_result = BasicFileHasher(algorithm="sha256").hash_file(p)
+        direct_result = FileHasher(algorithm="sha256").hash_file(p)
         assert handler_result == direct_result
 
     def test_rejects_non_file_object(self, handler, hasher):

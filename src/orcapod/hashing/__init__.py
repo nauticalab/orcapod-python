@@ -33,7 +33,7 @@ from orcapod.hashing.defaults import (
     get_default_python_type_handler_registry,
     get_default_semantic_hasher,
 )
-from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher
+from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher, FileHashKey
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
@@ -110,7 +110,8 @@ __all__ = [
     "StringCacherProtocol",
     "FunctionInfoExtractorProtocol",
     "SemanticTypeHasherProtocol",
-    "BasicFileHasher",
+    "FileHasher",
+    "FileHashKey",
     "CachedFileHasher",
     "BasicDirectoryHasher",
     "DirectoryHasherProtocol",

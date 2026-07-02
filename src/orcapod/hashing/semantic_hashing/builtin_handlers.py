@@ -441,7 +441,7 @@ def register_builtin_python_type_handlers(
     Args:
         registry: The ``HandlerRegistryProtocol`` instance to populate.
         file_hasher: Optional ``FileContentHasherProtocol`` for file content hashing.
-            Defaults to ``BasicFileHasher(sha256)``.
+            Defaults to ``FileHasher(sha256)``.
         function_info_extractor: Optional ``FunctionInfoExtractorProtocol``.
             Defaults to ``FunctionSignatureExtractor``.
         arrow_hasher: Optional ``ArrowHasherProtocol`` for nested table hashing.
@@ -450,8 +450,8 @@ def register_builtin_python_type_handlers(
             Defaults to ``BasicDirectoryHasher(sha256)``.
     """
     if file_hasher is None:
-        from orcapod.hashing.file_hashers import BasicFileHasher
-        file_hasher = BasicFileHasher(algorithm="sha256")
+        from orcapod.hashing.file_hashers import FileHasher
+        file_hasher = FileHasher(algorithm="sha256")
 
     if directory_hasher is None:
         from orcapod.hashing.directory_hashers import BasicDirectoryHasher

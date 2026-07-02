@@ -3,7 +3,7 @@
     "version": "v0.1",
     "description": "Initial stable release with extension type hashing support",
     "file_hasher": {
-        "_class": "orcapod.hashing.file_hashers.BasicFileHasher",
+        "_class": "orcapod.hashing.file_hashers.FileHasher",
         "_config": {
             "algorithm": "sha256"
         }
