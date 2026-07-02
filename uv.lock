@@ -2419,6 +2419,7 @@ dev = [
     { name = "ray", extra = ["default"] },
     { name = "redis" },
     { name = "ruff" },
+    { name = "spikeinterface" },
     { name = "testcontainers", extra = ["minio"] },
     { name = "tqdm" },
 ]
@@ -2487,6 +2488,7 @@ dev = [
     { name = "ray", extras = ["default"], specifier = "==2.48.0" },
     { name = "redis", specifier = ">=6.2.0" },
     { name = "ruff", specifier = ">=0.14.4" },
+    { name = "spikeinterface", specifier = ">=0.101" },
     { name = "testcontainers", extras = ["minio"], specifier = ">=4.0.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]

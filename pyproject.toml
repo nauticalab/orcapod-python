@@ -90,6 +90,7 @@ dev = [
     "tqdm>=4.67.1",
     "mkdocs-material>=9.7.5",
     "mkdocstrings[python]>=1.0.3",
+    "spikeinterface>=0.101",
 ]
 
 
