@@ -196,6 +196,7 @@ def test_si_recording_handler_in_memory_raises():
 
 
 def test_logical_si_sorting_importable():
+    """``LogicalSISorting`` is importable and exposes the expected extension name and storage type."""
     si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import LogicalSISorting
     import pyarrow as pa

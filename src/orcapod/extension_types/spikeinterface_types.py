@@ -1,16 +1,20 @@
-"""SpikeInterface LogicalType and handler for orcapod (ITL-459).
+"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468).
 
-`LogicalSIRecording` maps `spikeinterface.core.BaseRecording` ↔ Arrow
-`large_string` using SpikeInterface's own `to_dict(recursive=True,
-include_annotations=True, include_properties=False)` JSON dump (encoded
-via `SIJsonEncoder`) as the storage envelope. `SIRecordingHandler` hashes
+``LogicalSIRecording`` maps ``spikeinterface.core.BaseRecording`` ↔ Arrow
+``large_string`` using SpikeInterface's own ``to_dict(recursive=True,
+include_annotations=True, include_properties=False)`` JSON dump (encoded
+via ``SIJsonEncoder``) as the storage envelope. ``SIRecordingHandler`` hashes
 the same JSON bytes via SHA-256 for content identity.
 
-This module requires the optional `spikeinterface` extras group:
-`pip install orcapod[spikeinterface]`
+``LogicalSISorting`` maps ``spikeinterface.core.BaseSorting`` ↔ Arrow
+``large_string`` using the same serialization approach. ``SISortingHandler``
+hashes the JSON bytes via SHA-256.
+
+This module requires the optional ``spikeinterface`` extras group:
+``pip install orcapod[spikeinterface]``
 
 Register SI types into the default orcapod context before using them in
-pods: call `register_spikeinterface_types()` once at startup.
+pods: call ``register_spikeinterface_types()`` once at startup.
 """
 
 from __future__ import annotations
