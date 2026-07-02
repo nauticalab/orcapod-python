@@ -19,7 +19,15 @@ Built-in hashers (importable for custom registry setup):
   DirectoryHandler                     -- built-in handler for orcapod.Directory
   register_builtin_python_type_handlers
 
+File hashing:
+  FileHasher                           -- content hasher for individual files
+  FileHashKey                          -- frozen dataclass cache key (path, mtime_ns, size)
+  CachedFileHasher                     -- caching decorator around FileContentHasherProtocol
+  InMemoryHashCacher                   -- dict-backed cacher for testing
+  SqliteHashCacher                     -- SQLite-backed persistent cacher
+
 Utility:
+  CacherProtocol                       -- generic get/put caching protocol [K, V]
   FileContentHasherProtocol
   StringCacherProtocol
   FunctionInfoExtractorProtocol
@@ -33,7 +41,8 @@ from orcapod.hashing.defaults import (
     get_default_python_type_handler_registry,
     get_default_semantic_hasher,
 )
-from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher
+from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher, FileHashKey
+from orcapod.hashing.hash_cachers import InMemoryHashCacher, SqliteHashCacher
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
@@ -55,6 +64,7 @@ from orcapod.hashing.semantic_hashing.type_handler_registry import (
 )
 from orcapod.protocols.hashing_protocols import (
     ArrowHasherProtocol,
+    CacherProtocol,
     ContentIdentifiableProtocol,
     DirectoryHasherProtocol,
     FileContentHasherProtocol,
@@ -107,11 +117,15 @@ __all__ = [
     "PythonTypeHandlerProtocol",
     "FileContentHasherProtocol",
     "ArrowHasherProtocol",
+    "CacherProtocol",
     "StringCacherProtocol",
     "FunctionInfoExtractorProtocol",
     "SemanticTypeHasherProtocol",
-    "BasicFileHasher",
+    "FileHasher",
+    "FileHashKey",
     "CachedFileHasher",
+    "InMemoryHashCacher",
+    "SqliteHashCacher",
     "BasicDirectoryHasher",
     "DirectoryHasherProtocol",
     "hash_file",
