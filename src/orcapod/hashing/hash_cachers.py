@@ -5,7 +5,6 @@ Provides ``InMemoryHashCacher`` (testing/ephemeral use) and
 ``CacherProtocol[FileHashKey, ContentHash]``.
 """
 
-import logging
 import os
 import sqlite3
 import threading
@@ -13,8 +12,6 @@ from pathlib import Path
 
 from orcapod.hashing.file_hashers import FileHashKey
 from orcapod.types import ContentHash
-
-logger = logging.getLogger(__name__)
 
 
 class InMemoryHashCacher:

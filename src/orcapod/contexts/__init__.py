@@ -253,8 +253,6 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
             ``~/.orcapod/file_hash_cache.db`` or the
             ``ORCAPOD_HASH_CACHE_DB`` environment variable.
     """
-    from pathlib import Path  # noqa: F811
-
     from orcapod.extension_types.file_type import File
     from orcapod.hashing.file_hashers import CachedFileHasher
     from orcapod.hashing.hash_cachers import SqliteHashCacher
@@ -281,6 +279,9 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
             "CachedFileHasher manually instead."
         )
         while isinstance(base_hasher, CachedFileHasher):
+            cacher = base_hasher.cacher
+            if hasattr(cacher, "close"):
+                cacher.close()
             base_hasher = base_hasher.file_hasher
 
     registry.register(

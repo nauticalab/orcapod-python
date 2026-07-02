@@ -1,7 +1,6 @@
 """Tests for InMemoryHashCacher and SqliteHashCacher."""
 
 import sqlite3
-import threading
 
 import pytest
 from upath import UPath
