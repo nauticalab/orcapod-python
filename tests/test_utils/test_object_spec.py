@@ -93,8 +93,8 @@ class TestCreateInstanceFromSpecOptional:
 # ---------------------------------------------------------------------------
 
 class TestParseObjectspecOptional:
-    def test_list_with_optional_missing_filters_none(self, monkeypatch):
-        """A list of specs where one optional entry is missing returns None for it."""
+    def test_list_with_optional_missing_drops_entry(self, monkeypatch):
+        """Optional dict items that fail to resolve are dropped from the list entirely."""
         monkeypatch.setitem(sys.modules, "nonexistent_pkg_xyz", None)
         specs = [
             {"_type": "builtins.int"},
@@ -102,10 +102,8 @@ class TestParseObjectspecOptional:
             {"_type": "builtins.str"},
         ]
         result = parse_objectspec(specs)
-        # None appears in position 1 because the module was absent
-        assert result[0] is int
-        assert result[1] is None
-        assert result[2] is str
+        # The missing optional entry is dropped; the list has 2 elements, not 3.
+        assert result == [int, str]
 
     def test_class_spec_with_optional_missing_returns_none(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "nonexistent_pkg_xyz", None)
@@ -127,15 +125,29 @@ class TestParseObjectspecOptional:
 # LogicalTypeRegistry — None filtering
 # ---------------------------------------------------------------------------
 
-class TestLogicalTypeRegistryNoneFiltering:
-    def test_none_in_logical_types_is_skipped(self):
-        from orcapod.extension_types.registry import LogicalTypeRegistry
-        from orcapod.extension_types.builtin_logical_types import LogicalUUID
+class TestParseObjectspecOptionalListFiltering:
+    def test_optional_class_spec_filtered_from_list(self, monkeypatch):
+        """_optional _class items that fail to resolve are dropped from the list."""
+        monkeypatch.setitem(sys.modules, "nonexistent_pkg_xyz", None)
+        specs = [
+            {"_type": "builtins.int"},
+            {"_class": "nonexistent_pkg_xyz.SomeClass", "_config": {}, "_optional": True},
+            {"_type": "builtins.str"},
+        ]
+        result = parse_objectspec(specs)
+        assert result == [int, str]
 
-        # None should be silently skipped; valid type should still register.
-        registry = LogicalTypeRegistry(logical_types=[None, LogicalUUID()])
-        lt = registry.get_by_logical_name("orcapod.uuid")
-        assert lt is not None
+    def test_optional_class_spec_included_when_present(self):
+        """_optional _class items that resolve successfully are included."""
+        specs = [
+            {"_type": "builtins.int"},
+            {"_class": "builtins.list", "_config": {}, "_optional": True},
+            {"_type": "builtins.str"},
+        ]
+        result = parse_objectspec(specs)
+        assert result[0] is int
+        assert isinstance(result[1], list)
+        assert result[2] is str
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +168,19 @@ class TestPythonTypeHandlerRegistryNoneFiltering:
         registry = PythonTypeHandlerRegistry(handlers=handlers)
         handler = registry.get_handler(b"hello")
         assert handler is not None
+
+    def test_empty_pair_in_handlers_is_skipped(self):
+        """Empty list entries (optional pair where all elements were filtered) are skipped."""
+        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+        from orcapod.hashing.semantic_hashing.builtin_handlers import BytesHandler
+
+        # parse_objectspec filters _optional elements from the inner list, leaving [].
+        handlers = [
+            (bytes, BytesHandler()),
+            [],  # inner list became empty after optional filtering
+        ]
+        registry = PythonTypeHandlerRegistry(handlers=handlers)
+        assert registry.get_handler(b"x") is not None
 
     def test_none_entry_itself_skipped(self):
         from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry

@@ -29,7 +29,17 @@ def parse_objectspec(
             }
 
     elif isinstance(obj_spec, (list, tuple)):
-        processed = [parse_objectspec(item, ref_lut, validate) for item in obj_spec]
+        processed = []
+        for item in obj_spec:
+            result = parse_objectspec(item, ref_lut, validate)
+            # Omit None results produced by dict items with "_optional": true that
+            # failed to resolve due to a missing dependency.  This allows entries
+            # like LogicalSIRecording (backed by an optional extras group) to be
+            # listed in a context JSON without breaking startup when the extras are
+            # absent — they are simply absent from the resulting list.
+            if result is None and isinstance(item, dict) and item.get("_optional", False):
+                continue
+            processed.append(result)
         return tuple(processed) if isinstance(obj_spec, tuple) else processed
 
     else:
