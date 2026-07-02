@@ -195,6 +195,17 @@ def test_si_recording_handler_in_memory_raises():
         handler.handle(rec, hasher=None)
 
 
+def test_logical_si_sorting_importable():
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+    import pyarrow as pa
+
+    lt = LogicalSISorting()
+    assert lt.logical_type_name == "spikeinterface.sorting"
+    assert lt.python_type is si_core.BaseSorting
+    assert lt.get_arrow_extension_type().storage_type == pa.large_string()
+
+
 def test_register_spikeinterface_types(tmp_path):
     """register_spikeinterface_types() wires LogicalSIRecording and SIRecordingHandler
     into the default context so they are found by type lookup."""

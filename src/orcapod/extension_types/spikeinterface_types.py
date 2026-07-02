@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 
 try:
-    from spikeinterface.core import BaseRecording
+    from spikeinterface.core import BaseRecording, BaseSorting
 except ImportError as _exc:
     raise ImportError(
         "spikeinterface is not installed. "
@@ -163,6 +163,134 @@ class LogicalSIRecording(BaseLogicalType):
         except (json.JSONDecodeError, TypeError) as exc:
             raise ValueError(
                 f"LogicalSIRecording: cannot deserialise storage value "
+                f"{storage_value!r}; expected a JSON string."
+            ) from exc
+        return si_load(si_dict)
+
+
+class LogicalSISorting(BaseLogicalType):
+    """Logical type for ``spikeinterface.core.BaseSorting``.
+
+    Stores ``BaseSorting`` instances as Arrow ``large_string`` columns
+    tagged with extension name ``"spikeinterface.sorting"``. The stored
+    value is SpikeInterface's own ``to_dict(recursive=True,
+    include_annotations=True, include_properties=False)`` output, encoded
+    via ``SIJsonEncoder``. Loading reconstructs the sorting via
+    ``spikeinterface.core.load(dict)``.
+
+    Only sortings whose ``check_serializability("json")`` returns ``True``
+    are accepted. File-backed sortings (zarr, numpy_folder, npz_folder,
+    sorter folder) qualify. In-memory ``NumpySorting`` objects do not and
+    raise ``ValueError`` with clear save instructions.
+
+    Example:
+        >>> import tempfile, numpy as np
+        >>> import spikeinterface.core as si
+        >>> from orcapod.extension_types.spikeinterface_types import LogicalSISorting
+        >>> lt = LogicalSISorting()
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     sorting = si.NumpySorting.from_unit_dict(
+        ...         {0: np.array([0, 100, 200])}, sampling_frequency=30000
+        ...     )
+        ...     saved = sorting.save_to_folder(tmp + "/sorting")
+        ...     storage = lt.python_to_storage(saved)
+        ...     recovered = lt.storage_to_python(storage)
+        ...     saved.get_unit_ids().tolist() == recovered.get_unit_ids().tolist()
+        True
+    """
+
+    _arrow_ext_class = make_arrow_extension_type("spikeinterface.sorting", pa.large_string())
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("spikeinterface.sorting", pa.large_string())
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "spikeinterface.sorting"
+    python_type: type = BaseSorting
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the cached Arrow extension type for ``BaseSorting``.
+
+        Returns:
+            A ``pa.ExtensionType`` with extension name
+            ``"spikeinterface.sorting"`` and storage type ``pa.large_string()``.
+        """
+        if LogicalSISorting._arrow_ext is None:
+            LogicalSISorting._arrow_ext = LogicalSISorting._arrow_ext_class()
+        return LogicalSISorting._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the cached Polars extension type for ``BaseSorting``.
+
+        Returns:
+            A ``pl.BaseExtension`` registered under ``"spikeinterface.sorting"``.
+        """
+        if LogicalSISorting._polars_ext is None:
+            LogicalSISorting._polars_ext = LogicalSISorting._polars_ext_class()
+        return LogicalSISorting._polars_ext
+
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> str:
+        """Serialise a ``BaseSorting`` to its JSON storage representation.
+
+        Args:
+            value: A ``BaseSorting`` instance whose
+                ``check_serializability("json")`` returns ``True``.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A JSON string produced by ``sorting.to_dict(recursive=True,
+            include_annotations=True, include_properties=False)`` encoded
+            via ``SIJsonEncoder``.
+
+        Raises:
+            ValueError: If the sorting is not JSON-serialisable (e.g. an
+                in-memory ``NumpySorting``).
+        """
+        if not value.check_serializability("json"):
+            raise ValueError(
+                "This BaseSorting is not JSON-serializable and cannot be stored "
+                "by orcapod. This typically means it holds data in memory (e.g. "
+                "NumpySorting). Sortings built on top of file-backed data "
+                "(zarr, numpy_folder, npz_folder, etc.) are fine and do not need "
+                "to be materialized first. If your sorting is in-memory, call "
+                "sorting.save_to_zarr(path) or sorting.save_to_folder(path) "
+                "first, then pass the returned extractor to the pod."
+            )
+        from spikeinterface.core.core_tools import SIJsonEncoder
+        return json.dumps(
+            value.to_dict(
+                include_annotations=True,
+                include_properties=False,
+                recursive=True,
+            ),
+            cls=SIJsonEncoder,
+        )
+
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> BaseSorting:
+        """Reconstruct a ``BaseSorting`` from its JSON storage string.
+
+        Args:
+            storage_value: A JSON string as stored in Arrow.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``BaseSorting`` instance reconstructed via
+            ``spikeinterface.core.load``.
+
+        Raises:
+            ValueError: If ``storage_value`` is not valid JSON.
+            FileNotFoundError: If the backing zarr/folder no longer exists
+                (raised by SpikeInterface, propagated as-is).
+        """
+        from spikeinterface.core import load as si_load
+        try:
+            si_dict = json.loads(storage_value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(
+                f"LogicalSISorting: cannot deserialise storage value "
                 f"{storage_value!r}; expected a JSON string."
             ) from exc
         return si_load(si_dict)
