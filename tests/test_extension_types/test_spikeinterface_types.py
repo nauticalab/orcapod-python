@@ -9,7 +9,11 @@ import pytest
 
 
 def test_spikeinterface_not_installed_raises_import_error(monkeypatch):
-    """Importing spikeinterface_types when SI is absent raises ImportError."""
+    """Importing spikeinterface_types when SI is absent raises ImportError.
+
+    This test runs regardless of whether spikeinterface is installed — it
+    simulates absence by blocking the import via sys.modules.
+    """
     import sys
     import importlib
 
@@ -36,22 +40,24 @@ def test_spikeinterface_not_installed_raises_import_error(monkeypatch):
             sys.modules[si_types_key] = saved_si_types
         else:
             sys.modules.pop(si_types_key, None)
-            importlib.import_module(si_types_key)
+            # Re-import only if SI is genuinely available; if not, there is
+            # nothing to restore and the ImportError is expected.
+            try:
+                importlib.import_module(si_types_key)
+            except ImportError:
+                pass
 
 
-# All tests below require spikeinterface — skip if not installed
-si = pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
-import spikeinterface.core as si_core  # noqa: E402
-
-
-def _make_numpy_recording() -> si_core.NumpyRecording:
+def _make_numpy_recording():
     """Create a small in-memory NumpyRecording for use as a test source."""
+    import spikeinterface.core as si_core
     rng = np.random.default_rng(42)
     traces = rng.standard_normal((200, 4)).astype("float32")
     return si_core.NumpyRecording([traces], sampling_frequency=30_000)
 
 
 def test_logical_si_recording_importable():
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
     import pyarrow as pa
 
@@ -63,6 +69,7 @@ def test_logical_si_recording_importable():
 
 def test_in_memory_recording_raises():
     """NumpyRecording (json=False) raises ValueError with clear instructions."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
 
     rec = _make_numpy_recording()
@@ -78,6 +85,7 @@ def test_in_memory_recording_raises():
 
 def test_folder_recording_round_trip(tmp_path):
     """Binary-folder-backed recording round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
 
     saved = _make_numpy_recording().save_to_folder(str(tmp_path / "rec"))
@@ -97,6 +105,7 @@ def test_folder_recording_round_trip(tmp_path):
 
 def test_zarr_recording_round_trip(tmp_path):
     """Zarr-backed recording round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
 
     saved = _make_numpy_recording().save_to_zarr(str(tmp_path / "rec.zarr"))
@@ -120,6 +129,7 @@ def test_ephemeral_recording_round_trip(tmp_path):
     SpikeInterface re-applies the preprocessing chain lazily (using zscore
     which requires no optional dependencies and is fully deterministic).
     """
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     import spikeinterface.preprocessing as spre
     from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
 
@@ -143,6 +153,7 @@ def test_ephemeral_recording_round_trip(tmp_path):
 
 def test_si_recording_handler_hash_stability(tmp_path):
     """Same recording produces identical ContentHash across two calls."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import SIRecordingHandler
     from orcapod.types import ContentHash
 
@@ -158,6 +169,7 @@ def test_si_recording_handler_hash_stability(tmp_path):
 
 def test_si_recording_handler_hash_changes_with_content(tmp_path):
     """Different recordings produce different ContentHash values."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import SIRecordingHandler
 
     rng = np.random.default_rng(0)
@@ -174,6 +186,7 @@ def test_si_recording_handler_hash_changes_with_content(tmp_path):
 
 def test_si_recording_handler_in_memory_raises():
     """SIRecordingHandler raises ValueError for in-memory recordings."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import SIRecordingHandler
 
     rec = _make_numpy_recording()
@@ -185,6 +198,7 @@ def test_si_recording_handler_in_memory_raises():
 def test_register_spikeinterface_types(tmp_path):
     """register_spikeinterface_types() wires LogicalSIRecording and SIRecordingHandler
     into the default context so they are found by type lookup."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
     from orcapod.contexts import get_default_context
 

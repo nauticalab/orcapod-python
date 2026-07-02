@@ -27,7 +27,7 @@ it. orcapod stores that JSON string and delegates all disk I/O to SI.
   return values with `BaseRecording` without errors.
 - `python_to_storage()` serializes via `recording.to_dict(recursive=True)` → JSON string.
   Raises a clear `ValueError` for in-memory recordings (`check_serializability("json") == False`).
-- `storage_to_python()` reconstructs via `spikeinterface.core.load_extractor(dict)`.
+- `storage_to_python()` reconstructs via `spikeinterface.core.load(dict)`.
 - A `SIRecordingHandler` registered in the semantic hasher that hashes the JSON string
   (phase 1 — source-path content hashing is deferred to a follow-up issue).
 - `spikeinterface` available as `pip install orcapod[spikeinterface]`; imports are lazy so
@@ -43,8 +43,11 @@ it. orcapod stores that JSON string and delegates all disk I/O to SI.
 
 New file: `src/orcapod/extension_types/spikeinterface_types.py`
 
-SI imports use `LazyModule` (same pattern as polars/pyarrow in the codebase) so that
-`import orcapod` does not fail when SpikeInterface is not installed.
+`spikeinterface_types.py` imports `BaseRecording` at module level using a `try/except ImportError`
+block that re-raises with a clear pip-install message if SI is absent. The
+`extension_types/__init__.py` wraps the import in its own `try/except ImportError` so that
+`import orcapod` never fails when SI is not installed — the SI types are silently omitted from
+`__all__` in that case.
 
 ### Optional dependency
 
@@ -57,9 +60,11 @@ spikeinterface = ["spikeinterface>=0.101"]
 
 ### Registration
 
-`LogicalSIRecording` is registered in `contexts/data/v0.1.json` alongside
-`LogicalFile`, `LogicalDirectory`, and `LogicalNumpyArray`. The `SIRecordingHandler`
-is registered in the `python_type_handler_registry` in the same context config.
+`LogicalSIRecording` and `SIRecordingHandler` are **not** registered in
+`contexts/data/v0.1.json` — doing so would break startup for users who have not installed the
+`spikeinterface` extras group. Instead, users opt in explicitly by calling
+`register_spikeinterface_types()` once at application startup. This function accepts an optional
+`DataContext`; when called with no argument it registers into the default context.
 
 ---
 
@@ -97,7 +102,7 @@ for `np.ndarray`.
 **`storage_to_python(storage_value, converter)`:**
 
 1. Parses `json.loads(storage_value)` to recover the SI dict.
-2. Calls `spikeinterface.core.load_extractor(si_dict)` and returns the result.
+2. Calls `spikeinterface.core.load(si_dict)` and returns the result.
 3. If the backing zarr/folder has been moved or deleted, SI raises naturally — no
    additional wrapping needed (same behaviour as `LogicalDirectory` with a deleted path).
 
@@ -132,7 +137,7 @@ hashing infrastructure to land first (ITL-467).
 |-----------|-----------|
 | `NumpyRecording` or any recording with `check_serializability("json") == False` | `ValueError` clarifying that lazy file-backed recordings are fine but in-memory ones are not, with save instructions |
 | `spikeinterface` not installed | `ImportError` on first use of `LogicalSIRecording`, message: `"Install spikeinterface: pip install orcapod[spikeinterface]"` |
-| Backing zarr/folder deleted after storage | SI raises `FileNotFoundError` or similar on `load_extractor()` — propagates as-is |
+| Backing zarr/folder deleted after storage | SI raises `FileNotFoundError` or similar on `load()` — propagates as-is |
 | Corrupt JSON in storage | `json.JSONDecodeError` raised with the raw value in the message |
 
 ---
@@ -171,7 +176,7 @@ so they are skipped automatically when SI is not installed.
 
 - `src/orcapod/extension_types/directory_type.py` — pattern for JSON-storage LogicalType
 - `src/orcapod/extension_types/numpy_type.py` — pattern for direct python_type binding + hash handler
-- `src/orcapod/hashing/semantic_hashing/builtin_handlers.py` — where `SIRecordingHandler` registers
-- `src/orcapod/contexts/data/v0.1.json` — context config where LogicalType + handler are wired in
+- `src/orcapod/extension_types/spikeinterface_types.py` — implementation (LogicalType, handler, registration)
+- `src/orcapod/contexts/data/v0.1.json` — context config changelog entry (LogicalType/handler NOT wired in statically)
 - SpikeInterface `BaseExtractor.to_dict()` / `check_serializability()`: `spikeinterface/core/base.py`
 - ITL-467 — database-level artifact storage (phase 2 dependency)
