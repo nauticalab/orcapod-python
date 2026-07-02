@@ -96,7 +96,7 @@ class SqliteHashCacher:
                     mtime_ns  INTEGER NOT NULL,
                     size      INTEGER NOT NULL,
                     hash      BLOB    NOT NULL,
-                    cached_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                    cached_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     PRIMARY KEY (path, mtime_ns, size)
                 ) WITHOUT ROWID
                 """
