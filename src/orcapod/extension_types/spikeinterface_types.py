@@ -401,6 +401,10 @@ class LogicalSIMotion(BaseLogicalType):
         Returns:
             Raw bytes of a NumPy ``.npz`` archive.
         """
+        if not isinstance(value, Motion):
+            raise TypeError(
+                f"LogicalSIMotion: expected Motion, got {type(value)!r}"
+            )
         return _motion_to_npz_bytes(value)
 
     def storage_to_python(
@@ -440,6 +444,44 @@ class LogicalSIMotion(BaseLogicalType):
                 f"LogicalSIMotion: .npz archive is missing expected key {exc}. "
                 f"The archive may have been produced by a different version of orcapod."
             ) from exc
+
+
+class SIMotionHandler:
+    """Semantic hash handler for ``spikeinterface.core.motion.Motion``.
+
+    Computes a SHA-256 ``ContentHash`` of the ``.npz`` bytes produced by
+    ``_motion_to_npz_bytes()``. This is identical to the bytes that
+    ``LogicalSIMotion`` stores in Arrow, so hash input and storage
+    representation are always consistent.
+
+    The ``hasher`` argument is accepted for protocol conformance but not used —
+    hashing is done directly via ``hashlib.sha256`` to avoid overhead.
+    """
+
+    def handle(self, obj: Any, hasher: SemanticHasherProtocol | None) -> ContentHash:
+        """Return a SHA-256 ``ContentHash`` of the motion's ``.npz`` bytes.
+
+        Args:
+            obj: A ``Motion`` instance.
+            hasher: Accepted for protocol conformance; not used.
+
+        Returns:
+            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
+            SHA-256 of the ``.npz`` bytes from ``_motion_to_npz_bytes()``.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``Motion``.
+        """
+        if not isinstance(obj, Motion):
+            raise TypeError(
+                f"SIMotionHandler: expected Motion, got {type(obj)!r}"
+            )
+        npz_bytes = _motion_to_npz_bytes(obj)
+        logger.debug("SIMotionHandler: hashing %d .npz bytes", len(npz_bytes))
+        return ContentHash(
+            method="sha256",
+            digest=hashlib.sha256(npz_bytes).digest(),
+        )
 
 
 class SIRecordingHandler:

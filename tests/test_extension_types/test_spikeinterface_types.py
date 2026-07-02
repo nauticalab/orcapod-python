@@ -451,3 +451,45 @@ def test_si_motion_multi_segment_round_trip():
     assert recovered.num_segments == 2
     assert recovered.direction == "z"
     assert recovered.interpolation_method == "linear"
+
+
+# ── SIMotionHandler tests ──────────────────────────────────────────────────
+
+
+def test_si_motion_handler_hash_stability():
+    """Same Motion produces identical ContentHash across two calls."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SIMotionHandler
+    from orcapod.types import ContentHash
+
+    motion = _make_motion()
+    handler = SIMotionHandler()
+
+    h1 = handler.handle(motion, hasher=None)
+    h2 = handler.handle(motion, hasher=None)
+
+    assert isinstance(h1, ContentHash)
+    assert h1.method == "sha256"
+    assert h1 == h2
+
+
+def test_si_motion_handler_hash_changes_with_content():
+    """Different Motion objects (different seeds) produce different ContentHash values."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SIMotionHandler
+
+    motion_a = _make_motion(seed=1)
+    motion_b = _make_motion(seed=2)
+
+    handler = SIMotionHandler()
+    assert handler.handle(motion_a, hasher=None) != handler.handle(motion_b, hasher=None)
+
+
+def test_si_motion_handler_type_error():
+    """SIMotionHandler raises TypeError with class name in message for non-Motion input."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SIMotionHandler
+
+    handler = SIMotionHandler()
+    with pytest.raises(TypeError, match="SIMotionHandler"):
+        handler.handle("not a motion", hasher=None)
