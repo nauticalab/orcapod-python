@@ -58,21 +58,27 @@ Lives in `src/orcapod/hashing/file_hashers.py`.
 ```python
 @dataclass(frozen=True)
 class FileHashKey:
-    path: Path       # absolute, resolved via Path.resolve()
-    mtime_ns: int    # nanosecond mtime from os.stat().st_mtime_ns
-    size: int        # file size in bytes from os.stat().st_size
+    path: UPath      # absolute, resolved — always a UPath regardless of input type
+    mtime_ns: int    # nanosecond mtime from path.stat().st_mtime_ns
+    size: int        # file size in bytes from path.stat().st_size
 ```
 
 **Key rationale:**
-- `path` is always resolved to an absolute path so that `./data/x.bin` and
-  `/full/path/data/x.bin` share a cache entry.
+- `path` is always a `UPath` — `CachedFileHasher` normalizes any incoming
+  `PathLike` via `UPath(file_path)` before constructing the key. Wrapping a
+  plain `Path` in `UPath` is a no-op for local paths; remote paths (S3, GCS,
+  etc.) work transparently.
+- `path` is always resolved (`path.resolve()`) so that `./data/x.bin` and
+  `/full/path/data/x.bin` share a cache entry. For remote paths `.resolve()`
+  is a no-op (already fully qualified).
 - `mtime_ns` uses nanosecond precision to reduce same-second collision risk.
 - `size` is a cheap extra guard that catches most cases where mtime collides.
 
 **Known limitations (documented, not fixed in v1):**
 - Content changed but mtime preserved (`touch -r`, some editors): cache returns
   a stale hash. Escape hatch: don't call `enable_file_hash_caching()`.
-- Some filesystems have second-level mtime resolution; size guard reduces risk.
+- Some filesystems and remote backends (S3, GCS) provide only second-level
+  mtime resolution; size guard reduces risk.
 
 ### 3. `FileHasher` (rename of `BasicFileHasher`)
 
@@ -101,8 +107,9 @@ class CachedFileHasher:
     ) -> None: ...
 
     def hash_file(self, file_path: PathLike) -> ContentHash:
-        path = Path(file_path).resolve()
-        stat = os.stat(file_path)
+        path = file_path if isinstance(file_path, UPath) else UPath(file_path)
+        path = path.resolve()
+        stat = path.stat()
         key = FileHashKey(path, stat.st_mtime_ns, stat.st_size)
         hit = self.cacher.get(key)
         if hit is not None:
