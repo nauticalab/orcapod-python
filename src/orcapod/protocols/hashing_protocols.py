@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 from orcapod.types import ContentHash, PathLike, Schema
 
@@ -157,6 +157,31 @@ class ArrowHasherProtocol(Protocol):
     def hasher_id(self) -> str: ...
 
     def hash_table(self, table: "pa.Table | pa.RecordBatch") -> ContentHash: ...
+
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+class CacherProtocol(Protocol[K, V]):
+    """Generic get/put caching protocol.
+
+    A two-method protocol for caches keyed and valued by arbitrary types.
+    Use typed specializations (e.g. ``CacherProtocol[FileHashKey, ContentHash]``)
+    to constrain implementations.
+
+    Type Parameters:
+        K: The cache key type.
+        V: The cached value type.
+    """
+
+    def get(self, key: K) -> V | None:
+        """Return the cached value for ``key``, or ``None`` on miss."""
+        ...
+
+    def put(self, key: K, value: V) -> None:
+        """Store ``value`` under ``key``."""
+        ...
 
 
 class StringCacherProtocol(Protocol):
