@@ -381,3 +381,73 @@ def test_register_spikeinterface_types_includes_sorting(tmp_path):
         saved.get_unit_spike_train(unit_id=0, segment_index=0),
         recovered.get_unit_spike_train(unit_id=0, segment_index=0),
     )
+
+
+# ── Motion helpers & fixtures ──────────────────────────────────────────────
+
+
+def _make_motion(seed: int = 42) -> "spikeinterface.core.motion.Motion":
+    """Create a small deterministic single-segment Motion for use in tests."""
+    from spikeinterface.core.motion import Motion
+
+    rng = np.random.default_rng(seed)
+    n_temporal, n_spatial = 100, 5
+    displacement = rng.standard_normal((n_temporal, n_spatial))
+    temporal_bins = np.linspace(0, 10, n_temporal)
+    spatial_bins = np.linspace(0, 3000, n_spatial)
+    return Motion(displacement, temporal_bins, spatial_bins, direction="y")
+
+
+# ── LogicalSIMotion tests ──────────────────────────────────────────────────
+
+
+def test_logical_si_motion_importable():
+    """LogicalSIMotion has the expected extension name, python_type, and storage type."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+    from spikeinterface.core.motion import Motion
+    import pyarrow as pa
+
+    lt = LogicalSIMotion()
+    assert lt.logical_type_name == "spikeinterface.motion"
+    assert lt.python_type is Motion
+    assert lt.get_arrow_extension_type().storage_type == pa.large_binary()
+
+
+def test_si_motion_round_trip():
+    """Single-segment Motion round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    motion = _make_motion()
+    lt = LogicalSIMotion()
+
+    storage = lt.python_to_storage(motion)
+    assert isinstance(storage, bytes)
+
+    recovered = lt.storage_to_python(storage)
+    assert recovered == motion
+
+
+def test_si_motion_multi_segment_round_trip():
+    """Multi-segment Motion round-trips correctly, preserving segment count and direction."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+    from spikeinterface.core.motion import Motion
+
+    rng = np.random.default_rng(99)
+    n_t, n_s = 80, 4
+    motion = Motion(
+        displacement=[rng.standard_normal((n_t, n_s)), rng.standard_normal((n_t, n_s))],
+        temporal_bins_s=[np.linspace(0, 8, n_t), np.linspace(0, 8, n_t)],
+        spatial_bins_um=np.linspace(0, 2000, n_s),
+        direction="z",
+        interpolation_method="linear",
+    )
+    lt = LogicalSIMotion()
+    recovered = lt.storage_to_python(lt.python_to_storage(motion))
+
+    assert recovered == motion
+    assert recovered.num_segments == 2
+    assert recovered.direction == "z"
+    assert recovered.interpolation_method == "linear"

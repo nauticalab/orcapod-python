@@ -20,9 +20,12 @@ pods: call ``register_spikeinterface_types()`` once at startup.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 import polars as pl
 import pyarrow as pa
@@ -37,6 +40,7 @@ if TYPE_CHECKING:
 
 try:
     from spikeinterface.core import BaseRecording, BaseSorting
+    from spikeinterface.core.motion import Motion
 except ImportError as _exc:
     raise ImportError(
         "spikeinterface is not installed. "
@@ -44,6 +48,37 @@ except ImportError as _exc:
     ) from _exc
 
 logger = logging.getLogger(__name__)
+
+
+def _motion_to_npz_bytes(motion: Motion) -> bytes:
+    """Serialise a ``Motion`` to ``.npz`` bytes.
+
+    Shared by ``LogicalSIMotion.python_to_storage`` and ``SIMotionHandler.handle``
+    to guarantee the stored bytes and hash input are always identical.
+
+    The ``.npz`` archive keys are: ``spatial_bins_um``, ``direction`` (length-1
+    string array), ``interpolation_method`` (length-1 string array),
+    ``num_segments`` (length-1 int array), ``displacement_{i}`` and
+    ``temporal_bins_s_{i}`` for each segment index ``i``.
+
+    Args:
+        motion: A ``Motion`` instance.
+
+    Returns:
+        Raw bytes of a NumPy ``.npz`` archive.
+    """
+    buf = io.BytesIO()
+    kwargs: dict[str, np.ndarray] = {
+        "spatial_bins_um": motion.spatial_bins_um,
+        "direction": np.array([motion.direction]),
+        "interpolation_method": np.array([motion.interpolation_method]),
+        "num_segments": np.array([motion.num_segments]),
+    }
+    for i in range(motion.num_segments):
+        kwargs[f"displacement_{i}"] = motion.displacement[i]
+        kwargs[f"temporal_bins_s_{i}"] = motion.temporal_bins_s[i]
+    np.savez(buf, **kwargs)
+    return buf.getvalue()
 
 
 class LogicalSIRecording(BaseLogicalType):
@@ -298,6 +333,113 @@ class LogicalSISorting(BaseLogicalType):
                 f"{storage_value!r}; expected a JSON string."
             ) from exc
         return si_load(si_dict)
+
+
+class LogicalSIMotion(BaseLogicalType):
+    """Logical type for ``spikeinterface.core.motion.Motion``.
+
+    Stores ``Motion`` instances as Arrow ``large_binary`` columns tagged with
+    extension name ``"spikeinterface.motion"``. The stored value is a NumPy
+    ``.npz`` archive produced by ``_motion_to_npz_bytes()``, containing all
+    displacement arrays, temporal/spatial bin arrays, and scalar metadata
+    (``direction``, ``interpolation_method``, ``num_segments``). Loading
+    reconstructs the ``Motion`` directly from those arrays.
+
+    Because the entire content is embedded in the ``.npz`` bytes, no external
+    folder is required — stored ``Motion`` objects are portable wherever the
+    database is accessible.
+
+    Example:
+        >>> import numpy as np
+        >>> from spikeinterface.core.motion import Motion
+        >>> from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+        >>> lt = LogicalSIMotion()
+        >>> motion = Motion(np.zeros((10, 3)), np.linspace(0, 1, 10), np.array([0.0, 1.0, 2.0]))
+        >>> recovered = lt.storage_to_python(lt.python_to_storage(motion))
+        >>> recovered == motion
+        True
+    """
+
+    _arrow_ext_class = make_arrow_extension_type("spikeinterface.motion", pa.large_binary())
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("spikeinterface.motion", pa.large_binary())
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "spikeinterface.motion"
+    python_type: type = Motion
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the cached Arrow extension type for ``Motion``.
+
+        Returns:
+            A ``pa.ExtensionType`` with extension name ``"spikeinterface.motion"``
+            and storage type ``pa.large_binary()``.
+        """
+        if LogicalSIMotion._arrow_ext is None:
+            LogicalSIMotion._arrow_ext = LogicalSIMotion._arrow_ext_class()
+        return LogicalSIMotion._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the cached Polars extension type for ``Motion``.
+
+        Returns:
+            A ``pl.BaseExtension`` registered under ``"spikeinterface.motion"``.
+        """
+        if LogicalSIMotion._polars_ext is None:
+            LogicalSIMotion._polars_ext = LogicalSIMotion._polars_ext_class()
+        return LogicalSIMotion._polars_ext
+
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> bytes:
+        """Serialise a ``Motion`` to its ``.npz`` storage representation.
+
+        Args:
+            value: A ``Motion`` instance.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            Raw bytes of a NumPy ``.npz`` archive.
+        """
+        return _motion_to_npz_bytes(value)
+
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> Motion:
+        """Reconstruct a ``Motion`` from its ``.npz`` storage bytes.
+
+        Args:
+            storage_value: Raw ``.npz`` bytes as stored in Arrow ``large_binary``.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``Motion`` instance reconstructed from the stored arrays.
+
+        Raises:
+            ValueError: If ``storage_value`` cannot be parsed as a valid
+                ``.npz`` archive or is missing expected keys.
+        """
+        try:
+            d = np.load(io.BytesIO(bytes(storage_value)), allow_pickle=False)
+        except Exception as exc:
+            raise ValueError(
+                f"LogicalSIMotion: cannot deserialise storage value of type "
+                f"{type(storage_value)!r}; expected raw .npz bytes."
+            ) from exc
+        try:
+            n = int(d["num_segments"][0])
+            return Motion(
+                displacement=[d[f"displacement_{i}"] for i in range(n)],
+                temporal_bins_s=[d[f"temporal_bins_s_{i}"] for i in range(n)],
+                spatial_bins_um=d["spatial_bins_um"],
+                direction=str(d["direction"][0]),
+                interpolation_method=str(d["interpolation_method"][0]),
+            )
+        except KeyError as exc:
+            raise ValueError(
+                f"LogicalSIMotion: .npz archive is missing expected key {exc}. "
+                f"The archive may have been produced by a different version of orcapod."
+            ) from exc
 
 
 class SIRecordingHandler:
