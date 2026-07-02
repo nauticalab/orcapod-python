@@ -407,21 +407,23 @@ class SISortingHandler:
 
 
 def register_spikeinterface_types(context: Any = None) -> None:
-    """Register SpikeInterface LogicalTypes into an orcapod `DataContext`.
+    """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
+
+    Registers both ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459)
+    and ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468).
 
     For the default context this is called automatically at startup (the
-    default `v0.1.json` context config lists `LogicalSIRecording` and
-    `SIRecordingHandler` with `"_optional": true`, so they are wired in
-    whenever `spikeinterface` is installed). Call this function explicitly
-    only when you are working with a custom `DataContext` that was not
-    constructed from the default config.
+    default ``v0.1.json`` context config lists all four with ``"_optional": true``,
+    so they are wired in whenever ``spikeinterface`` is installed). Call this
+    function explicitly only when working with a custom ``DataContext`` that was
+    not constructed from the default config.
 
-    If `context` is `None`, the default context (from
-    `orcapod.contexts.get_default_context()`) is used. The function is
+    If ``context`` is ``None``, the default context (from
+    ``orcapod.contexts.get_default_context()``) is used. The function is
     idempotent — calling it more than once on the same context is safe.
 
     Args:
-        context: A `DataContext` instance, or `None` to use the default.
+        context: A ``DataContext`` instance, or ``None`` to use the default.
 
     Example:
         >>> from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
@@ -431,23 +433,32 @@ def register_spikeinterface_types(context: Any = None) -> None:
         from orcapod.contexts import get_default_context
         context = get_default_context()
 
-    lt = LogicalSIRecording()
+    # --- Recording ---
+    lt_recording = LogicalSIRecording()
     try:
-        context.type_converter.register_logical_type(lt)
+        context.type_converter.register_logical_type(lt_recording)
     except ValueError as exc:
-        # A different LogicalSIRecording instance is already registered (e.g.
-        # auto-registered from v0.1.json at context creation time).  That is
-        # fine — both instances are equivalent.  Any other ValueError propagates.
         if "already bound to" not in str(exc):
             raise
         logger.debug(
             "register_spikeinterface_types: LogicalSIRecording already registered, skipping"
         )
     else:
-        logger.debug(
-            "register_spikeinterface_types: registered LogicalSIRecording and SIRecordingHandler"
-        )
+        logger.debug("register_spikeinterface_types: registered LogicalSIRecording")
 
-    # SIRecordingHandler registration silently replaces an existing entry, so
-    # this call is always safe regardless of prior registration state.
     context.semantic_hasher.type_handler_registry.register(BaseRecording, SIRecordingHandler())
+
+    # --- Sorting ---
+    lt_sorting = LogicalSISorting()
+    try:
+        context.type_converter.register_logical_type(lt_sorting)
+    except ValueError as exc:
+        if "already bound to" not in str(exc):
+            raise
+        logger.debug(
+            "register_spikeinterface_types: LogicalSISorting already registered, skipping"
+        )
+    else:
+        logger.debug("register_spikeinterface_types: registered LogicalSISorting")
+
+    context.semantic_hasher.type_handler_registry.register(BaseSorting, SISortingHandler())
