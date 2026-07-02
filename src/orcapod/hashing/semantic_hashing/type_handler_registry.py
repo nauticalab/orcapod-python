@@ -44,8 +44,15 @@ class PythonTypeHandlerRegistry:
         self._handlers: dict[type, "PythonTypeHandlerProtocol"] = {}
         self._lock = threading.RLock()
         if handlers:
-            for target_type, handler in handlers:
-                self.register(target_type, handler)
+            for entry in handlers:
+                # Skip empty or incomplete pairs.  When a handler pair in the context
+                # JSON carries "_optional": true on its elements and the backing module
+                # is absent, parse_objectspec filters those elements out of the inner
+                # list, leaving an empty list [] here.  Also skip pairs where either
+                # element resolved to None.
+                if entry and len(entry) == 2 and all(x is not None for x in entry):
+                    target_type, handler = entry
+                    self.register(target_type, handler)
 
     def register(self, target_type: type, handler: "PythonTypeHandlerProtocol") -> None:
         """Register a hasher for a specific Python type.

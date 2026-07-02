@@ -30,6 +30,13 @@ from .directory_type import LogicalDirectory  # ITL-451
 from .numpy_type import LogicalNumpyArray  # ITL-460
 from .pandas_type import LogicalPandasDataFrame, LogicalPandasSeries  # PLT-1869
 
+# ITL-459 — SpikeInterface support (optional; requires pip install orcapod[spikeinterface])
+try:
+    from .spikeinterface_types import LogicalSIRecording, register_spikeinterface_types
+    _SI_AVAILABLE = True
+except ImportError:
+    _SI_AVAILABLE = False
+
 __all__ = [
     "LogicalTypeProtocol",
     "LogicalTypeFactoryProtocol",
@@ -57,6 +64,8 @@ __all__ = [
     "LogicalDirectory",
     # ITL-460
     "LogicalNumpyArray",
+    # ITL-459 (conditional — only present when spikeinterface is installed)
+    *( ["LogicalSIRecording", "register_spikeinterface_types"] if _SI_AVAILABLE else [] ),
     # PLT-1869
     "LogicalPandasDataFrame",
     "LogicalPandasSeries",
