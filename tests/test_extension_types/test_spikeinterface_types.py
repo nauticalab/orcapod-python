@@ -56,6 +56,18 @@ def _make_numpy_recording():
     return si_core.NumpyRecording([traces], sampling_frequency=30_000)
 
 
+def _make_numpy_sorting():
+    """Create a small in-memory NumpySorting for use as a test source."""
+    import spikeinterface.core as si_core
+    rng = np.random.default_rng(42)
+    n_samples = 1000
+    spike_trains = {
+        0: np.sort(rng.choice(n_samples, 20, replace=False)),
+        1: np.sort(rng.choice(n_samples, 15, replace=False)),
+    }
+    return si_core.NumpySorting.from_unit_dict(spike_trains, sampling_frequency=30_000)
+
+
 def test_logical_si_recording_importable():
     si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
     from orcapod.extension_types.spikeinterface_types import LogicalSIRecording
@@ -205,18 +217,6 @@ def test_logical_si_sorting_importable():
     assert lt.logical_type_name == "spikeinterface.sorting"
     assert lt.python_type is si_core.BaseSorting
     assert lt.get_arrow_extension_type().storage_type == pa.large_string()
-
-
-def _make_numpy_sorting():
-    """Create a small in-memory NumpySorting for use as a test source."""
-    import spikeinterface.core as si_core
-    rng = np.random.default_rng(42)
-    n_samples = 1000
-    spike_trains = {
-        0: np.sort(rng.choice(n_samples, 20, replace=False)),
-        1: np.sort(rng.choice(n_samples, 15, replace=False)),
-    }
-    return si_core.NumpySorting.from_unit_dict(spike_trains, sampling_frequency=30_000)
 
 
 def test_si_sorting_handler_hash_stability(tmp_path):
