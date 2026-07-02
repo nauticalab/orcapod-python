@@ -25,13 +25,13 @@ Example usage:
     versions = get_available_contexts()
 """
 
-import logging as _logging
+import logging
 from typing import Any
 
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols import semantic_types_protocols as sp
 
-_logger = _logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 from .core import ContextResolutionError, ContextValidationError, DataContext
 from .registry import JSONDataContextRegistry
@@ -272,7 +272,7 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
     base_hasher = existing_handler.file_hasher
 
     if isinstance(base_hasher, CachedFileHasher):
-        _logger.warning(
+        logger.warning(
             "enable_file_hash_caching() called but the default FileHandler "
             "already has a CachedFileHasher. Unwrapping and replacing with "
             "the new cacher. If layered caching is intentional, construct a "
