@@ -604,7 +604,7 @@ def register_spikeinterface_types(context: Any = None) -> None:
     ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470).
 
     For the default context this is called automatically at startup (the
-    default ``v0.1.json`` context config lists all four with ``"_optional": true``,
+    default ``v0.1.json`` context config lists all six with ``"_optional": true``,
     so they are wired in whenever ``spikeinterface`` is installed). Call this
     function explicitly only when working with a custom ``DataContext`` that was
     not constructed from the default config.
