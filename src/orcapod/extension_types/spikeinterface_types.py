@@ -353,6 +353,59 @@ class SIRecordingHandler:
         )
 
 
+class SISortingHandler:
+    """Semantic hash handler for ``spikeinterface.core.BaseSorting``.
+
+    Computes a SHA-256 ``ContentHash`` of the JSON bytes produced by
+    ``sorting.to_dict(recursive=True, include_annotations=True,
+    include_properties=False)`` encoded via ``SIJsonEncoder``. This is
+    identical to the bytes that ``LogicalSISorting`` stores in Arrow, so
+    hash input and storage representation are always consistent.
+
+    The ``hasher`` argument is accepted for protocol conformance but not used —
+    hashing is done directly via ``hashlib.sha256`` to avoid overhead.
+    """
+
+    def handle(self, obj: Any, hasher: SemanticHasherProtocol | None) -> ContentHash:
+        """Return a SHA-256 ``ContentHash`` of the sorting's JSON dump.
+
+        Args:
+            obj: A ``BaseSorting`` instance.
+            hasher: Accepted for protocol conformance; not used.
+
+        Returns:
+            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
+            SHA-256 of the JSON bytes from ``to_dict(recursive=True,
+            include_annotations=True, include_properties=False)`` encoded
+            via ``SIJsonEncoder``.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``BaseSorting``.
+            ValueError: If the sorting is not JSON-serialisable (in-memory).
+        """
+        if not isinstance(obj, BaseSorting):
+            raise TypeError(
+                f"SISortingHandler: expected BaseSorting, got {type(obj)!r}"
+            )
+        if not obj.check_serializability("json"):
+            raise ValueError(
+                "Cannot hash an in-memory BaseSorting "
+                "(check_serializability('json') is False). "
+                "Save it to disk first with save_to_zarr() or save_to_folder()."
+            )
+        # TODO(ITL-468): phase 2 — also hash backing source directory contents
+        from spikeinterface.core.core_tools import SIJsonEncoder
+        json_bytes = json.dumps(
+            obj.to_dict(include_annotations=True, include_properties=False, recursive=True),
+            cls=SIJsonEncoder,
+        ).encode()
+        logger.debug("SISortingHandler: hashing %d JSON bytes", len(json_bytes))
+        return ContentHash(
+            method="sha256",
+            digest=hashlib.sha256(json_bytes).digest(),
+        )
+
+
 def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod `DataContext`.
 
