@@ -28,6 +28,7 @@ from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalTyp
 from .file_type import LogicalFile  # ITL-450
 from .directory_type import LogicalDirectory  # ITL-451
 from .numpy_type import LogicalNumpyArray  # ITL-460
+from .pandas_type import LogicalPandasDataFrame, LogicalPandasSeries  # PLT-1869
 
 # ITL-459 — SpikeInterface support (optional; requires pip install orcapod[spikeinterface])
 try:
@@ -65,4 +66,7 @@ __all__ = [
     "LogicalNumpyArray",
     # ITL-459 (conditional — only present when spikeinterface is installed)
     *( ["LogicalSIRecording", "register_spikeinterface_types"] if _SI_AVAILABLE else [] ),
+    # PLT-1869
+    "LogicalPandasDataFrame",
+    "LogicalPandasSeries",
 ]
