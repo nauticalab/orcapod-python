@@ -7,7 +7,6 @@ directory so that subsequent pipeline runs skip expensive content hashing.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -22,7 +21,7 @@ def warm_cache(
         help="Minimum file size in MB. Files smaller than this are skipped. Default: 500 MB.",
         show_default=True,
     ),
-    db_path: Optional[str] = typer.Option(
+    db_path: str | None = typer.Option(
         None,
         "--db-path",
         help=(
@@ -54,6 +53,14 @@ def warm_cache(
     min_size_bytes = int(min_size * 1024 * 1024)
     _db_path: Path | None = Path(db_path) if db_path is not None else None
 
+    root = Path(path)
+    if not root.exists():
+        typer.echo(f"Error: path does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    if not root.is_dir():
+        typer.echo(f"Error: path is not a directory: {path}", err=True)
+        raise typer.Exit(code=1)
+
     typer.echo(f"Scanning {path} ...")
 
     stats = populate_hash_cache(
@@ -66,7 +73,7 @@ def warm_cache(
 
     gb = stats.total_bytes_hashed / (1024**3)
     speed_gb = stats.avg_hashing_speed / (1024**3)
-    min_size_display = f"{min_size:.4g} MB"
+    min_size_display = f"{min_size:g} MB"
 
     typer.echo(
         f"Done in {stats.total_duration:.1f}s — "

@@ -1,10 +1,7 @@
 """Orcapod command-line interface.
 
 Provides the ``orcapod`` entry point. Sub-commands are registered below.
-
-Usage::
-
-    orcapod warm-cache /data/recordings --min-size 500
+Run ``orcapod --help`` for usage.
 """
 
 from __future__ import annotations

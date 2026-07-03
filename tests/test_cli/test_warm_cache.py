@@ -36,7 +36,7 @@ class TestWarmCacheCLI:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert "hashed" in result.output
+        assert "1 hashed" in result.output
 
     def test_already_cached_on_second_run(self, runner, tmp_path):
         db = tmp_path / "cache.db"
@@ -55,7 +55,13 @@ class TestWarmCacheCLI:
         result = runner.invoke(app, args)  # second run — all cached
 
         assert result.exit_code == 0
-        assert "already cached" in result.output
+        assert "1 already cached" in result.output
+
+    def test_nonexistent_path_exits_nonzero(self, runner):
+        from orcapod.cli import app
+
+        result = runner.invoke(app, ["warm-cache", "/nonexistent_xyz_abc_987"])
+        assert result.exit_code != 0
 
     def test_min_size_default_shown_in_help(self, runner):
         from orcapod.cli import app
