@@ -25,6 +25,8 @@ File hashing:
   CachedFileHasher                     -- caching decorator around FileContentHasherProtocol
   InMemoryHashCacher                   -- dict-backed cacher for testing
   SqliteHashCacher                     -- SQLite-backed persistent cacher
+  CachePopulationStats                 -- stats returned by populate_hash_cache()
+  populate_hash_cache                  -- pre-populate the SQLite hash cache for large files
 
 Utility:
   CacherProtocol                       -- generic get/put caching protocol [K, V]

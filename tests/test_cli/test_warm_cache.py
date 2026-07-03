@@ -67,4 +67,4 @@ class TestWarmCacheCLI:
         from orcapod.cli import app
 
         result = runner.invoke(app, ["warm-cache", "--help"])
-        assert "500" in result.output  # default 500 MB should appear
+        assert "500 MB" in result.output  # default 500 MB should appear

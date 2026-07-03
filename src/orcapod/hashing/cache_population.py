@@ -82,90 +82,90 @@ def populate_hash_cache(
     """
     root = UPath(path)
     _db_path: Path | None = Path(db_path) if db_path is not None else None
-    cacher = SqliteHashCacher(_db_path)
     hasher = FileHasher(algorithm=algorithm, buffer_size=buffer_size)
 
-    # Collect the DB file and its SQLite journal/WAL siblings so they are
-    # never treated as data files even if the DB lives inside the scan root.
-    _db_resolved = cacher.db_path.resolve()
-    _excluded: frozenset[Path] = frozenset(
-        [
-            _db_resolved,
-            _db_resolved.with_suffix(_db_resolved.suffix + "-wal"),
-            _db_resolved.with_suffix(_db_resolved.suffix + "-shm"),
-        ]
-    )
+    with SqliteHashCacher(_db_path) as cacher:
+        # Collect the DB file and its SQLite journal/WAL siblings so they are
+        # never treated as data files even if the DB lives inside the scan root.
+        _db_resolved = cacher.db_path.resolve()
+        _excluded: frozenset[Path] = frozenset(
+            [
+                _db_resolved,
+                _db_resolved.with_suffix(_db_resolved.suffix + "-wal"),
+                _db_resolved.with_suffix(_db_resolved.suffix + "-shm"),
+            ]
+        )
 
-    hashed = 0
-    already_cached = 0
-    skipped_small = 0
-    error_count = 0
-    total_bytes_hashed = 0
+        hashed = 0
+        already_cached = 0
+        skipped_small = 0
+        error_count = 0
+        total_bytes_hashed = 0
 
-    start = time.monotonic()
+        start = time.monotonic()
 
-    # Explicit DFS stack — avoids recursion limits on deep trees.
-    stack: list[UPath] = [root]
-    while stack:
-        current = stack.pop()
-        try:
-            entries = list(current.iterdir())
-        except OSError:
-            logger.warning(
-                "Cannot access directory %s", current, exc_info=True
-            )
-            error_count += 1
-            continue
-
-        for entry in entries:
-            # Never follow symlinks — they can cause cycles.
-            if entry.is_symlink():
-                continue
-            if entry.is_dir():
-                stack.append(entry)
-                continue
-            if not entry.is_file():
-                continue
-
+        # Explicit DFS stack — avoids recursion limits on deep trees.
+        stack: list[UPath] = [root]
+        while stack:
+            current = stack.pop()
             try:
-                resolved = UPath(entry.resolve())
-
-                # Skip the SQLite cache database itself and its journal files.
-                if resolved in _excluded:
-                    continue
-
-                stat = resolved.stat()
-                size = stat.st_size
-
-                if size < min_size_bytes:
-                    skipped_small += 1
-                    continue
-
-                key = FileHashKey(resolved, stat.st_mtime_ns, size)
-                if cacher.get(key) is not None:
-                    already_cached += 1
-                    continue
-
-                content_hash = hasher.hash_file(resolved)
-                cacher.put(key, content_hash)
-                hashed += 1
-                total_bytes_hashed += size
-
-            except Exception:
+                entries = list(current.iterdir())
+            except OSError:
                 logger.warning(
-                    "Failed to process file %s", entry, exc_info=True
+                    "Cannot access directory %s", current, exc_info=True
                 )
                 error_count += 1
+                continue
 
-    duration = time.monotonic() - start
-    speed = total_bytes_hashed / duration if duration > 0 else 0.0
+            for entry in entries:
+                # Never follow symlinks — they can cause cycles.
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir():
+                    stack.append(entry)
+                    continue
+                if not entry.is_file():
+                    continue
 
-    return CachePopulationStats(
-        hashed=hashed,
-        already_cached=already_cached,
-        skipped_small=skipped_small,
-        errors=error_count,
-        total_bytes_hashed=total_bytes_hashed,
-        total_duration=duration,
-        avg_hashing_speed=speed,
-    )
+                try:
+                    resolved = entry.resolve()
+
+                    # Skip the SQLite cache database itself and its journal files.
+                    if resolved in _excluded:
+                        continue
+
+                    stat = resolved.stat()
+                    size = stat.st_size
+
+                    if size < min_size_bytes:
+                        skipped_small += 1
+                        continue
+
+                    key = FileHashKey(resolved, stat.st_mtime_ns, size)
+                    if cacher.get(key) is not None:
+                        already_cached += 1
+                        continue
+
+                    content_hash = hasher.hash_file(resolved)
+                    cacher.put(key, content_hash)
+                    hashed += 1
+                    total_bytes_hashed += size
+
+                except Exception:
+                    logger.warning(
+                        "Failed to process file %s", entry, exc_info=True
+                    )
+                    error_count += 1
+
+        duration = time.monotonic() - start
+        speed = total_bytes_hashed / duration if duration > 0 else 0.0
+
+        return CachePopulationStats(
+            hashed=hashed,
+            already_cached=already_cached,
+            skipped_small=skipped_small,
+            errors=error_count,
+            total_bytes_hashed=total_bytes_hashed,
+            total_duration=duration,
+            avg_hashing_speed=speed,
+        )
