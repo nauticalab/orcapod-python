@@ -226,3 +226,27 @@ class TestErrors:
 
         assert stats.errors == 1
         assert stats.hashed == 0
+
+    def test_directory_permission_error_increments_errors(self, tmp_path, monkeypatch):
+        import pathlib
+
+        db = tmp_path / "cache.db"
+        sub = tmp_path / "locked"
+        sub.mkdir()
+        _write(sub, "f.bin", 20)
+
+        original_iterdir = pathlib.Path.iterdir
+
+        def _raise_on_locked(self):
+            if self.name == "locked":
+                raise PermissionError("simulated permission denied")
+            return original_iterdir(self)
+
+        monkeypatch.setattr(pathlib.Path, "iterdir", _raise_on_locked)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        assert stats.errors == 1
+        assert stats.hashed == 0

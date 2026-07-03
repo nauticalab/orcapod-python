@@ -51,7 +51,7 @@ def populate_hash_cache(
     path: PathLike,
     *,
     min_size_bytes: int = _DEFAULT_MIN_SIZE_BYTES,
-    db_path: "UPath | PathLike | None" = None,
+    db_path: UPath | PathLike | None = None,
     algorithm: str = "sha256",
     buffer_size: int = 65536,
 ) -> CachePopulationStats:
