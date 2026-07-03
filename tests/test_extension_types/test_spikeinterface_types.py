@@ -1,4 +1,4 @@
-"""Tests for LogicalSIRecording, LogicalSISorting, and their handlers (ITL-459, ITL-468)."""
+"""Tests for LogicalSIRecording, LogicalSISorting, LogicalSISortingAnalyzer, and their handlers (ITL-459, ITL-468, ITL-469, ITL-470)."""
 
 from __future__ import annotations
 

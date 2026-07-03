@@ -1,4 +1,4 @@
-"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468, ITL-470).
+"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468, ITL-470, ITL-469).
 
 ``LogicalSIRecording`` maps ``spikeinterface.core.BaseRecording`` ↔ Arrow
 ``large_string`` using SpikeInterface's own ``to_dict(recursive=True,
@@ -15,6 +15,13 @@ hashes the JSON bytes via SHA-256.
 envelope. All displacement arrays, bin arrays, and scalar metadata are embedded
 in the archive — no external folder is required. ``SIMotionHandler`` hashes
 the same ``.npz`` bytes via SHA-256.
+
+``LogicalSISortingAnalyzer`` maps ``spikeinterface.core.SortingAnalyzer`` ↔ Arrow
+``large_string`` using a JSON path-reference object
+``{"folder": "<path>", "format": "<binary_folder|zarr>"}`` derived from
+``analyzer.folder`` and ``analyzer.format``. Unlike Recording/Sorting, there is
+no ``to_dict()`` round-trip — the analyzer is exclusively folder-backed.
+``SISortingAnalyzerHandler`` hashes the folder path string via SHA-256 (phase 1).
 
 This module requires the optional ``spikeinterface`` extras group:
 ``pip install orcapod[spikeinterface]``
