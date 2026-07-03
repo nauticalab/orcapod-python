@@ -27,7 +27,7 @@ the object's content.
 | Logical type name | `"spikeinterface.sorting_analyzer"` |
 | Python type | `spikeinterface.core.SortingAnalyzer` |
 | Arrow storage type | `pa.large_string()` |
-| Arrow extension name | `"orcapod.spikeinterface.sorting_analyzer"` |
+| Arrow extension name | `"spikeinterface.sorting_analyzer"` |
 
 **`SISortingAnalyzerHandler`** — semantic hash handler for `SortingAnalyzer`
 
@@ -60,7 +60,7 @@ support future content hashing (ITL-476). It is **not** used during loading.
 ### `SISortingAnalyzerHandler.handle(analyzer, hasher)` → `ContentHash`
 
 1. Check `analyzer.folder is None` → raise `ValueError`.
-2. Return `ContentHash(hashlib.sha256(str(analyzer.folder).encode()).hexdigest())`.
+2. Return `ContentHash(method="sha256", digest=hashlib.sha256(str(analyzer.folder).encode()).digest())`.
 
 This is **phase 1** — path-string hashing. Content hashing of the folder is deferred to ITL-476.
 
