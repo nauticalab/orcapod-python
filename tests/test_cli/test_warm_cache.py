@@ -68,3 +68,22 @@ class TestWarmCacheCLI:
 
         result = runner.invoke(app, ["warm-cache", "--help"])
         assert "500 MB" in result.output  # default 500 MB should appear
+
+    def test_workers_option_accepted(self, runner, tmp_path):
+        db = tmp_path / "cache.db"
+        f = tmp_path / "f.bin"
+        f.write_bytes(b"x" * 20)
+
+        from orcapod.cli import app
+
+        result = runner.invoke(
+            app,
+            [
+                "warm-cache",
+                str(tmp_path),
+                "--min-size", "0.00002",
+                "--db-path", str(db),
+                "--workers", "2",
+            ],
+        )
+        assert result.exit_code == 0, result.output

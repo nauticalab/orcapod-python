@@ -41,6 +41,12 @@ def warm_cache(
         help="Read buffer size in bytes. Default: 65536.",
         show_default=True,
     ),
+    max_workers: int = typer.Option(
+        4,
+        "--workers",
+        help="Number of threads for concurrent hashing. Default: 4.",
+        show_default=True,
+    ),
 ) -> None:
     """Pre-populate the file-hash cache for large files under PATH.
 
@@ -69,6 +75,7 @@ def warm_cache(
         db_path=_db_path,
         algorithm=algorithm,
         buffer_size=buffer_size,
+        max_workers=max_workers,
     )
 
     gb = stats.total_bytes_hashed / (1024**3)
