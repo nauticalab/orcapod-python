@@ -257,6 +257,60 @@ class TestErrors:
 
 
 # ---------------------------------------------------------------------------
+# Concurrency
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrency:
+    def test_concurrent_hashes_multiple_files(self, tmp_path):
+        """ThreadPoolExecutor path hashes all qualifying files without losing any."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "a.bin", 20)
+        _write(tmp_path, "b.bin", 20)
+        _write(tmp_path, "c.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, max_workers=4
+        )
+
+        assert stats.hashed == 3
+        assert stats.errors == 0
+
+    def test_max_workers_1_matches_serial(self, tmp_path):
+        """max_workers=1 and max_workers=4 produce identical CachePopulationStats."""
+        db1 = tmp_path / "cache1.db"
+        db2 = tmp_path / "cache2.db"
+        _write(tmp_path, "a.bin", 20)
+        _write(tmp_path, "b.bin", 30)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        serial = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db1, max_workers=1
+        )
+        concurrent = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db2, max_workers=4
+        )
+
+        assert serial.hashed == concurrent.hashed
+        assert serial.already_cached == concurrent.already_cached
+        assert serial.skipped_small == concurrent.skipped_small
+        assert serial.errors == concurrent.errors
+        assert serial.total_bytes_hashed == concurrent.total_bytes_hashed
+
+    def test_workers_default_is_4(self):
+        """The default value of max_workers is 4."""
+        import inspect
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        sig = inspect.signature(populate_hash_cache)
+        assert sig.parameters["max_workers"].default == 4
+
+
+# ---------------------------------------------------------------------------
 # Public exports
 # ---------------------------------------------------------------------------
 

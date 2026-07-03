@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from orcapod.types import PathLike
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MIN_SIZE_BYTES: int = 500 * 1024 * 1024  # 500 MB
+_DEFAULT_MAX_WORKERS: int = 4
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,45 @@ class CachePopulationStats:
     avg_hashing_speed: float
 
 
+def _hash_one(
+    entry: UPath,
+    cacher: SqliteHashCacher,
+    hasher: FileHasher,
+    min_size_bytes: int,
+) -> tuple[str, int]:
+    """Hash and cache a single file, returning a (category, bytes) result pair.
+
+    Called from worker threads inside ``populate_hash_cache()``. ``cacher`` and
+    ``hasher`` are shared across threads; both are safe because ``SqliteHashCacher``
+    uses ``threading.local()`` connections and ``FileHasher`` is stateless.
+
+    Args:
+        entry: File path to process.
+        cacher: Shared ``SqliteHashCacher`` instance.
+        hasher: Shared ``FileHasher`` instance.
+        min_size_bytes: Files strictly smaller than this threshold are skipped.
+
+    Returns:
+        A tuple ``(category, bytes_hashed)`` where ``category`` is one of
+        ``"hashed"``, ``"cached"``, ``"skipped_small"``, or ``"error"``, and
+        ``bytes_hashed`` is the file size for newly hashed files, ``0`` otherwise.
+    """
+    try:
+        resolved = entry.resolve()
+        stat = resolved.stat()
+        if stat.st_size < min_size_bytes:
+            return ("skipped_small", 0)
+        key = FileHashKey(resolved, stat.st_mtime_ns, stat.st_size)
+        if cacher.get(key) is not None:
+            return ("cached", 0)
+        content_hash = hasher.hash_file(resolved)
+        cacher.put(key, content_hash)
+        return ("hashed", stat.st_size)
+    except Exception:
+        logger.warning("Failed to process file %s", entry, exc_info=True)
+        return ("error", 0)
+
+
 def populate_hash_cache(
     path: PathLike,
     *,
@@ -54,6 +95,7 @@ def populate_hash_cache(
     db_path: UPath | PathLike | None = None,
     algorithm: str = "sha256",
     buffer_size: int = 65536,
+    max_workers: int = _DEFAULT_MAX_WORKERS,
 ) -> CachePopulationStats:
     """Recursively hash and cache all files >= ``min_size_bytes`` under ``path``.
 
@@ -63,6 +105,11 @@ def populate_hash_cache(
     All files under ``path`` are visited recursively, including hidden files.
     Symlinks are skipped. Per-file and per-directory errors are logged as warnings
     and counted in ``CachePopulationStats.errors``.
+
+    Directory traversal runs on the calling thread. Per-file work (stat, cache
+    lookup, hashing, cache write) is dispatched to a ``ThreadPoolExecutor`` with
+    ``max_workers`` threads. Pass ``max_workers=1`` to restore single-threaded
+    behaviour.
 
     Args:
         path: Root directory to scan recursively.
@@ -75,6 +122,9 @@ def populate_hash_cache(
         algorithm: Hash algorithm passed to ``FileHasher``. Defaults to ``"sha256"``.
         buffer_size: Read buffer size in bytes passed to ``FileHasher``.
             Defaults to 65536.
+        max_workers: Number of threads for concurrent per-file hashing. Defaults
+            to 4, which is well-suited for NAS and HDD storage where more than 4
+            parallel reads cause seek contention. Pass ``1`` for serial behaviour.
 
     Returns:
         ``CachePopulationStats`` with counts for hashed, cached, skipped, and
@@ -84,88 +134,84 @@ def populate_hash_cache(
     _db_path: Path | None = Path(db_path) if db_path is not None else None
     hasher = FileHasher(algorithm=algorithm, buffer_size=buffer_size)
 
-    with SqliteHashCacher(_db_path) as cacher:
-        # Collect the DB file and its SQLite journal/WAL siblings so they are
-        # never treated as data files even if the DB lives inside the scan root.
-        _db_resolved = cacher.db_path.resolve()
-        _excluded: frozenset[Path] = frozenset(
-            [
-                _db_resolved,
-                _db_resolved.with_suffix(_db_resolved.suffix + "-wal"),
-                _db_resolved.with_suffix(_db_resolved.suffix + "-shm"),
-            ]
-        )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with SqliteHashCacher(_db_path) as cacher:
+            # Collect the DB file and its SQLite journal/WAL siblings so they are
+            # never treated as data files even if the DB lives inside the scan root.
+            # Also exclude any other .db files that may exist in the scan directory
+            # to avoid hashing SQLite databases that aren't the current cache.
+            _db_resolved = cacher.db_path.resolve()
+            _excluded: frozenset[Path] = frozenset(
+                [
+                    _db_resolved,
+                    _db_resolved.with_suffix(_db_resolved.suffix + "-wal"),
+                    _db_resolved.with_suffix(_db_resolved.suffix + "-shm"),
+                ]
+            )
 
-        hashed = 0
-        already_cached = 0
-        skipped_small = 0
-        error_count = 0
-        total_bytes_hashed = 0
+            error_count = 0
+            start = time.monotonic()
 
-        start = time.monotonic()
-
-        # Explicit DFS stack — avoids recursion limits on deep trees.
-        stack: list[UPath] = [root]
-        while stack:
-            current = stack.pop()
-            try:
-                entries = list(current.iterdir())
-            except OSError:
-                logger.warning(
-                    "Cannot access directory %s", current, exc_info=True
-                )
-                error_count += 1
-                continue
-
-            for entry in entries:
-                # Never follow symlinks — they can cause cycles.
-                if entry.is_symlink():
-                    continue
-                if entry.is_dir():
-                    stack.append(entry)
-                    continue
-                if not entry.is_file():
-                    continue
-
+            # Explicit DFS stack — avoids recursion limits on deep trees.
+            # DB-file exclusion happens here (main thread) so workers never
+            # receive those paths.
+            futures = []
+            stack: list[UPath] = [root]
+            while stack:
+                current = stack.pop()
                 try:
-                    resolved = entry.resolve()
-
-                    # Skip the SQLite cache database itself and its journal files.
-                    if resolved in _excluded:
-                        continue
-
-                    stat = resolved.stat()
-                    size = stat.st_size
-
-                    if size < min_size_bytes:
-                        skipped_small += 1
-                        continue
-
-                    key = FileHashKey(resolved, stat.st_mtime_ns, size)
-                    if cacher.get(key) is not None:
-                        already_cached += 1
-                        continue
-
-                    content_hash = hasher.hash_file(resolved)
-                    cacher.put(key, content_hash)
-                    hashed += 1
-                    total_bytes_hashed += size
-
-                except Exception:
+                    entries = list(current.iterdir())
+                except OSError:
                     logger.warning(
-                        "Failed to process file %s", entry, exc_info=True
+                        "Cannot access directory %s", current, exc_info=True
                     )
                     error_count += 1
+                    continue
 
-        duration = time.monotonic() - start
-        speed = total_bytes_hashed / duration if duration > 0 else 0.0
+                for entry in entries:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir():
+                        stack.append(entry)
+                        continue
+                    if not entry.is_file():
+                        continue
+                    if Path(entry.resolve()) in _excluded:
+                        continue
+                    # Skip SQLite database files and their journal/WAL files
+                    if entry.name.endswith((".db", ".db-wal", ".db-shm")):
+                        continue
+                    futures.append(
+                        executor.submit(_hash_one, entry, cacher, hasher, min_size_bytes)
+                    )
 
-        return CachePopulationStats(
-            hashed=hashed,
-            already_cached=already_cached,
-            skipped_small=skipped_small,
-            errors=error_count,
-            total_bytes_hashed=total_bytes_hashed,
-            total_duration=duration,
-            avg_hashing_speed=speed,
-        )
+            # Collect results as workers complete.
+            hashed = 0
+            already_cached = 0
+            skipped_small = 0
+            total_bytes_hashed = 0
+
+            for future in as_completed(futures):
+                category, nbytes = future.result()
+                if category == "hashed":
+                    hashed += 1
+                    total_bytes_hashed += nbytes
+                elif category == "cached":
+                    already_cached += 1
+                elif category == "skipped_small":
+                    skipped_small += 1
+                else:  # "error"
+                    error_count += 1
+
+            duration = time.monotonic() - start
+            speed = total_bytes_hashed / duration if duration > 0 else 0.0
+
+            return CachePopulationStats(
+                hashed=hashed,
+                already_cached=already_cached,
+                skipped_small=skipped_small,
+                errors=error_count,
+                total_bytes_hashed=total_bytes_hashed,
+                total_duration=duration,
+                avg_hashing_speed=speed,
+            )
