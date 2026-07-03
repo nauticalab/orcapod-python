@@ -724,3 +724,55 @@ def test_zarr_analyzer_round_trip(tmp_path):
         analyzer.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
         recovered.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
     )
+
+
+# ── SISortingAnalyzerHandler tests ────────────────────────────────────────────
+
+def test_si_sorting_analyzer_handler_hash_stability(tmp_path):
+    """Same SortingAnalyzer produces identical ContentHash across two calls."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+    from orcapod.types import ContentHash
+
+    analyzer = _make_sorting_analyzer(tmp_path, "binary_folder")
+    handler = SISortingAnalyzerHandler()
+
+    h1 = handler.handle(analyzer, hasher=None)
+    h2 = handler.handle(analyzer, hasher=None)
+
+    assert isinstance(h1, ContentHash)
+    assert h1 == h2
+
+
+def test_si_sorting_analyzer_handler_hash_changes_with_path(tmp_path):
+    """SortingAnalyzers at different folder paths produce different ContentHash values."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+
+    analyzer_a = _make_sorting_analyzer(tmp_path / "a", "binary_folder")
+    analyzer_b = _make_sorting_analyzer(tmp_path / "b", "binary_folder")
+
+    handler = SISortingAnalyzerHandler()
+    assert handler.handle(analyzer_a, hasher=None) != handler.handle(analyzer_b, hasher=None)
+
+
+def test_si_sorting_analyzer_handler_in_memory_raises():
+    """``SISortingAnalyzerHandler`` raises ValueError for in-memory analyzers."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+
+    rng = np.random.default_rng(0)
+    n_chan = 2
+    traces = rng.standard_normal((100, n_chan)).astype("float32")
+    recording = si_core.NumpyRecording([traces], sampling_frequency=30_000)
+    # SortingAnalyzer.create requires a probe to be attached to the recording
+    locations = np.column_stack([np.zeros(n_chan), np.arange(n_chan) * 25.0])
+    recording.set_dummy_probe_from_locations(locations)
+    sorting = si_core.NumpySorting.from_unit_dict(
+        {0: np.array([10, 50, 90])}, sampling_frequency=30_000
+    )
+    analyzer = si_core.SortingAnalyzer.create(sorting, recording, format="memory")
+
+    handler = SISortingAnalyzerHandler()
+    with pytest.raises(ValueError, match="in-memory"):
+        handler.handle(analyzer, hasher=None)

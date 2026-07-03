@@ -723,6 +723,44 @@ class LogicalSISortingAnalyzer(BaseLogicalType):
         return SortingAnalyzer.load(data["folder"])
 
 
+class SISortingAnalyzerHandler:
+    """Semantic hash handler for ``spikeinterface.core.SortingAnalyzer``.
+
+    Computes a SHA-256 ``ContentHash`` of the folder path string
+    (``str(analyzer.folder).encode()``). This is phase 1 — path-string
+    hashing. Content hashing of the folder contents is deferred to ITL-476.
+
+    The ``hasher`` argument is accepted for protocol conformance but not used —
+    hashing is done directly via ``hashlib.sha256`` to avoid overhead.
+    """
+
+    def handle(self, obj: Any, hasher: SemanticHasherProtocol | None) -> ContentHash:
+        """Return a SHA-256 ``ContentHash`` of the analyzer's folder path string.
+
+        Args:
+            obj: A ``SortingAnalyzer`` instance.
+            hasher: Accepted for protocol conformance; not used.
+
+        Returns:
+            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
+            SHA-256 of ``str(analyzer.folder).encode()``.
+
+        Raises:
+            ValueError: If ``analyzer.folder`` is ``None`` (in-memory analyzer).
+        """
+        if obj.folder is None:
+            raise ValueError(
+                "Cannot hash in-memory SortingAnalyzer (folder is None). "
+                "Call save_as() first."
+            )
+        folder_bytes = str(obj.folder).encode()
+        logger.debug("SISortingAnalyzerHandler: hashing folder path %r", str(obj.folder))
+        return ContentHash(
+            method="sha256",
+            digest=hashlib.sha256(folder_bytes).digest(),
+        )
+
+
 def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
 
