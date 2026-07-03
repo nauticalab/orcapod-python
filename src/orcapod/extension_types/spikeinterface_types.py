@@ -746,8 +746,13 @@ class SISortingAnalyzerHandler:
             SHA-256 of ``str(analyzer.folder).encode()``.
 
         Raises:
+            TypeError: If ``obj`` is not a ``SortingAnalyzer``.
             ValueError: If ``analyzer.folder`` is ``None`` (in-memory analyzer).
         """
+        if not isinstance(obj, SortingAnalyzer):
+            raise TypeError(
+                f"SISortingAnalyzerHandler: expected SortingAnalyzer, got {type(obj)!r}"
+            )
         if obj.folder is None:
             raise ValueError(
                 "Cannot hash in-memory SortingAnalyzer (folder is None). "

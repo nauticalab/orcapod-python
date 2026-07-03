@@ -776,3 +776,13 @@ def test_si_sorting_analyzer_handler_in_memory_raises():
     handler = SISortingAnalyzerHandler()
     with pytest.raises(ValueError, match="in-memory"):
         handler.handle(analyzer, hasher=None)
+
+
+def test_si_sorting_analyzer_handler_type_error():
+    """``SISortingAnalyzerHandler`` raises TypeError for non-SortingAnalyzer objects."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+
+    handler = SISortingAnalyzerHandler()
+    with pytest.raises(TypeError, match="SISortingAnalyzerHandler"):
+        handler.handle("not_a_sorting_analyzer", hasher=None)
