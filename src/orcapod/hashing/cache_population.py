@@ -7,8 +7,9 @@ the SQLite file-hash cache with hashes of large files before a pipeline run.
 from __future__ import annotations
 
 import logging
+import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MIN_SIZE_BYTES: int = 500 * 1024 * 1024  # 500 MB
 _DEFAULT_MAX_WORKERS: int = 4
+# Maximum futures kept in-flight relative to the worker count.  Keeping the
+# pending set bounded prevents O(num_files) memory growth when traversal is
+# faster than hashing.
+_PENDING_FACTOR: int = 4
 
 
 @dataclass(frozen=True)
@@ -51,41 +56,40 @@ class CachePopulationStats:
 
 
 def _hash_one(
-    entry: UPath,
+    resolved: Path,
+    file_stat: os.stat_result,
     cacher: SqliteHashCacher,
     hasher: FileHasher,
-    min_size_bytes: int,
-) -> tuple[Literal["hashed", "cached", "skipped_small", "error"], int]:
-    """Hash and cache a single file, returning a (category, bytes) result pair.
+) -> tuple[Literal["hashed", "cached", "error"], int]:
+    """Hash and cache a single qualifying file, returning a (category, bytes) result pair.
 
-    Called from worker threads inside ``populate_hash_cache()``. ``cacher`` and
-    ``hasher`` are shared across threads; both are safe because ``SqliteHashCacher``
-    uses ``threading.local()`` connections and ``FileHasher`` is stateless.
+    Called from worker threads inside ``populate_hash_cache()``. The file has
+    already passed the size filter on the traversal thread. ``cacher`` and
+    ``hasher`` are shared across threads; both are safe because
+    ``SqliteHashCacher`` uses ``threading.local()`` connections and
+    ``FileHasher`` is stateless.
 
     Args:
-        entry: File path to process.
+        resolved: Fully resolved file path (no symlinks).
+        file_stat: ``os.stat_result`` obtained on the traversal thread; used
+            to build the cache key (mtime_ns + size) without a second stat call.
         cacher: Shared ``SqliteHashCacher`` instance.
         hasher: Shared ``FileHasher`` instance.
-        min_size_bytes: Files strictly smaller than this threshold are skipped.
 
     Returns:
         A tuple ``(category, bytes_hashed)`` where ``category`` is one of
-        ``"hashed"``, ``"cached"``, ``"skipped_small"``, or ``"error"``, and
-        ``bytes_hashed`` is the file size for newly hashed files, ``0`` otherwise.
+        ``"hashed"``, ``"cached"``, or ``"error"``, and ``bytes_hashed``
+        is the file size for newly hashed files, ``0`` otherwise.
     """
     try:
-        resolved = entry.resolve()
-        stat = resolved.stat()
-        if stat.st_size < min_size_bytes:
-            return ("skipped_small", 0)
-        key = FileHashKey(resolved, stat.st_mtime_ns, stat.st_size)
+        key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
         if cacher.get(key) is not None:
             return ("cached", 0)
         content_hash = hasher.hash_file(resolved)
         cacher.put(key, content_hash)
-        return ("hashed", stat.st_size)
+        return ("hashed", file_stat.st_size)
     except Exception:
-        logger.warning("Failed to process file %s", entry, exc_info=True)
+        logger.warning("Failed to process file %s", resolved, exc_info=True)
         return ("error", 0)
 
 
@@ -107,10 +111,13 @@ def populate_hash_cache(
     Symlinks are skipped. Per-file and per-directory errors are logged as warnings
     and counted in ``CachePopulationStats.errors``.
 
-    Directory traversal runs on the calling thread. Per-file work (stat, cache
-    lookup, hashing, cache write) is dispatched to a ``ThreadPoolExecutor`` with
-    ``max_workers`` threads. Pass ``max_workers=1`` to restore single-threaded
-    behaviour.
+    Directory traversal, ``stat()`` calls, and size filtering all run on the
+    calling thread.  Only files that meet the size threshold are dispatched to
+    a ``ThreadPoolExecutor`` with ``max_workers`` threads for cache-lookup and
+    hashing.  The number of in-flight futures is capped at
+    ``max_workers * 4`` so that peak memory stays O(max_workers) regardless
+    of how many files are in the tree.  Pass ``max_workers=1`` to restore
+    single-threaded behaviour.
 
     Args:
         path: Root directory to scan recursively. Accepts ``str``, ``os.PathLike``,
@@ -164,12 +171,20 @@ def populate_hash_cache(
             )
 
             error_count = 0
+            hashed = 0
+            already_cached = 0
+            skipped_small = 0
+            total_bytes_hashed = 0
             start = time.monotonic()
 
+            # Cap the number of futures kept in-flight so that peak memory
+            # stays O(max_workers) regardless of tree size.
+            _max_pending = max_workers * _PENDING_FACTOR
+            pending: set[Future[tuple[Literal["hashed", "cached", "error"], int]]] = set()
+
             # Explicit DFS stack — avoids recursion limits on deep trees.
-            # DB-file exclusion happens here (main thread) so workers never
-            # receive those paths.
-            futures = []
+            # DB-file exclusion, stat(), and size-filtering all happen here
+            # (main thread) so workers only receive qualifying file paths.
             stack: list[UPath] = [root]
             while stack:
                 current = stack.pop()
@@ -190,27 +205,54 @@ def populate_hash_cache(
                         continue
                     if not entry.is_file():
                         continue
-                    if Path(entry.resolve()) in _excluded:
+
+                    # Resolve, stat, and filter by size on the traversal
+                    # thread.  Only qualifying files are submitted to the
+                    # executor, keeping the pending set small and avoiding
+                    # futures for every tiny file in the tree.
+                    try:
+                        resolved = Path(entry.resolve())
+                        if resolved in _excluded:
+                            continue
+                        file_stat = resolved.stat()
+                    except OSError:
+                        logger.warning(
+                            "Cannot stat file %s", entry, exc_info=True
+                        )
+                        error_count += 1
                         continue
-                    futures.append(
-                        executor.submit(_hash_one, entry, cacher, hasher, min_size_bytes)
+
+                    if file_stat.st_size < min_size_bytes:
+                        skipped_small += 1
+                        continue
+
+                    # Drain completed futures when the pending set is full,
+                    # providing backpressure when hashing is slower than
+                    # traversal.
+                    if len(pending) >= _max_pending:
+                        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                        for fut in done:
+                            cat, nbytes = fut.result()
+                            if cat == "hashed":
+                                hashed += 1
+                                total_bytes_hashed += nbytes
+                            elif cat == "cached":
+                                already_cached += 1
+                            else:  # "error"
+                                error_count += 1
+
+                    pending.add(
+                        executor.submit(_hash_one, resolved, file_stat, cacher, hasher)
                     )
 
-            # Collect results as workers complete.
-            hashed = 0
-            already_cached = 0
-            skipped_small = 0
-            total_bytes_hashed = 0
-
-            for future in as_completed(futures):
+            # Drain all remaining futures.
+            for future in as_completed(pending):
                 category, nbytes = future.result()
                 if category == "hashed":
                     hashed += 1
                     total_bytes_hashed += nbytes
                 elif category == "cached":
                     already_cached += 1
-                elif category == "skipped_small":
-                    skipped_small += 1
                 else:  # "error"
                     error_count += 1
 
