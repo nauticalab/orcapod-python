@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from upath import UPath
 
 _DEFAULT_MIN_SIZE_MB: float = 500.0
 
@@ -63,7 +64,7 @@ def warm_cache(
         typer.echo("Error: --workers must be at least 1", err=True)
         raise typer.Exit(code=1)
 
-    root = Path(path)
+    root = UPath(path)
     if not root.exists():
         typer.echo(f"Error: path does not exist: {path}", err=True)
         raise typer.Exit(code=1)

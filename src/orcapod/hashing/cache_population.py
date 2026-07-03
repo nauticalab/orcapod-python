@@ -90,7 +90,7 @@ def _hash_one(
 
 
 def populate_hash_cache(
-    path: PathLike,
+    path: PathLike | UPath,
     *,
     min_size_bytes: int = _DEFAULT_MIN_SIZE_BYTES,
     db_path: UPath | PathLike | None = None,
@@ -113,7 +113,8 @@ def populate_hash_cache(
     behaviour.
 
     Args:
-        path: Root directory to scan recursively.
+        path: Root directory to scan recursively. Accepts ``str``, ``os.PathLike``,
+            or ``UPath``.
         min_size_bytes: Files strictly smaller than this threshold (in bytes) are
             skipped and not cached. Defaults to 500 MB (``500 * 1024 * 1024``).
         db_path: Path to the SQLite hash cache database. Only local paths are
