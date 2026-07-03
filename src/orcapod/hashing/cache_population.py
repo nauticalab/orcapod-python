@@ -56,7 +56,7 @@ class CachePopulationStats:
 
 
 def _hash_one(
-    resolved: Path,
+    resolved: UPath,
     file_stat: os.stat_result,
     cacher: SqliteHashCacher,
     hasher: FileHasher,
@@ -161,12 +161,12 @@ def populate_hash_cache(
             # journal ("-journal").
             _db_resolved = cacher.db_path.resolve()
             _db_str = str(_db_resolved)
-            _excluded: frozenset[Path] = frozenset(
+            _excluded: frozenset[UPath] = frozenset(
                 [
-                    _db_resolved,
-                    Path(_db_str + "-wal"),
-                    Path(_db_str + "-shm"),
-                    Path(_db_str + "-journal"),
+                    UPath(_db_resolved),
+                    UPath(_db_str + "-wal"),
+                    UPath(_db_str + "-shm"),
+                    UPath(_db_str + "-journal"),
                 ]
             )
 
@@ -211,7 +211,7 @@ def populate_hash_cache(
                     # executor, keeping the pending set small and avoiding
                     # futures for every tiny file in the tree.
                     try:
-                        resolved = Path(entry.resolve())
+                        resolved = entry.resolve()
                         if resolved in _excluded:
                             continue
                         file_stat = resolved.stat()
