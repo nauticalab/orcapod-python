@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from upath import UPath
 
@@ -54,7 +55,7 @@ def _hash_one(
     cacher: SqliteHashCacher,
     hasher: FileHasher,
     min_size_bytes: int,
-) -> tuple[str, int]:
+) -> tuple[Literal["hashed", "cached", "skipped_small", "error"], int]:
     """Hash and cache a single file, returning a (category, bytes) result pair.
 
     Called from worker threads inside ``populate_hash_cache()``. ``cacher`` and
@@ -138,8 +139,6 @@ def populate_hash_cache(
         with SqliteHashCacher(_db_path) as cacher:
             # Collect the DB file and its SQLite journal/WAL siblings so they are
             # never treated as data files even if the DB lives inside the scan root.
-            # Also exclude any other .db files that may exist in the scan directory
-            # to avoid hashing SQLite databases that aren't the current cache.
             _db_resolved = cacher.db_path.resolve()
             _excluded: frozenset[Path] = frozenset(
                 [
@@ -177,9 +176,6 @@ def populate_hash_cache(
                     if not entry.is_file():
                         continue
                     if Path(entry.resolve()) in _excluded:
-                        continue
-                    # Skip SQLite database files and their journal/WAL files
-                    if entry.name.endswith((".db", ".db-wal", ".db-shm")):
                         continue
                     futures.append(
                         executor.submit(_hash_one, entry, cacher, hasher, min_size_bytes)

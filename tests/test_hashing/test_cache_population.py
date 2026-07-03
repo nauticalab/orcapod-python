@@ -301,6 +301,10 @@ class TestConcurrency:
             data_dir, min_size_bytes=_MIN, db_path=db2, max_workers=4
         )
 
+        # Preconditions: verify both runs actually hashed the expected files.
+        assert serial.hashed == 2
+        assert serial.total_bytes_hashed == 50
+
         assert serial.hashed == concurrent.hashed
         assert serial.already_cached == concurrent.already_cached
         assert serial.skipped_small == concurrent.skipped_small
