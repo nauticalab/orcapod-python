@@ -29,6 +29,7 @@ dependencies = [
     "pymongo>=4.15.5",
     "basedpyright>=1.38.1",
     "pydantic>=2.0",
+    "typer>=0.12",
 ]
 readme = "README.md"
 requires-python = ">=3.11.0"
@@ -52,6 +53,8 @@ spiraldb = [
 spikeinterface = ["spikeinterface>=0.101"]
 all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]", "orcapod[spikeinterface]"]
 
+[project.scripts]
+orcapod = "orcapod.cli:app"
 
 [tool.hatch.version]
 source = "vcs"
