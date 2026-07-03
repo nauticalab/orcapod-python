@@ -522,6 +522,68 @@ def test_si_motion_storage_to_python_missing_key():
         lt.storage_to_python(truncated_bytes)
 
 
+def test_si_motion_storage_to_python_invalid_bytes():
+    """storage_to_python raises ValueError when passed bytes that are not a .npz archive."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    lt = LogicalSIMotion()
+    with pytest.raises(ValueError, match="cannot deserialise"):
+        lt.storage_to_python(b"this is not a npz archive at all")
+
+
+def test_register_spikeinterface_types_motion_fresh_registration():
+    """register_spikeinterface_types() takes the else-branch (first-time registration)
+    when LogicalSIMotion is not already in the context."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from unittest.mock import MagicMock
+    from orcapod.extension_types.spikeinterface_types import (
+        register_spikeinterface_types,
+        LogicalSIMotion,
+        SIMotionHandler,
+    )
+
+    # A fully mock context: register_logical_type returns normally (no ValueError)
+    # which causes the else-branch (line 679) to execute for all three types.
+    mock_ctx = MagicMock()
+    register_spikeinterface_types(context=mock_ctx)
+
+    # Verify LogicalSIMotion was passed to register_logical_type
+    registered_types = [
+        call.args[0].__class__
+        for call in mock_ctx.type_converter.register_logical_type.call_args_list
+    ]
+    assert LogicalSIMotion in registered_types
+
+    # Verify SIMotionHandler was registered with the handler registry
+    from spikeinterface.core.motion import Motion
+    handler_calls = mock_ctx.semantic_hasher.type_handler_registry.register.call_args_list
+    registered_python_types = [call.args[0] for call in handler_calls]
+    assert Motion in registered_python_types
+
+
+def test_register_spikeinterface_types_motion_reraises_unexpected_error():
+    """register_spikeinterface_types() re-raises ValueError from register_logical_type
+    when the message does not contain 'already bound to'."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from unittest.mock import MagicMock
+    from orcapod.extension_types.spikeinterface_types import (
+        register_spikeinterface_types,
+        LogicalSIMotion,
+    )
+
+    # Side-effect: raise an unexpected ValueError only when called with LogicalSIMotion
+    def raise_on_motion(logical_type):
+        if isinstance(logical_type, LogicalSIMotion):
+            raise ValueError("something completely unexpected happened")
+
+    mock_ctx = MagicMock()
+    mock_ctx.type_converter.register_logical_type.side_effect = raise_on_motion
+
+    with pytest.raises(ValueError, match="something completely unexpected"):
+        register_spikeinterface_types(context=mock_ctx)
+
+
 def test_register_spikeinterface_types_includes_motion():
     """register_spikeinterface_types() wires LogicalSIMotion and SIMotionHandler
     into the default context so they are found by type lookup."""
