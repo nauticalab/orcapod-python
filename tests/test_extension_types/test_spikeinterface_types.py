@@ -786,3 +786,35 @@ def test_si_sorting_analyzer_handler_type_error():
     handler = SISortingAnalyzerHandler()
     with pytest.raises(TypeError, match="SISortingAnalyzerHandler"):
         handler.handle("not_a_sorting_analyzer", hasher=None)
+
+
+def test_register_spikeinterface_types_includes_sorting_analyzer(tmp_path):
+    """``register_spikeinterface_types()`` wires ``LogicalSISortingAnalyzer`` and
+    ``SISortingAnalyzerHandler`` into the default context so they are found by type lookup."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
+    from orcapod.contexts import get_default_context
+
+    register_spikeinterface_types()
+    ctx = get_default_context()
+
+    analyzer = _make_sorting_analyzer(tmp_path, "binary_folder")
+
+    # LogicalType registered: type_converter can find it
+    arrow_type = ctx.type_converter.python_type_to_arrow_type(type(analyzer))
+    assert arrow_type.extension_name == "spikeinterface.sorting_analyzer"
+
+    # Handler registered: semantic_hasher can find it
+    from orcapod.types import ContentHash
+    handler = ctx.semantic_hasher.type_handler_registry.get_handler(analyzer)
+    assert handler is not None
+    result = handler.handle(analyzer, hasher=None)
+    assert isinstance(result, ContentHash)
+
+    # Full round-trip through type_converter
+    storage = ctx.type_converter.python_to_storage(analyzer, type(analyzer))
+    recovered = ctx.type_converter.storage_to_python(storage, type(analyzer))
+    np.testing.assert_array_equal(
+        analyzer.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+    )

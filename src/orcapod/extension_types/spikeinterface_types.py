@@ -770,8 +770,9 @@ def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
 
     Registers ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459),
-    ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468), and
-    ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470).
+    ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468),
+    ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470), and
+    ``LogicalSISortingAnalyzer`` / ``SISortingAnalyzerHandler`` (ITL-469).
 
     For the default context this is called automatically at startup (the
     default ``v0.1.json`` context config lists all six with ``"_optional": true``,
@@ -850,3 +851,24 @@ def register_spikeinterface_types(context: Any = None) -> None:
 
     # Handler registration silently replaces an existing entry, so always safe.
     context.semantic_hasher.type_handler_registry.register(Motion, SIMotionHandler())
+
+    # --- SortingAnalyzer ---
+    lt_sorting_analyzer = LogicalSISortingAnalyzer()
+    try:
+        context.type_converter.register_logical_type(lt_sorting_analyzer)
+    except ValueError as exc:
+        # A different LogicalSISortingAnalyzer instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time). That is
+        # fine — both instances are equivalent. Any other ValueError propagates.
+        if "already bound to" not in str(exc):
+            raise
+        logger.debug(
+            "register_spikeinterface_types: LogicalSISortingAnalyzer already registered, skipping"
+        )
+    else:
+        logger.debug("register_spikeinterface_types: registered LogicalSISortingAnalyzer")
+
+    # Handler registration silently replaces an existing entry, so always safe.
+    context.semantic_hasher.type_handler_registry.register(
+        SortingAnalyzer, SISortingAnalyzerHandler()
+    )
