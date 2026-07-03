@@ -217,6 +217,29 @@ class TestCleanFieldRecursion:
         gc = inner_field.type.field(0)
         assert gc.metadata == {_EXT_NAME: b"gc.t"}
 
+    def test_clean_sparse_union_type(self):
+        """_clean_type handles a sparse union arrow type (line 85 branch)."""
+        import pyarrow as pa
+        from orcapod.hashing.schema_cleaner import _clean_type
+
+        # Build a sparse union: int32 | utf8
+        fields = [pa.field("a", pa.int32()), pa.field("b", pa.utf8())]
+        sparse = pa.sparse_union(fields)
+        result = _clean_type(sparse)
+        assert pa.types.is_union(result)
+        assert result.mode == "sparse"
+
+    def test_clean_dense_union_type(self):
+        """_clean_type handles a dense union arrow type (line 86 branch)."""
+        import pyarrow as pa
+        from orcapod.hashing.schema_cleaner import _clean_type
+
+        fields = [pa.field("a", pa.int32()), pa.field("b", pa.utf8())]
+        dense = pa.dense_union(fields)
+        result = _clean_type(dense)
+        assert pa.types.is_union(result)
+        assert result.mode == "dense"
+
     def test_dictionary_value_type_cleaned(self):
         """dictionary value_type child metadata is filtered; index_type preserved."""
         # Build a dictionary whose value type is a struct with mixed metadata on a child

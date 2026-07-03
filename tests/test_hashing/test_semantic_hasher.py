@@ -24,7 +24,7 @@ from uuid import UUID
 
 import pytest
 
-from orcapod.hashing.defaults import get_default_semantic_hasher
+from orcapod.hashing.defaults import get_default_arrow_hasher, get_default_semantic_hasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
     register_builtin_python_type_handlers,
 )
@@ -1056,6 +1056,12 @@ class TestGlobalSingletons:
         assert isinstance(ch.to_int(), int)
         assert isinstance(ch.to_hex(16), str)
         assert len(ch.to_hex(16)) == 16
+
+    def test_get_default_arrow_hasher_returns_protocol_instance(self):
+        """get_default_arrow_hasher() returns the arrow hasher from the default context."""
+        from orcapod.protocols.hashing_protocols import ArrowHasherProtocol
+        hasher = get_default_arrow_hasher()
+        assert isinstance(hasher, ArrowHasherProtocol)
 
 
 # ---------------------------------------------------------------------------
