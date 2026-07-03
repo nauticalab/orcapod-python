@@ -1,4 +1,4 @@
-"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468).
+"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468, ITL-470).
 
 ``LogicalSIRecording`` maps ``spikeinterface.core.BaseRecording`` ↔ Arrow
 ``large_string`` using SpikeInterface's own ``to_dict(recursive=True,
@@ -10,6 +10,12 @@ the same JSON bytes via SHA-256 for content identity.
 ``large_string`` using the same serialization approach. ``SISortingHandler``
 hashes the JSON bytes via SHA-256.
 
+``LogicalSIMotion`` maps ``spikeinterface.core.motion.Motion`` ↔ Arrow
+``large_binary`` using a self-contained NumPy ``.npz`` archive as the storage
+envelope. All displacement arrays, bin arrays, and scalar metadata are embedded
+in the archive — no external folder is required. ``SIMotionHandler`` hashes
+the same ``.npz`` bytes via SHA-256.
+
 This module requires the optional ``spikeinterface`` extras group:
 ``pip install orcapod[spikeinterface]``
 
@@ -20,9 +26,12 @@ pods: call ``register_spikeinterface_types()`` once at startup.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 import polars as pl
 import pyarrow as pa
@@ -37,6 +46,7 @@ if TYPE_CHECKING:
 
 try:
     from spikeinterface.core import BaseRecording, BaseSorting
+    from spikeinterface.core.motion import Motion
 except ImportError as _exc:
     raise ImportError(
         "spikeinterface is not installed. "
@@ -44,6 +54,37 @@ except ImportError as _exc:
     ) from _exc
 
 logger = logging.getLogger(__name__)
+
+
+def _motion_to_npz_bytes(motion: Motion) -> bytes:
+    """Serialise a ``Motion`` to ``.npz`` bytes.
+
+    Shared by ``LogicalSIMotion.python_to_storage`` and ``SIMotionHandler.handle``
+    to guarantee the stored bytes and hash input are always identical.
+
+    The ``.npz`` archive keys are: ``spatial_bins_um``, ``direction`` (length-1
+    string array), ``interpolation_method`` (length-1 string array),
+    ``num_segments`` (length-1 int array), ``displacement_{i}`` and
+    ``temporal_bins_s_{i}`` for each segment index ``i``.
+
+    Args:
+        motion: A ``Motion`` instance.
+
+    Returns:
+        Raw bytes of a NumPy ``.npz`` archive.
+    """
+    buf = io.BytesIO()
+    kwargs: dict[str, np.ndarray] = {
+        "spatial_bins_um": motion.spatial_bins_um,
+        "direction": np.array([motion.direction]),
+        "interpolation_method": np.array([motion.interpolation_method]),
+        "num_segments": np.array([motion.num_segments]),
+    }
+    for i in range(motion.num_segments):
+        kwargs[f"displacement_{i}"] = motion.displacement[i]
+        kwargs[f"temporal_bins_s_{i}"] = motion.temporal_bins_s[i]
+    np.savez(buf, **kwargs)
+    return buf.getvalue()
 
 
 class LogicalSIRecording(BaseLogicalType):
@@ -300,6 +341,156 @@ class LogicalSISorting(BaseLogicalType):
         return si_load(si_dict)
 
 
+class LogicalSIMotion(BaseLogicalType):
+    """Logical type for ``spikeinterface.core.motion.Motion``.
+
+    Stores ``Motion`` instances as Arrow ``large_binary`` columns tagged with
+    extension name ``"spikeinterface.motion"``. The stored value is a NumPy
+    ``.npz`` archive produced by ``_motion_to_npz_bytes()``, containing all
+    displacement arrays, temporal/spatial bin arrays, and scalar metadata
+    (``direction``, ``interpolation_method``, ``num_segments``). Loading
+    reconstructs the ``Motion`` directly from those arrays.
+
+    Because the entire content is embedded in the ``.npz`` bytes, no external
+    folder is required — stored ``Motion`` objects are portable wherever the
+    database is accessible.
+
+    Example:
+        >>> import numpy as np
+        >>> from spikeinterface.core.motion import Motion
+        >>> from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+        >>> lt = LogicalSIMotion()
+        >>> motion = Motion(np.zeros((10, 3)), np.linspace(0, 1, 10), np.array([0.0, 1.0, 2.0]))
+        >>> recovered = lt.storage_to_python(lt.python_to_storage(motion))
+        >>> recovered == motion
+        True
+    """
+
+    _arrow_ext_class = make_arrow_extension_type("spikeinterface.motion", pa.large_binary())
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("spikeinterface.motion", pa.large_binary())
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "spikeinterface.motion"
+    python_type: type = Motion
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the cached Arrow extension type for ``Motion``.
+
+        Returns:
+            A ``pa.ExtensionType`` with extension name ``"spikeinterface.motion"``
+            and storage type ``pa.large_binary()``.
+        """
+        if LogicalSIMotion._arrow_ext is None:
+            LogicalSIMotion._arrow_ext = LogicalSIMotion._arrow_ext_class()
+        return LogicalSIMotion._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the cached Polars extension type for ``Motion``.
+
+        Returns:
+            A ``pl.BaseExtension`` registered under ``"spikeinterface.motion"``.
+        """
+        if LogicalSIMotion._polars_ext is None:
+            LogicalSIMotion._polars_ext = LogicalSIMotion._polars_ext_class()
+        return LogicalSIMotion._polars_ext
+
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> bytes:
+        """Serialise a ``Motion`` to its ``.npz`` storage representation.
+
+        Args:
+            value: A ``Motion`` instance.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            Raw bytes of a NumPy ``.npz`` archive.
+        """
+        if not isinstance(value, Motion):
+            raise TypeError(
+                f"LogicalSIMotion: expected Motion, got {type(value)!r}"
+            )
+        return _motion_to_npz_bytes(value)
+
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> Motion:
+        """Reconstruct a ``Motion`` from its ``.npz`` storage bytes.
+
+        Args:
+            storage_value: Raw ``.npz`` bytes as stored in Arrow ``large_binary``.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``Motion`` instance reconstructed from the stored arrays.
+
+        Raises:
+            ValueError: If ``storage_value`` cannot be parsed as a valid
+                ``.npz`` archive or is missing expected keys.
+        """
+        try:
+            npz = np.load(io.BytesIO(bytes(storage_value)), allow_pickle=False)
+        except Exception as exc:
+            raise ValueError(
+                f"LogicalSIMotion: cannot deserialise storage value of type "
+                f"{type(storage_value)!r}; expected raw .npz bytes."
+            ) from exc
+        with npz:
+            try:
+                n = int(npz["num_segments"][0])
+                return Motion(
+                    displacement=[npz[f"displacement_{i}"] for i in range(n)],
+                    temporal_bins_s=[npz[f"temporal_bins_s_{i}"] for i in range(n)],
+                    spatial_bins_um=npz["spatial_bins_um"],
+                    direction=str(npz["direction"][0]),
+                    interpolation_method=str(npz["interpolation_method"][0]),
+                )
+            except KeyError as exc:
+                raise ValueError(
+                    f"LogicalSIMotion: .npz archive is missing expected key {exc}. "
+                    f"The archive may have been produced by a different version of orcapod."
+                ) from exc
+
+
+class SIMotionHandler:
+    """Semantic hash handler for ``spikeinterface.core.motion.Motion``.
+
+    Computes a SHA-256 ``ContentHash`` of the ``.npz`` bytes produced by
+    ``_motion_to_npz_bytes()``. This is identical to the bytes that
+    ``LogicalSIMotion`` stores in Arrow, so hash input and storage
+    representation are always consistent.
+
+    The ``hasher`` argument is accepted for protocol conformance but not used —
+    hashing is done directly via ``hashlib.sha256`` to avoid overhead.
+    """
+
+    def handle(self, obj: Any, hasher: SemanticHasherProtocol | None) -> ContentHash:
+        """Return a SHA-256 ``ContentHash`` of the motion's ``.npz`` bytes.
+
+        Args:
+            obj: A ``Motion`` instance.
+            hasher: Accepted for protocol conformance; not used.
+
+        Returns:
+            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
+            SHA-256 of the ``.npz`` bytes from ``_motion_to_npz_bytes()``.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``Motion``.
+        """
+        if not isinstance(obj, Motion):
+            raise TypeError(
+                f"SIMotionHandler: expected Motion, got {type(obj)!r}"
+            )
+        npz_bytes = _motion_to_npz_bytes(obj)
+        logger.debug("SIMotionHandler: hashing %d .npz bytes", len(npz_bytes))
+        return ContentHash(
+            method="sha256",
+            digest=hashlib.sha256(npz_bytes).digest(),
+        )
+
+
 class SIRecordingHandler:
     """Semantic hash handler for `spikeinterface.core.BaseRecording`.
 
@@ -409,11 +600,12 @@ class SISortingHandler:
 def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
 
-    Registers both ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459)
-    and ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468).
+    Registers ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459),
+    ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468), and
+    ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470).
 
     For the default context this is called automatically at startup (the
-    default ``v0.1.json`` context config lists all four with ``"_optional": true``,
+    default ``v0.1.json`` context config lists all six with ``"_optional": true``,
     so they are wired in whenever ``spikeinterface`` is installed). Call this
     function explicitly only when working with a custom ``DataContext`` that was
     not constructed from the default config.
@@ -470,3 +662,22 @@ def register_spikeinterface_types(context: Any = None) -> None:
 
     # Handler registration silently replaces an existing entry, so always safe.
     context.semantic_hasher.type_handler_registry.register(BaseSorting, SISortingHandler())
+
+    # --- Motion ---
+    lt_motion = LogicalSIMotion()
+    try:
+        context.type_converter.register_logical_type(lt_motion)
+    except ValueError as exc:
+        # A different LogicalSIMotion instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time). That is
+        # fine — both instances are equivalent. Any other ValueError propagates.
+        if "already bound to" not in str(exc):
+            raise
+        logger.debug(
+            "register_spikeinterface_types: LogicalSIMotion already registered, skipping"
+        )
+    else:
+        logger.debug("register_spikeinterface_types: registered LogicalSIMotion")
+
+    # Handler registration silently replaces an existing entry, so always safe.
+    context.semantic_hasher.type_handler_registry.register(Motion, SIMotionHandler())

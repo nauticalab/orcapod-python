@@ -381,3 +381,234 @@ def test_register_spikeinterface_types_includes_sorting(tmp_path):
         saved.get_unit_spike_train(unit_id=0, segment_index=0),
         recovered.get_unit_spike_train(unit_id=0, segment_index=0),
     )
+
+
+# ── Motion helpers & fixtures ──────────────────────────────────────────────
+
+
+def _make_motion(seed: int = 42) -> "spikeinterface.core.motion.Motion":
+    """Create a small deterministic single-segment Motion for use in tests."""
+    from spikeinterface.core.motion import Motion
+
+    rng = np.random.default_rng(seed)
+    n_temporal, n_spatial = 100, 5
+    displacement = rng.standard_normal((n_temporal, n_spatial))
+    temporal_bins = np.linspace(0, 10, n_temporal)
+    spatial_bins = np.linspace(0, 3000, n_spatial)
+    return Motion(displacement, temporal_bins, spatial_bins, direction="y")
+
+
+# ── LogicalSIMotion tests ──────────────────────────────────────────────────
+
+
+def test_logical_si_motion_importable():
+    """LogicalSIMotion has the expected extension name, python_type, and storage type."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+    from spikeinterface.core.motion import Motion
+    import pyarrow as pa
+
+    lt = LogicalSIMotion()
+    assert lt.logical_type_name == "spikeinterface.motion"
+    assert lt.python_type is Motion
+    assert lt.get_arrow_extension_type().storage_type == pa.large_binary()
+
+
+def test_si_motion_round_trip():
+    """Single-segment Motion round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    motion = _make_motion()
+    lt = LogicalSIMotion()
+
+    storage = lt.python_to_storage(motion)
+    assert isinstance(storage, bytes)
+
+    recovered = lt.storage_to_python(storage)
+    assert recovered == motion
+
+
+def test_si_motion_multi_segment_round_trip():
+    """Multi-segment Motion round-trips correctly, preserving segment count and direction."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+    from spikeinterface.core.motion import Motion
+
+    rng = np.random.default_rng(99)
+    n_t, n_s = 80, 4
+    motion = Motion(
+        displacement=[rng.standard_normal((n_t, n_s)), rng.standard_normal((n_t, n_s))],
+        temporal_bins_s=[np.linspace(0, 8, n_t), np.linspace(0, 8, n_t)],
+        spatial_bins_um=np.linspace(0, 2000, n_s),
+        direction="z",
+        interpolation_method="linear",
+    )
+    lt = LogicalSIMotion()
+    recovered = lt.storage_to_python(lt.python_to_storage(motion))
+
+    assert recovered == motion
+    assert recovered.num_segments == 2
+    assert recovered.direction == "z"
+    assert recovered.interpolation_method == "linear"
+
+
+# ── SIMotionHandler tests ──────────────────────────────────────────────────
+
+
+def test_si_motion_handler_hash_stability():
+    """Same Motion produces identical ContentHash across two calls."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SIMotionHandler
+    from orcapod.types import ContentHash
+
+    motion = _make_motion()
+    handler = SIMotionHandler()
+
+    h1 = handler.handle(motion, hasher=None)
+    h2 = handler.handle(motion, hasher=None)
+
+    assert isinstance(h1, ContentHash)
+    assert h1.method == "sha256"
+    assert h1 == h2
+
+
+def test_si_motion_handler_hash_changes_with_content():
+    """Different Motion objects (different seeds) produce different ContentHash values."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SIMotionHandler
+
+    motion_a = _make_motion(seed=1)
+    motion_b = _make_motion(seed=2)
+
+    handler = SIMotionHandler()
+    assert handler.handle(motion_a, hasher=None) != handler.handle(motion_b, hasher=None)
+
+
+def test_si_motion_handler_type_error():
+    """SIMotionHandler raises TypeError with class name in message for non-Motion input."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SIMotionHandler
+
+    handler = SIMotionHandler()
+    with pytest.raises(TypeError, match="SIMotionHandler"):
+        handler.handle("not a motion", hasher=None)
+
+
+def test_logical_si_motion_python_to_storage_type_error():
+    """LogicalSIMotion.python_to_storage raises TypeError for non-Motion input."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    lt = LogicalSIMotion()
+    with pytest.raises(TypeError, match="LogicalSIMotion"):
+        lt.python_to_storage("not a motion")
+
+
+def test_si_motion_storage_to_python_missing_key():
+    """storage_to_python raises ValueError when .npz is missing an expected key."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    import io
+    import numpy as np
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    # Build a valid .npz but deliberately omit 'num_segments'
+    buf = io.BytesIO()
+    np.savez(buf, spatial_bins_um=np.array([0.0, 1.0]), direction=np.array(["y"]))
+    truncated_bytes = buf.getvalue()
+
+    lt = LogicalSIMotion()
+    with pytest.raises(ValueError, match="missing expected key"):
+        lt.storage_to_python(truncated_bytes)
+
+
+def test_si_motion_storage_to_python_invalid_bytes():
+    """storage_to_python raises ValueError when passed bytes that are not a .npz archive."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSIMotion
+
+    lt = LogicalSIMotion()
+    with pytest.raises(ValueError, match="cannot deserialise"):
+        lt.storage_to_python(b"this is not a npz archive at all")
+
+
+def test_register_spikeinterface_types_motion_fresh_registration():
+    """register_spikeinterface_types() takes the else-branch (first-time registration)
+    when LogicalSIMotion is not already in the context."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from unittest.mock import MagicMock
+    from orcapod.extension_types.spikeinterface_types import (
+        register_spikeinterface_types,
+        LogicalSIMotion,
+        SIMotionHandler,
+    )
+
+    # A fully mock context: register_logical_type returns normally (no ValueError)
+    # which causes the else-branch (line 679) to execute for all three types.
+    mock_ctx = MagicMock()
+    register_spikeinterface_types(context=mock_ctx)
+
+    # Verify LogicalSIMotion was passed to register_logical_type
+    registered_types = [
+        call.args[0].__class__
+        for call in mock_ctx.type_converter.register_logical_type.call_args_list
+    ]
+    assert LogicalSIMotion in registered_types
+
+    # Verify SIMotionHandler was registered with the handler registry
+    from spikeinterface.core.motion import Motion
+    handler_calls = mock_ctx.semantic_hasher.type_handler_registry.register.call_args_list
+    registered_python_types = [call.args[0] for call in handler_calls]
+    assert Motion in registered_python_types
+
+
+def test_register_spikeinterface_types_motion_reraises_unexpected_error():
+    """register_spikeinterface_types() re-raises ValueError from register_logical_type
+    when the message does not contain 'already bound to'."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from unittest.mock import MagicMock
+    from orcapod.extension_types.spikeinterface_types import (
+        register_spikeinterface_types,
+        LogicalSIMotion,
+    )
+
+    # Side-effect: raise an unexpected ValueError only when called with LogicalSIMotion
+    def raise_on_motion(logical_type):
+        if isinstance(logical_type, LogicalSIMotion):
+            raise ValueError("something completely unexpected happened")
+
+    mock_ctx = MagicMock()
+    mock_ctx.type_converter.register_logical_type.side_effect = raise_on_motion
+
+    with pytest.raises(ValueError, match="something completely unexpected"):
+        register_spikeinterface_types(context=mock_ctx)
+
+
+def test_register_spikeinterface_types_includes_motion():
+    """register_spikeinterface_types() wires LogicalSIMotion and SIMotionHandler
+    into the default context so they are found by type lookup."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
+    from orcapod.contexts import get_default_context
+    from spikeinterface.core.motion import Motion
+    from orcapod.types import ContentHash
+
+    register_spikeinterface_types()
+    ctx = get_default_context()
+
+    motion = _make_motion()
+
+    # LogicalType registered: type_converter can find it by python type
+    arrow_type = ctx.type_converter.python_type_to_arrow_type(Motion)
+    assert arrow_type.extension_name == "spikeinterface.motion"
+
+    # Handler registered: semantic_hasher can find it by instance
+    handler = ctx.semantic_hasher.type_handler_registry.get_handler(motion)
+    assert handler is not None
+    result = handler.handle(motion, hasher=None)
+    assert isinstance(result, ContentHash)
+
+    # Full round-trip through context type_converter
+    storage = ctx.type_converter.python_to_storage(motion, Motion)
+    recovered = ctx.type_converter.storage_to_python(storage, Motion)
+    assert recovered == motion
