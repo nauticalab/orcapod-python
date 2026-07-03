@@ -1,5 +1,9 @@
 """Tests for populate_hash_cache() and CachePopulationStats."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 import dataclasses
 import pytest
 
@@ -48,7 +52,7 @@ class TestCachePopulationStats:
 _MIN = 10  # small threshold so test files qualify without being 500 MB
 
 
-def _write(path, name: str, size: int):
+def _write(path: Path, name: str, size: int) -> Path:
     """Write a file of exactly ``size`` bytes under ``path``."""
     f = path / name
     f.write_bytes(b"x" * size)

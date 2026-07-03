@@ -110,9 +110,9 @@ def populate_hash_cache(
         current = stack.pop()
         try:
             entries = list(current.iterdir())
-        except PermissionError:
+        except OSError:
             logger.warning(
-                "Cannot access directory %s: permission denied", current
+                "Cannot access directory %s", current, exc_info=True
             )
             error_count += 1
             continue
@@ -128,7 +128,7 @@ def populate_hash_cache(
                 continue
 
             try:
-                resolved = entry.resolve()
+                resolved = UPath(entry.resolve())
 
                 # Skip the SQLite cache database itself and its journal files.
                 if resolved in _excluded:
