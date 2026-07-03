@@ -818,3 +818,35 @@ def test_register_spikeinterface_types_includes_sorting_analyzer(tmp_path):
         analyzer.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
         recovered.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
     )
+
+
+def test_si_sorting_analyzer_storage_to_python_bad_json():
+    """``storage_to_python`` raises ``ValueError`` when passed a non-JSON string."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+
+    lt = LogicalSISortingAnalyzer()
+    with pytest.raises(ValueError, match="cannot deserialise"):
+        lt.storage_to_python("this is not valid json {{{")
+
+
+def test_register_spikeinterface_types_sorting_analyzer_reraises_unexpected_error():
+    """``register_spikeinterface_types()`` re-raises ``ValueError`` from
+    ``register_logical_type`` when the message does not contain ``'already bound to'``."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from unittest.mock import MagicMock
+    from orcapod.extension_types.spikeinterface_types import (
+        register_spikeinterface_types,
+        LogicalSISortingAnalyzer,
+    )
+
+    # Side-effect: raise an unexpected ValueError only when called with LogicalSISortingAnalyzer
+    def raise_on_sorting_analyzer(logical_type):
+        if isinstance(logical_type, LogicalSISortingAnalyzer):
+            raise ValueError("something completely unexpected happened")
+
+    mock_ctx = MagicMock()
+    mock_ctx.type_converter.register_logical_type.side_effect = raise_on_sorting_analyzer
+
+    with pytest.raises(ValueError, match="something completely unexpected"):
+        register_spikeinterface_types(context=mock_ctx)
