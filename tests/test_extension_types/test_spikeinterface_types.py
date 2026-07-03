@@ -612,3 +612,47 @@ def test_register_spikeinterface_types_includes_motion():
     storage = ctx.type_converter.python_to_storage(motion, Motion)
     recovered = ctx.type_converter.storage_to_python(storage, Motion)
     assert recovered == motion
+
+
+# ── SortingAnalyzer helpers ───────────────────────────────────────────────────
+
+def _make_sorting_analyzer(tmp_path, fmt: str):
+    """Create a minimal saved SortingAnalyzer for use as a test artifact.
+
+    Args:
+        tmp_path: Base directory. Created if it does not exist.
+        fmt: ``"binary_folder"`` or ``"zarr"``.
+
+    Returns:
+        A ``SortingAnalyzer`` saved to ``tmp_path/analyzer`` (binary_folder)
+        or ``tmp_path/analyzer.zarr`` (zarr).
+    """
+    import spikeinterface.core as si_core
+    from pathlib import Path
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(42)
+    traces = rng.standard_normal((200, 4)).astype("float32")
+    recording = si_core.NumpyRecording([traces], sampling_frequency=30_000)
+    spike_trains = {0: np.sort(rng.choice(200, 10, replace=False))}
+    sorting = si_core.NumpySorting.from_unit_dict(spike_trains, sampling_frequency=30_000)
+    if fmt == "zarr":
+        folder = str(tmp_path / "analyzer.zarr")
+    else:
+        folder = str(tmp_path / "analyzer")
+    return si_core.SortingAnalyzer.create(sorting, recording, format=fmt, folder=folder)
+
+
+# ── LogicalSISortingAnalyzer tests ────────────────────────────────────────────
+
+def test_logical_si_sorting_analyzer_importable():
+    """``LogicalSISortingAnalyzer`` exposes the expected extension name, python_type,
+    and Arrow storage type."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+    import pyarrow as pa
+
+    lt = LogicalSISortingAnalyzer()
+    assert lt.logical_type_name == "spikeinterface.sorting_analyzer"
+    assert lt.python_type is si_core.SortingAnalyzer
+    assert lt.get_arrow_extension_type().storage_type == pa.large_string()

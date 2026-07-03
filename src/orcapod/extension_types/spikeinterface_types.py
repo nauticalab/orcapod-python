@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 
 try:
-    from spikeinterface.core import BaseRecording, BaseSorting
+    from spikeinterface.core import BaseRecording, BaseSorting, SortingAnalyzer
     from spikeinterface.core.motion import Motion
 except ImportError as _exc:
     raise ImportError(
@@ -595,6 +595,132 @@ class SISortingHandler:
             method="sha256",
             digest=hashlib.sha256(json_bytes).digest(),
         )
+
+
+class LogicalSISortingAnalyzer(BaseLogicalType):
+    """Logical type for ``spikeinterface.core.SortingAnalyzer``.
+
+    Stores ``SortingAnalyzer`` instances as Arrow ``large_string`` columns
+    tagged with extension name ``"spikeinterface.sorting_analyzer"``. Unlike
+    ``BaseRecording`` / ``BaseSorting``, ``SortingAnalyzer`` is not a
+    ``BaseExtractor`` subclass and has no ``to_dict()`` round-trip — it is
+    exclusively folder-backed (``binary_folder`` or ``zarr``). The stored value
+    is a JSON object ``{"folder": "<path>", "format": "<binary_folder|zarr>"}``
+    derived from ``analyzer.folder`` and ``analyzer.format``.
+
+    The analyzer must be saved to disk before passing it to orcapod (i.e.
+    ``analyzer.folder`` must not be ``None``). In-memory analyzers raise
+    ``ValueError`` with save instructions. Loading reconstructs the analyzer
+    via ``SortingAnalyzer.load(folder)`` with automatic format detection.
+
+    Example:
+        >>> import tempfile, numpy as np
+        >>> import spikeinterface.core as si_core
+        >>> from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+        >>> lt = LogicalSISortingAnalyzer()
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     recording = si_core.NumpyRecording(
+        ...         [np.zeros((200, 4), dtype="float32")], 30000
+        ...     )
+        ...     sorting = si_core.NumpySorting.from_unit_dict(
+        ...         {0: np.array([0, 50, 100])}, sampling_frequency=30000
+        ...     )
+        ...     analyzer = si_core.SortingAnalyzer.create(
+        ...         sorting, recording, format="binary_folder", folder=tmp + "/analyzer"
+        ...     )
+        ...     storage = lt.python_to_storage(analyzer)
+        ...     recovered = lt.storage_to_python(storage)
+        ...     recovered.sorting.get_unit_ids().tolist() == analyzer.sorting.get_unit_ids().tolist()
+        True
+    """
+
+    _arrow_ext_class = make_arrow_extension_type("spikeinterface.sorting_analyzer", pa.large_string())
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("spikeinterface.sorting_analyzer", pa.large_string())
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "spikeinterface.sorting_analyzer"
+    python_type: type = SortingAnalyzer
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the cached Arrow extension type for ``SortingAnalyzer``.
+
+        Returns:
+            A ``pa.ExtensionType`` with extension name
+            ``"spikeinterface.sorting_analyzer"`` and storage type
+            ``pa.large_string()``.
+        """
+        if LogicalSISortingAnalyzer._arrow_ext is None:
+            LogicalSISortingAnalyzer._arrow_ext = LogicalSISortingAnalyzer._arrow_ext_class()
+        return LogicalSISortingAnalyzer._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the cached Polars extension type for ``SortingAnalyzer``.
+
+        Returns:
+            A ``pl.BaseExtension`` registered under
+            ``"spikeinterface.sorting_analyzer"``.
+        """
+        if LogicalSISortingAnalyzer._polars_ext is None:
+            LogicalSISortingAnalyzer._polars_ext = LogicalSISortingAnalyzer._polars_ext_class()
+        return LogicalSISortingAnalyzer._polars_ext
+
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> str:
+        """Serialise a ``SortingAnalyzer`` to its JSON storage representation.
+
+        Args:
+            value: A ``SortingAnalyzer`` instance with a non-``None`` ``folder``
+                attribute (i.e. saved via ``save_as()`` or created with
+                ``format="binary_folder"`` or ``format="zarr"``).
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A JSON string ``{"folder": "<path>", "format": "<fmt>"}`` where
+            ``<path>`` is ``str(analyzer.folder)`` and ``<fmt>`` is
+            ``analyzer.format`` (``"binary_folder"`` or ``"zarr"``).
+
+        Raises:
+            ValueError: If ``analyzer.folder`` is ``None`` (in-memory analyzer
+                that has not been saved to disk).
+        """
+        if value.folder is None:
+            raise ValueError(
+                "SortingAnalyzer has no folder (in-memory). "
+                "Call analyzer.save_as(format='binary_folder'|'zarr', folder=<path>) "
+                "first, then pass the saved analyzer to the pod."
+            )
+        return json.dumps({"folder": str(value.folder), "format": value.format})
+
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> SortingAnalyzer:
+        """Reconstruct a ``SortingAnalyzer`` from its JSON storage string.
+
+        Args:
+            storage_value: A JSON string as stored in Arrow, with keys
+                ``"folder"`` and ``"format"``.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``SortingAnalyzer`` instance loaded via
+            ``SortingAnalyzer.load(folder)``. The format is auto-detected from
+            the folder suffix (``".zarr"`` → zarr, otherwise binary_folder).
+
+        Raises:
+            ValueError: If ``storage_value`` is not valid JSON.
+            FileNotFoundError: If the analyzer folder no longer exists
+                (raised by SpikeInterface, propagated as-is).
+        """
+        try:
+            data = json.loads(storage_value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(
+                f"LogicalSISortingAnalyzer: cannot deserialise storage value "
+                f"{storage_value!r}; expected a JSON string."
+            ) from exc
+        return SortingAnalyzer.load(data["folder"])
 
 
 def register_spikeinterface_types(context: Any = None) -> None:
