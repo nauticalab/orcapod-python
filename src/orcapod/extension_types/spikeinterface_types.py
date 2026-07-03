@@ -430,26 +430,27 @@ class LogicalSIMotion(BaseLogicalType):
                 ``.npz`` archive or is missing expected keys.
         """
         try:
-            d = np.load(io.BytesIO(bytes(storage_value)), allow_pickle=False)
+            npz = np.load(io.BytesIO(bytes(storage_value)), allow_pickle=False)
         except Exception as exc:
             raise ValueError(
                 f"LogicalSIMotion: cannot deserialise storage value of type "
                 f"{type(storage_value)!r}; expected raw .npz bytes."
             ) from exc
-        try:
-            n = int(d["num_segments"][0])
-            return Motion(
-                displacement=[d[f"displacement_{i}"] for i in range(n)],
-                temporal_bins_s=[d[f"temporal_bins_s_{i}"] for i in range(n)],
-                spatial_bins_um=d["spatial_bins_um"],
-                direction=str(d["direction"][0]),
-                interpolation_method=str(d["interpolation_method"][0]),
-            )
-        except KeyError as exc:
-            raise ValueError(
-                f"LogicalSIMotion: .npz archive is missing expected key {exc}. "
-                f"The archive may have been produced by a different version of orcapod."
-            ) from exc
+        with npz:
+            try:
+                n = int(npz["num_segments"][0])
+                return Motion(
+                    displacement=[npz[f"displacement_{i}"] for i in range(n)],
+                    temporal_bins_s=[npz[f"temporal_bins_s_{i}"] for i in range(n)],
+                    spatial_bins_um=npz["spatial_bins_um"],
+                    direction=str(npz["direction"][0]),
+                    interpolation_method=str(npz["interpolation_method"][0]),
+                )
+            except KeyError as exc:
+                raise ValueError(
+                    f"LogicalSIMotion: .npz archive is missing expected key {exc}. "
+                    f"The archive may have been produced by a different version of orcapod."
+                ) from exc
 
 
 class SIMotionHandler:

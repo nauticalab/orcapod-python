@@ -34,9 +34,7 @@ from .pandas_type import LogicalPandasDataFrame, LogicalPandasSeries  # PLT-1869
 try:
     from .spikeinterface_types import (
         LogicalSIRecording,
-        SIRecordingHandler,
         LogicalSISorting,
-        SISortingHandler,
         LogicalSIMotion,
         SIMotionHandler,
         register_spikeinterface_types,
@@ -75,9 +73,10 @@ __all__ = [
     # ITL-459, ITL-468, ITL-470 (conditional — only present when spikeinterface is installed)
     *(
         [
-            "LogicalSIRecording", "SIRecordingHandler",
-            "LogicalSISorting", "SISortingHandler",
-            "LogicalSIMotion", "SIMotionHandler",
+            "LogicalSIRecording",
+            "LogicalSISorting",
+            "LogicalSIMotion",
+            "SIMotionHandler",
             "register_spikeinterface_types",
         ] if _SI_AVAILABLE else []
     ),
