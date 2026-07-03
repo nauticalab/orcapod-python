@@ -1,5 +1,6 @@
 """Tests for populate_hash_cache() and CachePopulationStats."""
 
+import dataclasses
 import pytest
 
 
@@ -36,5 +37,5 @@ class TestCachePopulationStats:
             total_duration=0.0,
             avg_hashing_speed=0.0,
         )
-        with pytest.raises(Exception):
+        with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
             stats.hashed = 1  # type: ignore[misc]
