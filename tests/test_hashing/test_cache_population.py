@@ -280,18 +280,25 @@ class TestConcurrency:
 
     def test_max_workers_1_matches_serial(self, tmp_path):
         """max_workers=1 and max_workers=4 produce identical CachePopulationStats."""
-        db1 = tmp_path / "cache1.db"
-        db2 = tmp_path / "cache2.db"
-        _write(tmp_path, "a.bin", 20)
-        _write(tmp_path, "b.bin", 30)
+        # Keep data files and DB files in separate directories so that the DB
+        # created by the serial run is never picked up as a data file by the
+        # concurrent run (which has a different _excluded set).
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        db_dir = tmp_path / "dbs"
+        db_dir.mkdir()
+        db1 = db_dir / "cache1.db"
+        db2 = db_dir / "cache2.db"
+        _write(data_dir, "a.bin", 20)
+        _write(data_dir, "b.bin", 30)
 
         from orcapod.hashing.cache_population import populate_hash_cache
 
         serial = populate_hash_cache(
-            tmp_path, min_size_bytes=_MIN, db_path=db1, max_workers=1
+            data_dir, min_size_bytes=_MIN, db_path=db1, max_workers=1
         )
         concurrent = populate_hash_cache(
-            tmp_path, min_size_bytes=_MIN, db_path=db2, max_workers=4
+            data_dir, min_size_bytes=_MIN, db_path=db2, max_workers=4
         )
 
         assert serial.hashed == concurrent.hashed
