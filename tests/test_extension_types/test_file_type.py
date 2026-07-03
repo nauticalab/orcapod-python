@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 
 import pytest
 import pyarrow as pa
+from upath import UPath
 
 from orcapod.extension_types.file_type import File, LogicalFile
 
@@ -123,3 +126,43 @@ class TestLogicalFile:
         lt = LogicalFile()
         with pytest.raises(ValueError, match="LogicalFile"):
             lt.storage_to_python(json.dumps({"wrong_key": "/some/file.txt"}))
+
+
+class TestFilePathLike:
+    def test_isinstance_pathlike(self, tmp_path):
+        p = tmp_path / "file.txt"
+        p.write_text("data")
+        f = File(p)
+        assert isinstance(f, os.PathLike)
+
+    def test_fspath_returns_path_string(self, tmp_path):
+        p = tmp_path / "file.txt"
+        p.write_text("data")
+        f = File(p)
+        assert os.fspath(f) == str(p)
+
+    def test_open_accepts_file(self, tmp_path):
+        p = tmp_path / "file.txt"
+        p.write_text("hello")
+        f = File(p)
+        with open(f) as fh:
+            assert fh.read() == "hello"
+
+    def test_pathlib_path_accepts_file(self, tmp_path):
+        p = tmp_path / "file.txt"
+        p.write_text("data")
+        f = File(p)
+        assert pathlib.Path(f) == p
+
+    def test_remote_backed_fspath_raises(self):
+        remote = File._from_upath(UPath("s3://bucket/key.csv"))
+        with pytest.raises(TypeError):
+            os.fspath(remote)
+
+    def test_plain_proxy_upath_subclass_not_pathlike(self):
+        from upath.extensions import ProxyUPath
+
+        class _Stub(ProxyUPath):
+            pass
+
+        assert not issubclass(_Stub, os.PathLike)
