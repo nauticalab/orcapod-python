@@ -1,4 +1,4 @@
-"""Tests for LogicalSIRecording, LogicalSISorting, and their handlers (ITL-459, ITL-468)."""
+"""Tests for LogicalSIRecording, LogicalSISorting, LogicalSISortingAnalyzer, and their handlers (ITL-459, ITL-468, ITL-469, ITL-470)."""
 
 from __future__ import annotations
 
@@ -612,3 +612,241 @@ def test_register_spikeinterface_types_includes_motion():
     storage = ctx.type_converter.python_to_storage(motion, Motion)
     recovered = ctx.type_converter.storage_to_python(storage, Motion)
     assert recovered == motion
+
+
+# ── SortingAnalyzer helpers ───────────────────────────────────────────────────
+
+def _make_sorting_analyzer(tmp_path, fmt: str):
+    """Create a minimal saved SortingAnalyzer for use as a test artifact.
+
+    Args:
+        tmp_path: Base directory. Created if it does not exist.
+        fmt: ``"binary_folder"`` or ``"zarr"``.
+
+    Returns:
+        A ``SortingAnalyzer`` saved to ``tmp_path/analyzer`` (binary_folder)
+        or ``tmp_path/analyzer.zarr`` (zarr).
+    """
+    import spikeinterface.core as si_core
+    from pathlib import Path
+    tmp_path = Path(tmp_path)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(42)
+    n_chan = 4
+    traces = rng.standard_normal((200, n_chan)).astype("float32")
+    recording = si_core.NumpyRecording([traces], sampling_frequency=30_000)
+    # SortingAnalyzer.create requires a probe to be attached to the recording
+    locations = np.column_stack([np.zeros(n_chan), np.arange(n_chan) * 25.0])
+    recording.set_dummy_probe_from_locations(locations)
+    spike_trains = {0: np.sort(rng.choice(200, 10, replace=False))}
+    sorting = si_core.NumpySorting.from_unit_dict(spike_trains, sampling_frequency=30_000)
+    if fmt == "zarr":
+        folder = str(tmp_path / "analyzer.zarr")
+    else:
+        folder = str(tmp_path / "analyzer")
+    return si_core.SortingAnalyzer.create(sorting, recording, format=fmt, folder=folder)
+
+
+# ── LogicalSISortingAnalyzer tests ────────────────────────────────────────────
+
+def test_logical_si_sorting_analyzer_importable():
+    """``LogicalSISortingAnalyzer`` exposes the expected extension name, python_type,
+    and Arrow storage type."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+    import pyarrow as pa
+
+    lt = LogicalSISortingAnalyzer()
+    assert lt.logical_type_name == "spikeinterface.sorting_analyzer"
+    assert lt.python_type is si_core.SortingAnalyzer
+    assert lt.get_arrow_extension_type().storage_type == pa.large_string()
+
+
+def test_in_memory_analyzer_raises():
+    """In-memory SortingAnalyzer (folder=None) raises ValueError with clear save instructions."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+
+    rng = np.random.default_rng(0)
+    n_chan = 2
+    traces = rng.standard_normal((100, n_chan)).astype("float32")
+    recording = si_core.NumpyRecording([traces], sampling_frequency=30_000)
+    # SortingAnalyzer.create requires a probe to be attached to the recording
+    locations = np.column_stack([np.zeros(n_chan), np.arange(n_chan) * 25.0])
+    recording.set_dummy_probe_from_locations(locations)
+    sorting = si_core.NumpySorting.from_unit_dict(
+        {0: np.array([10, 50, 90])}, sampling_frequency=30_000
+    )
+    analyzer = si_core.SortingAnalyzer.create(sorting, recording, format="memory")
+
+    lt = LogicalSISortingAnalyzer()
+    with pytest.raises(ValueError, match="in-memory"):
+        lt.python_to_storage(analyzer)
+
+
+def test_binary_folder_analyzer_round_trip(tmp_path):
+    """binary_folder-backed SortingAnalyzer round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+
+    analyzer = _make_sorting_analyzer(tmp_path, "binary_folder")
+    lt = LogicalSISortingAnalyzer()
+
+    storage = lt.python_to_storage(analyzer)
+    assert isinstance(storage, str)
+    data = json.loads(storage)
+    assert "folder" in data
+    assert data["format"] == "binary_folder"
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        analyzer.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
+def test_zarr_analyzer_round_trip(tmp_path):
+    """Zarr-backed SortingAnalyzer round-trips through python_to_storage / storage_to_python."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+
+    analyzer = _make_sorting_analyzer(tmp_path, "zarr")
+    lt = LogicalSISortingAnalyzer()
+
+    storage = lt.python_to_storage(analyzer)
+    assert isinstance(storage, str)
+    data = json.loads(storage)
+    assert "folder" in data
+    assert data["format"] == "zarr"
+
+    recovered = lt.storage_to_python(storage)
+    np.testing.assert_array_equal(
+        analyzer.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
+# ── SISortingAnalyzerHandler tests ────────────────────────────────────────────
+
+def test_si_sorting_analyzer_handler_hash_stability(tmp_path):
+    """Same SortingAnalyzer produces identical ContentHash across two calls."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+    from orcapod.types import ContentHash
+
+    analyzer = _make_sorting_analyzer(tmp_path, "binary_folder")
+    handler = SISortingAnalyzerHandler()
+
+    h1 = handler.handle(analyzer, hasher=None)
+    h2 = handler.handle(analyzer, hasher=None)
+
+    assert isinstance(h1, ContentHash)
+    assert h1 == h2
+
+
+def test_si_sorting_analyzer_handler_hash_changes_with_path(tmp_path):
+    """SortingAnalyzers at different folder paths produce different ContentHash values."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+
+    analyzer_a = _make_sorting_analyzer(tmp_path / "a", "binary_folder")
+    analyzer_b = _make_sorting_analyzer(tmp_path / "b", "binary_folder")
+
+    handler = SISortingAnalyzerHandler()
+    assert handler.handle(analyzer_a, hasher=None) != handler.handle(analyzer_b, hasher=None)
+
+
+def test_si_sorting_analyzer_handler_in_memory_raises():
+    """``SISortingAnalyzerHandler`` raises ValueError for in-memory analyzers."""
+    si_core = pytest.importorskip("spikeinterface.core", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+
+    rng = np.random.default_rng(0)
+    n_chan = 2
+    traces = rng.standard_normal((100, n_chan)).astype("float32")
+    recording = si_core.NumpyRecording([traces], sampling_frequency=30_000)
+    # SortingAnalyzer.create requires a probe to be attached to the recording
+    locations = np.column_stack([np.zeros(n_chan), np.arange(n_chan) * 25.0])
+    recording.set_dummy_probe_from_locations(locations)
+    sorting = si_core.NumpySorting.from_unit_dict(
+        {0: np.array([10, 50, 90])}, sampling_frequency=30_000
+    )
+    analyzer = si_core.SortingAnalyzer.create(sorting, recording, format="memory")
+
+    handler = SISortingAnalyzerHandler()
+    with pytest.raises(ValueError, match="in-memory"):
+        handler.handle(analyzer, hasher=None)
+
+
+def test_si_sorting_analyzer_handler_type_error():
+    """``SISortingAnalyzerHandler`` raises TypeError for non-SortingAnalyzer objects."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import SISortingAnalyzerHandler
+
+    handler = SISortingAnalyzerHandler()
+    with pytest.raises(TypeError, match="SISortingAnalyzerHandler"):
+        handler.handle("not_a_sorting_analyzer", hasher=None)
+
+
+def test_register_spikeinterface_types_includes_sorting_analyzer(tmp_path):
+    """``register_spikeinterface_types()`` wires ``LogicalSISortingAnalyzer`` and
+    ``SISortingAnalyzerHandler`` into the default context so they are found by type lookup."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import register_spikeinterface_types
+    from orcapod.contexts import get_default_context
+
+    register_spikeinterface_types()
+    ctx = get_default_context()
+
+    analyzer = _make_sorting_analyzer(tmp_path, "binary_folder")
+
+    # LogicalType registered: type_converter can find it
+    arrow_type = ctx.type_converter.python_type_to_arrow_type(type(analyzer))
+    assert arrow_type.extension_name == "spikeinterface.sorting_analyzer"
+
+    # Handler registered: semantic_hasher can find it
+    from orcapod.types import ContentHash
+    handler = ctx.semantic_hasher.type_handler_registry.get_handler(analyzer)
+    assert handler is not None
+    result = handler.handle(analyzer, hasher=None)
+    assert isinstance(result, ContentHash)
+
+    # Full round-trip through type_converter
+    storage = ctx.type_converter.python_to_storage(analyzer, type(analyzer))
+    recovered = ctx.type_converter.storage_to_python(storage, type(analyzer))
+    np.testing.assert_array_equal(
+        analyzer.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+        recovered.sorting.get_unit_spike_train(unit_id=0, segment_index=0),
+    )
+
+
+def test_si_sorting_analyzer_storage_to_python_bad_json():
+    """``storage_to_python`` raises ``ValueError`` when passed a non-JSON string."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+
+    lt = LogicalSISortingAnalyzer()
+    with pytest.raises(ValueError, match="cannot deserialise"):
+        lt.storage_to_python("this is not valid json {{{")
+
+
+def test_register_spikeinterface_types_sorting_analyzer_reraises_unexpected_error():
+    """``register_spikeinterface_types()`` re-raises ``ValueError`` from
+    ``register_logical_type`` when the message does not contain ``'already bound to'``."""
+    pytest.importorskip("spikeinterface", reason="spikeinterface not installed")
+    from unittest.mock import MagicMock
+    from orcapod.extension_types.spikeinterface_types import (
+        register_spikeinterface_types,
+        LogicalSISortingAnalyzer,
+    )
+
+    # Side-effect: raise an unexpected ValueError only when called with LogicalSISortingAnalyzer
+    def raise_on_sorting_analyzer(logical_type):
+        if isinstance(logical_type, LogicalSISortingAnalyzer):
+            raise ValueError("something completely unexpected happened")
+
+    mock_ctx = MagicMock()
+    mock_ctx.type_converter.register_logical_type.side_effect = raise_on_sorting_analyzer
+
+    with pytest.raises(ValueError, match="something completely unexpected"):
+        register_spikeinterface_types(context=mock_ctx)

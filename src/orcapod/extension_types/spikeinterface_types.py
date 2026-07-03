@@ -1,4 +1,4 @@
-"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468, ITL-470).
+"""SpikeInterface LogicalTypes and handlers for orcapod (ITL-459, ITL-468, ITL-470, ITL-469).
 
 ``LogicalSIRecording`` maps ``spikeinterface.core.BaseRecording`` ↔ Arrow
 ``large_string`` using SpikeInterface's own ``to_dict(recursive=True,
@@ -15,6 +15,13 @@ hashes the JSON bytes via SHA-256.
 envelope. All displacement arrays, bin arrays, and scalar metadata are embedded
 in the archive — no external folder is required. ``SIMotionHandler`` hashes
 the same ``.npz`` bytes via SHA-256.
+
+``LogicalSISortingAnalyzer`` maps ``spikeinterface.core.SortingAnalyzer`` ↔ Arrow
+``large_string`` using a JSON path-reference object
+``{"folder": "<path>", "format": "<binary_folder|zarr>"}`` derived from
+``analyzer.folder`` and ``analyzer.format``. Unlike Recording/Sorting, there is
+no ``to_dict()`` round-trip — the analyzer is exclusively folder-backed.
+``SISortingAnalyzerHandler`` hashes the folder path string via SHA-256 (phase 1).
 
 This module requires the optional ``spikeinterface`` extras group:
 ``pip install orcapod[spikeinterface]``
@@ -45,7 +52,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 
 try:
-    from spikeinterface.core import BaseRecording, BaseSorting
+    from spikeinterface.core import BaseRecording, BaseSorting, SortingAnalyzer
     from spikeinterface.core.motion import Motion
 except ImportError as _exc:
     raise ImportError(
@@ -597,12 +604,182 @@ class SISortingHandler:
         )
 
 
+class LogicalSISortingAnalyzer(BaseLogicalType):
+    """Logical type for ``spikeinterface.core.SortingAnalyzer``.
+
+    Stores ``SortingAnalyzer`` instances as Arrow ``large_string`` columns
+    tagged with extension name ``"spikeinterface.sorting_analyzer"``. Unlike
+    ``BaseRecording`` / ``BaseSorting``, ``SortingAnalyzer`` is not a
+    ``BaseExtractor`` subclass and has no ``to_dict()`` round-trip — it is
+    exclusively folder-backed (``binary_folder`` or ``zarr``). The stored value
+    is a JSON object ``{"folder": "<path>", "format": "<binary_folder|zarr>"}``
+    derived from ``analyzer.folder`` and ``analyzer.format``.
+
+    The analyzer must be saved to disk before passing it to orcapod (i.e.
+    ``analyzer.folder`` must not be ``None``). In-memory analyzers raise
+    ``ValueError`` with save instructions. Loading reconstructs the analyzer
+    via ``SortingAnalyzer.load(folder)`` with automatic format detection.
+
+    Example:
+        >>> import tempfile, numpy as np
+        >>> import spikeinterface.core as si_core
+        >>> from orcapod.extension_types.spikeinterface_types import LogicalSISortingAnalyzer
+        >>> lt = LogicalSISortingAnalyzer()
+        >>> with tempfile.TemporaryDirectory() as tmp:
+        ...     recording = si_core.NumpyRecording(
+        ...         [np.zeros((200, 4), dtype="float32")], 30000
+        ...     )
+        ...     sorting = si_core.NumpySorting.from_unit_dict(
+        ...         {0: np.array([0, 50, 100])}, sampling_frequency=30000
+        ...     )
+        ...     analyzer = si_core.SortingAnalyzer.create(
+        ...         sorting, recording, format="binary_folder", folder=tmp + "/analyzer"
+        ...     )
+        ...     storage = lt.python_to_storage(analyzer)
+        ...     recovered = lt.storage_to_python(storage)
+        ...     recovered.sorting.get_unit_ids().tolist() == analyzer.sorting.get_unit_ids().tolist()
+        True
+    """
+
+    _arrow_ext_class = make_arrow_extension_type("spikeinterface.sorting_analyzer", pa.large_string())
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("spikeinterface.sorting_analyzer", pa.large_string())
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "spikeinterface.sorting_analyzer"
+    python_type: type = SortingAnalyzer
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the cached Arrow extension type for ``SortingAnalyzer``.
+
+        Returns:
+            A ``pa.ExtensionType`` with extension name
+            ``"spikeinterface.sorting_analyzer"`` and storage type
+            ``pa.large_string()``.
+        """
+        if LogicalSISortingAnalyzer._arrow_ext is None:
+            LogicalSISortingAnalyzer._arrow_ext = LogicalSISortingAnalyzer._arrow_ext_class()
+        return LogicalSISortingAnalyzer._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the cached Polars extension type for ``SortingAnalyzer``.
+
+        Returns:
+            A ``pl.BaseExtension`` registered under
+            ``"spikeinterface.sorting_analyzer"``.
+        """
+        if LogicalSISortingAnalyzer._polars_ext is None:
+            LogicalSISortingAnalyzer._polars_ext = LogicalSISortingAnalyzer._polars_ext_class()
+        return LogicalSISortingAnalyzer._polars_ext
+
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> str:
+        """Serialise a ``SortingAnalyzer`` to its JSON storage representation.
+
+        Args:
+            value: A ``SortingAnalyzer`` instance with a non-``None`` ``folder``
+                attribute (i.e. saved via ``save_as()`` or created with
+                ``format="binary_folder"`` or ``format="zarr"``).
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A JSON string ``{"folder": "<path>", "format": "<fmt>"}`` where
+            ``<path>`` is ``str(analyzer.folder)`` and ``<fmt>`` is
+            ``analyzer.format`` (``"binary_folder"`` or ``"zarr"``).
+
+        Raises:
+            ValueError: If ``analyzer.folder`` is ``None`` (in-memory analyzer
+                that has not been saved to disk).
+        """
+        if value.folder is None:
+            raise ValueError(
+                "SortingAnalyzer has no folder (in-memory). "
+                "Call analyzer.save_as(format='binary_folder'|'zarr', folder=<path>) "
+                "first, then pass the saved analyzer to the pod."
+            )
+        return json.dumps({"folder": str(value.folder), "format": value.format})
+
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> SortingAnalyzer:
+        """Reconstruct a ``SortingAnalyzer`` from its JSON storage string.
+
+        Args:
+            storage_value: A JSON string as stored in Arrow, with keys
+                ``"folder"`` and ``"format"``.
+            converter: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``SortingAnalyzer`` instance loaded via
+            ``SortingAnalyzer.load(folder)``. The format is auto-detected from
+            the folder suffix (``".zarr"`` → zarr, otherwise binary_folder).
+
+        Raises:
+            ValueError: If ``storage_value`` is not valid JSON.
+            FileNotFoundError: If the analyzer folder no longer exists
+                (raised by SpikeInterface, propagated as-is).
+        """
+        try:
+            data = json.loads(storage_value)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(
+                f"LogicalSISortingAnalyzer: cannot deserialise storage value "
+                f"{storage_value!r}; expected a JSON string."
+            ) from exc
+        return SortingAnalyzer.load(data["folder"])
+
+
+class SISortingAnalyzerHandler:
+    """Semantic hash handler for ``spikeinterface.core.SortingAnalyzer``.
+
+    Computes a SHA-256 ``ContentHash`` of the folder path string
+    (``str(analyzer.folder).encode()``). This is phase 1 — path-string
+    hashing. Content hashing of the folder contents is deferred to ITL-476.
+
+    The ``hasher`` argument is accepted for protocol conformance but not used —
+    hashing is done directly via ``hashlib.sha256`` to avoid overhead.
+    """
+
+    def handle(self, obj: Any, hasher: SemanticHasherProtocol | None) -> ContentHash:
+        """Return a SHA-256 ``ContentHash`` of the analyzer's folder path string.
+
+        Args:
+            obj: A ``SortingAnalyzer`` instance.
+            hasher: Accepted for protocol conformance; not used.
+
+        Returns:
+            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
+            SHA-256 of ``str(analyzer.folder).encode()``.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``SortingAnalyzer``.
+            ValueError: If ``analyzer.folder`` is ``None`` (in-memory analyzer).
+        """
+        if not isinstance(obj, SortingAnalyzer):
+            raise TypeError(
+                f"SISortingAnalyzerHandler: expected SortingAnalyzer, got {type(obj)!r}"
+            )
+        if obj.folder is None:
+            raise ValueError(
+                "Cannot hash in-memory SortingAnalyzer (folder is None). "
+                "Call save_as() first."
+            )
+        folder_bytes = str(obj.folder).encode()
+        logger.debug("SISortingAnalyzerHandler: hashing folder path %r", str(obj.folder))
+        return ContentHash(
+            method="sha256",
+            digest=hashlib.sha256(folder_bytes).digest(),
+        )
+
+
 def register_spikeinterface_types(context: Any = None) -> None:
     """Register SpikeInterface LogicalTypes into an orcapod ``DataContext``.
 
     Registers ``LogicalSIRecording`` / ``SIRecordingHandler`` (ITL-459),
-    ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468), and
-    ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470).
+    ``LogicalSISorting`` / ``SISortingHandler`` (ITL-468),
+    ``LogicalSIMotion`` / ``SIMotionHandler`` (ITL-470), and
+    ``LogicalSISortingAnalyzer`` / ``SISortingAnalyzerHandler`` (ITL-469).
 
     For the default context this is called automatically at startup (the
     default ``v0.1.json`` context config lists all six with ``"_optional": true``,
@@ -681,3 +858,24 @@ def register_spikeinterface_types(context: Any = None) -> None:
 
     # Handler registration silently replaces an existing entry, so always safe.
     context.semantic_hasher.type_handler_registry.register(Motion, SIMotionHandler())
+
+    # --- SortingAnalyzer ---
+    lt_sorting_analyzer = LogicalSISortingAnalyzer()
+    try:
+        context.type_converter.register_logical_type(lt_sorting_analyzer)
+    except ValueError as exc:
+        # A different LogicalSISortingAnalyzer instance is already registered (e.g.
+        # auto-registered from v0.1.json at context creation time). That is
+        # fine — both instances are equivalent. Any other ValueError propagates.
+        if "already bound to" not in str(exc):
+            raise
+        logger.debug(
+            "register_spikeinterface_types: LogicalSISortingAnalyzer already registered, skipping"
+        )
+    else:
+        logger.debug("register_spikeinterface_types: registered LogicalSISortingAnalyzer")
+
+    # Handler registration silently replaces an existing entry, so always safe.
+    context.semantic_hasher.type_handler_registry.register(
+        SortingAnalyzer, SISortingAnalyzerHandler()
+    )
