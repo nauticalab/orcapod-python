@@ -254,3 +254,16 @@ class TestErrors:
 
         assert stats.errors == 1
         assert stats.hashed == 0
+
+
+# ---------------------------------------------------------------------------
+# Public exports
+# ---------------------------------------------------------------------------
+
+
+class TestPublicExports:
+    def test_importable_from_orcapod_hashing(self):
+        from orcapod.hashing import CachePopulationStats, populate_hash_cache
+
+        assert callable(populate_hash_cache)
+        assert CachePopulationStats.__dataclass_fields__  # is a dataclass
