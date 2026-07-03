@@ -126,25 +126,39 @@ def populate_hash_cache(
         max_workers: Number of threads for concurrent per-file hashing. Defaults
             to 4, which is well-suited for NAS and HDD storage where more than 4
             parallel reads cause seek contention. Pass ``1`` for serial behaviour.
+            Must be >= 1; raises ``ValueError`` otherwise.
 
     Returns:
         ``CachePopulationStats`` with counts for hashed, cached, skipped, and
         errored files plus throughput metrics.
+
+    Raises:
+        ValueError: If ``max_workers`` is less than 1.
     """
+    if max_workers < 1:
+        raise ValueError(f"max_workers must be >= 1, got {max_workers!r}")
+
     root = UPath(path)
     _db_path: Path | None = Path(db_path) if db_path is not None else None
     hasher = FileHasher(algorithm=algorithm, buffer_size=buffer_size)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         with SqliteHashCacher(_db_path) as cacher:
-            # Collect the DB file and its SQLite journal/WAL siblings so they are
-            # never treated as data files even if the DB lives inside the scan root.
+            # Collect the DB file and its SQLite sidecar files so they are never
+            # treated as data files even if the DB lives inside the scan root.
+            # Sidecars are named by appending to the full filename (including any
+            # extension), so string concatenation is used rather than with_suffix()
+            # — which would raise ValueError for DB paths without an extension.
+            # Covered sidecars: WAL ("-wal"), shared-memory ("-shm"), and rollback
+            # journal ("-journal").
             _db_resolved = cacher.db_path.resolve()
+            _db_str = str(_db_resolved)
             _excluded: frozenset[Path] = frozenset(
                 [
                     _db_resolved,
-                    _db_resolved.with_suffix(_db_resolved.suffix + "-wal"),
-                    _db_resolved.with_suffix(_db_resolved.suffix + "-shm"),
+                    Path(_db_str + "-wal"),
+                    Path(_db_str + "-shm"),
+                    Path(_db_str + "-journal"),
                 ]
             )
 

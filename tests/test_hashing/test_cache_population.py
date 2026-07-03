@@ -144,6 +144,16 @@ class TestTraversal:
         assert stats.hashed == 1
         assert stats.errors == 0
 
+    def test_db_path_without_extension(self, tmp_path):
+        """DB paths with no file extension do not raise ValueError during sidecar exclusion."""
+        db = tmp_path / "cache"  # no extension — with_suffix() would raise here
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        assert stats.hashed == 1
+
 
 # ---------------------------------------------------------------------------
 # Cache hit / miss
@@ -340,6 +350,13 @@ class TestConcurrency:
 
         sig = inspect.signature(populate_hash_cache)
         assert sig.parameters["max_workers"].default == 4
+
+    def test_max_workers_zero_raises(self, tmp_path):
+        """max_workers=0 raises ValueError before any hashing starts."""
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        with pytest.raises(ValueError, match="max_workers"):
+            populate_hash_cache(tmp_path, max_workers=0)
 
 
 # ---------------------------------------------------------------------------

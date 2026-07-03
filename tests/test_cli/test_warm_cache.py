@@ -162,3 +162,11 @@ class TestWarmCacheCLI:
         assert "already cached" in result.output
         assert "skipped" in result.output
         assert "errors" in result.output
+
+    def test_workers_zero_exits_nonzero(self, runner, tmp_path):
+        """--workers 0 exits with a non-zero code and prints a clear error."""
+        from orcapod.cli import app
+
+        result = runner.invoke(app, ["warm-cache", str(tmp_path), "--workers", "0"])
+        assert result.exit_code != 0
+        assert "workers" in result.output.lower()
