@@ -25,6 +25,8 @@ File hashing:
   CachedFileHasher                     -- caching decorator around FileContentHasherProtocol
   InMemoryHashCacher                   -- dict-backed cacher for testing
   SqliteHashCacher                     -- SQLite-backed persistent cacher
+  CachePopulationStats                 -- stats returned by populate_hash_cache()
+  populate_hash_cache                  -- pre-populate the SQLite hash cache for large files
 
 Utility:
   CacherProtocol                       -- generic get/put caching protocol [K, V]
@@ -42,6 +44,7 @@ from orcapod.hashing.defaults import (
     get_default_semantic_hasher,
 )
 from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher, FileHashKey
+from orcapod.hashing.cache_population import CachePopulationStats, populate_hash_cache
 from orcapod.hashing.hash_cachers import InMemoryHashCacher, SqliteHashCacher
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.hash_utils import hash_file
@@ -126,6 +129,8 @@ __all__ = [
     "CachedFileHasher",
     "InMemoryHashCacher",
     "SqliteHashCacher",
+    "CachePopulationStats",
+    "populate_hash_cache",
     "BasicDirectoryHasher",
     "DirectoryHasherProtocol",
     "hash_file",
