@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import warnings
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Self
@@ -85,6 +86,22 @@ class Directory(ProxyUPath):
                 f"Directory: path is not traversable: {self.__wrapped__!r}"
             ) from exc
         self._ignore = ignore
+
+    def __fspath__(self) -> str:
+        """Return the file system path representation of the underlying ``UPath``.
+
+        Succeeds for local-backed paths (``PosixUPath``, ``FilePath``) and returns
+        the local path string. Raises ``TypeError`` for remote-backed paths (S3, GCS,
+        engm, …), consistent with how ``UPath`` itself behaves for those backends.
+
+        Returns:
+            The local filesystem path as a string.
+
+        Raises:
+            TypeError: If the underlying path is remote-backed (e.g. S3, GCS) and does
+                not support local filesystem operations.
+        """
+        return os.fspath(self.__wrapped__)
 
     @classmethod
     def _from_upath(cls, upath: UPath, /) -> Self:
