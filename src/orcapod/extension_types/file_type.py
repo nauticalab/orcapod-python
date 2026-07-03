@@ -89,7 +89,8 @@ class File(ProxyUPath):
             The local filesystem path as a string.
 
         Raises:
-            TypeError: If the underlying path is remote-backed and not ``os.PathLike``.
+            TypeError: If the underlying path is remote-backed (e.g. S3, GCS) and does
+                not support local filesystem operations.
         """
         return os.fspath(self.__wrapped__)
 
