@@ -123,6 +123,27 @@ class TestTraversal:
         # Only the real file, not the symlink
         assert stats.hashed == 1
 
+    def test_skips_symlinked_directories(self, tmp_path):
+        """A symlink pointing to a subdirectory is not followed; files inside are not hashed."""
+        db = tmp_path / "cache.db"
+        # Real subdirectory with a qualifying file inside.
+        real_sub = tmp_path / "real_sub"
+        real_sub.mkdir()
+        _write(real_sub, "secret.bin", 20)
+
+        # Symlink in the scan root pointing at real_sub.
+        link = tmp_path / "link_to_sub"
+        link.symlink_to(real_sub)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        # real_sub/secret.bin is hashed (reached via real_sub, not via the symlink).
+        # The symlink itself is skipped; no double-count.
+        assert stats.hashed == 1
+        assert stats.errors == 0
+
 
 # ---------------------------------------------------------------------------
 # Cache hit / miss

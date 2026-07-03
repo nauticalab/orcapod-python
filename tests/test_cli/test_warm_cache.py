@@ -87,3 +87,78 @@ class TestWarmCacheCLI:
             ],
         )
         assert result.exit_code == 0, result.output
+
+    def test_file_path_exits_nonzero(self, runner, tmp_path):
+        """Passing a file (not a directory) as PATH exits with a non-zero code."""
+        f = tmp_path / "notadir.bin"
+        f.write_bytes(b"x" * 10)
+
+        from orcapod.cli import app
+
+        result = runner.invoke(app, ["warm-cache", str(f)])
+        assert result.exit_code != 0
+        assert "not a directory" in result.output
+
+    def test_speed_line_shown_when_files_hashed(self, runner, tmp_path):
+        """'Average hashing speed:' line appears when at least one file was hashed."""
+        db = tmp_path / "cache.db"
+        f = tmp_path / "f.bin"
+        f.write_bytes(b"x" * 20)
+
+        from orcapod.cli import app
+
+        result = runner.invoke(
+            app,
+            [
+                "warm-cache",
+                str(tmp_path),
+                "--min-size", "0.00002",
+                "--db-path", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Average hashing speed:" in result.output
+
+    def test_speed_line_not_shown_when_nothing_hashed(self, runner, tmp_path):
+        """'Average hashing speed:' line is suppressed when no files were hashed."""
+        db = tmp_path / "cache.db"
+        # File below threshold — will be skipped, not hashed.
+        f = tmp_path / "tiny.bin"
+        f.write_bytes(b"x" * 5)
+
+        from orcapod.cli import app
+
+        result = runner.invoke(
+            app,
+            [
+                "warm-cache",
+                str(tmp_path),
+                "--min-size", "100",   # 100 MB threshold — tiny.bin won't qualify
+                "--db-path", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Average hashing speed:" not in result.output
+
+    def test_summary_output_contains_counts(self, runner, tmp_path):
+        """Output summary line contains hashed, already cached, skipped, and errors counts."""
+        db = tmp_path / "cache.db"
+        f = tmp_path / "f.bin"
+        f.write_bytes(b"x" * 20)
+
+        from orcapod.cli import app
+
+        result = runner.invoke(
+            app,
+            [
+                "warm-cache",
+                str(tmp_path),
+                "--min-size", "0.00002",
+                "--db-path", str(db),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "hashed" in result.output
+        assert "already cached" in result.output
+        assert "skipped" in result.output
+        assert "errors" in result.output
