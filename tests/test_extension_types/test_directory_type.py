@@ -269,3 +269,16 @@ class TestDirectoryPathLike:
         remote = Directory._from_upath(UPath("s3://bucket/prefix/"))
         with pytest.raises(TypeError):
             os.fspath(remote)
+
+    def test_os_listdir_accepts_directory(self, tmp_path):
+        (tmp_path / "a.txt").write_text("x")
+        d = Directory(tmp_path)
+        assert "a.txt" in os.listdir(d)
+
+    def test_plain_proxy_upath_subclass_not_pathlike(self):
+        from upath.extensions import ProxyUPath
+
+        class _Stub(ProxyUPath):
+            pass
+
+        assert not issubclass(_Stub, os.PathLike)
