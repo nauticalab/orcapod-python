@@ -6,6 +6,7 @@ from pathlib import Path
 
 import dataclasses
 import pytest
+from typer.testing import CliRunner
 
 
 class TestCachePopulationStats:
@@ -753,3 +754,65 @@ class TestProgressCallback:
 
         assert outcomes == ["error"]
         assert stats.errors == 1
+
+
+class TestCLI:
+    def _app(self):
+        import typer
+        from orcapod.cli.warm_cache import warm_cache
+        app = typer.Typer()
+        app.command()(warm_cache)
+        return app
+
+    def test_force_flag_wires_through(self, tmp_path):
+        """--force causes already-cached files to be re-hashed."""
+        runner = CliRunner()
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        app = self._app()
+        # First run to populate cache.
+        runner.invoke(app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)])
+        # Second run with --force.
+        result = runner.invoke(
+            app, [str(tmp_path), "--min-size", "0", "--db-path", str(db), "--force"]
+        )
+        assert result.exit_code == 0
+        assert "1 hashed" in result.output
+        assert "0 already cached" in result.output
+
+    def test_dry_run_flag_wires_through(self, tmp_path):
+        """--dry-run prints 'would be hashed' and makes no cache writes."""
+        runner = CliRunner()
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        app = self._app()
+        result = runner.invoke(
+            app, [str(tmp_path), "--min-size", "0", "--db-path", str(db), "--dry-run"]
+        )
+        assert result.exit_code == 0
+        assert "would be hashed" in result.output
+        assert "Dry run" in result.output
+
+        # Cache must be empty after dry-run.
+        real_run = runner.invoke(
+            app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)]
+        )
+        assert "1 hashed" in real_run.output
+
+    def test_normal_output_includes_cached_gb(self, tmp_path):
+        """Normal run output shows cached GB on the second run."""
+        runner = CliRunner()
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        app = self._app()
+        runner.invoke(app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)])
+        result = runner.invoke(
+            app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)]
+        )
+        assert result.exit_code == 0
+        # "1 already cached (0.00 GB)" should appear.
+        assert "already cached" in result.output
+        assert "GB" in result.output
