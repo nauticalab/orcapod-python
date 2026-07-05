@@ -271,8 +271,10 @@ def populate_hash_cache(
         force: If ``True``, re-hash files even if they already have a cache entry.
             Defaults to ``False``.
         progress_callback: Optional callable invoked once per qualifying file
-            (i.e. files that pass the size filter). Receives the resolved
-            ``Path``, a ``FileOutcome`` string, and a frozen
+            (i.e. every file that passes the size filter, including those that
+            encounter stat or hashing errors). Receives the resolved ``Path``,
+            a ``FileOutcome`` string (``"hashed"``, ``"cached"``,
+            ``"would_hash"``, or ``"error"``), and a frozen
             ``CachePopulationStats`` snapshot of running totals at that moment.
             Not called for files below ``min_size_bytes`` or for directory
             access errors. Defaults to ``None``.

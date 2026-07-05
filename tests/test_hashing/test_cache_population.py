@@ -681,14 +681,17 @@ class TestProgressCallback:
             tmp_path,
             min_size_bytes=_MIN,
             db_path=db,
+            max_workers=1,  # serial for deterministic drain order
             progress_callback=lambda path, outcome, stats: snapshots.append(stats),
         )
 
         assert len(snapshots) == 2
-        # After both files are processed the last snapshot has hashed=2 and correct total bytes.
-        last = snapshots[-1]
-        assert last.hashed == 2
-        assert last.total_bytes_hashed == 50
+        # Intermediate snapshot: exactly one file processed so far.
+        assert snapshots[0].hashed == 1
+        assert snapshots[0].total_bytes_hashed in (20, 30)  # either file may come first
+        # Final snapshot: both files processed.
+        assert snapshots[1].hashed == 2
+        assert snapshots[1].total_bytes_hashed == 50
 
     def test_callback_outcome_cached(self, tmp_path):
         """On second run, callback receives 'cached' outcome."""
@@ -726,3 +729,27 @@ class TestProgressCallback:
         )
 
         assert outcomes == ["would_hash"]
+
+    def test_callback_receives_error_outcome(self, tmp_path, monkeypatch):
+        """A file that fails stat or hashing after passing the size filter fires the callback with 'error'."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing import file_hashers
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        def _raise(self, path):
+            raise OSError("simulated hashing error")
+
+        monkeypatch.setattr(file_hashers.FileHasher, "hash_file", _raise)
+
+        outcomes = []
+        stats = populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            progress_callback=lambda path, outcome, snap: outcomes.append(outcome),
+        )
+
+        assert outcomes == ["error"]
+        assert stats.errors == 1
