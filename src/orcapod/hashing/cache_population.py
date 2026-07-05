@@ -59,7 +59,7 @@ class CachePopulationStats:
 
 # "would_hash" is produced by _DryRunVisitor (dry_run=True); not used by _HashVisitor.
 FileOutcome = Literal["hashed", "cached", "would_hash", "error"]
-ProgressCallback = Callable[[Path, FileOutcome, CachePopulationStats], None]
+ProgressCallback = Callable[[UPath, FileOutcome, CachePopulationStats], None]
 
 
 @dataclass
@@ -267,15 +267,26 @@ def populate_hash_cache(
             Must be >= 1; raises ``ValueError`` otherwise.
         dry_run: If ``True``, perform the full walk, stat, size filter, and cache
             check but skip hashing and cache writes. ``stats.hashed`` reports how
-            many files *would* be hashed. Defaults to ``False``.
+            many files *would* be hashed. The walk runs serially on the calling
+            thread regardless of ``max_workers``; ``max_workers`` is ignored when
+            ``dry_run=True``. Defaults to ``False``.
         force: If ``True``, re-hash files even if they already have a cache entry.
             Defaults to ``False``.
         progress_callback: Optional callable invoked once per qualifying file
             (i.e. every file that passes the size filter, including those that
-            encounter stat or hashing errors). Receives the resolved ``Path``,
-            a ``FileOutcome`` string (``"hashed"``, ``"cached"``,
-            ``"would_hash"``, or ``"error"``), and a frozen
-            ``CachePopulationStats`` snapshot of running totals at that moment.
+            encounter stat or hashing errors). Receives three arguments:
+
+            - **path** (``UPath``): the resolved absolute path for
+              ``"hashed"``, ``"cached"``, ``"would_hash"``, and hashing-error
+              outcomes (symlinks followed, ``..`` eliminated). For stat or
+              resolve failures the original ``iterdir()`` entry is passed
+              instead — it identifies where in the tree the failure occurred
+              but may contain unresolved symlink components.
+            - **outcome** (``FileOutcome``): one of ``"hashed"``,
+              ``"cached"``, ``"would_hash"``, or ``"error"``.
+            - **stats** (``CachePopulationStats``): frozen snapshot of
+              running totals at this moment.
+
             Not called for files below ``min_size_bytes`` or for directory
             access errors. Defaults to ``None``.
 
