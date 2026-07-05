@@ -113,7 +113,7 @@ class _Accumulator:
         self._stats = _Stats()
         self._callback = callback
 
-    def record(self, path: Path, outcome: FileOutcome, nbytes: int) -> None:
+    def record(self, path: UPath, outcome: FileOutcome, nbytes: int) -> None:
         """Update counters for a qualifying file and fire the callback if set.
 
         Args:
@@ -272,9 +272,10 @@ def populate_hash_cache(
             ``dry_run=True``. Defaults to ``False``.
         force: If ``True``, re-hash files even if they already have a cache entry.
             Defaults to ``False``.
-        progress_callback: Optional callable invoked once per qualifying file
-            (i.e. every file that passes the size filter, including those that
-            encounter stat or hashing errors). Receives three arguments:
+        progress_callback: Optional callable invoked once for each file that
+            either meets the size threshold or fails at ``stat()``/``resolve()``
+            time (stat and resolve failures are reported before any size check).
+            Receives three arguments:
 
             - **path** (``UPath``): the resolved absolute path for
               ``"hashed"``, ``"cached"``, ``"would_hash"``, and hashing-error
@@ -302,7 +303,6 @@ def populate_hash_cache(
 
     root = UPath(path)
     _db_path: Path | None = Path(db_path) if db_path is not None else None
-    hasher = FileHasher(algorithm=algorithm, buffer_size=buffer_size)
 
     with SqliteHashCacher(_db_path) as cacher:
         _db_resolved = cacher.db_path.resolve()
@@ -319,6 +319,7 @@ def populate_hash_cache(
         if dry_run:
             visitor: _HashVisitor | _DryRunVisitor = _DryRunVisitor(cacher, force=force)
         else:
+            hasher = FileHasher(algorithm=algorithm, buffer_size=buffer_size)
             visitor = _HashVisitor(cacher, hasher, force=force)
         accumulator = _Accumulator(progress_callback)
 
