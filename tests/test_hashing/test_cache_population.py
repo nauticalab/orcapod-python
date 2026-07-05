@@ -18,6 +18,7 @@ class TestCachePopulationStats:
             skipped_small=3,
             errors=0,
             total_bytes_hashed=100,
+            total_bytes_cached=50,
             total_duration=1.0,
             avg_hashing_speed=100.0,
         )
@@ -26,6 +27,7 @@ class TestCachePopulationStats:
         assert stats.skipped_small == 3
         assert stats.errors == 0
         assert stats.total_bytes_hashed == 100
+        assert stats.total_bytes_cached == 50
         assert stats.total_duration == 1.0
         assert stats.avg_hashing_speed == 100.0
 
@@ -38,6 +40,7 @@ class TestCachePopulationStats:
             skipped_small=0,
             errors=0,
             total_bytes_hashed=0,
+            total_bytes_cached=0,
             total_duration=0.0,
             avg_hashing_speed=0.0,
         )
@@ -171,8 +174,10 @@ class TestCacheHitMiss:
         second = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
 
         assert first.hashed == 1
+        assert first.total_bytes_cached == 0
         assert second.already_cached == 1
         assert second.hashed == 0
+        assert second.total_bytes_cached == 20
 
     def test_total_bytes_hashed(self, tmp_path):
         db = tmp_path / "cache.db"
@@ -370,3 +375,47 @@ class TestPublicExports:
 
         assert callable(populate_hash_cache)
         assert CachePopulationStats.__dataclass_fields__  # is a dataclass
+
+
+# ---------------------------------------------------------------------------
+# Cached bytes
+# ---------------------------------------------------------------------------
+
+
+class TestCachedBytes:
+    def test_total_bytes_cached_zero_on_first_run(self, tmp_path):
+        """First run has nothing cached yet — total_bytes_cached must be zero."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        assert stats.total_bytes_cached == 0
+
+    def test_total_bytes_cached_on_second_run(self, tmp_path):
+        """Second run finds the file cached — total_bytes_cached equals file size."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        second = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        assert second.total_bytes_cached == 20
+        assert second.total_bytes_hashed == 0
+
+    def test_total_bytes_cached_multiple_files(self, tmp_path):
+        """total_bytes_cached sums across all already-cached files."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "a.bin", 20)
+        _write(tmp_path, "b.bin", 30)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        second = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        assert second.total_bytes_cached == 50
+        assert second.total_bytes_hashed == 0

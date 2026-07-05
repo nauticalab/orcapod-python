@@ -41,6 +41,7 @@ class CachePopulationStats:
         errors: Files or directories that raised an exception during traversal or hashing
             (logged as warnings).
         total_bytes_hashed: Sum of bytes across all newly hashed files.
+        total_bytes_cached: Sum of bytes across all already-cached files.
         total_duration: Wall-clock duration of the full run in seconds.
         avg_hashing_speed: Hashing throughput in bytes per second
             (``total_bytes_hashed / total_duration``; ``0.0`` if ``total_duration`` is zero).
@@ -51,6 +52,7 @@ class CachePopulationStats:
     skipped_small: int
     errors: int
     total_bytes_hashed: int
+    total_bytes_cached: int
     total_duration: float
     avg_hashing_speed: float
 
@@ -84,7 +86,7 @@ def _hash_one(
     try:
         key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
         if cacher.get(key) is not None:
-            return ("cached", 0)
+            return ("cached", file_stat.st_size)
         content_hash = hasher.hash_file(resolved)
         cacher.put(key, content_hash)
         return ("hashed", file_stat.st_size)
@@ -175,6 +177,7 @@ def populate_hash_cache(
             already_cached = 0
             skipped_small = 0
             total_bytes_hashed = 0
+            already_cached_bytes = 0
             start = time.monotonic()
 
             # Cap the number of futures kept in-flight so that peak memory
@@ -238,6 +241,7 @@ def populate_hash_cache(
                                 total_bytes_hashed += nbytes
                             elif cat == "cached":
                                 already_cached += 1
+                                already_cached_bytes += nbytes
                             else:  # "error"
                                 error_count += 1
 
@@ -253,6 +257,7 @@ def populate_hash_cache(
                     total_bytes_hashed += nbytes
                 elif category == "cached":
                     already_cached += 1
+                    already_cached_bytes += nbytes
                 else:  # "error"
                     error_count += 1
 
@@ -265,6 +270,7 @@ def populate_hash_cache(
                 skipped_small=skipped_small,
                 errors=error_count,
                 total_bytes_hashed=total_bytes_hashed,
+                total_bytes_cached=already_cached_bytes,
                 total_duration=duration,
                 avg_hashing_speed=speed,
             )
