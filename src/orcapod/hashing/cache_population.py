@@ -10,9 +10,9 @@ import logging
 import os
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from upath import UPath
 
@@ -57,43 +57,123 @@ class CachePopulationStats:
     avg_hashing_speed: float
 
 
-def _hash_one(
-    resolved: UPath,
-    file_stat: os.stat_result,
-    cacher: SqliteHashCacher,
-    hasher: FileHasher,
-) -> tuple[Literal["hashed", "cached", "error"], int]:
-    """Hash and cache a single qualifying file, returning a (category, bytes) result pair.
+FileOutcome = Literal["hashed", "cached", "would_hash", "error"]
 
-    Called from worker threads inside ``populate_hash_cache()``. The file has
-    already passed the size filter on the traversal thread. ``cacher`` and
-    ``hasher`` are shared across threads; both are safe because
-    ``SqliteHashCacher`` uses ``threading.local()`` connections and
-    ``FileHasher`` is stateless.
+
+@dataclass
+class _Stats:
+    """Private mutable accumulator for per-run counters.
+
+    Replaces the five loose local variables previously used inside
+    ``populate_hash_cache``.
+    """
+
+    hashed: int = 0
+    already_cached: int = 0
+    skipped_small: int = 0
+    errors: int = 0
+    total_bytes_hashed: int = 0
+    total_bytes_cached: int = 0
+    start: float = field(default_factory=time.monotonic)
+
+    def snapshot(self) -> CachePopulationStats:
+        """Return a frozen ``CachePopulationStats`` snapshot of current totals."""
+        duration = time.monotonic() - self.start
+        return CachePopulationStats(
+            hashed=self.hashed,
+            already_cached=self.already_cached,
+            skipped_small=self.skipped_small,
+            errors=self.errors,
+            total_bytes_hashed=self.total_bytes_hashed,
+            total_bytes_cached=self.total_bytes_cached,
+            total_duration=duration,
+            avg_hashing_speed=(
+                self.total_bytes_hashed / duration if duration > 0 else 0.0
+            ),
+        )
+
+
+class _Accumulator:
+    """Owns a ``_Stats`` object and an optional progress callback.
+
+    All counter updates flow through this class so there is one place
+    where snapshots are created and the callback is fired.
+    """
+
+    def __init__(self, callback: "ProgressCallback | None" = None) -> None:
+        self._stats = _Stats()
+        self._callback = callback
+
+    def record(self, path: "Path", outcome: FileOutcome, nbytes: int) -> None:
+        """Update counters for a qualifying file and fire the callback if set.
+
+        Args:
+            path: Resolved file path that was just processed.
+            outcome: What happened to the file.
+            nbytes: File size in bytes (for hashed/would_hash/cached outcomes);
+                ``0`` for errors.
+        """
+        if outcome in ("hashed", "would_hash"):
+            self._stats.hashed += 1
+            self._stats.total_bytes_hashed += nbytes
+        elif outcome == "cached":
+            self._stats.already_cached += 1
+            self._stats.total_bytes_cached += nbytes
+        else:  # "error"
+            self._stats.errors += 1
+        if self._callback is not None:
+            self._callback(path, outcome, self._stats.snapshot())
+
+    def record_skipped_small(self) -> None:
+        """Increment ``skipped_small`` without firing the callback."""
+        self._stats.skipped_small += 1
+
+    def record_directory_error(self) -> None:
+        """Increment ``errors`` for a directory access failure without firing the callback."""
+        self._stats.errors += 1
+
+    def finalize(self) -> CachePopulationStats:
+        """Return the final frozen ``CachePopulationStats`` snapshot."""
+        return self._stats.snapshot()
+
+
+class _HashVisitor:
+    """Per-file visitor that checks the cache and hashes on miss.
+
+    Callable with signature ``(resolved, file_stat) -> (FileOutcome, int)``.
+    Thread-safe: ``SqliteHashCacher`` uses ``threading.local()`` connections
+    and ``FileHasher`` is stateless.
 
     Args:
-        resolved: Fully resolved file path (no symlinks).
-        file_stat: ``os.stat_result`` obtained on the traversal thread; used
-            to build the cache key (mtime_ns + size) without a second stat call.
         cacher: Shared ``SqliteHashCacher`` instance.
         hasher: Shared ``FileHasher`` instance.
-
-    Returns:
-        A tuple ``(category, nbytes)`` where ``category`` is one of
-        ``"hashed"``, ``"cached"``, or ``"error"``. ``nbytes`` is the
-        file size for newly hashed and already-cached files; ``0`` for
-        errors.
+        force: If ``True``, skip the cache-get and always re-hash.
     """
-    try:
-        key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
-        if cacher.get(key) is not None:
-            return ("cached", file_stat.st_size)
-        content_hash = hasher.hash_file(resolved)
-        cacher.put(key, content_hash)
-        return ("hashed", file_stat.st_size)
-    except Exception:
-        logger.warning("Failed to process file %s", resolved, exc_info=True)
-        return ("error", 0)
+
+    def __init__(
+        self,
+        cacher: SqliteHashCacher,
+        hasher: FileHasher,
+        *,
+        force: bool = False,
+    ) -> None:
+        self._cacher = cacher
+        self._hasher = hasher
+        self._force = force
+
+    def __call__(
+        self, resolved: UPath, file_stat: os.stat_result
+    ) -> tuple[FileOutcome, int]:
+        try:
+            key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
+            if not self._force and self._cacher.get(key) is not None:
+                return ("cached", file_stat.st_size)
+            content_hash = self._hasher.hash_file(resolved)
+            self._cacher.put(key, content_hash)
+            return ("hashed", file_stat.st_size)
+        except Exception:
+            logger.warning("Failed to process file %s", resolved, exc_info=True)
+            return ("error", 0)
 
 
 def populate_hash_cache(
@@ -153,42 +233,25 @@ def populate_hash_cache(
     _db_path: Path | None = Path(db_path) if db_path is not None else None
     hasher = FileHasher(algorithm=algorithm, buffer_size=buffer_size)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        with SqliteHashCacher(_db_path) as cacher:
-            # Collect the DB file and its SQLite sidecar files so they are never
-            # treated as data files even if the DB lives inside the scan root.
-            # Sidecars are named by appending to the full filename (including any
-            # extension), so string concatenation is used rather than with_suffix()
-            # — which would raise ValueError for DB paths without an extension.
-            # Covered sidecars: WAL ("-wal"), shared-memory ("-shm"), and rollback
-            # journal ("-journal").
-            _db_resolved = cacher.db_path.resolve()
-            _db_str = str(_db_resolved)
-            _excluded: frozenset[UPath] = frozenset(
-                [
-                    UPath(_db_resolved),
-                    UPath(_db_str + "-wal"),
-                    UPath(_db_str + "-shm"),
-                    UPath(_db_str + "-journal"),
-                ]
-            )
+    with SqliteHashCacher(_db_path) as cacher:
+        _db_resolved = cacher.db_path.resolve()
+        _db_str = str(_db_resolved)
+        _excluded: frozenset[UPath] = frozenset(
+            [
+                UPath(_db_resolved),
+                UPath(_db_str + "-wal"),
+                UPath(_db_str + "-shm"),
+                UPath(_db_str + "-journal"),
+            ]
+        )
 
-            error_count = 0
-            hashed = 0
-            already_cached = 0
-            skipped_small = 0
-            total_bytes_hashed = 0
-            already_cached_bytes = 0
-            start = time.monotonic()
+        visitor = _HashVisitor(cacher, hasher)
+        accumulator = _Accumulator()
+        _max_pending = max_workers * _PENDING_FACTOR
 
-            # Cap the number of futures kept in-flight so that peak memory
-            # stays O(max_workers) regardless of tree size.
-            _max_pending = max_workers * _PENDING_FACTOR
-            pending: set[Future[tuple[Literal["hashed", "cached", "error"], int]]] = set()
+        pending: dict[Future[tuple[FileOutcome, int]], UPath] = {}
 
-            # Explicit DFS stack — avoids recursion limits on deep trees.
-            # DB-file exclusion, stat(), and size-filtering all happen here
-            # (main thread) so workers only receive qualifying file paths.
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             stack: list[UPath] = [root]
             while stack:
                 current = stack.pop()
@@ -198,7 +261,7 @@ def populate_hash_cache(
                     logger.warning(
                         "Cannot access directory %s", current, exc_info=True
                     )
-                    error_count += 1
+                    accumulator.record_directory_error()
                     continue
 
                 for entry in entries:
@@ -210,10 +273,6 @@ def populate_hash_cache(
                     if not entry.is_file():
                         continue
 
-                    # Resolve, stat, and filter by size on the traversal
-                    # thread.  Only qualifying files are submitted to the
-                    # executor, keeping the pending set small and avoiding
-                    # futures for every tiny file in the tree.
                     try:
                         resolved = entry.resolve()
                         if resolved in _excluded:
@@ -223,55 +282,26 @@ def populate_hash_cache(
                         logger.warning(
                             "Cannot stat file %s", entry, exc_info=True
                         )
-                        error_count += 1
+                        accumulator.record(entry, "error", 0)
                         continue
 
                     if file_stat.st_size < min_size_bytes:
-                        skipped_small += 1
+                        accumulator.record_skipped_small()
                         continue
 
-                    # Drain completed futures when the pending set is full,
-                    # providing backpressure when hashing is slower than
-                    # traversal.
                     if len(pending) >= _max_pending:
-                        done, pending = wait(pending, return_when=FIRST_COMPLETED)
-                        for fut in done:
-                            cat, nbytes = fut.result()
-                            if cat == "hashed":
-                                hashed += 1
-                                total_bytes_hashed += nbytes
-                            elif cat == "cached":
-                                already_cached += 1
-                                already_cached_bytes += nbytes
-                            else:  # "error"
-                                error_count += 1
+                        done_futures, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
+                        for fut in done_futures:
+                            p = pending.pop(fut)
+                            outcome, nbytes = fut.result()
+                            accumulator.record(p, outcome, nbytes)
 
-                    pending.add(
-                        executor.submit(_hash_one, resolved, file_stat, cacher, hasher)
-                    )
+                    future = executor.submit(visitor, resolved, file_stat)
+                    pending[future] = resolved
 
-            # Drain all remaining futures.
-            for future in as_completed(pending):
-                category, nbytes = future.result()
-                if category == "hashed":
-                    hashed += 1
-                    total_bytes_hashed += nbytes
-                elif category == "cached":
-                    already_cached += 1
-                    already_cached_bytes += nbytes
-                else:  # "error"
-                    error_count += 1
+            for fut in as_completed(pending):
+                p = pending[fut]
+                outcome, nbytes = fut.result()
+                accumulator.record(p, outcome, nbytes)
 
-            duration = time.monotonic() - start
-            speed = total_bytes_hashed / duration if duration > 0 else 0.0
-
-            return CachePopulationStats(
-                hashed=hashed,
-                already_cached=already_cached,
-                skipped_small=skipped_small,
-                errors=error_count,
-                total_bytes_hashed=total_bytes_hashed,
-                total_bytes_cached=already_cached_bytes,
-                total_duration=duration,
-                avg_hashing_speed=speed,
-            )
+    return accumulator.finalize()
