@@ -44,7 +44,12 @@ from orcapod.hashing.defaults import (
     get_default_semantic_hasher,
 )
 from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher, FileHashKey
-from orcapod.hashing.cache_population import CachePopulationStats, populate_hash_cache
+from orcapod.hashing.cache_population import (
+    CachePopulationStats,
+    FileOutcome,
+    ProgressCallback,
+    populate_hash_cache,
+)
 from orcapod.hashing.hash_cachers import InMemoryHashCacher, SqliteHashCacher
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.hash_utils import hash_file
@@ -130,6 +135,8 @@ __all__ = [
     "InMemoryHashCacher",
     "SqliteHashCacher",
     "CachePopulationStats",
+    "FileOutcome",
+    "ProgressCallback",
     "populate_hash_cache",
     "BasicDirectoryHasher",
     "DirectoryHasherProtocol",
