@@ -191,6 +191,7 @@ def populate_hash_cache(
     algorithm: str = "sha256",
     buffer_size: int = 65536,
     max_workers: int = _DEFAULT_MAX_WORKERS,
+    force: bool = False,
 ) -> CachePopulationStats:
     """Recursively hash and cache all files >= ``min_size_bytes`` under ``path``.
 
@@ -225,6 +226,8 @@ def populate_hash_cache(
             to 4, which is well-suited for NAS and HDD storage where more than 4
             parallel reads cause seek contention. Pass ``1`` for serial behaviour.
             Must be >= 1; raises ``ValueError`` otherwise.
+        force: If ``True``, re-hash files even if they already have a cache entry.
+            Defaults to ``False``.
 
     Returns:
         ``CachePopulationStats`` with counts for hashed, cached, skipped, and
@@ -252,7 +255,7 @@ def populate_hash_cache(
             ]
         )
 
-        visitor = _HashVisitor(cacher, hasher)
+        visitor = _HashVisitor(cacher, hasher, force=force)
         accumulator = _Accumulator()
         _max_pending = max_workers * _PENDING_FACTOR
 

@@ -419,3 +419,54 @@ class TestCachedBytes:
 
         assert second.total_bytes_cached == 50
         assert second.total_bytes_hashed == 0
+
+
+# ---------------------------------------------------------------------------
+# Force parameter
+# ---------------------------------------------------------------------------
+
+
+class TestForce:
+    def test_force_rehashes_cached_file(self, tmp_path):
+        """force=True re-hashes a file even if already in the cache."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        first = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        assert first.hashed == 1
+
+        second = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, force=True
+        )
+        assert second.hashed == 1
+        assert second.already_cached == 0
+
+    def test_force_false_skips_cached_file(self, tmp_path):
+        """force=False (default) does not re-hash an already-cached file."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        second = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, force=False
+        )
+        assert second.already_cached == 1
+        assert second.hashed == 0
+
+    def test_force_bytes_hashed(self, tmp_path):
+        """force=True: total_bytes_hashed counts re-hashed bytes; total_bytes_cached is zero."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        second = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, force=True
+        )
+        assert second.total_bytes_hashed == 20
+        assert second.total_bytes_cached == 0
