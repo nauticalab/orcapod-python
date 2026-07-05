@@ -79,9 +79,10 @@ def _hash_one(
         hasher: Shared ``FileHasher`` instance.
 
     Returns:
-        A tuple ``(category, bytes_hashed)`` where ``category`` is one of
-        ``"hashed"``, ``"cached"``, or ``"error"``, and ``bytes_hashed``
-        is the file size for newly hashed files, ``0`` otherwise.
+        A tuple ``(category, nbytes)`` where ``category`` is one of
+        ``"hashed"``, ``"cached"``, or ``"error"``. ``nbytes`` is the
+        file size for newly hashed and already-cached files; ``0`` for
+        errors.
     """
     try:
         key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
