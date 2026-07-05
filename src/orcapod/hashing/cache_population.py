@@ -12,7 +12,7 @@ import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from upath import UPath
 
@@ -57,6 +57,7 @@ class CachePopulationStats:
     avg_hashing_speed: float
 
 
+# "would_hash" is produced by _DryRunVisitor (dry_run=True); not used by _HashVisitor.
 FileOutcome = Literal["hashed", "cached", "would_hash", "error"]
 
 
@@ -107,11 +108,14 @@ class _Accumulator:
     (the main traversal thread). Worker threads must not call ``record()`` directly.
     """
 
-    def __init__(self, callback: None = None) -> None:
+    def __init__(
+        self,
+        callback: Callable[[Path, FileOutcome, CachePopulationStats], None] | None = None,
+    ) -> None:
         self._stats = _Stats()
         self._callback = callback
 
-    def record(self, path: "Path", outcome: FileOutcome, nbytes: int) -> None:
+    def record(self, path: Path, outcome: FileOutcome, nbytes: int) -> None:
         """Update counters for a qualifying file and fire the callback if set.
 
         Args:
