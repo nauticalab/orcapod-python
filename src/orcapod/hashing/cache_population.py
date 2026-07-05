@@ -12,7 +12,7 @@ import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 from upath import UPath
 
@@ -77,7 +77,11 @@ class _Stats:
     start: float = field(default_factory=time.monotonic)
 
     def snapshot(self) -> CachePopulationStats:
-        """Return a frozen ``CachePopulationStats`` snapshot of current totals."""
+        """Return a frozen ``CachePopulationStats`` snapshot of current totals.
+
+        Each call captures a fresh ``time.monotonic()`` reading, so the snapshot
+        is accurate whether taken mid-run (for callbacks) or at completion.
+        """
         duration = time.monotonic() - self.start
         return CachePopulationStats(
             hashed=self.hashed,
@@ -98,9 +102,12 @@ class _Accumulator:
 
     All counter updates flow through this class so there is one place
     where snapshots are created and the callback is fired.
+
+    Not thread-safe. All ``record()`` calls must come from the same thread
+    (the main traversal thread). Worker threads must not call ``record()`` directly.
     """
 
-    def __init__(self, callback: "ProgressCallback | None" = None) -> None:
+    def __init__(self, callback: None = None) -> None:
         self._stats = _Stats()
         self._callback = callback
 
