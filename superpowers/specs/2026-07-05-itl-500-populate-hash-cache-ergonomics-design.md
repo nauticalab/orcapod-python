@@ -44,7 +44,7 @@ In scope:
 - `tests/test_hashing/test_cache_population.py` — new test classes
 
 Out of scope:
-- `CachePopulationStats` public fields — no renames or new public fields
+- `CachePopulationStats` public fields — no renames; one new field added (`total_bytes_cached`)
 - Async / `asyncio` execution model — remains `concurrent.futures` throughout
 - Progress bar built into the CLI — callback API serves library consumers;
   CLI stays simple text output
@@ -94,6 +94,7 @@ class _Stats:
     skipped_small: int = 0
     errors: int = 0
     total_bytes_hashed: int = 0
+    total_bytes_cached: int = 0   # mirrors new CachePopulationStats field
     start: float = field(default_factory=time.monotonic)
 
     def snapshot(self) -> CachePopulationStats:
@@ -104,6 +105,7 @@ class _Stats:
             skipped_small=self.skipped_small,
             errors=self.errors,
             total_bytes_hashed=self.total_bytes_hashed,
+            total_bytes_cached=self.total_bytes_cached,
             total_duration=duration,
             avg_hashing_speed=(
                 self.total_bytes_hashed / duration if duration > 0 else 0.0
@@ -133,9 +135,12 @@ class _Accumulator:
         # Returns the final frozen stats snapshot.
 ```
 
-`"hashed"` and `"would_hash"` both increment `_stats.hashed` and
-`_stats.total_bytes_hashed` — dry-run `hashed` means "would-hash count"; callers
-that passed `dry_run=True` interpret it accordingly (documented on the parameter).
+`"hashed"` and `"would_hash"` both increment `_stats.hashed` and `_stats.total_bytes_hashed`.
+`"cached"` increments `_stats.already_cached` and `_stats.total_bytes_cached` — the `nbytes`
+argument for cached outcomes is `file_stat.st_size` (visitors always return the file size,
+not `0`, so the accumulator can track cached bytes).
+Dry-run `hashed` means "would-hash count"; callers that passed `dry_run=True` interpret it
+accordingly (documented on the parameter).
 
 ---
 
@@ -153,7 +158,7 @@ class _HashVisitor:
     def __call__(self, resolved, file_stat) -> tuple[FileOutcome, int]:
         key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
         if not self._force and self._cacher.get(key) is not None:
-            return ("cached", 0)
+            return ("cached", file_stat.st_size)   # size returned for total_bytes_cached
         content_hash = self._hasher.hash_file(resolved)
         self._cacher.put(key, content_hash)
         return ("hashed", file_stat.st_size)
@@ -170,7 +175,7 @@ class _DryRunVisitor:
             return ("would_hash", file_stat.st_size)
         key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
         if self._cacher.get(key) is not None:
-            return ("cached", 0)
+            return ("cached", file_stat.st_size)    # size returned for total_bytes_cached
         return ("would_hash", file_stat.st_size)
         # exceptions → ("error", 0) with logger.warning
 ```
@@ -247,8 +252,8 @@ Two new Typer options:
 
 Output format differs for dry-run:
 
-- Normal: `"Done in Xs — N hashed (X.XX GB), Y already cached, Z skipped, E errors."`
-- Dry-run: `"Dry run complete in Xs — N would be hashed (X.XX GB), Y already cached, Z skipped, E errors."`
+- Normal: `"Done in Xs — N hashed (X.XX GB), Y already cached (X.XX GB), Z skipped, E errors."`
+- Dry-run: `"Dry run complete in Xs — N would be hashed (X.XX GB), Y already cached (X.XX GB), Z skipped, E errors."`
 
 No built-in progress bar is added to the CLI. The `progress_callback` API
 is the extension point for library consumers.
