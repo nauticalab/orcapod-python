@@ -71,6 +71,7 @@ def warm_cache(
     min_size_bytes = int(min_size * 1024 * 1024)
     _db_path: Path | None = Path(db_path) if db_path is not None else None
 
+    # Guard here for clean CLI error message; the library also validates and raises ValueError.
     if max_workers < 1:
         typer.echo("Error: --workers must be at least 1", err=True)
         raise typer.Exit(code=1)

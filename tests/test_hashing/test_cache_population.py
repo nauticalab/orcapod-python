@@ -780,6 +780,7 @@ class TestCLI:
         assert result.exit_code == 0
         assert "1 hashed" in result.output
         assert "0 already cached" in result.output
+        assert "would be hashed" not in result.output
 
     def test_dry_run_flag_wires_through(self, tmp_path):
         """--dry-run prints 'would be hashed' and makes no cache writes."""
@@ -800,6 +801,28 @@ class TestCLI:
             app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)]
         )
         assert "1 hashed" in real_run.output
+
+    def test_dry_run_and_force_combined(self, tmp_path):
+        """--dry-run --force: all qualifying files reported as would-be-hashed; cache stays empty."""
+        runner = CliRunner()
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        app = self._app()
+        # Populate cache first.
+        runner.invoke(app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)])
+        # Dry run with force — should say "would be hashed" even though file is cached.
+        result = runner.invoke(
+            app,
+            [str(tmp_path), "--min-size", "0", "--db-path", str(db), "--dry-run", "--force"],
+        )
+        assert result.exit_code == 0
+        assert "would be hashed" in result.output
+        assert "Dry run" in result.output
+
+        # Real run after combined dry+force should still find the file cached (no writes happened).
+        real_run = runner.invoke(app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)])
+        assert "1 already cached" in real_run.output
 
     def test_normal_output_includes_cached_gb(self, tmp_path):
         """Normal run output shows cached GB on the second run."""
