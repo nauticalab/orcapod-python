@@ -48,18 +48,30 @@ def warm_cache(
         help="Number of threads for concurrent hashing. Default: 4.",
         show_default=True,
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Scan and check cache without hashing. Prints what would be done.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-hash files even if already cached.",
+    ),
 ) -> None:
     """Pre-populate the file-hash cache for large files under PATH.
 
     Recursively scans PATH and hashes every file that is at least MIN_SIZE MB.
-    Files already present in the cache are skipped. On completion, prints a
-    summary with counts and throughput.
+    Files already present in the cache are skipped unless --force is given.
+    Use --dry-run to preview what would be done without writing to the cache.
+    On completion, prints a summary with counts and throughput.
     """
     from orcapod.hashing.cache_population import populate_hash_cache
 
     min_size_bytes = int(min_size * 1024 * 1024)
     _db_path: Path | None = Path(db_path) if db_path is not None else None
 
+    # Guard here for clean CLI error message; the library also validates and raises ValueError.
     if max_workers < 1:
         typer.echo("Error: --workers must be at least 1", err=True)
         raise typer.Exit(code=1)
@@ -72,7 +84,10 @@ def warm_cache(
         typer.echo(f"Error: path is not a directory: {path}", err=True)
         raise typer.Exit(code=1)
 
-    typer.echo(f"Scanning {path} ...")
+    if dry_run:
+        typer.echo(f"Dry-run scan of {path} ...")
+    else:
+        typer.echo(f"Scanning {path} ...")
 
     stats = populate_hash_cache(
         path,
@@ -81,18 +96,30 @@ def warm_cache(
         algorithm=algorithm,
         buffer_size=buffer_size,
         max_workers=max_workers,
+        dry_run=dry_run,
+        force=force,
     )
 
-    gb = stats.total_bytes_hashed / (1024**3)
+    gb_hashed = stats.total_bytes_hashed / (1024**3)
+    gb_cached = stats.total_bytes_cached / (1024**3)
     speed_gb = stats.avg_hashing_speed / (1024**3)
     min_size_display = f"{min_size:g} MB"
 
-    typer.echo(
-        f"Done in {stats.total_duration:.1f}s — "
-        f"{stats.hashed} hashed ({gb:.2f} GB), "
-        f"{stats.already_cached} already cached, "
-        f"{stats.skipped_small} skipped (< {min_size_display}), "
-        f"{stats.errors} errors."
-    )
-    if stats.hashed > 0:
-        typer.echo(f"Average hashing speed: {speed_gb:.2f} GB/s")
+    if dry_run:
+        typer.echo(
+            f"Dry run complete in {stats.total_duration:.1f}s — "
+            f"{stats.hashed} would be hashed ({gb_hashed:.2f} GB), "
+            f"{stats.already_cached} already cached ({gb_cached:.2f} GB), "
+            f"{stats.skipped_small} skipped (< {min_size_display}), "
+            f"{stats.errors} errors."
+        )
+    else:
+        typer.echo(
+            f"Done in {stats.total_duration:.1f}s — "
+            f"{stats.hashed} hashed ({gb_hashed:.2f} GB), "
+            f"{stats.already_cached} already cached ({gb_cached:.2f} GB), "
+            f"{stats.skipped_small} skipped (< {min_size_display}), "
+            f"{stats.errors} errors."
+        )
+        if stats.hashed > 0:
+            typer.echo(f"Average hashing speed: {speed_gb:.2f} GB/s")
