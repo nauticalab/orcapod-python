@@ -470,3 +470,117 @@ class TestForce:
         )
         assert second.total_bytes_hashed == 20
         assert second.total_bytes_cached == 0
+
+
+class TestVisitors:
+    def test_dry_run_visitor_miss_returns_would_hash(self, tmp_path):
+        """_DryRunVisitor returns would_hash for a file not in the cache."""
+        from orcapod.hashing.cache_population import _DryRunVisitor
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        db = tmp_path / "cache.db"
+        f = _write(tmp_path, "f.bin", 20)
+        resolved = f.resolve()
+        file_stat = resolved.stat()
+
+        with SqliteHashCacher(db) as cacher:
+            visitor = _DryRunVisitor(cacher)
+            outcome, nbytes = visitor(resolved, file_stat)
+
+        assert outcome == "would_hash"
+        assert nbytes == 20
+
+    def test_dry_run_visitor_hit_returns_cached(self, tmp_path):
+        """_DryRunVisitor returns cached for a file already in the cache."""
+        from orcapod.hashing.cache_population import _DryRunVisitor, populate_hash_cache
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        db = tmp_path / "cache.db"
+        f = _write(tmp_path, "f.bin", 20)
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        resolved = f.resolve()
+        file_stat = resolved.stat()
+
+        with SqliteHashCacher(db) as cacher:
+            visitor = _DryRunVisitor(cacher)
+            outcome, nbytes = visitor(resolved, file_stat)
+
+        assert outcome == "cached"
+        assert nbytes == 20
+
+    def test_dry_run_visitor_force_always_would_hash(self, tmp_path):
+        """_DryRunVisitor with force=True always returns would_hash regardless of cache."""
+        from orcapod.hashing.cache_population import _DryRunVisitor, populate_hash_cache
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        db = tmp_path / "cache.db"
+        f = _write(tmp_path, "f.bin", 20)
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        resolved = f.resolve()
+        file_stat = resolved.stat()
+
+        with SqliteHashCacher(db) as cacher:
+            visitor = _DryRunVisitor(cacher, force=True)
+            outcome, nbytes = visitor(resolved, file_stat)
+
+        assert outcome == "would_hash"
+        assert nbytes == 20
+
+
+class TestDryRun:
+    def test_dry_run_no_cache_writes(self, tmp_path):
+        """dry_run=True must not write any entries to the cache."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+
+        # Second run with dry_run=False should hash (not find cache entries).
+        second = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        assert second.hashed == 1
+        assert second.already_cached == 0
+
+    def test_dry_run_hashed_equals_would_hash_count(self, tmp_path):
+        """In dry-run mode, stats.hashed counts files that would be hashed."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "a.bin", 20)
+        _write(tmp_path, "b.bin", 30)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+        assert stats.hashed == 2
+        assert stats.total_bytes_hashed == 50
+
+    def test_dry_run_already_cached_counted(self, tmp_path):
+        """dry_run=True counts already-cached files and their bytes correctly."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+
+        assert stats.already_cached == 1
+        assert stats.total_bytes_cached == 20
+        assert stats.hashed == 0
+
+    def test_dry_run_force_all_would_hash(self, tmp_path):
+        """dry_run=True, force=True: all qualifying files are would_hash regardless of cache."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+        stats = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True, force=True
+        )
+
+        assert stats.hashed == 1
+        assert stats.already_cached == 0

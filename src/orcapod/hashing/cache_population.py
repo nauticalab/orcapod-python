@@ -187,6 +187,41 @@ class _HashVisitor:
             return ("error", 0)
 
 
+class _DryRunVisitor:
+    """Per-file visitor that checks the cache without hashing or writing.
+
+    Callable with signature ``(resolved, file_stat) -> (FileOutcome, int)``.
+    Runs on the traversal thread — no thread pool needed for cache lookups.
+
+    Args:
+        cacher: Shared ``SqliteHashCacher`` instance.
+        force: If ``True``, skip the cache check and always return ``"would_hash"``.
+    """
+
+    def __init__(
+        self,
+        cacher: SqliteHashCacher,
+        *,
+        force: bool = False,
+    ) -> None:
+        self._cacher = cacher
+        self._force = force
+
+    def __call__(
+        self, resolved: UPath, file_stat: os.stat_result
+    ) -> tuple[FileOutcome, int]:
+        try:
+            if self._force:
+                return ("would_hash", file_stat.st_size)
+            key = FileHashKey(resolved, file_stat.st_mtime_ns, file_stat.st_size)
+            if self._cacher.get(key) is not None:
+                return ("cached", file_stat.st_size)
+            return ("would_hash", file_stat.st_size)
+        except Exception:
+            logger.warning("Failed to check file %s", resolved, exc_info=True)
+            return ("error", 0)
+
+
 def populate_hash_cache(
     path: PathLike | UPath,
     *,
@@ -195,6 +230,7 @@ def populate_hash_cache(
     algorithm: str = "sha256",
     buffer_size: int = 65536,
     max_workers: int = _DEFAULT_MAX_WORKERS,
+    dry_run: bool = False,
     force: bool = False,
 ) -> CachePopulationStats:
     """Recursively hash and cache all files >= ``min_size_bytes`` under ``path``.
@@ -230,6 +266,9 @@ def populate_hash_cache(
             to 4, which is well-suited for NAS and HDD storage where more than 4
             parallel reads cause seek contention. Pass ``1`` for serial behaviour.
             Must be >= 1; raises ``ValueError`` otherwise.
+        dry_run: If ``True``, perform the full walk, stat, size filter, and cache
+            check but skip hashing and cache writes. ``stats.hashed`` reports how
+            many files *would* be hashed. Defaults to ``False``.
         force: If ``True``, re-hash files even if they already have a cache entry.
             Defaults to ``False``.
 
@@ -259,13 +298,14 @@ def populate_hash_cache(
             ]
         )
 
-        visitor = _HashVisitor(cacher, hasher, force=force)
+        if dry_run:
+            visitor: _HashVisitor | _DryRunVisitor = _DryRunVisitor(cacher, force=force)
+        else:
+            visitor = _HashVisitor(cacher, hasher, force=force)
         accumulator = _Accumulator()
-        _max_pending = max_workers * _PENDING_FACTOR
 
-        pending: dict[Future[tuple[FileOutcome, int]], UPath] = {}
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        if dry_run:
+            # Serial path — cache lookups are fast; no thread pool needed.
             stack: list[UPath] = [root]
             while stack:
                 current = stack.pop()
@@ -303,19 +343,63 @@ def populate_hash_cache(
                         accumulator.record_skipped_small()
                         continue
 
-                    if len(pending) >= _max_pending:
-                        done_futures, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
-                        for fut in done_futures:
-                            p = pending.pop(fut)
-                            outcome, nbytes = fut.result()
-                            accumulator.record(p, outcome, nbytes)
+                    outcome, nbytes = visitor(resolved, file_stat)
+                    accumulator.record(resolved, outcome, nbytes)
+        else:
+            _max_pending = max_workers * _PENDING_FACTOR
+            pending: dict[Future[tuple[FileOutcome, int]], UPath] = {}
 
-                    future = executor.submit(visitor, resolved, file_stat)
-                    pending[future] = resolved
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                stack = [root]
+                while stack:
+                    current = stack.pop()
+                    try:
+                        entries = list(current.iterdir())
+                    except OSError:
+                        logger.warning(
+                            "Cannot access directory %s", current, exc_info=True
+                        )
+                        accumulator.record_directory_error()
+                        continue
 
-            for fut in as_completed(pending):
-                p = pending[fut]
-                outcome, nbytes = fut.result()
-                accumulator.record(p, outcome, nbytes)
+                    for entry in entries:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir():
+                            stack.append(entry)
+                            continue
+                        if not entry.is_file():
+                            continue
+
+                        try:
+                            resolved = entry.resolve()
+                            if resolved in _excluded:
+                                continue
+                            file_stat = resolved.stat()
+                        except OSError:
+                            logger.warning(
+                                "Cannot stat file %s", entry, exc_info=True
+                            )
+                            accumulator.record(entry, "error", 0)
+                            continue
+
+                        if file_stat.st_size < min_size_bytes:
+                            accumulator.record_skipped_small()
+                            continue
+
+                        if len(pending) >= _max_pending:
+                            done_futures, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
+                            for fut in done_futures:
+                                p = pending.pop(fut)
+                                outcome, nbytes = fut.result()
+                                accumulator.record(p, outcome, nbytes)
+
+                        future = executor.submit(visitor, resolved, file_stat)
+                        pending[future] = resolved
+
+                for fut in as_completed(pending):
+                    p = pending[fut]
+                    outcome, nbytes = fut.result()
+                    accumulator.record(p, outcome, nbytes)
 
     return accumulator.finalize()
