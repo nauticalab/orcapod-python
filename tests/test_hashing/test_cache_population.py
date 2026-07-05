@@ -372,10 +372,17 @@ class TestConcurrency:
 
 class TestPublicExports:
     def test_importable_from_orcapod_hashing(self):
-        from orcapod.hashing import CachePopulationStats, populate_hash_cache
+        from orcapod.hashing import (
+            CachePopulationStats,
+            FileOutcome,
+            ProgressCallback,
+            populate_hash_cache,
+        )
 
         assert callable(populate_hash_cache)
         assert CachePopulationStats.__dataclass_fields__  # is a dataclass
+        assert FileOutcome is not None
+        assert ProgressCallback is not None
 
 
 # ---------------------------------------------------------------------------
