@@ -584,3 +584,145 @@ class TestDryRun:
 
         assert stats.hashed == 1
         assert stats.already_cached == 0
+
+    def test_dry_run_directory_error_increments_errors(self, tmp_path, monkeypatch):
+        """dry_run=True: a directory permission error increments stats.errors."""
+        import pathlib
+
+        db = tmp_path / "cache.db"
+        sub = tmp_path / "locked"
+        sub.mkdir()
+        _write(sub, "f.bin", 20)
+
+        original_iterdir = pathlib.Path.iterdir
+
+        def _raise_on_locked(self):
+            if self.name == "locked":
+                raise PermissionError("simulated permission denied")
+            return original_iterdir(self)
+
+        monkeypatch.setattr(pathlib.Path, "iterdir", _raise_on_locked)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+
+        assert stats.errors == 1
+        assert stats.hashed == 0
+
+
+class TestProgressCallback:
+    def test_callback_fires_once_per_qualifying_file(self, tmp_path):
+        """Callback is called exactly once for each file that passes the size filter."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "a.bin", 20)
+        _write(tmp_path, "b.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        calls = []
+        populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            progress_callback=lambda path, outcome, stats: calls.append(outcome),
+        )
+
+        assert len(calls) == 2
+        assert all(o == "hashed" for o in calls)
+
+    def test_callback_receives_correct_path(self, tmp_path):
+        """Callback path argument is the resolved path of the file just processed."""
+        db = tmp_path / "cache.db"
+        f = _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        paths_seen = []
+        populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            progress_callback=lambda path, outcome, stats: paths_seen.append(path),
+        )
+
+        assert len(paths_seen) == 1
+        assert paths_seen[0] == f.resolve()
+
+    def test_callback_not_fired_for_skipped_small(self, tmp_path):
+        """Files below min_size_bytes do not trigger the callback."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "small.bin", 5)   # below _MIN=10
+        _write(tmp_path, "big.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        calls = []
+        populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            progress_callback=lambda path, outcome, stats: calls.append(outcome),
+        )
+
+        assert len(calls) == 1
+        assert calls[0] == "hashed"
+
+    def test_callback_running_totals_are_accurate(self, tmp_path):
+        """Each callback invocation receives a snapshot with totals correct up to that point."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "a.bin", 20)
+        _write(tmp_path, "b.bin", 30)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        snapshots = []
+        populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            progress_callback=lambda path, outcome, stats: snapshots.append(stats),
+        )
+
+        assert len(snapshots) == 2
+        # After both files are processed the last snapshot has hashed=2 and correct total bytes.
+        last = snapshots[-1]
+        assert last.hashed == 2
+        assert last.total_bytes_hashed == 50
+
+    def test_callback_outcome_cached(self, tmp_path):
+        """On second run, callback receives 'cached' outcome."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
+
+        outcomes = []
+        populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            progress_callback=lambda path, outcome, stats: outcomes.append(outcome),
+        )
+
+        assert outcomes == ["cached"]
+
+    def test_callback_outcome_would_hash_in_dry_run(self, tmp_path):
+        """In dry-run mode, callback receives 'would_hash' for uncached files."""
+        db = tmp_path / "cache.db"
+        _write(tmp_path, "f.bin", 20)
+
+        from orcapod.hashing.cache_population import populate_hash_cache
+
+        outcomes = []
+        populate_hash_cache(
+            tmp_path,
+            min_size_bytes=_MIN,
+            db_path=db,
+            dry_run=True,
+            progress_callback=lambda path, outcome, stats: outcomes.append(outcome),
+        )
+
+        assert outcomes == ["would_hash"]

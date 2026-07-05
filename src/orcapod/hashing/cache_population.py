@@ -59,6 +59,7 @@ class CachePopulationStats:
 
 # "would_hash" is produced by _DryRunVisitor (dry_run=True); not used by _HashVisitor.
 FileOutcome = Literal["hashed", "cached", "would_hash", "error"]
+ProgressCallback = Callable[[Path, FileOutcome, CachePopulationStats], None]
 
 
 @dataclass
@@ -108,10 +109,7 @@ class _Accumulator:
     (the main traversal thread). Worker threads must not call ``record()`` directly.
     """
 
-    def __init__(
-        self,
-        callback: Callable[[Path, FileOutcome, CachePopulationStats], None] | None = None,
-    ) -> None:
+    def __init__(self, callback: ProgressCallback | None = None) -> None:
         self._stats = _Stats()
         self._callback = callback
 
@@ -232,6 +230,7 @@ def populate_hash_cache(
     max_workers: int = _DEFAULT_MAX_WORKERS,
     dry_run: bool = False,
     force: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> CachePopulationStats:
     """Recursively hash and cache all files >= ``min_size_bytes`` under ``path``.
 
@@ -271,6 +270,12 @@ def populate_hash_cache(
             many files *would* be hashed. Defaults to ``False``.
         force: If ``True``, re-hash files even if they already have a cache entry.
             Defaults to ``False``.
+        progress_callback: Optional callable invoked once per qualifying file
+            (i.e. files that pass the size filter). Receives the resolved
+            ``Path``, a ``FileOutcome`` string, and a frozen
+            ``CachePopulationStats`` snapshot of running totals at that moment.
+            Not called for files below ``min_size_bytes`` or for directory
+            access errors. Defaults to ``None``.
 
     Returns:
         ``CachePopulationStats`` with counts for hashed, cached, skipped, and
@@ -302,7 +307,7 @@ def populate_hash_cache(
             visitor: _HashVisitor | _DryRunVisitor = _DryRunVisitor(cacher, force=force)
         else:
             visitor = _HashVisitor(cacher, hasher, force=force)
-        accumulator = _Accumulator()
+        accumulator = _Accumulator(progress_callback)
 
         if dry_run:
             # Serial path — cache lookups are fast; no thread pool needed.
