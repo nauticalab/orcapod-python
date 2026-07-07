@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, TypeGuard, runtime_checkabl
 if TYPE_CHECKING:
     from orcapod.channels import ReadableChannel, WritableChannel
     from orcapod.core.nodes import GraphNode
+    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
     from orcapod.protocols.core_protocols import (
         DataProtocol,
@@ -89,6 +90,16 @@ class FunctionNodeProtocol(Protocol):
         observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
 
+    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+        """Assign or remove the ephemeral result store for this node.
+
+        Pass an ``InMemoryArrowDatabase`` to attach the store.
+        Pass ``None`` to detach it — the node falls back to persistent-only
+        behaviour for subsequent writes. No-op for node types that do not
+        support ephemeral result storage (e.g. blueprint ``FunctionNode``).
+        """
+        ...
+
 
 @runtime_checkable
 class OperatorNodeProtocol(Protocol):
@@ -114,6 +125,14 @@ class OperatorNodeProtocol(Protocol):
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
+
+    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+        """Assign or remove the ephemeral result store for this node.
+
+        No-op for operator nodes in v1 — full ephemeral support for operators
+        is deferred to ITL-509.
+        """
+        ...
 
 
 def is_source_node(node: GraphNode) -> TypeGuard[SourceNodeProtocol]:
