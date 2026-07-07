@@ -6,7 +6,9 @@ returned raw bytes instead of ContentHash, and verify the CachedFileHasher
 correctly round-trips ContentHash through the cache.
 """
 
+import fsspec
 import pytest
+from upath import UPath
 
 from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher, FileHashKey
 from orcapod.hashing.hash_cachers import InMemoryHashCacher
@@ -169,7 +171,6 @@ class TestCachedFileHasher:
 
     def test_cache_stores_content_hash_directly(self, sample_file):
         """The cacher stores ContentHash objects keyed by FileHashKey."""
-        from upath import UPath
         inner = FileHasher(algorithm="sha256")
         cacher = InMemoryHashCacher()
         cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
@@ -267,3 +268,38 @@ class TestCachedFileHasher:
         second = cached.hash_file(f)
 
         assert first.digest != second.digest
+
+    def test_cache_key_preserves_url_form(self):
+        """CachedFileHasher must not resolve URL-form paths to concrete backend paths.
+
+        UPath.resolve() only normalises ``.``/``..`` components — it does not call
+        any fsspec backend resolution. The FileHashKey.path must therefore retain
+        the original URL string for non-local protocols.
+        """
+        fs = fsspec.filesystem("memory")
+        fs.mkdir("/ns", exist_ok=True)
+        with fs.open("/ns/cache_key_test.bin", "wb") as fh:
+            fh.write(b"cache-key-url-test")
+
+        try:
+            inner = FileHasher(algorithm="sha256")
+            cacher = InMemoryHashCacher()
+            cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
+
+            url_path = UPath("memory://ns/cache_key_test.bin")
+            cached.hash_file(url_path)
+
+            # Reconstruct the expected FileHashKey the same way CachedFileHasher does,
+            # then verify a cache hit via the public get() API.
+            resolved = url_path.resolve()
+            stat = resolved.stat()
+            expected_key = FileHashKey(resolved, stat.st_mtime_ns, stat.st_size)
+            assert cacher.get(expected_key) is not None, (
+                "Expected a cache hit for the URL-form path key"
+            )
+            # The resolved path must still be in URL form — not a concrete backend path.
+            assert str(expected_key.path) == "memory://ns/cache_key_test.bin", (
+                f"Cache key path must preserve URL form; got {str(expected_key.path)!r}"
+            )
+        finally:
+            fs.rm("/ns/cache_key_test.bin")
