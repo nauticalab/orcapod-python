@@ -943,10 +943,10 @@ class UniversalTypeConverter:
         """Convert a list of Python dictionaries to an Arrow table.
 
         When deriving the Arrow schema from a Python schema (i.e. when
-        ``arrow_schema`` is ``None``), Pydantic ``BaseModel`` subclasses and
-        ``@dataclass`` types found in the schema are automatically registered
-        in the semantic-type system. Registration is idempotent — calling this
-        method multiple times with the same types is safe.
+        ``arrow_schema`` is ``None``), any type in the schema that has a
+        registered factory in the semantic-type system is automatically
+        registered. Registration is idempotent — calling this method
+        multiple times with the same types is safe.
 
         Args:
             python_dicts: Rows of data as plain Python dicts.
@@ -975,10 +975,12 @@ class UniversalTypeConverter:
             python_schema = infer_python_schema_from_pylist_data(python_dicts)
 
         if arrow_schema is None:
-            # Convert to Arrow schema — auto-register any Pydantic / dataclass types
-            # encountered here so DictSource users do not need to pre-register via a
-            # function pod. ensure_types_registered_for_schemas is idempotent and
-            # thread-safe; it is a no-op for primitives and already-registered types.
+            # Convert to Arrow schema — auto-register any types that have a registered
+            # factory in the semantic-type system (e.g. Pydantic BaseModel subclasses,
+            # @dataclass classes, or any custom factory). This means DictSource users
+            # do not need to pre-register types via a function pod.
+            # ensure_types_registered_for_schemas is idempotent and thread-safe; it is
+            # a no-op for primitives and already-registered types.
             assert python_schema is not None, "Python schema should not be None here"
             self.ensure_types_registered_for_schemas(python_schema)
             arrow_schema = self.python_schema_to_arrow_schema(python_schema)
