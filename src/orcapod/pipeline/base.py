@@ -149,7 +149,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         them to persistent-only writes for subsequent runs.
 
         Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
+            store: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
                 to detach.
         """
         for node in self._nodes.values():
