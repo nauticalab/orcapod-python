@@ -1428,7 +1428,7 @@ class FunctionJobNode(FunctionNodeBase):
             self.node_identity_path,
             entry_id,
             combined_record,
-            skip_duplicates=False,
+            skip_duplicates=skip_cache_lookup,
         )
 
     # ------------------------------------------------------------------
