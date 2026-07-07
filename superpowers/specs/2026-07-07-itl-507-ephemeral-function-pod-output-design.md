@@ -52,16 +52,19 @@ record IDs), persistent store second (for unprefixed record IDs).
 
 In scope:
 - `NodeConfig` — new `ephemeral_result: bool = False` field
-- `PersistentFunctionNode` — new `ephemeral_result_store` slot and two-store
-  read/write logic
-- Pipeline compilation — detect nodes with `ephemeral_result=True` and assign the
-  shared `InMemoryArrowDatabase`
+- `NodeBase` / node protocol — new `set_ephemeral_store(store)` method on all node
+  types; `PersistentFunctionNode` stores the value, operator nodes no-op in v1
+- `PersistentFunctionNode` — `ephemeral_result_store` slot, `set_ephemeral_store()`
+  implementation, and two-store read/write logic
+- `Pipeline.set_ephemeral_store(store)` — pipeline-level method that propagates the
+  store to all nodes by calling `node.set_ephemeral_store(store)` on each
 - `"temp:"` prefix convention for ephemeral record IDs
 - Tests covering all read/write paths and the cross-session miss scenario
 
 Out of scope (v1):
 - `FunctionPodStream` — already fully in-memory; no result database to replace
-- `OperatorNode` / `PersistentOperatorNode` — different caching model; deferred
+- `OperatorNode` / `PersistentOperatorNode` — `set_ephemeral_store()` is defined (no-op)
+  but no caching logic changes; full ephemeral support deferred
 - Non-in-memory ephemeral backends (temp file, Redis, cloud object store) — v2+
 - Explicit API to clear the ephemeral store mid-run — node replacement or pipeline
   reconstruction achieves this for v1
@@ -88,7 +91,34 @@ store instead of the persistent result database. It has no effect when the node 
 
 ---
 
-### 2. `PersistentFunctionNode` — two-store model
+### 2. Node interface — `set_ephemeral_store()`
+
+All node types gain a `set_ephemeral_store(store: InMemoryArrowDatabase)` method,
+declared on the node base class or protocol so that the pipeline can call it uniformly
+without knowing the concrete node type:
+
+```python
+# NodeBase (or node protocol)
+def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
+    """Assign the ephemeral result store for this node.
+
+    No-op for node types that do not support ephemeral result storage.
+    """
+```
+
+`PersistentFunctionNode` overrides this to store the value:
+
+```python
+# PersistentFunctionNode
+def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
+    self.ephemeral_result_store = store
+```
+
+Operator nodes inherit the default no-op implementation. This keeps them protocol-
+conformant now and avoids any conditional branching in the pipeline; when operator
+ephemeral support is added in a later version only the operator class changes.
+
+### 3. `PersistentFunctionNode` — two-store model
 
 `PersistentFunctionNode` gains a new optional slot:
 
@@ -96,9 +126,8 @@ store instead of the persistent result database. It has no effect when the node 
 ephemeral_result_store: InMemoryArrowDatabase | None = None
 ```
 
-This slot is `None` by default and is assigned by the pipeline after compilation — the
-same pattern used for `result_database` and `tag_database`. The node never creates its own
-store.
+This slot is `None` by default and is set via `set_ephemeral_store()` by the pipeline
+before execution begins. The node never creates its own store.
 
 Both stores can be active simultaneously:
 
@@ -190,33 +219,49 @@ silently falling back to the persistent store.
 
 ---
 
-### 3. Pipeline — store creation and injection
+### 4. Pipeline — store creation and injection
 
-The pipeline creates one shared `InMemoryArrowDatabase` instance and injects it into all
-nodes whose `NodeConfig.ephemeral_result=True` before execution begins:
+The pipeline exposes a `set_ephemeral_store(store: InMemoryArrowDatabase)` method that
+propagates the store to every node by calling `node.set_ephemeral_store(store)` on each:
 
 ```python
-# During pipeline compilation / pre-run setup:
-ephemeral_store = InMemoryArrowDatabase()
-for node in self._nodes:
-    if node.node_config.ephemeral_result:
-        node.ephemeral_result_store = ephemeral_store
+# Pipeline
+def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
+    """Assign an ephemeral result store to all nodes in the pipeline.
+
+    Each node's ``set_ephemeral_store`` is called unconditionally; nodes that
+    do not support ephemeral storage (e.g. operator nodes in v1) ignore the call.
+    """
+    for node in self._nodes:
+        node.set_ephemeral_store(store)
 ```
 
-Sharing one instance across all ephemeral nodes is correct: each node already scopes its
-own table within a shared database via its pipeline-hash-based path, so no additional
-namespacing is needed.
+Callers construct the store and hand it in — the pipeline does not create it:
 
-**Lifetime decisions** are left to the pipeline:
+```python
+# During pipeline pre-run setup:
+ephemeral_store = InMemoryArrowDatabase()
+pipeline.set_ephemeral_store(ephemeral_store)
+```
+
+Calling `set_ephemeral_store` on every node (not only those with
+`node_config.ephemeral_result=True`) is intentional: the method is a no-op for nodes
+that don't use it, so the loop stays simple and uniform.
+
+Sharing one `InMemoryArrowDatabase` instance across all ephemeral nodes is correct: each
+node already scopes its own table within a shared database via its pipeline-hash-based
+path, so no additional namespacing is needed.
+
+**Lifetime decisions** are left to the caller:
 - Passing a fresh `InMemoryArrowDatabase()` at each `run()` call gives clean
   within-run-only semantics.
 - Reusing the same instance across `run()` calls gives cross-run in-memory caching
   (useful when the pipeline is invoked repeatedly in the same Python session).
-  Both are valid; the choice is the pipeline's, not the node's.
+  Both are valid; the choice is the caller's, not the pipeline's.
 
 ---
 
-### 4. Supported node configurations
+### 5. Supported node configurations
 
 | `result_database` | `ephemeral_result` | Behaviour |
 |---|---|---|
@@ -235,10 +280,12 @@ src/orcapod/
 
 src/orcapod/core/
 └── nodes/
-    └── persistent_function_node.py   # ephemeral_result_store slot + two-store logic
+    ├── base.py                       # set_ephemeral_store() default no-op on NodeBase
+    ├── persistent_function_node.py   # set_ephemeral_store() override + ephemeral_result_store slot + two-store logic
+    └── operator_node.py              # inherits no-op set_ephemeral_store() — no logic changes
 
 src/orcapod/pipeline/
-└── <compilation module>      # store creation and injection into nodes
+└── <pipeline module>         # Pipeline.set_ephemeral_store() — propagates to all nodes
 
 tests/test_core/function_pod/
 └── test_ephemeral_result.py  # NEW — all ephemeral result tests
@@ -254,11 +301,27 @@ tests/test_core/function_pod/
 |---|---|---|---|
 | `ephemeral_result` | `bool` | `False` | Route new writes to ephemeral in-memory store |
 
+### Node base class / protocol
+
+| Method | Signature | Behaviour |
+|---|---|---|
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Default: no-op. Overridden by `PersistentFunctionNode`. |
+
 ### `PersistentFunctionNode`
 
 | Attribute | Type | Set by |
 |---|---|---|
-| `ephemeral_result_store` | `InMemoryArrowDatabase \| None` | Pipeline (post-construction) |
+| `ephemeral_result_store` | `InMemoryArrowDatabase \| None` | `set_ephemeral_store()` called by pipeline |
+
+| Method | Signature | Behaviour |
+|---|---|---|
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Assigns `self.ephemeral_result_store = store` |
+
+### `Pipeline`
+
+| Method | Signature | Behaviour |
+|---|---|---|
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Calls `node.set_ephemeral_store(store)` on every node in the pipeline |
 
 ---
 
