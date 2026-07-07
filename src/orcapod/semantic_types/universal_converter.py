@@ -940,10 +940,31 @@ class UniversalTypeConverter:
         python_schema: SchemaLike | None = None,
         arrow_schema: "pa.Schema | None" = None,
     ) -> pa.Table:
-        """
-        Convert a list of Python dictionaries to an Arrow table.
+        """Convert a list of Python dictionaries to an Arrow table.
 
-        This uses the main conversion logic and caches results for performance.
+        When deriving the Arrow schema from a Python schema (i.e. when
+        ``arrow_schema`` is ``None``), any type in the schema that has a
+        registered factory in the semantic-type system is automatically
+        registered. Registration is idempotent — calling this method
+        multiple times with the same types is safe.
+
+        Args:
+            python_dicts: Rows of data as plain Python dicts.
+            python_schema: Optional mapping of column name to Python type. If
+                omitted and ``arrow_schema`` is also omitted, the schema is
+                inferred from the data.
+            arrow_schema: Optional Arrow schema. Behaviour depends on whether
+                ``python_schema`` is also supplied:
+
+                * ``python_schema`` omitted — the Python schema is derived from
+                  ``arrow_schema`` for value-conversion purposes; no type
+                  registration is performed.
+                * ``python_schema`` supplied — both schemas are used as-is and a
+                  warning is logged if they are incompatible; no type
+                  registration is performed in either case.
+
+        Returns:
+            A PyArrow ``Table`` containing the converted data.
         """
         if python_schema is not None and arrow_schema is not None:
             logger.warning(
@@ -954,8 +975,14 @@ class UniversalTypeConverter:
             python_schema = infer_python_schema_from_pylist_data(python_dicts)
 
         if arrow_schema is None:
-            # Convert to Arrow schema
+            # Convert to Arrow schema — auto-register any types that have a registered
+            # factory in the semantic-type system (e.g. Pydantic BaseModel subclasses,
+            # @dataclass classes, or any custom factory). This means DictSource users
+            # do not need to pre-register types via a function pod.
+            # ensure_types_registered_for_schemas is idempotent and thread-safe; it is
+            # a no-op for primitives and already-registered types.
             assert python_schema is not None, "Python schema should not be None here"
+            self.ensure_types_registered_for_schemas(python_schema)
             arrow_schema = self.python_schema_to_arrow_schema(python_schema)
 
         if python_schema is None:
