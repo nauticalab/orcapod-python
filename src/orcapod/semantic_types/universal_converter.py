@@ -953,8 +953,15 @@ class UniversalTypeConverter:
             python_schema: Optional mapping of column name to Python type. If
                 omitted and ``arrow_schema`` is also omitted, the schema is
                 inferred from the data.
-            arrow_schema: Optional Arrow schema. When provided the Python schema
-                is derived from it; no type registration is performed.
+            arrow_schema: Optional Arrow schema. Behaviour depends on whether
+                ``python_schema`` is also supplied:
+
+                * ``python_schema`` omitted — the Python schema is derived from
+                  ``arrow_schema`` for value-conversion purposes; no type
+                  registration is performed.
+                * ``python_schema`` supplied — both schemas are used as-is and a
+                  warning is logged if they are incompatible; no type
+                  registration is performed in either case.
 
         Returns:
             A PyArrow ``Table`` containing the converted data.
