@@ -166,3 +166,72 @@ class TestFilePathLike:
             pass
 
         assert not issubclass(_Stub, os.PathLike)
+
+
+class TestURLFormIdentity:
+    """Regression tests: op.File preserves URL-form identity for non-local protocols.
+
+    Uses ``memory://`` as a stable, always-available stand-in for ``engm://``.
+    The same invariants hold for any non-local fsspec protocol.
+    """
+
+    @pytest.fixture(autouse=True)
+    def memory_file(self):
+        """Create ``memory://ns/x.bin`` with known content; clean up after."""
+        import fsspec
+        fs = fsspec.filesystem("memory")
+        # Clean up any pre-existing state
+        if "/ns/x.bin" in fs.store:
+            fs.rm("/ns/x.bin")
+        if "/ns" in fs.pseudo_dirs:
+            fs.pseudo_dirs.remove("/ns")
+        # Create directory and file
+        fs.mkdir("/ns", create_parents=True)
+        with fs.open("/ns/x.bin", "wb") as fh:
+            fh.write(b"url-identity-test-content")
+        yield
+        # Clean up after test
+        if "/ns/x.bin" in fs.store:
+            fs.rm("/ns/x.bin")
+        if "/ns" in fs.pseudo_dirs:
+            fs.pseudo_dirs.remove("/ns")
+
+    def test_str_preserves_url_form(self):
+        f = File("memory://ns/x.bin")
+        assert str(f) == "memory://ns/x.bin", (
+            f"Expected URL form 'memory://ns/x.bin', got {str(f)!r}"
+        )
+
+    def test_hash_is_stable(self):
+        h1 = hash(File("memory://ns/x.bin"))
+        h2 = hash(File("memory://ns/x.bin"))
+        assert h1 == h2, "hash() must be identical across two constructions of the same URL"
+
+    def test_hash_equals_upath_protocol_tuple(self):
+        # UPath.__hash__ = hash((protocol, vfspath))
+        # For memory://ns/x.bin: protocol="memory", vfspath="/ns/x.bin"
+        # This test pins the exact hash contract so any regression is immediately visible.
+        expected = hash(("memory", "/ns/x.bin"))
+        actual = hash(File("memory://ns/x.bin"))
+        assert actual == expected, (
+            f"hash(File('memory://ns/x.bin')) should equal hash(('memory', '/ns/x.bin')), "
+            f"got {actual} vs {expected}"
+        )
+
+    def test_logical_file_storage_encodes_url(self):
+        f = File("memory://ns/x.bin")
+        lt = LogicalFile()
+        storage = lt.python_to_storage(f)
+        data = json.loads(storage)
+        assert data["path"] == "memory://ns/x.bin", (
+            f"python_to_storage must encode URL form; got path={data['path']!r}"
+        )
+
+    def test_logical_file_round_trip_preserves_url(self):
+        f = File("memory://ns/x.bin")
+        lt = LogicalFile()
+        recovered = lt.storage_to_python(lt.python_to_storage(f))
+        assert str(recovered) == "memory://ns/x.bin", (
+            f"storage_to_python(python_to_storage(f)) must preserve URL form; "
+            f"got {str(recovered)!r}"
+        )
