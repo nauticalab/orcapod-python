@@ -728,14 +728,11 @@ class FunctionJobNode(FunctionNodeBase):
         self.ephemeral_result_store: "ArrowDatabaseProtocol | None" = None
         self._ephemeral_cached_pod: CachedFunctionPod | None = None
 
-        if pipeline_database is not None:
-            self.attach_databases(
-                pipeline_database=pipeline_database,
-                result_database=result_database,
-                ephemeral_database=ephemeral_database,
-            )
-        elif ephemeral_database is not None:
-            self.set_ephemeral_store(ephemeral_database)
+        self.attach_databases(
+            pipeline_database=pipeline_database,
+            result_database=result_database,
+            ephemeral_database=ephemeral_database,
+        )
 
     # ------------------------------------------------------------------
     # attach_databases
@@ -743,7 +740,7 @@ class FunctionJobNode(FunctionNodeBase):
 
     def attach_databases(
         self,
-        pipeline_database: ArrowDatabaseProtocol,
+        pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
         ephemeral_database: ArrowDatabaseProtocol | None = None,
     ) -> None:
@@ -756,46 +753,55 @@ class FunctionJobNode(FunctionNodeBase):
         using the record path stored in the descriptor so that
         ``get_all_records()`` and ``_load_cached_entries()`` still work.
 
+        When ``pipeline_database`` is ``None``, the persistent-DB portion of
+        setup is skipped entirely — no ``CachedFunctionPod`` is created and
+        ``_pipeline_database`` is left as ``None``.  Only
+        ``ephemeral_database`` wiring proceeds in that case.
+
         The databases are expected to be pre-scoped by the pipeline (via
         ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
         prefix is needed here.
 
         Args:
-            pipeline_database: Database for pipeline records.
+            pipeline_database: Database for pipeline records. Pass ``None``
+                to skip persistent-DB setup (ephemeral-only or deferred
+                wiring).
             result_database: Database for cached results. Defaults to
-                ``pipeline_database.at("_result")``.
+                ``pipeline_database.at("_result")`` when ``pipeline_database``
+                is not ``None``.
             ephemeral_database: Optional ephemeral store to attach immediately
                 via ``set_ephemeral_store()``. Equivalent to calling
                 ``set_ephemeral_store(ephemeral_database)`` after
                 ``attach_databases()``.
         """
-        if result_database is None:
-            # Default result database is pipeline_database scoped to "_result"
-            # so that results are stored separately from pipeline-level records.
-            result_database = pipeline_database.at("_result")
+        if pipeline_database is not None:
+            if result_database is None:
+                # Default result database is pipeline_database scoped to "_result"
+                # so that results are stored separately from pipeline-level records.
+                result_database = pipeline_database.at("_result")
 
-        if self._function_pod is not None:
-            # Normal path: wrap in CachedFunctionPod for compute + cache.
-            self._cached_function_pod = CachedFunctionPod(
-                self._function_pod,
-                result_database=result_database,
-            )
-        else:
-            # Read-only stub path (loaded job without a live function pod).
-            # Use the record path stored from the descriptor so that
-            # get_all_records() / _load_cached_entries() can query the DB.
-            self._cached_function_pod = _ResultDatabaseReader(  # type: ignore[assignment]
-                result_database=result_database,
-                record_path=self._stored_result_record_path,
-            )
+            if self._function_pod is not None:
+                # Normal path: wrap in CachedFunctionPod for compute + cache.
+                self._cached_function_pod = CachedFunctionPod(
+                    self._function_pod,
+                    result_database=result_database,
+                )
+            else:
+                # Read-only stub path (loaded job without a live function pod).
+                # Use the record path stored from the descriptor so that
+                # get_all_records() / _load_cached_entries() can query the DB.
+                self._cached_function_pod = _ResultDatabaseReader(  # type: ignore[assignment]
+                    result_database=result_database,
+                    record_path=self._stored_result_record_path,
+                )
 
-        self._pipeline_database = pipeline_database
+            self._pipeline_database = pipeline_database
 
-        # Clear all caches
-        self._node_identity_path_cache = None
-        self.clear_cache()
-        self._invalidate_content_hash_cache()
-        self._invalidate_pipeline_hash_cache()
+            # Clear all caches
+            self._node_identity_path_cache = None
+            self.clear_cache()
+            self._invalidate_content_hash_cache()
+            self._invalidate_pipeline_hash_cache()
 
         if ephemeral_database is not None:
             self.set_ephemeral_store(ephemeral_database)
