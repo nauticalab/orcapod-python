@@ -1187,7 +1187,7 @@ class FunctionJobNode(FunctionNodeBase):
             if output_data is not None:
                 result_computed = bool(
                     output_data.get_meta_value(
-                        self._ephemeral_cached_pod.RESULT_COMPUTED_FLAG, True
+                        self._ephemeral_cached_pod.RESULT_COMPUTED_FLAG, False
                     )
                 )
                 if self._pipeline_database is not None:
@@ -1279,19 +1279,49 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``_process_data_internal``.
 
-        Computes via async path, writes pipeline provenance, caches by entry_id.
-        Exceptions propagate.
+        Mirrors the sync ephemeral/persistent branch logic using async variants
+        of ``process_data``. See ``_process_data_internal`` for full behaviour
+        documentation.
 
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
-        if self._cached_function_pod is not None:
-            tag_out, output_data = (
-                await self._cached_function_pod.async_process_data(
-                    tag, data, logger=logger
-                )
-            )
+        node_config = (
+            self._function_pod.node_config if self._function_pod is not None else None
+        )
+        ephemeral_result = (
+            node_config.ephemeral_result if node_config is not None else False
+        )
 
+        if ephemeral_result:
+            if self._ephemeral_cached_pod is None:
+                raise RuntimeError(
+                    f"FunctionJobNode '{self.label}' has ephemeral_result=True but no "
+                    "ephemeral store has been assigned. Call set_ephemeral_store() with "
+                    "an InMemoryArrowDatabase before executing this node."
+                )
+            tag_out, output_data = await self._ephemeral_cached_pod.async_process_data(
+                tag, data, logger=logger
+            )
+            if output_data is not None:
+                result_computed = bool(
+                    output_data.get_meta_value(
+                        self._ephemeral_cached_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                if self._pipeline_database is not None:
+                    self.add_pipeline_record(
+                        tag,
+                        data,
+                        data_record_id=output_data.datagram_uuid,
+                        computed=result_computed,
+                        skip_cache_lookup=True,
+                        is_ephemeral=True,
+                    )
+        elif self._cached_function_pod is not None:
+            tag_out, output_data = await self._cached_function_pod.async_process_data(
+                tag, data, logger=logger
+            )
             if output_data is not None:
                 result_computed = bool(
                     output_data.get_meta_value(
@@ -1303,12 +1333,11 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
+                    skip_cache_lookup=True,
                 )
         else:
-            tag_out, output_data = (
-                await self._function_pod.async_process_data(
-                    tag, data, logger=logger
-                )
+            tag_out, output_data = await self._function_pod.async_process_data(
+                tag, data, logger=logger
             )
 
         # Store by entry_id and invalidate derived caches
