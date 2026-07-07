@@ -8,7 +8,7 @@ import uuid as _uuid_module
 
 import pyarrow as pa
 import pytest
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -200,6 +200,25 @@ class _MixedLiteralModel(BaseModel):
 class _LiteralRoundTripModel(BaseModel):
     method: Literal["a", "b"]
     count: int
+
+
+class _ModelWithComputedField(BaseModel):
+    x: int
+    y: int
+
+    @computed_field
+    @property
+    def total(self) -> int:
+        return self.x + self.y
+
+
+class _ModelWithValidator(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def name_must_be_uppercase(cls, v: str) -> str:
+        return v.upper()
 
 
 # ── Module-level models for read-path and round-trip tests ───────────────────
@@ -643,3 +662,55 @@ def test_literal_model_polars_dataframe_round_trip():
     assert isinstance(reconstructed, _LiteralRoundTripModel)
     assert reconstructed.method == "a"
     assert reconstructed.count == 42
+
+
+def test_computed_field_not_stored():
+    """@computed_field properties must not appear in the Arrow struct schema.
+
+    PydanticLogicalTypeFactory walks model_fields (not model_computed_fields),
+    so @computed_field properties are naturally excluded. This test pins that
+    behaviour so a future refactor cannot accidentally include them.
+    """
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    factory = PydanticLogicalTypeFactory()
+    converter = _make_full_converter()
+    lt = factory.create_for_python_type(_ModelWithComputedField, converter=converter)
+
+    storage = lt.get_arrow_extension_type().storage_type
+    field_names = {storage.field(i).name for i in range(storage.num_fields)}
+    assert "x" in field_names
+    assert "y" in field_names
+    assert "total" not in field_names, (
+        "@computed_field 'total' must not appear in the Arrow struct schema"
+    )
+    assert storage.num_fields == 2
+
+
+def test_validator_runs_on_decode():
+    """Pydantic validators must execute when a model is reconstructed from Arrow storage.
+
+    Reconstruction calls Model(**kwargs), which runs Pydantic's validation pipeline
+    automatically. This test uses a @field_validator that uppercases the 'name' field
+    to provide a concrete, observable signal that validators are running.
+
+    Note: non-idempotent validators (those that mutate values, like this one) mean
+    the decoded instance may differ from a round-trip re-encoding of the original
+    value — this is a Pydantic property, not an Orcapod bug.
+    """
+    from orcapod.extension_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+
+    converter = _make_full_converter()
+    factory = PydanticLogicalTypeFactory()
+    lt = factory.create_for_python_type(_ModelWithValidator, converter=converter)
+    converter.register_logical_type(lt)
+
+    # Store a lowercase value directly (bypassing validator on write for clarity)
+    storage_value = {"name": "alice"}
+
+    # Decode — validator must run and uppercase the name
+    reconstructed = lt.storage_to_python(storage_value, converter)
+    assert isinstance(reconstructed, _ModelWithValidator)
+    assert reconstructed.name == "ALICE", (
+        "Validator did not run on decode — expected 'alice' to be uppercased to 'ALICE'"
+    )
