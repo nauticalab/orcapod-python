@@ -1153,14 +1153,56 @@ class FunctionJobNode(FunctionNodeBase):
         Stores result in ``_cached_output_datas`` keyed by entry_id.
         Exceptions propagate to the caller — no error handling here.
 
+        When ``node_config.ephemeral_result=True``:
+        - Uses ``_ephemeral_cached_pod`` for both compute and storage.
+        - Raises ``RuntimeError`` if no ephemeral store has been set.
+        - Writes the pipeline record with ``is_ephemeral=True`` and
+          ``skip_cache_lookup=True`` (append strategy for recompute-after-miss).
+
+        When ``node_config.ephemeral_result=False`` (default):
+        - Uses ``_cached_function_pod`` (persistent DB) or raw function pod.
+        - Writes the pipeline record with ``skip_cache_lookup=True`` (prevents
+          infinite miss cycle when a stale pipeline entry exists).
+
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
-        if self._cached_function_pod is not None:
+        node_config = (
+            self._function_pod.node_config if self._function_pod is not None else None
+        )
+        ephemeral_result = (
+            node_config.ephemeral_result if node_config is not None else False
+        )
+
+        if ephemeral_result:
+            if self._ephemeral_cached_pod is None:
+                raise RuntimeError(
+                    f"FunctionJobNode '{self.label}' has ephemeral_result=True but no "
+                    "ephemeral store has been assigned. Call set_ephemeral_store() with "
+                    "an InMemoryArrowDatabase before executing this node."
+                )
+            tag_out, output_data = self._ephemeral_cached_pod.process_data(
+                tag, data, logger=logger
+            )
+            if output_data is not None:
+                result_computed = bool(
+                    output_data.get_meta_value(
+                        self._ephemeral_cached_pod.RESULT_COMPUTED_FLAG, True
+                    )
+                )
+                if self._pipeline_database is not None:
+                    self.add_pipeline_record(
+                        tag,
+                        data,
+                        data_record_id=output_data.datagram_uuid,
+                        computed=result_computed,
+                        skip_cache_lookup=True,
+                        is_ephemeral=True,
+                    )
+        elif self._cached_function_pod is not None:
             tag_out, output_data = self._cached_function_pod.process_data(
                 tag, data, logger=logger
             )
-
             if output_data is not None:
                 result_computed = bool(
                     output_data.get_meta_value(
