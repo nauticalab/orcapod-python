@@ -52,12 +52,14 @@ record IDs), persistent store second (for unprefixed record IDs).
 
 In scope:
 - `NodeConfig` — new `ephemeral_result: bool = False` field
-- `NodeBase` / node protocol — new `set_ephemeral_store(store)` method on all node
-  types; `PersistentFunctionNode` stores the value, operator nodes no-op in v1
+- `node_protocols.py` — `set_ephemeral_store(store)` added to `FunctionNodeProtocol`
+  and `OperatorNodeProtocol`
+- `pipeline_protocols.py` — `set_ephemeral_store(store)` added to `PipelineProtocol`
 - `PersistentFunctionNode` — `ephemeral_result_store` slot, `set_ephemeral_store()`
   implementation, and two-store read/write logic
-- `Pipeline.set_ephemeral_store(store)` — pipeline-level method that propagates the
-  store to all nodes by calling `node.set_ephemeral_store(store)` on each
+- All other node types — no-op `set_ephemeral_store()` satisfying the protocol
+- `Pipeline.set_ephemeral_store(store)` — propagates to all nodes via
+  `node.set_ephemeral_store(store)`
 - `"temp:"` prefix convention for ephemeral record IDs
 - Tests covering all read/write paths and the cross-session miss scenario
 
@@ -91,32 +93,35 @@ store instead of the persistent result database. It has no effect when the node 
 
 ---
 
-### 2. Node interface — `set_ephemeral_store()`
+### 2. Node protocol and interface — `set_ephemeral_store()`
 
-All node types gain a `set_ephemeral_store(store: InMemoryArrowDatabase)` method,
-declared on the node base class or protocol so that the pipeline can call it uniformly
-without knowing the concrete node type:
+`set_ephemeral_store(store: InMemoryArrowDatabase)` is added to both
+`FunctionNodeProtocol` and `OperatorNodeProtocol` in `node_protocols.py`:
 
 ```python
-# NodeBase (or node protocol)
+# node_protocols.py — added to FunctionNodeProtocol and OperatorNodeProtocol
 def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
     """Assign the ephemeral result store for this node.
 
-    No-op for node types that do not support ephemeral result storage.
+    No-op for node types that do not support ephemeral result storage in
+    the current version.
     """
+    ...
 ```
 
-`PersistentFunctionNode` overrides this to store the value:
+Concrete implementations:
 
-```python
-# PersistentFunctionNode
-def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
-    self.ephemeral_result_store = store
-```
+- **`PersistentFunctionNode`** — stores the value:
+  ```python
+  def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
+      self.ephemeral_result_store = store
+  ```
+- **All other node types** (non-persistent function nodes, operator nodes) — implement
+  the method as a no-op, satisfying the protocol without any behaviour change.
 
-Operator nodes inherit the default no-op implementation. This keeps them protocol-
-conformant now and avoids any conditional branching in the pipeline; when operator
-ephemeral support is added in a later version only the operator class changes.
+Adding the method to both protocols — rather than only `FunctionNodeProtocol` — avoids
+any conditional branching in the pipeline's `set_ephemeral_store()` loop and keeps
+operator nodes protocol-conformant for future versions.
 
 ### 3. `PersistentFunctionNode` — two-store model
 
@@ -221,18 +226,22 @@ silently falling back to the persistent store.
 
 ### 4. Pipeline — store creation and injection
 
-The pipeline exposes a `set_ephemeral_store(store: InMemoryArrowDatabase)` method that
-propagates the store to every node by calling `node.set_ephemeral_store(store)` on each:
+`set_ephemeral_store(store: InMemoryArrowDatabase)` is added to `PipelineProtocol` in
+`pipeline_protocols.py` and implemented on the concrete `Pipeline` class. It propagates
+the store to every node by calling `node.set_ephemeral_store(store)` on each:
 
 ```python
-# Pipeline
+# PipelineProtocol (pipeline_protocols.py) — new method signature
+def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None: ...
+
+# Pipeline (concrete implementation)
 def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
     """Assign an ephemeral result store to all nodes in the pipeline.
 
     Each node's ``set_ephemeral_store`` is called unconditionally; nodes that
     do not support ephemeral storage (e.g. operator nodes in v1) ignore the call.
     """
-    for node in self._nodes:
+    for node in self._nodes.values():
         node.set_ephemeral_store(store)
 ```
 
@@ -276,19 +285,24 @@ path, so no additional namespacing is needed.
 
 ```
 src/orcapod/
-└── types.py                  # NodeConfig.ephemeral_result field (new)
+└── types.py                          # NodeConfig.ephemeral_result field (new)
+
+src/orcapod/protocols/
+├── node_protocols.py                 # set_ephemeral_store() added to FunctionNodeProtocol
+│                                     # and OperatorNodeProtocol
+└── pipeline_protocols.py             # set_ephemeral_store() added to PipelineProtocol
 
 src/orcapod/core/
 └── nodes/
-    ├── base.py                       # set_ephemeral_store() default no-op on NodeBase
-    ├── persistent_function_node.py   # set_ephemeral_store() override + ephemeral_result_store slot + two-store logic
-    └── operator_node.py              # inherits no-op set_ephemeral_store() — no logic changes
+    ├── persistent_function_node.py   # set_ephemeral_store() override + ephemeral_result_store
+    │                                 # slot + two-store read/write logic
+    └── <other node types>            # no-op set_ephemeral_store() satisfying the protocol
 
 src/orcapod/pipeline/
-└── <pipeline module>         # Pipeline.set_ephemeral_store() — propagates to all nodes
+└── <pipeline module>                 # Pipeline.set_ephemeral_store() — propagates to all nodes
 
 tests/test_core/function_pod/
-└── test_ephemeral_result.py  # NEW — all ephemeral result tests
+└── test_ephemeral_result.py          # NEW — all ephemeral result tests
 ```
 
 ---
@@ -301,11 +315,17 @@ tests/test_core/function_pod/
 |---|---|---|---|
 | `ephemeral_result` | `bool` | `False` | Route new writes to ephemeral in-memory store |
 
-### Node base class / protocol
+### `FunctionNodeProtocol` and `OperatorNodeProtocol` (`node_protocols.py`)
 
 | Method | Signature | Behaviour |
 |---|---|---|
-| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Default: no-op. Overridden by `PersistentFunctionNode`. |
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Protocol-level declaration. Concrete implementations: `PersistentFunctionNode` stores the value; all other node types no-op. |
+
+### `PipelineProtocol` (`pipeline_protocols.py`)
+
+| Method | Signature | Behaviour |
+|---|---|---|
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Protocol-level declaration. Implemented on `Pipeline` — calls `node.set_ephemeral_store(store)` for every node. |
 
 ### `PersistentFunctionNode`
 
