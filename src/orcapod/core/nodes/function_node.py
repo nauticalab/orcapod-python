@@ -719,6 +719,10 @@ class FunctionJobNode(FunctionNodeBase):
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cached_function_pod: CachedFunctionPod | None = None
 
+        # Ephemeral result store (None until set_ephemeral_store() is called by the pipeline)
+        self.ephemeral_result_store: "InMemoryArrowDatabase | None" = None
+        self._ephemeral_cached_pod: "CachedFunctionPod | None" = None
+
         if pipeline_database is not None:
             self.attach_databases(
                 pipeline_database=pipeline_database,
@@ -934,6 +938,26 @@ class FunctionJobNode(FunctionNodeBase):
         self._cached_output_datas.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
+
+    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+        """Assign or remove the ephemeral result store.
+
+        When *store* is not ``None``, creates a ``CachedFunctionPod`` backed by
+        *store* so that ephemeral writes use the same format as persistent writes.
+        When *store* is ``None``, clears both the store and the ephemeral pod.
+
+        Args:
+            store: The ``InMemoryArrowDatabase`` to use for ephemeral result
+                storage, or ``None`` to detach and revert to persistent-only writes.
+        """
+        self.ephemeral_result_store = store
+        if store is not None and self._function_pod is not None:
+            self._ephemeral_cached_pod = CachedFunctionPod(
+                self._function_pod,
+                result_database=store,
+            )
+        else:
+            self._ephemeral_cached_pod = None
 
     # ------------------------------------------------------------------
     # Internal helpers
