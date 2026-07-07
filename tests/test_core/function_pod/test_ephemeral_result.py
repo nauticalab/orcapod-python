@@ -592,3 +592,111 @@ class TestPipelineInjectsStore:
             assert node.ephemeral_result_store is None, (
                 f"Node '{label}' ephemeral store was not detached"
             )
+
+
+# ---------------------------------------------------------------------------
+# Task 10 tests: persistent miss warning and ephemeral-only node
+# ---------------------------------------------------------------------------
+
+class TestPersistentMissWarning:
+    def test_persistent_miss_warns_and_recomputes(self, caplog):
+        """Tag table has a regular record_id but persistent DB was trimmed: WARNING emitted."""
+        import logging
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Write a persistent record
+        node, _ = _make_node(stream, pipeline_db=pipeline_db, result_db=result_db, ephemeral_result=False)
+        node.execute(stream)
+
+        # Wipe the result DB to simulate data loss
+        result_db._tables.clear()
+        result_db._pending_batches.clear()
+
+        # Recreate node with same pipeline_db (tag entry still there) but empty result_db
+        node2, _ = _make_node(stream, pipeline_db=pipeline_db, result_db=result_db, ephemeral_result=False)
+
+        with caplog.at_level(logging.WARNING, logger="orcapod.core.nodes.function_node"):
+            results = node2.execute(stream)
+
+        assert len(results) == 1  # recomputed
+        assert any("has no match in persistent result DB" in msg for msg in caplog.messages)
+
+    def test_recompute_after_persistent_miss_appends_new_pipeline_record(self):
+        """After persistent miss and recompute, tag table has two rows; next call hits."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Session 1: write persistent record
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        pod = FunctionPod(pf)
+        node1 = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        # Simulate data loss
+        result_db._tables.clear()
+        result_db._pending_batches.clear()
+
+        # Session 2: miss → recompute → appends new record to pipeline_db
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        pod2 = FunctionPod(pf2)
+        node2 = FunctionJobNode(
+            function_pod=pod2,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node2.execute(stream)
+        assert call_count["n"] == 2  # recomputed
+
+        # Session 3: tag table now has two rows (stale + new); inner join resolves correctly
+        pf3 = PythonDataFunction(counting_double, output_keys="result")
+        pod3 = FunctionPod(pf3)
+        node3 = FunctionJobNode(
+            function_pod=pod3,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node3._cached_output_datas.clear()
+        node3.execute(stream)
+        assert call_count["n"] == 2  # NOT recomputed — new row was found
+
+
+class TestEphemeralOnlyNode:
+    def test_ephemeral_only_node_no_persistent_db(self):
+        """NodeConfig(ephemeral_result=True) with no result_database works end-to-end."""
+        stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
+        pipeline_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+        cfg = NodeConfig(ephemeral_result=True)
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf, node_config=cfg)
+
+        # No result_database — pipeline_db doubles as both
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node.set_ephemeral_store(ephemeral_store)
+        results = node.execute(stream)
+
+        assert len(results) == 2
+        vals = {tag.as_dict()["id"]: data.as_dict()["result"] for tag, data in results}
+        assert vals == {0: 20, 1: 40}
