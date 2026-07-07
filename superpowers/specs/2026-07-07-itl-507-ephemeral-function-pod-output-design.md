@@ -218,12 +218,55 @@ else:
     record_id = uuid7().hex
     self.result_database.add_result_record(record_id, input_data, output_data)
 
-self._add_pipeline_record(tag, output_data, record_id)   # tag table — always persistent
+# skip_cache_lookup=True — always append the new pipeline record even if a
+# stale entry for this entry_id already exists (see "Recompute-after-miss
+# write strategy" below).
+self._add_pipeline_record(tag, output_data, record_id, skip_cache_lookup=True)
 ```
 
 If `ephemeral_result=True` but `ephemeral_result_store` is `None` (store not yet assigned
 by the pipeline), raise `RuntimeError` at execution time with a clear message rather than
 silently falling back to the persistent store.
+
+#### Recompute-after-miss write strategy
+
+When Phase 2 is triggered by a miss (either a persistent DB miss or a cross-session
+ephemeral miss), the tag table may already contain a stale entry for the same
+`entry_id` pointing to a `DATA_RECORD_ID` that no longer resolves. If
+`add_pipeline_record` skips when an existing entry is found (the current default
+behaviour), the new `DATA_RECORD_ID` is never written and the stale entry persists
+indefinitely, causing every subsequent run to miss, warn, and recompute — an infinite
+miss cycle.
+
+**Strategy: always append, deduplication is implicit via the inner join.**
+
+`add_pipeline_record` is called with `skip_cache_lookup=True` on all Phase 2 writes.
+This bypasses the skip-if-exists guard and appends a new pipeline DB row alongside
+the stale one. The database permits multiple rows per `entry_id`
+(`skip_duplicates=False`).
+
+At Phase 1 bulk resolution, the inner join between the tag table and the result store
+is the natural deduplication filter:
+
+- Stale rows (whose `DATA_RECORD_ID` is absent from the result store) find no join
+  partner and are dropped silently.
+- Valid rows (whose `DATA_RECORD_ID` is present) survive and are returned.
+
+**Recovery scenario** — if a previously missing persistent result (R1) is later
+restored to the result database while a replacement entry (R2) also exists:
+
+- Both rows survive the join and map to the same `entry_id`.
+- For deterministic functions (same input → same output), R1 and R2 are
+  semantically identical; either can be used. The implementation picks whichever
+  join partner appears first.
+- For non-deterministic functions, both results are valid products of the same input;
+  returning either is acceptable. No additional deduplication is required in v1 — the
+  recovery scenario is rare and the ambiguity is benign.
+
+**Ephemeral accumulation** — stale `"temp:"` entries accumulate across sessions (each
+cross-session miss appends a new row). This is harmless: stale `"temp:"` rows never
+match the ephemeral store and are silently dropped at join time. Cleanup is out of
+scope for v1.
 
 ---
 
@@ -366,6 +409,8 @@ All tests in `tests/test_core/function_pod/test_ephemeral_result.py`:
 | `test_bulk_resolution_mixed_stores` | Tag table contains both `"temp:"` and regular entries; bulk resolution yields hits from both stores and only recomputes entries absent from both |
 | `test_bulk_resolution_ephemeral_miss_dropped_from_available` | Tag table has a `"temp:"` entry but ephemeral store is fresh; that entry is excluded from available results and the input falls into Phase 2 |
 | `test_bulk_resolution_persistent_miss_warns_and_recomputes` | Tag table has a regular `record_id` entry but persistent DB has been trimmed; a `WARNING`-level log is emitted, the entry is excluded from available results, and the input falls into Phase 2 |
+| `test_recompute_after_miss_appends_new_pipeline_record` | After a persistent miss triggers recomputation, the tag table contains two rows for the same entry_id — the stale one and the new valid one; subsequent lookup resolves correctly via the inner join without recomputing again |
+| `test_recompute_after_ephemeral_miss_no_infinite_cycle` | Cross-session ephemeral miss triggers recomputation; the new `"temp:"` entry is appended and the result is served on the next call without triggering Phase 2 again |
 
 ---
 
