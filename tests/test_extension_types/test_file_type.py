@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 
+import fsspec
 import pytest
 import pyarrow as pa
 from upath import UPath
@@ -166,3 +167,77 @@ class TestFilePathLike:
             pass
 
         assert not issubclass(_Stub, os.PathLike)
+
+
+class TestURLFormIdentity:
+    """Regression tests: op.File preserves URL-form identity for non-local protocols.
+
+    Uses ``memory://`` as a stable, always-available stand-in for ``engm://``.
+    The same invariants hold for any non-local fsspec protocol.
+    """
+
+    @pytest.fixture(autouse=True)
+    def memory_file(self):
+        """Create ``memory://ns/x.bin`` with known content; clean up after."""
+        fs = fsspec.filesystem("memory")
+        # Clean up any pre-existing state
+        if fs.exists("/ns/x.bin"):
+            fs.rm("/ns/x.bin")
+        try:
+            fs.rmdir("/ns")
+        except (FileNotFoundError, OSError):
+            pass
+        # Create directory and file
+        fs.mkdir("/ns", create_parents=True)
+        with fs.open("/ns/x.bin", "wb") as fh:
+            fh.write(b"url-identity-test-content")
+        yield
+        # Clean up after test
+        if fs.exists("/ns/x.bin"):
+            fs.rm("/ns/x.bin")
+        try:
+            fs.rmdir("/ns")
+        except (FileNotFoundError, OSError):
+            pass
+
+    def test_str_preserves_url_form(self):
+        f = File("memory://ns/x.bin")
+        assert str(f) == "memory://ns/x.bin", (
+            f"Expected URL form 'memory://ns/x.bin', got {str(f)!r}"
+        )
+
+    def test_hash_is_stable(self):
+        h1 = hash(File("memory://ns/x.bin"))
+        h2 = hash(File("memory://ns/x.bin"))
+        assert h1 == h2, "hash() must be identical across two constructions of the same URL"
+
+    def test_hash_equals_upath_protocol_tuple(self):
+        # File.__hash__ delegates to ProxyUPath.__hash__ → UPath.__hash__.
+        # Derive the expected hash from UPath directly so the test stays focused
+        # on verifying that File follows the same hash contract as its wrapped UPath,
+        # rather than hard-coding the internal (protocol, vfspath) representation.
+        ref = UPath("memory://ns/x.bin")
+        expected = hash(ref)
+        actual = hash(File("memory://ns/x.bin"))
+        assert actual == expected, (
+            f"hash(File('memory://ns/x.bin')) should equal hash(UPath('memory://ns/x.bin')), "
+            f"got {actual} vs {expected}"
+        )
+
+    def test_logical_file_storage_encodes_url(self):
+        f = File("memory://ns/x.bin")
+        lt = LogicalFile()
+        storage = lt.python_to_storage(f)
+        data = json.loads(storage)
+        assert data["path"] == "memory://ns/x.bin", (
+            f"python_to_storage must encode URL form; got path={data['path']!r}"
+        )
+
+    def test_logical_file_round_trip_preserves_url(self):
+        f = File("memory://ns/x.bin")
+        lt = LogicalFile()
+        recovered = lt.storage_to_python(lt.python_to_storage(f))
+        assert str(recovered) == "memory://ns/x.bin", (
+            f"storage_to_python(python_to_storage(f)) must preserve URL form; "
+            f"got {str(recovered)!r}"
+        )
