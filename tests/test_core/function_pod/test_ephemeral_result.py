@@ -156,3 +156,144 @@ class TestAddPipelineRecord:
         assert constants.IS_EPHEMERAL_COL in all_records.column_names
         vals = all_records.column(constants.IS_EPHEMERAL_COL).to_pylist()
         assert all(v is True for v in vals)
+
+
+# ---------------------------------------------------------------------------
+# Task 7 tests: two-store join
+# ---------------------------------------------------------------------------
+
+class TestBulkResolution:
+    def test_ephemeral_false_unchanged(self):
+        """ephemeral_result=False: execute() behaves identically to current implementation."""
+        stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
+        node, _ = _make_node(stream)
+        results = node.execute(stream)
+        assert len(results) == 2
+        vals = {tag.as_dict()["id"]: data.as_dict()["result"] for tag, data in results}
+        assert vals == {0: 20, 1: 40}
+
+    def test_ephemeral_result_written_to_memory_not_persistent_db(self):
+        """With ephemeral_result=True, persistent DB has no result rows; ephemeral store does."""
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+        cfg = NodeConfig(ephemeral_result=True)
+        pod = _make_pod(config=cfg)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node.set_ephemeral_store(ephemeral_store)
+        results = node.execute(stream)
+
+        assert len(results) == 1
+        assert results[0][1].as_dict()["result"] == 20
+
+        # Persistent result DB must be empty (no writes there)
+        eph_cache = node._ephemeral_cached_pod
+        assert eph_cache is not None
+        assert eph_cache.result_database.get_all_records(eph_cache.record_path) is not None
+        assert result_db.get_all_records(node._cached_function_pod.record_path) is None
+
+    def test_within_session_ephemeral_hit(self):
+        """Same node called twice: second call hits ephemeral store — no recomputation."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        cfg = NodeConfig(ephemeral_result=True)
+        pod = FunctionPod(pf, config=cfg)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node.set_ephemeral_store(ephemeral_store)
+
+        node.execute(stream)
+        assert call_count["n"] == 1
+
+        # Second execution — same entry_id — must hit cache
+        node._cached_output_datas.clear()  # clear in-memory cache to force DB lookup
+        node.execute(stream)
+        assert call_count["n"] == 1  # function must NOT have been called again
+
+    def test_cross_session_miss_recomputes(self):
+        """Fresh InMemoryArrowDatabase (new session): ephemeral miss triggers recomputation."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+
+        # Session 1: execute with ephemeral store
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        cfg = NodeConfig(ephemeral_result=True)
+        pod = FunctionPod(pf, config=cfg)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node.set_ephemeral_store(InMemoryArrowDatabase())
+        node.execute(stream)
+        assert call_count["n"] == 1
+
+        # Session 2: fresh in-memory node with a fresh ephemeral store
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        pod2 = FunctionPod(pf2, config=cfg)
+        node2 = FunctionJobNode(
+            function_pod=pod2,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node2.set_ephemeral_store(InMemoryArrowDatabase())  # fresh store
+        node2.execute(stream)
+        assert call_count["n"] == 2  # recomputed
+
+    def test_persistent_hit_served_when_ephemeral_true(self):
+        """A persistent result is still served from cache when ephemeral store is also set."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        pod = FunctionPod(pf)  # ephemeral_result=False (default)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        # Attach an ephemeral store — must NOT break persistent reads
+        node.set_ephemeral_store(InMemoryArrowDatabase())
+
+        # Run 1: writes to persistent DB (ephemeral_result=False)
+        results = node.execute(stream)
+        assert len(results) == 1
+        assert results[0][1].as_dict()["result"] == 20
+        assert call_count["n"] == 1
+
+        # Clear in-memory cache to force DB lookup on Run 2
+        node._cached_output_datas.clear()
+
+        # Run 2: Phase 1 must find persistent result — no recompute
+        results2 = node.execute(stream)
+        assert len(results2) == 1
+        assert results2[0][1].as_dict()["result"] == 20
+        assert call_count["n"] == 1  # NOT recomputed

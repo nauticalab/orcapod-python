@@ -1488,21 +1488,19 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         entry_ids: list[bytes] | None = None,
     ) -> _JoinedRecords | None:
-        """Internal primitive: fetch both DBs, content-hash-filter, and inner-join.
+        """Internal primitive: fetch both DBs and inner-join, supporting two stores.
 
-        Fetches ``taginfo`` from the pipeline database with
-        ``_PIPELINE_ENTRY_ID_COL`` as the row-key column, fetches ``results``
-        from the result database, applies ``_filter_by_content_hash``, and
-        inner-joins the two tables on ``DATA_RECORD_ID`` via polars.
+        Fetches ``taginfo`` from the pipeline database, partitions rows by
+        ``IS_EPHEMERAL_COL`` into persistent and ephemeral groups, performs two
+        independent inner joins (one per store), merges with persistent priority
+        via an anti-join, and returns the combined result.
 
-        If ``entry_ids`` is provided, the polars DataFrame is filtered to
-        matching ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow,
-        avoiding a round-trip.
+        Persistent miss rows (tag entry with no matching result DB row) emit a
+        WARNING-level log. Ephemeral miss rows (cross-session miss) are silently
+        dropped.
 
-        Does NOT apply ``ColumnConfig`` column dropping (that is
-        ``get_all_records``'s job), convert rows to ``(tag, data)`` tuples
-        (that is ``_load_cached_entries``'s job), or touch the in-memory cache
-        (that is ``get_cached_results``'s job).
+        If ``entry_ids`` is provided, the result is filtered to matching
+        ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow.
 
         Args:
             entry_ids: If given, return only rows whose
@@ -1512,10 +1510,9 @@ class FunctionJobNode(FunctionNodeBase):
         Returns:
             A ``_JoinedRecords`` whose ``table`` always includes a
             ``_PIPELINE_ENTRY_ID_COL`` column, or ``None`` when either
-            database is absent or either DB fetch returns ``None``. A 0-row
-            table is returned (not ``None``) when both fetches succeed but the
-            join finds no matching rows — callers check ``num_rows``
-            themselves.
+            the pipeline database or cached function pod is absent. A 0-row
+            table (not ``None``) is returned when both fetches succeed but
+            no matching rows exist — callers check ``num_rows`` themselves.
         """
         if self._cached_function_pod is None or self._pipeline_database is None:
             return None
@@ -1524,32 +1521,121 @@ class FunctionJobNode(FunctionNodeBase):
             self.node_identity_path,
             record_id_column=_PIPELINE_ENTRY_ID_COL,
         )
-        results = self._cached_function_pod.result_database.get_all_records(
-            self._cached_function_pod.record_path,
-            record_id_column=constants.DATA_RECORD_ID,
-        )
 
-        if taginfo is None or results is None:
+        if taginfo is None:
             return None
 
         taginfo_columns = tuple(taginfo.column_names)
         taginfo = self._filter_by_content_hash(taginfo)
         taginfo_schema = taginfo.schema
-        results_schema = results.schema
 
-        joined_df = pl.DataFrame(taginfo).join(
-            pl.DataFrame(results),
-            on=constants.DATA_RECORD_ID,
-            how="inner",
-        )
+        is_ephemeral_col = constants.IS_EPHEMERAL_COL
+        taginfo_df = pl.DataFrame(taginfo)
+
+        # Partition by IS_EPHEMERAL_COL (backward-compat: missing col → all persistent)
+        if is_ephemeral_col in taginfo.column_names:
+            persistent_taginfo_df = taginfo_df.filter(
+                ~pl.col(is_ephemeral_col).fill_null(False)
+            )
+            ephemeral_taginfo_df = taginfo_df.filter(
+                pl.col(is_ephemeral_col).fill_null(False)
+            )
+        else:
+            persistent_taginfo_df = taginfo_df
+            ephemeral_taginfo_df = pl.DataFrame()
+
+        # ------------------------------------------------------------------
+        # Persistent join
+        # ------------------------------------------------------------------
+        results_schema = None
+        persistent_df = pl.DataFrame()
+        if persistent_taginfo_df.height > 0:
+            results = self._cached_function_pod.result_database.get_all_records(
+                self._cached_function_pod.record_path,
+                record_id_column=constants.DATA_RECORD_ID,
+            )
+            if results is None:
+                # Tag table has persistent entries but result DB is empty — data loss
+                for row_dict in persistent_taginfo_df.to_dicts():
+                    logger.warning(
+                        "Pipeline DB entry '%s' has no match in persistent result DB "
+                        "— data may have been deleted externally. "
+                        "This input will be recomputed.",
+                        row_dict.get(_PIPELINE_ENTRY_ID_COL),
+                    )
+            else:
+                results_schema = results.schema
+                full_persistent_df = persistent_taginfo_df.join(
+                    pl.DataFrame(results),
+                    on=constants.DATA_RECORD_ID,
+                    how="inner",
+                )
+                # Warn about persistent tag rows that found no match in the result DB
+                if full_persistent_df.height < persistent_taginfo_df.height:
+                    matched_ids = set(
+                        full_persistent_df.select(_PIPELINE_ENTRY_ID_COL)
+                        .to_series()
+                        .to_list()
+                    )
+                    for row_dict in persistent_taginfo_df.to_dicts():
+                        if row_dict[_PIPELINE_ENTRY_ID_COL] not in matched_ids:
+                            logger.warning(
+                                "Pipeline DB entry '%s' has no match in persistent result DB "
+                                "— data may have been deleted externally. "
+                                "This input will be recomputed.",
+                                row_dict[_PIPELINE_ENTRY_ID_COL],
+                            )
+                persistent_df = full_persistent_df
+
+        # ------------------------------------------------------------------
+        # Ephemeral join
+        # ------------------------------------------------------------------
+        ephemeral_df = pl.DataFrame()
+        if ephemeral_taginfo_df.height > 0 and self._ephemeral_cached_pod is not None:
+            eph_results = self._ephemeral_cached_pod.result_database.get_all_records(
+                self._ephemeral_cached_pod.record_path,
+                record_id_column=constants.DATA_RECORD_ID,
+            )
+            if eph_results is not None:
+                if results_schema is None:
+                    results_schema = eph_results.schema
+                ephemeral_df = ephemeral_taginfo_df.join(
+                    pl.DataFrame(eph_results),
+                    on=constants.DATA_RECORD_ID,
+                    how="inner",
+                )
+            # Cross-session miss: eph_results is None → silently drop ephemeral entries
+
+        # ------------------------------------------------------------------
+        # Merge with persistent priority (anti-join + concat)
+        # ------------------------------------------------------------------
+        if ephemeral_df.height > 0 and persistent_df.height > 0:
+            ephemeral_only_df = ephemeral_df.join(
+                persistent_df.select([_PIPELINE_ENTRY_ID_COL]),
+                on=_PIPELINE_ENTRY_ID_COL,
+                how="anti",
+            )
+            merged_df = pl.concat([persistent_df, ephemeral_only_df], how="diagonal")
+        elif ephemeral_df.height > 0:
+            merged_df = ephemeral_df
+        elif persistent_df.height > 0:
+            merged_df = persistent_df
+        else:
+            # No results found in either store — return empty table preserving taginfo schema
+            empty_table = taginfo.slice(0, 0)
+            return _JoinedRecords(table=empty_table, taginfo_columns=taginfo_columns)
+
+        # Apply entry_id filter if requested
         if entry_ids is not None:
-            joined_df = joined_df.filter(
+            merged_df = merged_df.filter(
                 pl.col(_PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
             )
-        joined = joined_df.to_arrow()
-        joined = arrow_utils.restore_schema_nullability(
-            joined, taginfo_schema, results_schema
-        )
+
+        joined = merged_df.to_arrow()
+        if results_schema is not None:
+            joined = arrow_utils.restore_schema_nullability(
+                joined, taginfo_schema, results_schema
+            )
         return _JoinedRecords(table=joined, taginfo_columns=taginfo_columns)
 
     def _load_cached_entries(
