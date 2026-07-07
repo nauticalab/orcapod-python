@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 
+import fsspec
 import pytest
 import pyarrow as pa
 from upath import UPath
@@ -178,13 +179,14 @@ class TestURLFormIdentity:
     @pytest.fixture(autouse=True)
     def memory_file(self):
         """Create ``memory://ns/x.bin`` with known content; clean up after."""
-        import fsspec
         fs = fsspec.filesystem("memory")
         # Clean up any pre-existing state
         if "/ns/x.bin" in fs.store:
             fs.rm("/ns/x.bin")
-        if "/ns" in fs.pseudo_dirs:
-            fs.pseudo_dirs.remove("/ns")
+        try:
+            fs.rmdir("/ns")
+        except (FileNotFoundError, OSError):
+            pass
         # Create directory and file
         fs.mkdir("/ns", create_parents=True)
         with fs.open("/ns/x.bin", "wb") as fh:
@@ -193,8 +195,10 @@ class TestURLFormIdentity:
         # Clean up after test
         if "/ns/x.bin" in fs.store:
             fs.rm("/ns/x.bin")
-        if "/ns" in fs.pseudo_dirs:
-            fs.pseudo_dirs.remove("/ns")
+        try:
+            fs.rmdir("/ns")
+        except (FileNotFoundError, OSError):
+            pass
 
     def test_str_preserves_url_form(self):
         f = File("memory://ns/x.bin")
