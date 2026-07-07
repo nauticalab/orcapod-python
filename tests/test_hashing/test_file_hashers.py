@@ -267,3 +267,34 @@ class TestCachedFileHasher:
         second = cached.hash_file(f)
 
         assert first.digest != second.digest
+
+    def test_cache_key_preserves_url_form(self):
+        """CachedFileHasher must not resolve URL-form paths to concrete backend paths.
+
+        UPath.resolve() only normalises ``.``/``..`` components — it does not call
+        any fsspec backend resolution. The FileHashKey.path must therefore retain
+        the original URL string for non-local protocols.
+        """
+        import fsspec
+        from upath import UPath
+
+        fs = fsspec.filesystem("memory")
+        fs.mkdir("/ns", exist_ok=True)
+        with fs.open("/ns/cache_key_test.bin", "wb") as fh:
+            fh.write(b"cache-key-url-test")
+
+        try:
+            inner = FileHasher(algorithm="sha256")
+            cacher = InMemoryHashCacher()
+            cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
+
+            cached.hash_file(UPath("memory://ns/cache_key_test.bin"))
+
+            keys = list(cacher._cache.keys())
+            assert len(keys) == 1, f"Expected 1 cache entry, got {len(keys)}"
+            key = keys[0]
+            assert str(key.path) == "memory://ns/cache_key_test.bin", (
+                f"Cache key path must preserve URL form; got {str(key.path)!r}"
+            )
+        finally:
+            fs.rm("/ns/cache_key_test.bin")
