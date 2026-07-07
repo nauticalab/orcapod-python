@@ -464,8 +464,10 @@ All tests in `tests/test_core/function_pod/test_ephemeral_result.py`:
 - **`FunctionPodStream` ephemeral annotation**: `FunctionPodStream` has no result database;
   it is already fully transient. Any future design around provenance-skipping for
   `FunctionPodStream` outputs is a separate issue.
-- **Operator ephemeral caching**: operators use a different three-tier caching model
-  (off / log / replay); ephemeral support for operators is deferred.
+- **Operator ephemeral caching (ITL-509)**: operators use a different three-tier caching
+  model (off / log / replay); ephemeral support for operators is deferred to ITL-509.
+  `set_ephemeral_store()` is defined on operator nodes as a no-op to keep them
+  protocol-conformant until that work lands.
 - **Store clear / reset API**: no explicit method to clear `ephemeral_result_store` in v1.
   Callers control lifetime by passing a fresh store at the pipeline level.
 - **Indexed recomputation (`entry_id` versioning, ITL-508 / v0.2.0)**: the v1 append
