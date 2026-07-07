@@ -197,21 +197,32 @@ Because the two joins are independent, the same `entry_id` can appear in both di
 only when the tag table has both a persistent entry and an ephemeral entry for the same
 input (e.g. a persisted result from run N and a fresh ephemeral from run N+1).
 
-**Step 4 — merge with persistent priority:**
+**Step 4 — merge with persistent priority (vectorised, no dict conversion):**
+
+Priority is enforced at the Polars level using an **anti-join + concat** — no
+conversion to Python dicts is needed:
 
 ```python
-# ephemeral_hits merged first; persistent_hits overwrites on any entry_id collision
-available_results = {**ephemeral_hits, **persistent_hits}
+# Keep only ephemeral rows whose entry_id has NO match in persistent_df.
+# This excludes any ephemeral entry that is shadowed by a persistent one.
+ephemeral_only_df = ephemeral_df.join(
+    persistent_df.select(ENTRY_ID_COL),
+    on=ENTRY_ID_COL,
+    how="anti",
+)
+
+# Concatenate: persistent rows first, then ephemeral-only rows.
+# Every entry_id in the result is unique — persistent rows are present in full,
+# ephemeral rows only fill in where no persistent entry exists.
+available_results_df = pl.concat([persistent_df, ephemeral_only_df])
 ```
 
-Because `persistent_hits` is merged second, it overwrites any key present in both
-dicts. This is the mechanism that enforces the priority rule: persistent results are
-authoritative and deliberately retained; ephemeral results are transient and should
-never shadow them.
+The anti-join is O(n + m) and fully vectorised. The concat is zero-copy in Polars.
+No Python-level iteration or dict merging is required.
 
-`available_results` is keyed on `entry_id` and maps to the fully reconstructed
-`(tag, data)` pair. This is the complete set of results the node can serve without
-recomputation.
+`available_results_df` contains one row per `entry_id` and includes all tag and data
+columns needed to reconstruct `(tag, data)` pairs. This is the complete set of results
+the node can serve without recomputation.
 
 **Step 5 — determine what still needs computing:**
 
@@ -282,9 +293,10 @@ acceptable for single-threaded and low-concurrency pipelines.
 **Recovery scenario** — if a previously missing persistent result (R1) is later
 restored to the result database while a replacement ephemeral entry (R2) also exists:
 
-- R1 (persistent) and R2 (ephemeral) both survive their respective joins.
-- Step 4's persistent-priority merge means R1 wins: the persistent result is returned
-  and R2 is silently ignored.
+- R1 (persistent) survives the persistent join; R2 (ephemeral) survives the ephemeral
+  join. Both rows carry the same `entry_id`.
+- Step 4's anti-join excludes R2 from `ephemeral_only_df` because its `entry_id` is
+  already present in `persistent_df`. Only R1 appears in `available_results_df`.
 - This is the correct outcome: the restored authoritative result takes precedence over
   the transient replacement that was computed only because R1 was temporarily absent.
 
