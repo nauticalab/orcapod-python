@@ -228,7 +228,7 @@ If `ephemeral_result=True` but `ephemeral_result_store` is `None` (store not yet
 by the pipeline), raise `RuntimeError` at execution time with a clear message rather than
 silently falling back to the persistent store.
 
-#### Recompute-after-miss write strategy
+#### Recompute-after-miss write strategy (v1 — known limitation)
 
 When Phase 2 is triggered by a miss (either a persistent DB miss or a cross-session
 ephemeral miss), the tag table may already contain a stale entry for the same
@@ -238,7 +238,7 @@ behaviour), the new `DATA_RECORD_ID` is never written and the stale entry persis
 indefinitely, causing every subsequent run to miss, warn, and recompute — an infinite
 miss cycle.
 
-**Strategy: always append, deduplication is implicit via the inner join.**
+**v1 strategy: always append, deduplication is implicit via the inner join.**
 
 `add_pipeline_record` is called with `skip_cache_lookup=True` on all Phase 2 writes.
 This bypasses the skip-if-exists guard and appends a new pipeline DB row alongside
@@ -252,16 +252,23 @@ is the natural deduplication filter:
   partner and are dropped silently.
 - Valid rows (whose `DATA_RECORD_ID` is present) survive and are returned.
 
+**Known race condition (v1 limitation):** under concurrent execution, two threads may
+simultaneously detect the same miss and both proceed to Phase 2. Both will append a
+new pipeline DB row, resulting in two valid rows for the same logical input. For
+deterministic functions the results are semantically identical, but the duplicate rows
+are wasteful and could cause double-delivery if not handled by the caller.
+
+A proper concurrency-safe solution — an explicit **recomputation index** baked into
+`entry_id` — is deferred to v0.2.0 (ITL-508). The v1 `skip_cache_lookup` approach is
+acceptable for single-threaded and low-concurrency pipelines.
+
 **Recovery scenario** — if a previously missing persistent result (R1) is later
 restored to the result database while a replacement entry (R2) also exists:
 
-- Both rows survive the join and map to the same `entry_id`.
-- For deterministic functions (same input → same output), R1 and R2 are
-  semantically identical; either can be used. The implementation picks whichever
-  join partner appears first.
-- For non-deterministic functions, both results are valid products of the same input;
-  returning either is acceptable. No additional deduplication is required in v1 — the
-  recovery scenario is rare and the ambiguity is benign.
+- Both rows survive the join and map to the same logical input.
+- For deterministic functions, R1 and R2 are semantically identical; either can be
+  used. The implementation picks whichever join partner appears first.
+- The recovery scenario is rare and the ambiguity is benign in v1.
 
 **Ephemeral accumulation** — stale `"temp:"` entries accumulate across sessions (each
 cross-session miss appends a new row). This is harmless: stale `"temp:"` rows never
@@ -426,3 +433,10 @@ All tests in `tests/test_core/function_pod/test_ephemeral_result.py`:
   (off / log / replay); ephemeral support for operators is deferred.
 - **Store clear / reset API**: no explicit method to clear `ephemeral_result_store` in v1.
   Callers control lifetime by passing a fresh store at the pipeline level.
+- **Indexed recomputation (`entry_id` versioning, ITL-508 / v0.2.0)**: the v1 append
+  strategy for recompute-after-miss has a known race window under concurrent execution.
+  ITL-508 will incorporate an explicit recomputation index into `entry_id` (e.g.
+  `hash(... + recomputation_index=N)`). Index 0 is the original computation; a miss
+  increments to index 1. Insert uses an atomic insert-if-not-exists so that concurrent
+  threads all attempting index 1 result in exactly one successful write. This eliminates
+  both the race condition and unbounded stale-row accumulation.
