@@ -116,23 +116,58 @@ The `record_id` column in the tag table acts as a routing key:
 
 No other tag table columns change.
 
-#### Phase 1 — cache lookup
+#### Phase 1 — available-results resolution (bulk, at `iter_data()` start)
+
+At the start of `iter_data()`, before any computation begins, the node determines the
+complete set of **currently available computed results** across both stores. This is a
+bulk operation, not a per-tag lookup.
+
+**Step 1 — fetch all tag table entries** for this node's pipeline path. This is the same
+full scan performed today: retrieve every row in the tag table whose pipeline path matches
+this node. Each row contains the input tag hash and its corresponding `record_id`.
+
+**Step 2 — partition by `record_id` prefix:**
 
 ```
-tag table lookup(tag) → tag_entry?
-  no  → cache miss → Phase 2
-  yes → record_id starts with "temp:"?
-          yes → ephemeral_result_store.lookup(record_id_without_prefix)
-                  found  → yield (within-session hit)
-                  not found → treat as cache miss → Phase 2
-          no  → result_database.lookup(record_id)
-                  found  → yield (persistent hit)
-                  not found → treat as cache miss → Phase 2
+persistent_entries = {tag_hash: record_id
+                      for tag_hash, record_id in tag_rows
+                      if not record_id.startswith("temp:")}
+
+ephemeral_entries  = {tag_hash: record_id.removeprefix("temp:")
+                      for tag_hash, record_id in tag_rows
+                      if record_id.startswith("temp:")}
 ```
 
-The "not found in ephemeral store" branch covers the cross-session case: a previous run
-wrote a `"temp:"` tag entry, the in-process store has since been cleared or replaced, so
-the result is simply recomputed.
+**Step 3 — resolve each group against its store:**
+
+- **Persistent group:** bulk join `persistent_entries` against `result_database` on
+  `record_id`. Any `record_id` not found in the result database is silently dropped
+  (treated as a miss — the database may have been trimmed externally).
+- **Ephemeral group:** bulk join `ephemeral_entries` against `ephemeral_result_store` on
+  the stripped `record_id`. Any `record_id` not found in the ephemeral store is silently
+  dropped. This is the **cross-session miss** path: a prior run wrote a `"temp:"` tag
+  entry, but the in-process store is fresh (or was never populated), so the result is
+  simply absent.
+
+**Step 4 — union** the two resolved sets:
+
+```
+available_results = persistent_hits ∪ ephemeral_hits
+```
+
+`available_results` is keyed on input tag hash and maps to the fully reconstructed output
+`(tag, data)` pair. This is the complete set of results the node can serve without
+recomputation.
+
+**Step 5 — determine what still needs computing:**
+
+```
+needs_computing = {tag for tag in current_inputs
+                   if tag.hash() not in available_results}
+```
+
+Results in `available_results` are yielded immediately (cache hits). Inputs in
+`needs_computing` proceed to Phase 2.
 
 #### Phase 2 — compute and write
 
@@ -242,6 +277,9 @@ All tests in `tests/test_core/function_pod/test_ephemeral_result.py`:
 | `test_ephemeral_only_node` | `result_database=None, ephemeral_result=True`: end-to-end execution succeeds; results retrievable within session |
 | `test_store_not_assigned_raises` | `ephemeral_result=True` but `ephemeral_result_store=None` at execution time raises `RuntimeError` with clear message |
 | `test_pipeline_injects_shared_store` | Pipeline assigns the same `InMemoryArrowDatabase` instance to all ephemeral nodes |
+| `test_bulk_resolution_mixed_stores` | Tag table contains both `"temp:"` and regular entries; bulk resolution yields hits from both stores and only recomputes entries absent from both |
+| `test_bulk_resolution_ephemeral_miss_dropped_from_available` | Tag table has a `"temp:"` entry but ephemeral store is fresh; that entry is excluded from available results and the input falls into Phase 2 |
+| `test_bulk_resolution_persistent_miss_dropped_from_available` | Tag table has a regular `record_id` entry but persistent DB has been trimmed; that entry is excluded from available results and the input falls into Phase 2 |
 
 ---
 
