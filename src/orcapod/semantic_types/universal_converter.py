@@ -940,10 +940,24 @@ class UniversalTypeConverter:
         python_schema: SchemaLike | None = None,
         arrow_schema: "pa.Schema | None" = None,
     ) -> pa.Table:
-        """
-        Convert a list of Python dictionaries to an Arrow table.
+        """Convert a list of Python dictionaries to an Arrow table.
 
-        This uses the main conversion logic and caches results for performance.
+        When deriving the Arrow schema from a Python schema (i.e. when
+        ``arrow_schema`` is ``None``), Pydantic ``BaseModel`` subclasses and
+        ``@dataclass`` types found in the schema are automatically registered
+        in the semantic-type system. Registration is idempotent — calling this
+        method multiple times with the same types is safe.
+
+        Args:
+            python_dicts: Rows of data as plain Python dicts.
+            python_schema: Optional mapping of column name to Python type. If
+                omitted and ``arrow_schema`` is also omitted, the schema is
+                inferred from the data.
+            arrow_schema: Optional Arrow schema. When provided the Python schema
+                is derived from it; no type registration is performed.
+
+        Returns:
+            A PyArrow ``Table`` containing the converted data.
         """
         if python_schema is not None and arrow_schema is not None:
             logger.warning(

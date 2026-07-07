@@ -13,9 +13,10 @@ from orcapod.core.sources import DictSource
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — fresh model classes scoped per-test to avoid cross-test registry
-# state. Using classes defined at module level is fine because registration is
-# idempotent; the classes just need to be new relative to any prior test run.
+# Model classes used across tests. All are defined at module level so that
+# get_type_hints() can resolve their annotations (local-scope classes are not
+# reachable via __globals__). Registration is idempotent, so the same class
+# appearing in multiple tests never causes a double-registration error.
 # ---------------------------------------------------------------------------
 
 
