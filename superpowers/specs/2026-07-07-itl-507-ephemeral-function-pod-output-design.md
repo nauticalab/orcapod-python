@@ -175,13 +175,16 @@ ephemeral_entries  = {tag_hash: record_id.removeprefix("temp:")
 **Step 3 — resolve each group against its store:**
 
 - **Persistent group:** bulk join `persistent_entries` against `result_database` on
-  `record_id`. Any `record_id` not found in the result database is silently dropped
-  (treated as a miss — the database may have been trimmed externally).
+  `record_id`. Any `record_id` not found in the result database is dropped from the
+  available set and treated as a cache miss, but a **`WARNING`-level log message is
+  emitted** for each missing entry — a tag table entry pointing to a non-existent
+  persistent record indicates unexpected data loss or external modification of the
+  result database and should not pass silently.
 - **Ephemeral group:** bulk join `ephemeral_entries` against `ephemeral_result_store` on
   the stripped `record_id`. Any `record_id` not found in the ephemeral store is silently
-  dropped. This is the **cross-session miss** path: a prior run wrote a `"temp:"` tag
-  entry, but the in-process store is fresh (or was never populated), so the result is
-  simply absent.
+  dropped — no warning is emitted. This is the expected **cross-session miss** path: a
+  prior run wrote a `"temp:"` tag entry, but the in-process store is fresh (or was never
+  populated), so the result is simply absent and will be recomputed.
 
 **Step 4 — union** the two resolved sets:
 
@@ -362,7 +365,7 @@ All tests in `tests/test_core/function_pod/test_ephemeral_result.py`:
 | `test_pipeline_injects_shared_store` | Pipeline assigns the same `InMemoryArrowDatabase` instance to all ephemeral nodes |
 | `test_bulk_resolution_mixed_stores` | Tag table contains both `"temp:"` and regular entries; bulk resolution yields hits from both stores and only recomputes entries absent from both |
 | `test_bulk_resolution_ephemeral_miss_dropped_from_available` | Tag table has a `"temp:"` entry but ephemeral store is fresh; that entry is excluded from available results and the input falls into Phase 2 |
-| `test_bulk_resolution_persistent_miss_dropped_from_available` | Tag table has a regular `record_id` entry but persistent DB has been trimmed; that entry is excluded from available results and the input falls into Phase 2 |
+| `test_bulk_resolution_persistent_miss_warns_and_recomputes` | Tag table has a regular `record_id` entry but persistent DB has been trimmed; a `WARNING`-level log is emitted, the entry is excluded from available results, and the input falls into Phase 2 |
 
 ---
 
