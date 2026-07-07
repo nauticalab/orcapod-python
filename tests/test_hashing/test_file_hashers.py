@@ -286,13 +286,20 @@ class TestCachedFileHasher:
             cacher = InMemoryHashCacher()
             cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
 
-            cached.hash_file(UPath("memory://ns/cache_key_test.bin"))
+            url_path = UPath("memory://ns/cache_key_test.bin")
+            cached.hash_file(url_path)
 
-            keys = list(cacher._cache.keys())
-            assert len(keys) == 1, f"Expected 1 cache entry, got {len(keys)}"
-            key = keys[0]
-            assert str(key.path) == "memory://ns/cache_key_test.bin", (
-                f"Cache key path must preserve URL form; got {str(key.path)!r}"
+            # Reconstruct the expected FileHashKey the same way CachedFileHasher does,
+            # then verify a cache hit via the public get() API.
+            resolved = url_path.resolve()
+            stat = resolved.stat()
+            expected_key = FileHashKey(resolved, stat.st_mtime_ns, stat.st_size)
+            assert cacher.get(expected_key) is not None, (
+                "Expected a cache hit for the URL-form path key"
+            )
+            # The resolved path must still be in URL form — not a concrete backend path.
+            assert str(expected_key.path) == "memory://ns/cache_key_test.bin", (
+                f"Cache key path must preserve URL form; got {str(expected_key.path)!r}"
             )
         finally:
             fs.rm("/ns/cache_key_test.bin")

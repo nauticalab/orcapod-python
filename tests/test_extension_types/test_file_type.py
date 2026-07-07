@@ -181,7 +181,7 @@ class TestURLFormIdentity:
         """Create ``memory://ns/x.bin`` with known content; clean up after."""
         fs = fsspec.filesystem("memory")
         # Clean up any pre-existing state
-        if "/ns/x.bin" in fs.store:
+        if fs.exists("/ns/x.bin"):
             fs.rm("/ns/x.bin")
         try:
             fs.rmdir("/ns")
@@ -193,7 +193,7 @@ class TestURLFormIdentity:
             fh.write(b"url-identity-test-content")
         yield
         # Clean up after test
-        if "/ns/x.bin" in fs.store:
+        if fs.exists("/ns/x.bin"):
             fs.rm("/ns/x.bin")
         try:
             fs.rmdir("/ns")
@@ -212,13 +212,15 @@ class TestURLFormIdentity:
         assert h1 == h2, "hash() must be identical across two constructions of the same URL"
 
     def test_hash_equals_upath_protocol_tuple(self):
-        # UPath.__hash__ = hash((protocol, vfspath))
-        # For memory://ns/x.bin: protocol="memory", vfspath="/ns/x.bin"
-        # This test pins the exact hash contract so any regression is immediately visible.
-        expected = hash(("memory", "/ns/x.bin"))
+        # File.__hash__ delegates to ProxyUPath.__hash__ → UPath.__hash__.
+        # Derive the expected hash from UPath directly so the test stays focused
+        # on verifying that File follows the same hash contract as its wrapped UPath,
+        # rather than hard-coding the internal (protocol, vfspath) representation.
+        ref = UPath("memory://ns/x.bin")
+        expected = hash(ref)
         actual = hash(File("memory://ns/x.bin"))
         assert actual == expected, (
-            f"hash(File('memory://ns/x.bin')) should equal hash(('memory', '/ns/x.bin')), "
+            f"hash(File('memory://ns/x.bin')) should equal hash(UPath('memory://ns/x.bin')), "
             f"got {actual} vs {expected}"
         )
 

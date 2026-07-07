@@ -92,7 +92,7 @@ no mocking infrastructure beyond writing a file to the in-memory filesystem.
 | Test class | File | What it covers |
 |---|---|---|
 | `TestURLFormIdentity` | `tests/test_extension_types/test_file_type.py` | `str()`, `hash()`, `LogicalFile` round-trip |
-| `TestCachedFileHasherURLKey` (new method in existing class) | `tests/test_hashing/test_file_hashers.py` | `CachedFileHasher` cache-key URL preservation |
+| `TestCachedFileHasher.test_cache_key_preserves_url_form` | `tests/test_hashing/test_file_hashers.py` | `CachedFileHasher` cache-key URL preservation |
 
 ### `TestURLFormIdentity` — five tests
 
@@ -114,4 +114,4 @@ Added to `tests/test_hashing/test_file_hashers.py` as a new method on the existi
 
 | Test | Assertion |
 |---|---|
-| `test_cache_key_preserves_url_form` | After hashing `memory://ns/x.bin`, the `FileHashKey.path` in the cache has `str(key.path) == "memory://ns/x.bin"` |
+| `test_cache_key_preserves_url_form` | After hashing `memory://ns/cache_key_test.bin`, reconstruct the `FileHashKey` via `resolve()` + `stat()` and verify a cache hit via `cacher.get()` and that `str(key.path) == "memory://ns/cache_key_test.bin"` |
