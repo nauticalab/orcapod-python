@@ -6,7 +6,9 @@ returned raw bytes instead of ContentHash, and verify the CachedFileHasher
 correctly round-trips ContentHash through the cache.
 """
 
+import fsspec
 import pytest
+from upath import UPath
 
 from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher, FileHashKey
 from orcapod.hashing.hash_cachers import InMemoryHashCacher
@@ -169,7 +171,6 @@ class TestCachedFileHasher:
 
     def test_cache_stores_content_hash_directly(self, sample_file):
         """The cacher stores ContentHash objects keyed by FileHashKey."""
-        from upath import UPath
         inner = FileHasher(algorithm="sha256")
         cacher = InMemoryHashCacher()
         cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
@@ -275,9 +276,6 @@ class TestCachedFileHasher:
         any fsspec backend resolution. The FileHashKey.path must therefore retain
         the original URL string for non-local protocols.
         """
-        import fsspec
-        from upath import UPath
-
         fs = fsspec.filesystem("memory")
         fs.mkdir("/ns", exist_ok=True)
         with fs.open("/ns/cache_key_test.bin", "wb") as fh:
