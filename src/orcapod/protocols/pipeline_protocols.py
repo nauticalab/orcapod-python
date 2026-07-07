@@ -63,10 +63,11 @@ class PipelineProtocol(Protocol[NodeT]):
     def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
         """Assign or remove the ephemeral result store for all nodes.
 
-        Propagates ``store`` to every node in the pipeline by calling
-        ``node.set_ephemeral_store(store)`` on each. Nodes that do not
-        support ephemeral storage (e.g. operator nodes in v1) treat this
-        as a no-op.
+        Propagates ``store`` to every function-pod and operator-pod node in
+        the pipeline by calling ``node.set_ephemeral_store(store)`` on each.
+        Source nodes are skipped — they produce data, not consume it. Nodes
+        that do not support ephemeral storage (e.g. operator nodes in v1)
+        treat this as a no-op.
 
         Pass ``None`` to detach the ephemeral store from all nodes,
         reverting them to persistent-only writes for subsequent runs.

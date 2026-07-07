@@ -1649,13 +1649,12 @@ class FunctionJobNode(FunctionNodeBase):
             )
             if results is None:
                 # Tag table has persistent entries but result DB is empty — data loss
-                for row_dict in persistent_taginfo_df.to_dicts():
-                    logger.warning(
-                        "Pipeline DB entry '%s' has no match in persistent result DB "
-                        "— data may have been deleted externally. "
-                        "This input will be recomputed.",
-                        row_dict.get(_PIPELINE_ENTRY_ID_COL),
-                    )
+                logger.warning(
+                    "%d pipeline DB entries have no match in persistent result DB "
+                    "— data may have been deleted externally. "
+                    "These inputs will be recomputed.",
+                    persistent_taginfo_df.height,
+                )
             else:
                 results_schema = results.schema
                 full_persistent_df = persistent_taginfo_df.join(
@@ -1664,20 +1663,14 @@ class FunctionJobNode(FunctionNodeBase):
                     how="inner",
                 )
                 # Warn about persistent tag rows that found no match in the result DB
-                if full_persistent_df.height < persistent_taginfo_df.height:
-                    matched_ids = set(
-                        full_persistent_df.select(_PIPELINE_ENTRY_ID_COL)
-                        .to_series()
-                        .to_list()
+                missing_count = persistent_taginfo_df.height - full_persistent_df.height
+                if missing_count > 0:
+                    logger.warning(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— data may have been deleted externally. "
+                        "These inputs will be recomputed.",
+                        missing_count,
                     )
-                    for row_dict in persistent_taginfo_df.to_dicts():
-                        if row_dict[_PIPELINE_ENTRY_ID_COL] not in matched_ids:
-                            logger.warning(
-                                "Pipeline DB entry '%s' has no match in persistent result DB "
-                                "— data may have been deleted externally. "
-                                "This input will be recomputed.",
-                                row_dict[_PIPELINE_ENTRY_ID_COL],
-                            )
                 persistent_df = full_persistent_df
 
         # ------------------------------------------------------------------

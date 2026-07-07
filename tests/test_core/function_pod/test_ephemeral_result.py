@@ -40,7 +40,7 @@ def _make_stream(rows: list[dict], tag_columns: list[str] | None = None) -> Arro
     return ArrowTableStream(table, tag_columns=tag_columns)
 
 
-def _make_source_stream(rows: list[dict], tag_columns: list[str] | None = None) -> ArrowTableStream:
+def _make_source_stream(rows: list[dict], tag_columns: list[str] | None = None) -> ArrowTableSource:
     if tag_columns is None:
         tag_columns = ["id"]
     table = pa.table(
@@ -622,7 +622,7 @@ class TestPersistentMissWarning:
             results = node2.execute(stream)
 
         assert len(results) == 1  # recomputed
-        assert any("has no match in persistent result DB" in msg for msg in caplog.messages)
+        assert any("have no match in persistent result DB" in msg for msg in caplog.messages)
 
     def test_recompute_after_persistent_miss_appends_new_pipeline_record(self):
         """After persistent miss and recompute, tag table has two rows; next call hits."""
