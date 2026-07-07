@@ -1172,6 +1172,7 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
+                    skip_cache_lookup=True,
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
@@ -1315,6 +1316,7 @@ class FunctionJobNode(FunctionNodeBase):
         data_record_id: uuid.UUID,
         computed: bool,
         skip_cache_lookup: bool = False,
+        is_ephemeral: bool = False,
     ) -> None:
         """Add a pipeline record to the database for a processed data.
 
@@ -1322,6 +1324,7 @@ class FunctionJobNode(FunctionNodeBase):
         - Tag columns (including system tags)
         - All source columns of the input data (provenance, not data)
         - Output data record ID (for joining with result records)
+        - Whether the result is stored in the ephemeral store
         - Input data data context key
         - Whether the result was freshly computed or cached
         """
@@ -1365,6 +1368,9 @@ class FunctionJobNode(FunctionNodeBase):
                 ),
                 f"{constants.META_PREFIX}computed": pa.array(
                     [computed], type=pa.bool_()
+                ),
+                constants.IS_EPHEMERAL_COL: pa.array(
+                    [is_ephemeral], type=pa.bool_()
                 ),
             }
         )

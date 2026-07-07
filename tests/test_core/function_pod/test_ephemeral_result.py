@@ -116,3 +116,43 @@ class TestSetEphemeralStore:
         node.set_ephemeral_store(store)
         node.set_ephemeral_store(None)
         assert node.ephemeral_result_store is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6 test: IS_EPHEMERAL_COL written to pipeline DB
+# ---------------------------------------------------------------------------
+
+class TestAddPipelineRecord:
+    def test_is_ephemeral_false_written_to_pipeline_db(self):
+        """add_pipeline_record(is_ephemeral=False) stores IS_EPHEMERAL_COL = False."""
+        from orcapod.system_constants import constants
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, db = _make_node(stream)
+        results = node.execute(stream)
+        assert len(results) == 1
+
+        all_records = db.get_all_records(node.node_identity_path)
+        assert all_records is not None
+        assert constants.IS_EPHEMERAL_COL in all_records.column_names
+        vals = all_records.column(constants.IS_EPHEMERAL_COL).to_pylist()
+        assert all(v is False for v in vals)
+
+    def test_is_ephemeral_true_written_to_pipeline_db(self):
+        """When ephemeral_result=True, IS_EPHEMERAL_COL=True is stored in the tag table."""
+        from orcapod.system_constants import constants
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+        node, _ = _make_node(stream, pipeline_db=pipeline_db, ephemeral_result=True)
+        node.set_ephemeral_store(ephemeral_store)
+
+        results = node.execute(stream)
+        assert len(results) == 1
+
+        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        assert all_records is not None
+        assert constants.IS_EPHEMERAL_COL in all_records.column_names
+        vals = all_records.column(constants.IS_EPHEMERAL_COL).to_pylist()
+        assert all(v is True for v in vals)
