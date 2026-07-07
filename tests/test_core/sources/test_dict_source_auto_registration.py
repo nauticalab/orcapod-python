@@ -30,6 +30,10 @@ class _Measurement:
     unit: str
 
 
+class _Sensor(BaseModel):
+    reading: float
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -73,9 +77,6 @@ class TestDictSourceAutoRegistration:
         """Function-pod eager registration still works after DictSource auto-registration."""
         from orcapod.core.data_function import PythonDataFunction
         from orcapod.core.function_pod import FunctionPod
-
-        class _Sensor(BaseModel):
-            reading: float
 
         def identity(sensor: _Sensor) -> _Sensor:
             return sensor

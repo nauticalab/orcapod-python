@@ -954,8 +954,12 @@ class UniversalTypeConverter:
             python_schema = infer_python_schema_from_pylist_data(python_dicts)
 
         if arrow_schema is None:
-            # Convert to Arrow schema
+            # Convert to Arrow schema — auto-register any Pydantic / dataclass types
+            # encountered here so DictSource users do not need to pre-register via a
+            # function pod. ensure_types_registered_for_schemas is idempotent and
+            # thread-safe; it is a no-op for primitives and already-registered types.
             assert python_schema is not None, "Python schema should not be None here"
+            self.ensure_types_registered_for_schemas(python_schema)
             arrow_schema = self.python_schema_to_arrow_schema(python_schema)
 
         if python_schema is None:
