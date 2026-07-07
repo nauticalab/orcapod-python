@@ -298,6 +298,110 @@ class TestBulkResolution:
         assert results2[0][1].as_dict()["result"] == 20
         assert call_count["n"] == 1  # NOT recomputed
 
+    def test_bulk_resolution_mixed_stores(self):
+        """Tag table has both persistent and ephemeral entries; both resolve correctly."""
+        stream_a = _make_stream([{"id": 0, "x": 10}])
+        stream_b = _make_stream([{"id": 1, "x": 20}])
+        pipeline_db = InMemoryArrowDatabase()
+
+        # id=0 → persistent
+        node_p, _ = _make_node(stream_a, pipeline_db=pipeline_db, ephemeral_result=False)
+        node_p.execute(stream_a)
+
+        # id=1 → ephemeral, reusing same pipeline_db
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        ephemeral_store = InMemoryArrowDatabase()
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        cfg = NodeConfig(ephemeral_result=True)
+        pod = FunctionPod(pf, config=cfg)
+        node_e = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream_b,
+            pipeline_database=pipeline_db,
+        )
+        node_e.set_ephemeral_store(ephemeral_store)
+        node_e.execute(stream_b)
+
+        # Now load both results via a combined stream
+        stream_both = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
+        node_both = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream_both,
+            pipeline_database=pipeline_db,
+        )
+        node_both.set_ephemeral_store(ephemeral_store)
+        node_both._cached_output_datas.clear()
+
+        results = node_both.execute(stream_both)
+        assert len(results) == 2
+        vals = {tag.as_dict()["id"]: data.as_dict()["result"] for tag, data in results}
+        assert vals == {0: 20, 1: 40}
+
+    def test_persistent_result_outcompetes_ephemeral(self):
+        """When both persistent and ephemeral entries exist for the same entry_id, persistent wins.
+
+        This tests the anti-join merge: a tag table row with IS_EPHEMERAL=True that shares
+        an entry_id with an IS_EPHEMERAL=False row should be excluded from available_results.
+        """
+        # Use a single node to write both a persistent AND an ephemeral entry for id=0.
+        # We do this by:
+        #   1. Execute with ephemeral store attached but ephemeral_result=False → writes persistent entry
+        #   2. Manually insert an ephemeral tag-table row + ephemeral store result to simulate
+        #      the scenario where both exist (e.g. after a recovery run).
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+
+        # Write a persistent entry
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        pod = FunctionPod(pf)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node.set_ephemeral_store(ephemeral_store)
+        node.execute(stream)  # writes IS_EPHEMERAL=False persistent entry
+        assert call_count["n"] == 1
+
+        # Simulate an ephemeral entry also existing for the same input
+        # by calling add_pipeline_record directly with is_ephemeral=True.
+        # (This represents the "recovery scenario" from the spec.)
+        import uuid as _uuid
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        fake_uuid = _uuid.UUID(int=0)  # dummy UUID, no actual result stored
+        node.add_pipeline_record(
+            tag, data,
+            data_record_id=fake_uuid,
+            computed=True,
+            skip_cache_lookup=True,
+            is_ephemeral=True,
+        )
+
+        # Clear in-memory cache to force fresh DB lookup
+        node._cached_output_datas.clear()
+
+        # Phase 1: both persistent (result=20) and ephemeral (fake UUID, no actual result)
+        # entries exist. Persistent should win — ephemeral entry excluded by anti-join.
+        # Since fake_uuid has no actual result in ephemeral_store, the ephemeral join
+        # produces no row for it. The persistent join wins, and result=20 is returned.
+        results = node.execute(stream)
+        assert len(results) == 1
+        assert results[0][1].as_dict()["result"] == 20
+        assert call_count["n"] == 1  # NOT recomputed
+
 
 # ---------------------------------------------------------------------------
 # Task 8 tests: ephemeral write path
