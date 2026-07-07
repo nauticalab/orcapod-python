@@ -721,7 +721,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         # Ephemeral result store (None until set_ephemeral_store() is called by the pipeline)
         self.ephemeral_result_store: "InMemoryArrowDatabase | None" = None
-        self._ephemeral_cached_pod: "CachedFunctionPod | None" = None
+        self._ephemeral_cached_pod: CachedFunctionPod | None = None
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -945,6 +945,13 @@ class FunctionJobNode(FunctionNodeBase):
         When *store* is not ``None``, creates a ``CachedFunctionPod`` backed by
         *store* so that ephemeral writes use the same format as persistent writes.
         When *store* is ``None``, clears both the store and the ephemeral pod.
+
+        Note:
+            For deserialized read-only nodes where ``_function_pod`` is ``None``,
+            ``ephemeral_result_store`` is assigned but ``_ephemeral_cached_pod``
+            remains ``None``. Such nodes cannot compute new results anyway, so
+            ``_process_data_internal`` must guard against this by checking
+            ``_ephemeral_cached_pod is not None`` before attempting ephemeral writes.
 
         Args:
             store: The ``InMemoryArrowDatabase`` to use for ephemeral result
