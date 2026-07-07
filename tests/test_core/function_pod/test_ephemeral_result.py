@@ -386,3 +386,51 @@ class TestEphemeralWritePath:
         node3._cached_output_datas.clear()
         node3.execute(stream)
         assert call_count["n"] == 2  # NOT recomputed
+
+
+# ---------------------------------------------------------------------------
+# Task 9 tests: pipeline propagation
+# ---------------------------------------------------------------------------
+
+class TestPipelineInjectsStore:
+    def test_pipeline_job_set_ephemeral_store_propagates(self):
+        """PipelineJob.set_ephemeral_store propagates to all compiled nodes."""
+        from orcapod.pipeline.job import PipelineJob
+
+        stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
+        cfg = NodeConfig(ephemeral_result=True)
+        pod = _make_pod(config=cfg)
+
+        job = PipelineJob(name="test_pipeline")
+        with job:
+            output = pod(stream)
+
+        ephemeral_store = InMemoryArrowDatabase()
+        job.set_ephemeral_store(ephemeral_store)
+
+        # Every function node in the compiled pipeline should now have the store
+        for label, node in job.function_pods.items():
+            assert node.ephemeral_result_store is ephemeral_store, (
+                f"Node '{label}' did not receive the ephemeral store"
+            )
+
+    def test_pipeline_job_set_ephemeral_store_none_detaches(self):
+        """PipelineJob.set_ephemeral_store(None) detaches the store from all nodes."""
+        from orcapod.pipeline.job import PipelineJob
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        cfg = NodeConfig(ephemeral_result=True)
+        pod = _make_pod(config=cfg)
+
+        job = PipelineJob(name="test_pipeline")
+        with job:
+            pod(stream)
+
+        store = InMemoryArrowDatabase()
+        job.set_ephemeral_store(store)
+        job.set_ephemeral_store(None)
+
+        for label, node in job.function_pods.items():
+            assert node.ephemeral_result_store is None, (
+                f"Node '{label}' ephemeral store was not detached"
+            )
