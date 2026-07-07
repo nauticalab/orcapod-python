@@ -19,7 +19,7 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import networkx as nx
-    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+    from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 else:
     nx = LazyModule("networkx")
 
@@ -136,7 +136,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """Copy of compiled nodes that are operator-pod nodes (label → node)."""
         return {k: v for k, v in self._nodes.items() if v.node_type == "operator"}
 
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
         """Assign or remove the ephemeral result store for all nodes.
 
         Propagates ``store`` to every function-pod and operator-pod node in the

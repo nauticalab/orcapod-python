@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from abc import abstractmethod
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
@@ -62,7 +63,6 @@ if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
-    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 else:
     pa = LazyModule("pyarrow")
     pc = LazyModule("pyarrow.compute")
@@ -392,15 +392,16 @@ class FunctionNodeBase(StreamBase):
             f"input_stream={self._input_stream!r})"
         )
 
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+    @abstractmethod
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
         """Assign or remove the ephemeral result store for this node.
 
-        No-op by default. ``FunctionJobNode`` overrides this with a real
-        implementation that routes new computation results to ``store``
-        instead of the persistent result database.
+        ``FunctionJobNode`` overrides this with a real implementation that routes
+        new computation results to ``store`` instead of the persistent result
+        database. ``FunctionNode`` (blueprint) provides a no-op override.
 
         Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
+            store: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
                 to detach.
         """
 
@@ -441,6 +442,9 @@ class FunctionNode(FunctionNodeBase):
         # Blueprint nodes have no in-memory output table cache
         self._cached_output_table: "pa.Table | None" = None
         self._cached_content_hash_column: "pa.Array | None" = None
+
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """No-op — blueprint nodes carry no database references."""
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -697,6 +701,7 @@ class FunctionJobNode(FunctionNodeBase):
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
+        ephemeral_database: ArrowDatabaseProtocol | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         super().__init__(
@@ -720,14 +725,17 @@ class FunctionJobNode(FunctionNodeBase):
         self._cached_function_pod: CachedFunctionPod | None = None
 
         # Ephemeral result store (None until set_ephemeral_store() is called by the pipeline)
-        self.ephemeral_result_store: "InMemoryArrowDatabase | None" = None
+        self.ephemeral_result_store: "ArrowDatabaseProtocol | None" = None
         self._ephemeral_cached_pod: CachedFunctionPod | None = None
 
         if pipeline_database is not None:
             self.attach_databases(
                 pipeline_database=pipeline_database,
                 result_database=result_database,
+                ephemeral_database=ephemeral_database,
             )
+        elif ephemeral_database is not None:
+            self.set_ephemeral_store(ephemeral_database)
 
     # ------------------------------------------------------------------
     # attach_databases
@@ -737,6 +745,7 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         pipeline_database: ArrowDatabaseProtocol,
         result_database: ArrowDatabaseProtocol | None = None,
+        ephemeral_database: ArrowDatabaseProtocol | None = None,
     ) -> None:
         """Attach databases for persistent caching and pipeline records.
 
@@ -755,6 +764,10 @@ class FunctionJobNode(FunctionNodeBase):
             pipeline_database: Database for pipeline records.
             result_database: Database for cached results. Defaults to
                 ``pipeline_database.at("_result")``.
+            ephemeral_database: Optional ephemeral store to attach immediately
+                via ``set_ephemeral_store()``. Equivalent to calling
+                ``set_ephemeral_store(ephemeral_database)`` after
+                ``attach_databases()``.
         """
         if result_database is None:
             # Default result database is pipeline_database scoped to "_result"
@@ -783,6 +796,9 @@ class FunctionJobNode(FunctionNodeBase):
         self.clear_cache()
         self._invalidate_content_hash_cache()
         self._invalidate_pipeline_hash_cache()
+
+        if ephemeral_database is not None:
+            self.set_ephemeral_store(ephemeral_database)
 
     # ------------------------------------------------------------------
     # from_descriptor — read-only stub for loaded jobs
@@ -939,7 +955,7 @@ class FunctionJobNode(FunctionNodeBase):
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
         """Assign or remove the ephemeral result store.
 
         When *store* is not ``None``, creates a ``CachedFunctionPod`` backed by
@@ -954,7 +970,7 @@ class FunctionJobNode(FunctionNodeBase):
             ``_ephemeral_cached_pod is not None`` before attempting ephemeral writes.
 
         Args:
-            store: The ``InMemoryArrowDatabase`` to use for ephemeral result
+            store: The ``ArrowDatabaseProtocol`` to use for ephemeral result
                 storage, or ``None`` to detach and revert to persistent-only writes.
         """
         self.ephemeral_result_store = store
@@ -1153,13 +1169,13 @@ class FunctionJobNode(FunctionNodeBase):
         Stores result in ``_cached_output_datas`` keyed by entry_id.
         Exceptions propagate to the caller — no error handling here.
 
-        When ``node_config.ephemeral_result=True``:
+        When ``node_config.is_result_ephemeral=True``:
         - Uses ``_ephemeral_cached_pod`` for both compute and storage.
         - Raises ``RuntimeError`` if no ephemeral store has been set.
         - Writes the pipeline record with ``is_ephemeral=True`` and
           ``skip_cache_lookup=True`` (append strategy for recompute-after-miss).
 
-        When ``node_config.ephemeral_result=False`` (default):
+        When ``node_config.is_result_ephemeral=False`` (default):
         - Uses ``_cached_function_pod`` (persistent DB) or raw function pod.
         - Writes the pipeline record with ``skip_cache_lookup=True`` (prevents
           infinite miss cycle when a stale pipeline entry exists).
@@ -1171,15 +1187,15 @@ class FunctionJobNode(FunctionNodeBase):
             self._function_pod.node_config if self._function_pod is not None else None
         )
         ephemeral_result = (
-            node_config.ephemeral_result if node_config is not None else False
+            node_config.is_result_ephemeral if node_config is not None else False
         )
 
         if ephemeral_result:
             if self._ephemeral_cached_pod is None:
                 raise RuntimeError(
-                    f"FunctionJobNode '{self.label}' has ephemeral_result=True but no "
+                    f"FunctionJobNode '{self.label}' has is_result_ephemeral=True but no "
                     "ephemeral store has been assigned. Call set_ephemeral_store() with "
-                    "an InMemoryArrowDatabase before executing this node."
+                    "an ArrowDatabaseProtocol before executing this node."
                 )
             tag_out, output_data = self._ephemeral_cached_pod.process_data(
                 tag, data, logger=logger
@@ -1290,15 +1306,15 @@ class FunctionJobNode(FunctionNodeBase):
             self._function_pod.node_config if self._function_pod is not None else None
         )
         ephemeral_result = (
-            node_config.ephemeral_result if node_config is not None else False
+            node_config.is_result_ephemeral if node_config is not None else False
         )
 
         if ephemeral_result:
             if self._ephemeral_cached_pod is None:
                 raise RuntimeError(
-                    f"FunctionJobNode '{self.label}' has ephemeral_result=True but no "
+                    f"FunctionJobNode '{self.label}' has is_result_ephemeral=True but no "
                     "ephemeral store has been assigned. Call set_ephemeral_store() with "
-                    "an InMemoryArrowDatabase before executing this node."
+                    "an ArrowDatabaseProtocol before executing this node."
                 )
             tag_out, output_data = await self._ephemeral_cached_pod.async_process_data(
                 tag, data, logger=logger

@@ -8,7 +8,7 @@ from orcapod.protocols import core_protocols as cp
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+    from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
     from orcapod.pipeline.dag import GraphProtocol
 
 
@@ -60,7 +60,7 @@ class PipelineProtocol(Protocol[NodeT]):
         """Node-object DAG for topology traversal and introspection."""
         ...
 
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
         """Assign or remove the ephemeral result store for all nodes.
 
         Propagates ``store`` to every node in the pipeline by calling

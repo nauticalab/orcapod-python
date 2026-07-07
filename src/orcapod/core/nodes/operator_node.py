@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from abc import abstractmethod
 from collections.abc import Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -47,7 +48,6 @@ if TYPE_CHECKING:
     import pyarrow as pa
     import pyarrow.compute as pc
 
-    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     pa = LazyModule("pyarrow")
@@ -281,14 +281,15 @@ class OperatorNodeBase(StreamBase):
             f"upstreams={self._input_streams!r})"
         )
 
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+    @abstractmethod
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
         """Assign or remove the ephemeral result store for this node.
 
         No-op for operator nodes — full ephemeral support for operators
         is deferred to ITL-509.
 
         Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
+            store: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
                 to detach. Ignored by operator nodes in v1.
         """
 
@@ -462,6 +463,9 @@ class OperatorNode(OperatorNodeBase):
 
         return node
 
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """No-op — blueprint operator nodes carry no database references."""
+
     def as_node(self) -> OperatorNode:
         """Return the lightweight blueprint equivalent of this node.
 
@@ -580,6 +584,9 @@ class OperatorJobNode(OperatorNodeBase):
             table_scope=self._table_scope,
             tracker_manager=self.tracker_manager,
         )
+
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """No-op — full ephemeral support for operators is deferred to ITL-509."""
 
     # ------------------------------------------------------------------
     # Override clear_cache to also clear output stream caches
