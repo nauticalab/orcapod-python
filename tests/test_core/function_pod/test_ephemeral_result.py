@@ -348,64 +348,113 @@ class TestBulkResolution:
         assert vals == {0: 20, 1: 40}
 
     def test_persistent_result_outcompetes_ephemeral(self):
-        """When both persistent and ephemeral entries exist for the same entry_id, persistent wins.
+        """Persistent result wins when both persistent and ephemeral rows share the same entry_id.
 
-        This tests the anti-join merge: a tag table row with IS_EPHEMERAL=True that shares
-        an entry_id with an IS_EPHEMERAL=False row should be excluded from available_results.
+        Verifies the anti-join priority merge in ``_fetch_joined_records``:
+        when both ``persistent_df`` and ``ephemeral_df`` have a row for the same
+        ``_PIPELINE_ENTRY_ID_COL`` value, the ephemeral row is excluded by anti-join,
+        and the persistent result is returned (not recomputed).
+
+        Because ``add_pipeline_record`` with ``skip_cache_lookup=True`` deduplicates
+        at the DB level, constructing this scenario requires direct DB manipulation:
+        - write the persistent row normally
+        - ``flush()`` pipeline_db so it moves to committed tables (not pending)
+        - insert the ephemeral row via ``add_record(skip_duplicates=False)`` — succeeds
+          because the committed row is not in ``_pending_record_ids``
         """
-        # Use a single node to write both a persistent AND an ephemeral entry for id=0.
-        # We do this by:
-        #   1. Execute with ephemeral store attached but ephemeral_result=False → writes persistent entry
-        #   2. Manually insert an ephemeral tag-table row + ephemeral store result to simulate
-        #      the scenario where both exist (e.g. after a recovery run).
-        stream = _make_stream([{"id": 0, "x": 10}])
-        pipeline_db = InMemoryArrowDatabase()
-        ephemeral_store = InMemoryArrowDatabase()
+        import pyarrow as pa
+        from orcapod.core.nodes.function_node import _PIPELINE_ENTRY_ID_COL
+        from orcapod.system_constants import constants
 
-        # Write a persistent entry
         call_count = {"n": 0}
 
         def counting_double(x: int) -> int:
             call_count["n"] += 1
             return x * 2
 
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+
         pf = PythonDataFunction(counting_double, output_keys="result")
-        pod = FunctionPod(pf)
+        pod = FunctionPod(pf)  # ephemeral_result=False (default)
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
         node.set_ephemeral_store(ephemeral_store)
-        node.execute(stream)  # writes IS_EPHEMERAL=False persistent entry
+
+        # Step 1: Write the persistent result (IS_EPHEMERAL=False)
+        node.execute(stream)
         assert call_count["n"] == 1
 
-        # Simulate an ephemeral entry also existing for the same input
-        # by calling add_pipeline_record directly with is_ephemeral=True.
-        # (This represents the "recovery scenario" from the spec.)
-        import uuid as _uuid
-        tag = Tag({"id": 0})
-        data = Data({"x": 10})
-        fake_uuid = _uuid.UUID(int=0)  # dummy UUID, no actual result stored
-        node.add_pipeline_record(
-            tag, data,
-            data_record_id=fake_uuid,
-            computed=True,
-            skip_cache_lookup=True,
-            is_ephemeral=True,
+        # Step 2: Write a real result to ephemeral_store so the ephemeral inner-join
+        # produces a row (this makes ephemeral_df.height > 0, triggering the anti-join branch).
+        # This computation increments call_count — capture it here for the later assertion.
+        tag_obj = Tag({"id": 0})
+        data_obj = Data({"x": 10})
+        _, eph_output = node._ephemeral_cached_pod.process_data(tag_obj, data_obj)
+        assert eph_output is not None
+        eph_data_record_id = eph_output.datagram_uuid
+        count_after_setup = call_count["n"]  # 2: once from step 1, once from this call
+
+        # Step 3: Flush pipeline_db — moves the persistent row from _pending to _tables
+        # After this, _pending_record_ids is cleared for this path
+        pipeline_db.flush()
+
+        # Step 4: Get the committed row and its entry_id bytes
+        existing = pipeline_db.get_all_records(
+            node.node_identity_path,
+            record_id_column=_PIPELINE_ENTRY_ID_COL,
+        )
+        assert existing is not None and existing.num_rows == 1
+        entry_id_bytes = existing[_PIPELINE_ENTRY_ID_COL][0].as_py()
+
+        # Step 5: Build an ephemeral copy of the row with IS_EPHEMERAL=True and the
+        # ephemeral_store's data_record_id
+        row_without_id = existing.drop([_PIPELINE_ENTRY_ID_COL])
+        eph_col_idx = row_without_id.schema.get_field_index(constants.IS_EPHEMERAL_COL)
+        rid_col_idx = row_without_id.schema.get_field_index(constants.DATA_RECORD_ID)
+        ephemeral_row = row_without_id.set_column(
+            eph_col_idx,
+            constants.IS_EPHEMERAL_COL,
+            pa.array([True], type=pa.bool_()),
+        )
+        ephemeral_row = ephemeral_row.set_column(
+            rid_col_idx,
+            constants.DATA_RECORD_ID,
+            pa.array([eph_data_record_id.bytes], type=pa.large_binary()),
         )
 
-        # Clear in-memory cache to force fresh DB lookup
+        # Step 6: Insert the ephemeral row with the SAME entry_id, skip_duplicates=False.
+        # This succeeds because the flushed row is in _tables (not _pending_record_ids).
+        pipeline_db.add_record(
+            node.node_identity_path,
+            entry_id_bytes,
+            ephemeral_row,
+            skip_duplicates=False,
+        )
+
+        # Now pipeline_db has two rows for the same entry_id:
+        #   IS_EPHEMERAL=False → persistent result (result=20)
+        #   IS_EPHEMERAL=True  → ephemeral result (result=20, same value but different store)
+        both = pipeline_db.get_all_records(
+            node.node_identity_path,
+            record_id_column=_PIPELINE_ENTRY_ID_COL,
+        )
+        assert both is not None and both.num_rows == 2
+
+        # Step 7: Clear in-memory cache to force _fetch_joined_records lookup
         node._cached_output_datas.clear()
 
-        # Phase 1: both persistent (result=20) and ephemeral (fake UUID, no actual result)
-        # entries exist. Persistent should win — ephemeral entry excluded by anti-join.
-        # Since fake_uuid has no actual result in ephemeral_store, the ephemeral join
-        # produces no row for it. The persistent join wins, and result=20 is returned.
+        # The anti-join should exclude the ephemeral row (entry_id clash with persistent row),
+        # returning only the persistent result. No recomputation.
         results = node.execute(stream)
         assert len(results) == 1
         assert results[0][1].as_dict()["result"] == 20
-        assert call_count["n"] == 1  # NOT recomputed
+        # call_count did not increase — persistent hit from anti-join merge, no recomputation
+        assert call_count["n"] == count_after_setup
 
 
 # ---------------------------------------------------------------------------
