@@ -189,15 +189,24 @@ ephemeral_entries  = {tag_hash: record_id.removeprefix("temp:")
   prior run wrote a `"temp:"` tag entry, but the in-process store is fresh (or was never
   populated), so the result is simply absent and will be recomputed.
 
-**Step 4 — union** the two resolved sets:
+**Step 4 — merge with persistent priority:**
 
-```
-available_results = persistent_hits ∪ ephemeral_hits
+Persistent results outcompete ephemeral results. If both stores have a valid result for
+the same input, the persistent result is used and the ephemeral entry is ignored.
+
+```python
+# ephemeral_hits merged first so that persistent_hits overwrites on collision
+available_results = {**ephemeral_hits, **persistent_hits}
 ```
 
 `available_results` is keyed on input tag hash and maps to the fully reconstructed output
 `(tag, data)` pair. This is the complete set of results the node can serve without
 recomputation.
+
+The persistent-priority rule reflects the semantic intent of each store: persistent
+results are authoritative and deliberately retained; ephemeral results are transient
+and may be stale or superseded. Any time a persistent result exists it should be
+preferred — regardless of whether an ephemeral result also happens to be present.
 
 **Step 5 — determine what still needs computing:**
 
@@ -266,12 +275,13 @@ A proper concurrency-safe solution — an explicit **recomputation index** baked
 acceptable for single-threaded and low-concurrency pipelines.
 
 **Recovery scenario** — if a previously missing persistent result (R1) is later
-restored to the result database while a replacement entry (R2) also exists:
+restored to the result database while a replacement ephemeral entry (R2) also exists:
 
-- Both rows survive the join and map to the same logical input.
-- For deterministic functions, R1 and R2 are semantically identical; either can be
-  used. The implementation picks whichever join partner appears first.
-- The recovery scenario is rare and the ambiguity is benign in v1.
+- R1 (persistent) and R2 (ephemeral) both survive their respective joins.
+- Step 4's persistent-priority merge means R1 wins: the persistent result is returned
+  and R2 is silently ignored.
+- This is the correct outcome: the restored authoritative result takes precedence over
+  the transient replacement that was computed only because R1 was temporarily absent.
 
 **Ephemeral accumulation** — stale `"temp:"` entries accumulate across sessions (each
 cross-session miss appends a new row). This is harmless: stale `"temp:"` rows never
@@ -424,6 +434,8 @@ All tests in `tests/test_core/function_pod/test_ephemeral_result.py`:
 | `test_bulk_resolution_persistent_miss_warns_and_recomputes` | Tag table has a regular `record_id` entry but persistent DB has been trimmed; a `WARNING`-level log is emitted, the entry is excluded from available results, and the input falls into Phase 2 |
 | `test_recompute_after_miss_appends_new_pipeline_record` | After a persistent miss triggers recomputation, the tag table contains two rows for the same entry_id — the stale one and the new valid one; subsequent lookup resolves correctly via the inner join without recomputing again |
 | `test_recompute_after_ephemeral_miss_no_infinite_cycle` | Cross-session ephemeral miss triggers recomputation; the new `"temp:"` entry is appended and the result is served on the next call without triggering Phase 2 again |
+| `test_set_ephemeral_store_none_detaches` | Calling `set_ephemeral_store(None)` on a node reverts it to persistent-only writes; calling `pipeline.set_ephemeral_store(None)` detaches from all nodes |
+| `test_persistent_result_outcompetes_ephemeral` | When both a persistent and an ephemeral result exist for the same input, the persistent result is returned and the ephemeral entry is ignored |
 
 ---
 
