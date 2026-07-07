@@ -175,38 +175,43 @@ ephemeral_entries  = {tag_hash: record_id.removeprefix("temp:")
                       if record_id.startswith("temp:")}
 ```
 
-**Step 3 — resolve each group against its store:**
+**Step 3 — resolve each group against its store via two independent joins:**
 
-- **Persistent group:** bulk join `persistent_entries` against `result_database` on
-  `record_id`. Any `record_id` not found in the result database is dropped from the
-  available set and treated as a cache miss, but a **`WARNING`-level log message is
-  emitted** for each missing entry — a tag table entry pointing to a non-existent
-  persistent record indicates unexpected data loss or external modification of the
-  result database and should not pass silently.
-- **Ephemeral group:** bulk join `ephemeral_entries` against `ephemeral_result_store` on
-  the stripped `record_id`. Any `record_id` not found in the ephemeral store is silently
-  dropped — no warning is emitted. This is the expected **cross-session miss** path: a
-  prior run wrote a `"temp:"` tag entry, but the in-process store is fresh (or was never
-  populated), so the result is simply absent and will be recomputed.
+The current `_fetch_joined_records` performs a single join between the pipeline DB and
+one result database. The two-store model requires this to become two separate joins,
+each producing its own dict keyed by `entry_id`:
+
+- **Persistent join:** inner join `persistent_entries` (pipeline DB rows) against
+  `result_database` on `record_id`. Convert the resulting rows to
+  `persistent_hits: dict[entry_id, (tag, data)]`. Any pipeline DB row whose
+  `record_id` finds no match in `result_database` is excluded from the dict — this is
+  a **`WARNING`-level log event** (unexpected data loss or external modification).
+
+- **Ephemeral join:** strip the `"temp:"` prefix from `ephemeral_entries` record IDs,
+  then inner join against `ephemeral_result_store` on the stripped `record_id`. Convert
+  to `ephemeral_hits: dict[entry_id, (tag, data)]`. Any row with no match in the
+  ephemeral store is silently excluded — this is the expected **cross-session miss**
+  path and needs no warning.
+
+Because the two joins are independent, the same `entry_id` can appear in both dicts
+only when the tag table has both a persistent entry and an ephemeral entry for the same
+input (e.g. a persisted result from run N and a fresh ephemeral from run N+1).
 
 **Step 4 — merge with persistent priority:**
 
-Persistent results outcompete ephemeral results. If both stores have a valid result for
-the same input, the persistent result is used and the ephemeral entry is ignored.
-
 ```python
-# ephemeral_hits merged first so that persistent_hits overwrites on collision
+# ephemeral_hits merged first; persistent_hits overwrites on any entry_id collision
 available_results = {**ephemeral_hits, **persistent_hits}
 ```
 
-`available_results` is keyed on input tag hash and maps to the fully reconstructed output
+Because `persistent_hits` is merged second, it overwrites any key present in both
+dicts. This is the mechanism that enforces the priority rule: persistent results are
+authoritative and deliberately retained; ephemeral results are transient and should
+never shadow them.
+
+`available_results` is keyed on `entry_id` and maps to the fully reconstructed
 `(tag, data)` pair. This is the complete set of results the node can serve without
 recomputation.
-
-The persistent-priority rule reflects the semantic intent of each store: persistent
-results are authoritative and deliberately retained; ephemeral results are transient
-and may be stale or superseded. Any time a persistent result exists it should be
-preferred — regardless of whether an ephemeral result also happens to be present.
 
 **Step 5 — determine what still needs computing:**
 
