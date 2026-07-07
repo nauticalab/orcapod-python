@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import dataclasses
 
-import pytest
 from pydantic import BaseModel
 
 from orcapod.core.sources import DictSource
@@ -85,7 +84,7 @@ class TestDictSourceAutoRegistration:
         pod = FunctionPod(
             data_function=PythonDataFunction(identity, output_keys="sensor")
         )
-        assert pod is not None
+        assert pod.data_function.output_data_schema == {"sensor": _Sensor}
 
         # DictSource with the same type — registration already done; must not raise.
         src = DictSource(
