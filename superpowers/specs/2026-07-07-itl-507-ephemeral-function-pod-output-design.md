@@ -95,25 +95,28 @@ store instead of the persistent result database. It has no effect when the node 
 
 ### 2. Node protocol and interface — `set_ephemeral_store()`
 
-`set_ephemeral_store(store: InMemoryArrowDatabase)` is added to both
-`FunctionNodeProtocol` and `OperatorNodeProtocol` in `node_protocols.py`:
+`set_ephemeral_store(store: InMemoryArrowDatabase | None)` is added to both
+`FunctionNodeProtocol` and `OperatorNodeProtocol` in `node_protocols.py`.
+Passing `None` explicitly removes (detaches) the ephemeral store from the node:
 
 ```python
 # node_protocols.py — added to FunctionNodeProtocol and OperatorNodeProtocol
-def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
-    """Assign the ephemeral result store for this node.
+def set_ephemeral_store(self, store: InMemoryArrowDatabase | None) -> None:
+    """Assign or remove the ephemeral result store for this node.
 
-    No-op for node types that do not support ephemeral result storage in
-    the current version.
+    Pass an ``InMemoryArrowDatabase`` to attach the store.
+    Pass ``None`` to detach it — the node falls back to persistent-only
+    behaviour for subsequent writes.
+    No-op for node types that do not support ephemeral result storage.
     """
     ...
 ```
 
 Concrete implementations:
 
-- **`PersistentFunctionNode`** — stores the value:
+- **`PersistentFunctionNode`** — stores or clears the value:
   ```python
-  def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
+  def set_ephemeral_store(self, store: InMemoryArrowDatabase | None) -> None:
       self.ephemeral_result_store = store
   ```
 - **All other node types** (non-persistent function nodes, operator nodes) — implement
@@ -285,12 +288,15 @@ the store to every node by calling `node.set_ephemeral_store(store)` on each:
 
 ```python
 # PipelineProtocol (pipeline_protocols.py) — new method signature
-def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None: ...
+def set_ephemeral_store(self, store: InMemoryArrowDatabase | None) -> None: ...
 
 # Pipeline (concrete implementation)
-def set_ephemeral_store(self, store: InMemoryArrowDatabase) -> None:
-    """Assign an ephemeral result store to all nodes in the pipeline.
+def set_ephemeral_store(self, store: InMemoryArrowDatabase | None) -> None:
+    """Assign or remove the ephemeral result store for all nodes in the pipeline.
 
+    Pass an ``InMemoryArrowDatabase`` to attach it to all nodes.
+    Pass ``None`` to detach the ephemeral store from all nodes, reverting them
+    to persistent-only behaviour for subsequent writes.
     Each node's ``set_ephemeral_store`` is called unconditionally; nodes that
     do not support ephemeral storage (e.g. operator nodes in v1) ignore the call.
     """
@@ -372,13 +378,13 @@ tests/test_core/function_pod/
 
 | Method | Signature | Behaviour |
 |---|---|---|
-| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Protocol-level declaration. Concrete implementations: `PersistentFunctionNode` stores the value; all other node types no-op. |
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase \| None) -> None` | Protocol-level declaration. Pass `None` to detach. Concrete implementations: `PersistentFunctionNode` stores or clears the value; all other node types no-op. |
 
 ### `PipelineProtocol` (`pipeline_protocols.py`)
 
 | Method | Signature | Behaviour |
 |---|---|---|
-| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Protocol-level declaration. Implemented on `Pipeline` — calls `node.set_ephemeral_store(store)` for every node. |
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase \| None) -> None` | Protocol-level declaration. Pass `None` to detach from all nodes. Implemented on `Pipeline` — calls `node.set_ephemeral_store(store)` for every node. |
 
 ### `PersistentFunctionNode`
 
@@ -388,7 +394,7 @@ tests/test_core/function_pod/
 
 | Method | Signature | Behaviour |
 |---|---|---|
-| `set_ephemeral_store` | `(store: InMemoryArrowDatabase) -> None` | Assigns `self.ephemeral_result_store = store` |
+| `set_ephemeral_store` | `(store: InMemoryArrowDatabase \| None) -> None` | Assigns `self.ephemeral_result_store = store`. Pass `None` to detach. |
 
 ### `Pipeline`
 
