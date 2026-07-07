@@ -281,6 +281,17 @@ class OperatorNodeBase(StreamBase):
             f"upstreams={self._input_streams!r})"
         )
 
+    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+        """Assign or remove the ephemeral result store for this node.
+
+        No-op for operator nodes — full ephemeral support for operators
+        is deferred to ITL-509.
+
+        Args:
+            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
+                to detach. Ignored by operator nodes in v1.
+        """
+
 
 # ---------------------------------------------------------------------------
 # OperatorNode — thin blueprint (no DB)
@@ -481,19 +492,6 @@ class OperatorNode(OperatorNodeBase):
             tracker_manager=self.tracker_manager,
         )
 
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
-
-        No-op for operator nodes in v1 — full ephemeral support for operators
-        is deferred to ITL-509.
-
-        Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
-                to detach. Ignored by operator nodes.
-        """
-        # Operator nodes do not support ephemeral storage in v1.
-        pass
-
 
 # ---------------------------------------------------------------------------
 # OperatorJobNode — DB-backed execution node
@@ -592,19 +590,6 @@ class OperatorJobNode(OperatorNodeBase):
         super().clear_cache()  # clears _node_identity_path_cache + _update_modified_time
         self._cached_output_stream = None
         self._cached_output_table = None
-
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
-
-        No-op for operator nodes in v1 — full ephemeral support for operators
-        is deferred to ITL-509.
-
-        Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
-                to detach. Ignored by operator nodes.
-        """
-        # Operator nodes do not support ephemeral storage in v1.
-        pass
 
     # ------------------------------------------------------------------
     # attach_databases

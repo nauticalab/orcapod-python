@@ -392,6 +392,18 @@ class FunctionNodeBase(StreamBase):
             f"input_stream={self._input_stream!r})"
         )
 
+    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
+        """Assign or remove the ephemeral result store for this node.
+
+        No-op by default. ``FunctionJobNode`` overrides this with a real
+        implementation that routes new computation results to ``store``
+        instead of the persistent result database.
+
+        Args:
+            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
+                to detach.
+        """
+
 
 # ---------------------------------------------------------------------------
 # FunctionNode — thin blueprint (no DB)
@@ -610,19 +622,6 @@ class FunctionNode(FunctionNodeBase):
             table_scope=self._table_scope,
             tracker_manager=self.tracker_manager,
         )
-
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
-
-        No-op for blueprint ``FunctionNode`` — ephemeral storage is only
-        supported on ``FunctionJobNode``, which overrides this method.
-
-        Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
-                to detach. Ignored by blueprint nodes.
-        """
-        # Blueprint nodes have no database to attach to — this is a no-op.
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -935,21 +934,6 @@ class FunctionJobNode(FunctionNodeBase):
         self._cached_output_datas.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
-
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
-
-        Pass an ``InMemoryArrowDatabase`` to attach the store.
-        Pass ``None`` to detach it — the node falls back to persistent-only
-        behaviour for subsequent writes.
-
-        Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
-                to detach.
-        """
-        # Store attachment for v1 is a no-op for execution nodes —
-        # actual ephemeral storage implementation deferred to ITL-508.
-        pass
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -18,7 +18,6 @@ from orcapod.types import CacheMode
 if TYPE_CHECKING:
     from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode
     from orcapod.core.nodes.source_node import SourceNode
-    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
     from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
     from orcapod.pipeline.execution_context import ExecutionContext
     from orcapod.pipeline.graph import Pipeline
@@ -592,24 +591,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             ``True`` if all SourceNode slots are bound and a store is set.
         """
         return self._store is not None and not self.unbound_sources
-
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
-        """Assign or remove the ephemeral result store for all nodes.
-
-        Propagates ``store`` to every node in the pipeline by calling
-        ``node.set_ephemeral_store(store)`` on each. Nodes that do not
-        support ephemeral storage (e.g. operator nodes in v1) treat this
-        as a no-op.
-
-        Pass ``None`` to detach the ephemeral store from all nodes,
-        reverting them to persistent-only writes for subsequent runs.
-
-        Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
-                to detach.
-        """
-        for node in self._nodes.values():
-            node.set_ephemeral_store(store)
 
     def is_runnable(self, node_label: str) -> bool:
         """Return ``True`` if all upstream inputs of *node_label* are resolved.

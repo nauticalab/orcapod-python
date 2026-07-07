@@ -20,7 +20,6 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import networkx as nx
-    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
     from orcapod.pipeline.dag import GraphProtocol
     from orcapod.pipeline.execution_context import ExecutionContext
 else:
@@ -442,24 +441,6 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
         # Mutable per-execution state — own copy so runs don't interfere
         clone._nodes = dict(self._nodes)
         return clone
-
-    def set_ephemeral_store(self, store: "InMemoryArrowDatabase | None") -> None:
-        """Assign or remove the ephemeral result store for all nodes.
-
-        Propagates ``store`` to every node in the pipeline by calling
-        ``node.set_ephemeral_store(store)`` on each. Nodes that do not
-        support ephemeral storage (e.g. operator nodes in v1) treat this
-        as a no-op.
-
-        Pass ``None`` to detach the ephemeral store from all nodes,
-        reverting them to persistent-only writes for subsequent runs.
-
-        Args:
-            store: An ``InMemoryArrowDatabase`` instance to attach, or ``None``
-                to detach.
-        """
-        for node in self._nodes.values():
-            node.set_ephemeral_store(store)
 
     def __dir__(self) -> list[str]:
         return list(super().__dir__()) + list(self._nodes.keys())
