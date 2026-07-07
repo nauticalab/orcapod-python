@@ -318,7 +318,7 @@ class TestBulkResolution:
         ephemeral_store = InMemoryArrowDatabase()
         pf = PythonDataFunction(counting_double, output_keys="result")
         cfg = NodeConfig(ephemeral_result=True)
-        pod = FunctionPod(pf, config=cfg)
+        pod = FunctionPod(pf, node_config=cfg)
         node_e = FunctionJobNode(
             function_pod=pod,
             input_stream=stream_b,
@@ -326,6 +326,11 @@ class TestBulkResolution:
         )
         node_e.set_ephemeral_store(ephemeral_store)
         node_e.execute(stream_b)
+
+        # Verify id=1 result is in ephemeral_store (not persistent)
+        eph_cache = node_e._ephemeral_cached_pod
+        assert eph_cache is not None
+        assert eph_cache.result_database.get_all_records(eph_cache.record_path) is not None
 
         # Now load both results via a combined stream
         stream_both = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
