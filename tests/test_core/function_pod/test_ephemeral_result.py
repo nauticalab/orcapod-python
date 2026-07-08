@@ -834,7 +834,7 @@ class TestAddPipelineRecordIndexed:
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag, data = next(iter(stream.iter_data()))
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="skip_cache_lookup"):
             node.add_pipeline_record(
                 tag, data, data_record_id=uuid.uuid4(), computed=True,
                 skip_cache_lookup=False,  # removed parameter

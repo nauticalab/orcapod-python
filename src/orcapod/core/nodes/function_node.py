@@ -1187,13 +1187,15 @@ class FunctionJobNode(FunctionNodeBase):
         When ``node_config.is_result_ephemeral=True``:
         - Uses ``_ephemeral_cached_pod`` for both compute and storage.
         - Raises ``RuntimeError`` if no ephemeral store has been set.
-        - Writes the pipeline record with ``is_ephemeral=True`` and
-          ``skip_cache_lookup=True`` (append strategy for recompute-after-miss).
+        - Calls ``add_pipeline_record`` which computes the next recomputation
+          index (``max_index + 1``) and writes with ``skip_duplicates=True``
+          so concurrent coroutines are safely serialised.
 
         When ``node_config.is_result_ephemeral=False`` (default):
         - Uses ``_cached_function_pod`` (persistent DB) or raw function pod.
-        - Writes the pipeline record with ``skip_cache_lookup=True`` (prevents
-          infinite miss cycle when a stale pipeline entry exists).
+        - Calls ``add_pipeline_record`` which computes the next recomputation
+          index (``max_index + 1``) and writes with ``skip_duplicates=True``
+          so concurrent coroutines are safely serialised.
 
         Returns:
             A ``(tag, output_data)`` 2-tuple.
@@ -1508,9 +1510,9 @@ class FunctionJobNode(FunctionNodeBase):
         self._require_pipeline_database()
         base_entry_id = self.compute_base_entry_id(tag, input_data)
 
-        # Determine the next recomputation index by reading all existing rows
-        # that share this base_entry_id.  Steps 1-5 below are fully synchronous
-        # (no await), so concurrent asyncio coroutines serialise naturally.
+        # Determine the next recomputation index by querying all existing rows
+        # for this base_entry_id. No await is used here, so within a single-threaded
+        # asyncio event loop this read-then-write sequence is uninterrupted.
         existing = self._pipeline_database.get_records_with_column_value(
             self.node_identity_path,
             {_PIPELINE_BASE_ENTRY_ID_COL: base_entry_id},

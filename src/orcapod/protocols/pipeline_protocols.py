@@ -1,6 +1,7 @@
 # Protocols for pipeline and nodes
 from __future__ import annotations
 
+import uuid
 from collections.abc import Hashable
 from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
@@ -120,6 +121,7 @@ class PodNodeProtocol(cp.PodProtocol, Protocol):
         self,
         tag: cp.TagProtocol,
         input_data: cp.DataProtocol,
-        data_record_id: str,
-        retrieved: bool | None = None,
+        data_record_id: uuid.UUID,
+        computed: bool,
+        is_ephemeral: bool = False,
     ) -> None: ...
