@@ -1121,9 +1121,11 @@ dataclass extension type) is written via `ConnectorArrowDatabase.add_records()` 
 back, the column is returned as the raw storage type (e.g. `large_string`, `large_binary`,
 `struct`) with no extension marker. This makes SQL connector round-trips impossible and causes silent data-type loss.
 
-**Interim fix (PLT-1659):** `ConnectorArrowDatabase.add_records()` now raises `ValueError`
-immediately when any column is extension-typed, surfacing the issue at write
-time rather than on a confusing read. Two representations are rejected:
+**Interim fix (PLT-1659 / ITL-471):** `DBConnectorProtocol` now declares a `validate_records`
+hook. `SQLiteConnector` and `PostgreSQLConnector` implement it to reject extension-typed columns
+at write time, surfacing the issue immediately rather than on a confusing read. `SpiralDBConnector`
+overrides it as a no-op because it preserves field metadata via the native KV store.
+Two representations are rejected by the SQL implementations:
 - In-memory extension types: `isinstance(field.type, pa.ExtensionType)`.
 - Metadata-only columns: plain storage type whose field metadata contains
   `b"ARROW:extension:name"` (the representation produced when reading a Parquet/IPC file
@@ -1134,7 +1136,25 @@ a companion metadata table (one row per column: `table_name`, `column_name`,
 `extension_name`, `extension_metadata`). On `create_table_if_not_exists`, write rows for any
 extension-typed columns; on `iter_batches`, join the metadata table and reconstruct the
 `pa.ExtensionType` for affected columns before returning the batch. Once implemented, the
-`ValueError` guard in `add_records()` can be lifted.
+connectors override `validate_records` to a no-op.
+
+---
+
+### CA2 — Extension-type detection logic duplicated across multiple connectors
+**Status:** open
+**Severity:** low
+
+The `b"ARROW:extension:name"` detection logic (checking both `isinstance(field.type, pa.ExtensionType)`
+and `field.metadata.get(b"ARROW:extension:name")`) is copied verbatim into `SQLiteConnector.validate_records`,
+`PostgreSQLConnector.validate_records`, and `MockDBConnector` in the test files. The constant
+`b"ARROW:extension:name"` also appears inline in `extension_types/schema_walker.py` and other places
+without a single canonical definition.
+
+**Fix:** Extract into a shared helper `_check_extension_fields(schema) -> list[tuple[str, str]]`
+(and/or a module-level constant `_ARROW_EXT_NAME_KEY`) reachable from all connector implementations.
+When SQLite/PostgreSQL implement metadata preservation (PLT-1795), they'll override `validate_records`
+to a no-op — at that point the duplication goes away naturally. Until then, the helper would keep
+the detection logic in one place.
 
 ---
 
