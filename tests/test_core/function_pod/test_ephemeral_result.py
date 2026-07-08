@@ -1,9 +1,13 @@
 """Tests for FunctionJobNode ephemeral result store — ITL-507."""
 from __future__ import annotations
 
+import asyncio
+import uuid
+
 import pyarrow as pa
 import pytest
 
+from orcapod.channels import Channel
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPod
@@ -700,3 +704,165 @@ class TestEphemeralOnlyNode:
         assert len(results) == 2
         vals = {tag.as_dict()["id"]: data.as_dict()["result"] for tag, data in results}
         assert vals == {0: 20, 1: 40}
+
+
+# ---------------------------------------------------------------------------
+# Task 11 tests: async ephemeral execution path
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncEphemeralExecution:
+    @pytest.mark.asyncio
+    async def test_async_execute_ephemeral_happy_path(self):
+        """async_execute with is_result_ephemeral=True writes to ephemeral store and emits results."""
+        stream = _make_stream([{"id": 0, "x": 5}, {"id": 1, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        ephemeral_store = InMemoryArrowDatabase()
+
+        cfg = NodeConfig(is_result_ephemeral=True)
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf, node_config=cfg)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node.set_ephemeral_store(ephemeral_store)
+
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+
+        for tag, data in stream.iter_data():
+            await input_ch.writer.send((tag, data))
+        await input_ch.writer.close()
+
+        await node.async_execute(input_ch.reader, output_ch.writer)
+
+        results = await output_ch.reader.collect()
+        assert len(results) == 2
+        values = sorted(data.as_dict()["result"] for _, data in results)
+        assert values == [10, 20]
+
+        # Result records must be in the ephemeral store, not the persistent store
+        eph_records = ephemeral_store.get_all_records(
+            node._ephemeral_cached_pod.record_path,
+        )
+        assert eph_records is not None
+        assert eph_records.num_rows == 2
+
+    @pytest.mark.asyncio
+    async def test_async_process_data_internal_raises_when_no_store(self):
+        """_async_process_data_internal raises RuntimeError when is_result_ephemeral=True but no store."""
+        stream = _make_stream([{"id": 0, "x": 5}])
+        pipeline_db = InMemoryArrowDatabase()
+
+        cfg = NodeConfig(is_result_ephemeral=True)
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf, node_config=cfg)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        # set_ephemeral_store never called → _ephemeral_cached_pod is None
+
+        tag, data = next(iter(stream.iter_data()))
+        with pytest.raises(RuntimeError, match="is_result_ephemeral=True"):
+            await node._async_process_data_internal(tag, data)
+
+
+# ---------------------------------------------------------------------------
+# Task 12 tests: add_pipeline_record duplicate-skip early return
+# ---------------------------------------------------------------------------
+
+
+class TestAddPipelineRecordDeduplication:
+    def test_duplicate_not_added_when_skip_cache_lookup_false(self):
+        """add_pipeline_record with skip_cache_lookup=False is a no-op for already-seen entry_id."""
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        node, _ = _make_node(stream, pipeline_db=pipeline_db)
+
+        # First execute — writes the pipeline record
+        node.execute(stream)
+        pipeline_db.flush()
+
+        # Count committed records in the pipeline DB
+        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        assert all_records is not None
+        count_before = all_records.num_rows  # should be 1
+
+        # Call add_pipeline_record directly with skip_cache_lookup=False (the default).
+        # The duplicate guard should detect the existing entry_id and return early.
+        tag, data = next(iter(stream.iter_data()))
+        node.add_pipeline_record(
+            tag,
+            data,
+            data_record_id=uuid.uuid4(),
+            computed=True,
+            skip_cache_lookup=False,
+        )
+        pipeline_db.flush()
+
+        all_records_after = pipeline_db.get_all_records(node.node_identity_path)
+        assert all_records_after is not None
+        assert all_records_after.num_rows == count_before  # no new row added
+
+
+# ---------------------------------------------------------------------------
+# Task 13 tests: _fetch_joined_records guard and backward-compat branch
+# ---------------------------------------------------------------------------
+
+
+class TestFetchJoinedRecordsGuards:
+    def test_get_all_records_no_db_returns_none(self):
+        """get_all_records() on a FunctionJobNode with no pipeline_database returns None."""
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf)
+        # Intentionally no pipeline_database → _cached_function_pod is None
+        node = FunctionJobNode(function_pod=pod, input_stream=stream)
+
+        result = node.get_all_records()
+        assert result is None
+
+    def test_legacy_records_without_ephemeral_col_treated_as_persistent(self):
+        """Records lacking IS_EPHEMERAL_COL are treated as persistent (backward compat)."""
+        from orcapod import system_constants as sc
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Session 1: write a normal persistent record
+        node1, _ = _make_node(
+            stream,
+            pipeline_db=pipeline_db,
+            result_db=result_db,
+            is_result_ephemeral=False,
+        )
+        node1.execute(stream)
+        pipeline_db.flush()
+
+        # Drop IS_EPHEMERAL_COL from the committed table to simulate a legacy record
+        is_eph_col = sc.constants.IS_EPHEMERAL_COL
+        record_key = "/".join(node1.node_identity_path)
+        old_table = pipeline_db._tables[record_key]
+        col_idx = old_table.schema.get_field_index(is_eph_col)
+        assert col_idx >= 0, "IS_EPHEMERAL_COL must exist before we drop it"
+        pipeline_db._tables[record_key] = old_table.remove_column(col_idx)
+
+        # Session 2: new node with same DBs — should handle missing column gracefully
+        pf2 = PythonDataFunction(double, output_keys="result")
+        pod2 = FunctionPod(pf2)
+        node2 = FunctionJobNode(
+            function_pod=pod2,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        results = node2.execute(stream)
+
+        # Result must be served (from result DB cache or recomputed)
+        assert len(results) == 1
+        assert results[0][1].as_dict()["result"] == 20
