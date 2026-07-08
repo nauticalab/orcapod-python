@@ -117,6 +117,24 @@ class DBConnectorProtocol(Protocol):
         """
         ...
 
+    def validate_records(self, records: pa.Table) -> None:
+        """Validate that ``records`` are safe to write through this connector.
+
+        Implementations should raise ``ValueError`` if ``records`` contain
+        columns that this connector cannot round-trip faithfully (e.g. Arrow
+        extension-typed columns on connectors that drop field metadata).
+
+        A connector that fully preserves Arrow field metadata should implement
+        this as a no-op.
+
+        Args:
+            records: Arrow table to validate before writing.
+
+        Raises:
+            ValueError: If any column is incompatible with this connector.
+        """
+        ...
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def close(self) -> None:
