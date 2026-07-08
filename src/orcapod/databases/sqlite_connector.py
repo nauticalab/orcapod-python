@@ -111,6 +111,37 @@ def _coerce_column(values: list[Any], arrow_type: pa.DataType) -> list[Any]:
     return values
 
 
+def _field_has_metadata(field: pa.Field) -> bool:
+    """Return True if ``field`` or any nested child carries Arrow metadata.
+
+    Recursively walks struct and list type trees so that metadata on child
+    fields is detected and not silently dropped.
+
+    Args:
+        field: The Arrow field to inspect.
+
+    Returns:
+        True if the field or any descendant carries field metadata or is an
+        Arrow extension type; False otherwise.
+    """
+    import pyarrow as _pa  # noqa: PLC0415
+
+    if isinstance(field.type, _pa.ExtensionType) or field.metadata:
+        return True
+    if _pa.types.is_struct(field.type):
+        return any(
+            _field_has_metadata(field.type.field(i))
+            for i in range(field.type.num_fields)
+        )
+    if (
+        _pa.types.is_list(field.type)
+        or _pa.types.is_large_list(field.type)
+        or _pa.types.is_fixed_size_list(field.type)
+    ):
+        return _field_has_metadata(field.type.value_field)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # SQLiteConnector
 # ---------------------------------------------------------------------------
@@ -364,20 +395,16 @@ class SQLiteConnector:
         across read/write cycles — any metadata present would be silently lost.
         This includes Arrow extension types, which encode their identity in field
         metadata and would be demoted to their plain storage type on read.
+        Nested field metadata (inside struct or list columns) is also detected.
 
         Args:
             records: Arrow table to validate.
 
         Raises:
-            ValueError: If any field carries metadata (including Arrow extension
-                types), or if the schema itself carries metadata.
+            ValueError: If any field (or any nested child field) carries
+                metadata, or if the schema itself carries metadata.
         """
-        import pyarrow as _pa  # noqa: PLC0415
-
-        problem_fields: list[str] = []
-        for field in records.schema:
-            if isinstance(field.type, _pa.ExtensionType) or field.metadata:
-                problem_fields.append(field.name)
+        problem_fields = [f.name for f in records.schema if _field_has_metadata(f)]
         has_schema_meta = bool(records.schema.metadata)
         if problem_fields or has_schema_meta:
             parts: list[str] = []

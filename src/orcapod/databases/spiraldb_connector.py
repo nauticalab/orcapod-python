@@ -149,7 +149,16 @@ def _load_arrow_metadata(
     if _ARROW_METADATA_KEY not in kv:
         return (None, {})
 
-    blob = json.loads(kv[_ARROW_METADATA_KEY].decode("utf-8"))
+    try:
+        blob = json.loads(kv[_ARROW_METADATA_KEY].decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning(
+            "Ignoring malformed Arrow metadata in SpiralDB KV store "
+            "(%s: %s); table will be read without metadata restoration.",
+            type(exc).__name__,
+            exc,
+        )
+        return (None, {})
 
     schema_meta: dict[bytes, bytes] | None = None
     if "schema" in blob:

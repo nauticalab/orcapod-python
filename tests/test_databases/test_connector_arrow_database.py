@@ -41,6 +41,29 @@ from orcapod.databases import ConnectorArrowDatabase
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _field_has_metadata(field: pa.Field) -> bool:
+    """Return True if ``field`` or any nested child carries Arrow metadata."""
+    if isinstance(field.type, pa.ExtensionType) or field.metadata:
+        return True
+    if pa.types.is_struct(field.type):
+        return any(
+            _field_has_metadata(field.type.field(i))
+            for i in range(field.type.num_fields)
+        )
+    if (
+        pa.types.is_list(field.type)
+        or pa.types.is_large_list(field.type)
+        or pa.types.is_fixed_size_list(field.type)
+    ):
+        return _field_has_metadata(field.type.value_field)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # MockDBConnector — in-memory DBConnectorProtocol for tests
 # ---------------------------------------------------------------------------
 
@@ -133,10 +156,7 @@ class MockDBConnector:
 
     def validate_records(self, records: pa.Table) -> None:
         """Reject any Arrow field or schema metadata — mirrors real SQL connectors."""
-        problem_fields: list[str] = []
-        for field in records.schema:
-            if isinstance(field.type, pa.ExtensionType) or field.metadata:
-                problem_fields.append(field.name)
+        problem_fields = [f.name for f in records.schema if _field_has_metadata(f)]
         has_schema_meta = bool(records.schema.metadata)
         if problem_fields or has_schema_meta:
             parts: list[str] = []
@@ -932,6 +952,45 @@ class TestMetadataWriteGuard:
             {
                 "__record_id": pa.array([b"id1"], type=pa.large_binary()),
                 "value": pa.array([42], type=pa.int64()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_rejects_nested_struct_child_metadata(self, db):
+        """add_records raises ValueError when a nested struct child has metadata."""
+        import pyarrow as pa
+
+        # Outer field has no metadata, but the inner struct child does.
+        inner_with_meta = pa.field("val", pa.float64(), metadata={b"unit": b"m"})
+        struct_field = pa.field("s", pa.struct([inner_with_meta]))
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), struct_field])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "s": pa.array(
+                    [{"val": 1.0}],
+                    type=pa.struct([pa.field("val", pa.float64())]),
+                ),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_rejects_nested_list_value_field_metadata(self, db):
+        """add_records raises ValueError when a list's value field has metadata."""
+        import pyarrow as pa
+
+        # Outer list field has no metadata, but the value field does.
+        value_field = pa.field("item", pa.int32(), metadata={b"desc": b"count"})
+        list_field = pa.field("lst", pa.list_(value_field))
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), list_field])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "lst": pa.array([[1, 2]], type=pa.list_(pa.int32())),
             },
             schema=schema,
         )

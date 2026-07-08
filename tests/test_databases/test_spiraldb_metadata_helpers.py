@@ -252,6 +252,24 @@ class TestLoadArrowMetadata:
         assert "children" in field_trees["s"]
         assert "val" in field_trees["s"]["children"]
 
+    def test_corrupt_json_returns_empty(self):
+        """Key present but value is not valid JSON → returns (None, {}) and logs warning."""
+        from orcapod.databases.spiraldb_connector import _ARROW_METADATA_KEY
+
+        kv = {_ARROW_METADATA_KEY: b"not valid json {{{"}
+        schema_meta, field_trees = _load_arrow_metadata(kv)
+        assert schema_meta is None
+        assert field_trees == {}
+
+    def test_invalid_utf8_returns_empty(self):
+        """Key present but value is not valid UTF-8 → returns (None, {}) and logs warning."""
+        from orcapod.databases.spiraldb_connector import _ARROW_METADATA_KEY
+
+        kv = {_ARROW_METADATA_KEY: b"\xff\xfe invalid utf-8 \x80"}
+        schema_meta, field_trees = _load_arrow_metadata(kv)
+        assert schema_meta is None
+        assert field_trees == {}
+
 
 # ---------------------------------------------------------------------------
 # _restore_field
