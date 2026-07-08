@@ -467,3 +467,36 @@ class TestConfigSerialization:
         connector.close()
         with pytest.raises(RuntimeError, match="closed"):
             connector.to_config()
+
+
+# ---------------------------------------------------------------------------
+# TestValidateRecords
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRecords:
+    def test_no_op_for_plain_columns(self, connector):
+        """validate_records is a no-op on SpiralDBConnector for plain columns."""
+        table = pa.table({
+            "id": pa.array([b"a"], type=pa.large_binary()),
+            "value": pa.array([1], type=pa.int64()),
+        })
+        connector.validate_records(table)  # must not raise
+
+    def test_no_op_for_extension_typed_columns(self, connector):
+        """SpiralDBConnector.validate_records allows extension-typed columns."""
+        ext_field = pa.field(
+            "payload",
+            pa.large_string(),
+            metadata={
+                b"ARROW:extension:name": b"orcapod.path",
+                b"ARROW:extension:metadata": b"",
+            },
+        )
+        schema = pa.schema([pa.field("id", pa.large_binary()), ext_field])
+        table = pa.table(
+            {"id": pa.array([b"a"], type=pa.large_binary()),
+             "payload": pa.array(["/tmp/x"], type=pa.large_string())},
+            schema=schema,
+        )
+        connector.validate_records(table)  # must not raise — SpiralDB supports extension types

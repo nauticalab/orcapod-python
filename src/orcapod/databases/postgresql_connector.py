@@ -474,6 +474,38 @@ class PostgreSQLConnector:
                 conn.rollback()
                 raise
 
+    def validate_records(self, records: pa.Table) -> None:
+        """Reject Arrow extension-typed columns.
+
+        ``PostgreSQLConnector`` does not preserve ``ARROW:extension:*`` field
+        metadata — extension types would be silently demoted to their storage
+        type on read.
+
+        Args:
+            records: Arrow table to validate.
+
+        Raises:
+            ValueError: If any column carries an Arrow extension type.
+        """
+        import pyarrow as _pa  # noqa: PLC0415
+
+        _EXT_NAME_KEY = b"ARROW:extension:name"
+        ext_fields: list[tuple[str, str]] = []
+        for field in records.schema:
+            if isinstance(field.type, _pa.ExtensionType):
+                ext_fields.append((field.name, field.type.extension_name))
+            elif field.metadata and _EXT_NAME_KEY in field.metadata:
+                ext_fields.append(
+                    (field.name, field.metadata[_EXT_NAME_KEY].decode("utf-8", errors="replace"))
+                )
+        if ext_fields:
+            ext_info = ", ".join(f"{name!r}: {ext_name!r}" for name, ext_name in ext_fields)
+            raise ValueError(
+                f"PostgreSQLConnector does not support Arrow extension-typed columns "
+                f"({ext_info}). PostgreSQLConnector does not preserve ARROW:extension:* "
+                "field metadata across read/write cycles."
+            )
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def close(self) -> None:

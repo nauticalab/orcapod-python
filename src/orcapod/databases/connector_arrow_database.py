@@ -244,33 +244,7 @@ class ConnectorArrowDatabase:
                 f"got {rid_type}. Encode the column to bytes before calling add_records()."
             )
 
-        # Reject Arrow extension-typed columns: SQL connectors do not preserve
-        # ARROW:extension:* field metadata, so extension types would be silently
-        # dropped on read, making round-trips impossible.  Use DeltaTableDatabase
-        # or write directly to Parquet instead.  See PLT-1795 for the planned fix.
-        #
-        # Two representations are checked:
-        # 1. In-memory extension types: isinstance(field.type, pa.ExtensionType).
-        # 2. Metadata-only extension columns: a plain Arrow type whose field metadata
-        #    contains the b"ARROW:extension:name" key.  This arises when reading a
-        #    Parquet/IPC file with an unregistered extension type — the array is
-        #    decoded as its storage type but the metadata is preserved on the field.
-        _EXT_NAME_KEY = b"ARROW:extension:name"
-        ext_fields: list[tuple[str, str]] = []
-        for field in records.schema:
-            if isinstance(field.type, pa.ExtensionType):
-                ext_fields.append((field.name, field.type.extension_name))
-            elif field.metadata and _EXT_NAME_KEY in field.metadata:
-                ext_fields.append((field.name, field.metadata[_EXT_NAME_KEY].decode("utf-8", errors="replace")))
-        if ext_fields:
-            ext_info = ", ".join(f"{name!r}: {ext_name!r}" for name, ext_name in ext_fields)
-            raise ValueError(
-                f"ConnectorArrowDatabase does not support Arrow extension-typed columns "
-                f"({ext_info}). SQL connectors do not preserve ARROW:extension:* field "
-                f"metadata, so extension types would be silently dropped on read. "
-                f"Use DeltaTableDatabase or write directly to Parquet instead. "
-                f"See PLT-1795 for the planned fix."
-            )
+        self._connector.validate_records(records)
 
         records = self._deduplicate_within_table(records)
         record_key = self._get_record_key(record_path)

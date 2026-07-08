@@ -131,6 +131,23 @@ class MockDBConnector:
             kept = existing.filter(mask)
             self._tables[table_name] = pa.concat_tables([kept, records])
 
+    def validate_records(self, records: pa.Table) -> None:
+        """Rejecting default — mirrors real SQL connectors for test fidelity."""
+        _EXT_NAME_KEY = b"ARROW:extension:name"
+        ext_fields: list[tuple[str, str]] = []
+        for field in records.schema:
+            if isinstance(field.type, pa.ExtensionType):
+                ext_fields.append((field.name, field.type.extension_name))
+            elif field.metadata and _EXT_NAME_KEY in field.metadata:
+                ext_fields.append(
+                    (field.name, field.metadata[_EXT_NAME_KEY].decode("utf-8", errors="replace"))
+                )
+        if ext_fields:
+            ext_info = ", ".join(f"{name!r}: {ext_name!r}" for name, ext_name in ext_fields)
+            raise ValueError(
+                f"MockDBConnector does not support Arrow extension-typed columns ({ext_info})."
+            )
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def close(self) -> None:
@@ -888,3 +905,26 @@ class TestExtensionTypeWriteGuard:
         )
         # Should not raise
         db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_permissive_connector_allows_extension_types(self):
+        """A connector with a permissive validate_records lets extension columns through."""
+        class PermissiveConnector(MockDBConnector):
+            def validate_records(self, records: pa.Table) -> None:
+                pass  # no-op — this connector supports metadata
+
+        db = ConnectorArrowDatabase(PermissiveConnector())
+        ext_field = pa.field(
+            "payload",
+            pa.large_string(),
+            metadata={
+                b"ARROW:extension:name": b"orcapod.path",
+                b"ARROW:extension:metadata": b"",
+            },
+        )
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), ext_field])
+        table = pa.table(
+            {"__record_id": pa.array([b"id1"], type=pa.large_binary()),
+             "payload": pa.array(["/tmp/test"], type=pa.large_string())},
+            schema=schema,
+        )
+        db.add_records(("results",), table, record_id_column="__record_id")  # must not raise

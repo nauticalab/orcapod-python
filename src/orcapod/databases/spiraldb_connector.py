@@ -605,6 +605,9 @@ class SpiralDBConnector:
         if len(novel) > 0:
             tbl.write(novel)
 
+    def validate_records(self, records: pa.Table) -> None:
+        """No-op: ``SpiralDBConnector`` preserves Arrow field metadata via the native KV store."""
+
     def close(self) -> None:
         """Mark this connector as closed. Idempotent. No network teardown needed."""
         self._closed = True
