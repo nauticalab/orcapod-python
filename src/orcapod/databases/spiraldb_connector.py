@@ -34,6 +34,129 @@ else:
 
 logger = logging.getLogger(__name__)
 
+import base64
+import json
+
+_ARROW_METADATA_KEY = "__arrow_metadata__"
+
+
+def _serialize_field_meta_tree(field: "pa.Field") -> "dict | None":
+    """Recursively build the metadata tree for a single ``pa.Field``.
+
+    Walks the field's type tree, collecting ``field.metadata`` at each level.
+    Covers struct inner fields, list/large_list/fixed_size_list value fields.
+    Map key/item fields are not recursed (``pa.map_`` constructor does not
+    accept field-level metadata on key/item).
+
+    Args:
+        field: The ``pa.Field`` to serialize.
+
+    Returns:
+        A dict with optional ``"meta"`` (base64-encoded k/v pairs) and
+        ``"children"`` (recursive trees for composite type children) keys,
+        or ``None`` if this field and all its descendants have no metadata.
+    """
+    import pyarrow as _pa  # noqa: PLC0415
+
+    node: dict = {}
+
+    if field.metadata:
+        node["meta"] = {
+            base64.b64encode(k).decode(): base64.b64encode(v).decode()
+            for k, v in field.metadata.items()
+        }
+
+    ftype = field.type
+    child_fields: list = []
+    if _pa.types.is_struct(ftype):
+        child_fields = [ftype.field(i) for i in range(ftype.num_fields)]
+    elif (
+        _pa.types.is_list(ftype)
+        or _pa.types.is_large_list(ftype)
+        or _pa.types.is_fixed_size_list(ftype)
+    ):
+        child_fields = [ftype.value_field]
+
+    if child_fields:
+        children: dict = {}
+        for child in child_fields:
+            child_tree = _serialize_field_meta_tree(child)
+            if child_tree is not None:
+                children[child.name] = child_tree
+        if children:
+            node["children"] = children
+
+    return node if node else None
+
+
+def _serialize_arrow_metadata(table: "pa.Table") -> "dict[str, bytes] | None":
+    """Encode all Arrow metadata from ``table`` into a single SpiralDB KV entry.
+
+    Serializes both schema-level (``table.schema.metadata``) and per-field
+    metadata (including nested struct/list field metadata) into a single JSON
+    blob stored under ``_ARROW_METADATA_KEY``.
+
+    Args:
+        table: The Arrow table whose metadata to encode.
+
+    Returns:
+        ``{"__arrow_metadata__": blob_bytes}`` if any metadata exists anywhere
+        in the schema, or ``None`` if the schema and all fields (at every depth)
+        have no metadata.
+    """
+    blob: dict = {}
+
+    if table.schema.metadata:
+        blob["schema"] = {
+            base64.b64encode(k).decode(): base64.b64encode(v).decode()
+            for k, v in table.schema.metadata.items()
+        }
+
+    field_trees: dict = {}
+    for field in table.schema:
+        tree = _serialize_field_meta_tree(field)
+        if tree is not None:
+            field_trees[field.name] = tree
+    if field_trees:
+        blob["fields"] = field_trees
+
+    if not blob:
+        return None
+
+    return {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
+
+
+def _load_arrow_metadata(kv: "dict[str, bytes]") -> "dict":
+    """Decode the Arrow metadata blob from a SpiralDB KV store entry.
+
+    Args:
+        kv: Dict containing the ``_ARROW_METADATA_KEY`` entry as produced by
+            ``_serialize_arrow_metadata``.
+
+    Returns:
+        Decoded metadata dict with ``"schema"`` and/or ``"fields"`` keys.
+
+    Note:
+        Not yet implemented — placeholder for Task 3.
+    """
+    raise NotImplementedError("_load_arrow_metadata is not yet implemented (Task 3)")
+
+
+def _restore_field(field: "pa.Field", tree: "dict") -> "pa.Field":
+    """Restore metadata onto a ``pa.Field`` from a serialized metadata tree.
+
+    Args:
+        field: The ``pa.Field`` to restore metadata onto.
+        tree: Metadata tree dict as produced by ``_serialize_field_meta_tree``.
+
+    Returns:
+        A new ``pa.Field`` with metadata restored.
+
+    Note:
+        Not yet implemented — placeholder for Task 3.
+    """
+    raise NotImplementedError("_restore_field is not yet implemented (Task 3)")
+
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
