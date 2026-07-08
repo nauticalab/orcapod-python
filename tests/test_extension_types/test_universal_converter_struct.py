@@ -72,3 +72,23 @@ def test_dynamic_typeddict_roundtrips_to_struct(converter):
     assert arrow_type_back == PLAIN_STRUCT, (
         f"Round-trip failed: expected {PLAIN_STRUCT!r}, got {arrow_type_back!r}"
     )
+
+
+def test_dynamic_typeddict_write_back(converter):
+    """python_dicts_to_struct_dicts with a TypedDict schema correctly writes struct data."""
+    schema = pa.schema([pa.field("result", PLAIN_STRUCT, nullable=False)])
+    python_schema = converter.arrow_schema_to_python_schema(schema)
+
+    data = [
+        {"result": {"total": 8, "delta": 2}},
+        {"result": {"total": 17, "delta": 3}},
+    ]
+    struct_dicts = converter.python_dicts_to_struct_dicts(data, python_schema=python_schema)
+    table = pa.Table.from_pylist(struct_dicts, schema=schema)
+
+    assert table.num_rows == 2
+    assert table.schema == schema
+
+    rows = table.column("result").to_pylist()
+    assert rows[0] == {"total": 8, "delta": 2}
+    assert rows[1] == {"total": 17, "delta": 3}
