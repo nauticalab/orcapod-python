@@ -1510,6 +1510,23 @@ class FunctionJobNode(FunctionNodeBase):
         self._require_pipeline_database()
         base_entry_id = self.compute_base_entry_id(tag, input_data)
 
+        # Guard against pre-ITL-508 pipeline DB records that are missing the new
+        # versioning columns. If such records exist, fail fast with a clear message
+        # rather than letting the subsequent filter crash with a cryptic Arrow error.
+        _all_existing = self._pipeline_database.get_all_records(self.node_identity_path)
+        if _all_existing is not None and _all_existing.num_rows > 0:
+            _missing = [
+                col
+                for col in (_PIPELINE_BASE_ENTRY_ID_COL, _PIPELINE_RECOMPUTATION_INDEX_COL)
+                if col not in _all_existing.schema.names
+            ]
+            if _missing:
+                raise ValueError(
+                    f"Pipeline database at {self.node_identity_path!r} contains records "
+                    f"that are missing required ITL-508 columns: {_missing!r}. "
+                    "Please clear or migrate the pipeline database before using this node."
+                )
+
         # Determine the next recomputation index by querying all existing rows
         # for this base_entry_id. No await is used here, so within a single-threaded
         # asyncio event loop this read-then-write sequence is uninterrupted.

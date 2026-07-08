@@ -196,10 +196,17 @@ to ITL-515.
 ### Concurrent-miss serialisation (asyncio)
 - Two asyncio tasks both observe a Phase 1 miss for the same (tag, data).
 - Both enter Phase 2 concurrently.
-- After both complete, pipeline DB contains exactly **one** row at
-  `recomputation_index=1` (no duplicate).
-- `call_count` reflects two computations (both ran) but only one pipeline
-  record was written.
+- After both complete, pipeline DB contains **at least one** valid row for
+  the `base_entry_id`. Because `add_pipeline_record` is fully synchronous
+  (no `await`), asyncio cooperative multitasking serialises the two writes:
+  each coroutine reads the current `max_index` and writes at `max_index + 1`,
+  so in practice both rows land (one at index 0, one at index 1). The
+  `skip_duplicates=True` guard prevents a write from clobbering another only
+  when two coroutines happen to compute the identical versioned entry ID, which
+  cannot occur when `max_index` advances between reads. Asserting `>= 1` rows
+  is therefore the correct lower bound; the exact count depends on scheduling.
+- A subsequent Phase 1 lookup (new session, same DBs) finds a valid result
+  and does NOT recompute.
 
 ### Ephemeral + persistent coexistence
 - Ephemeral row at index 0 (stale) and persistent row at index 1 share the

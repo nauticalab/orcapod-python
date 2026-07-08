@@ -91,8 +91,8 @@ class TestFetchJoinedRecords:
         assert all(isinstance(c, str) for c in result.taginfo_columns)
         assert _PIPELINE_ENTRY_ID_COL in result.taginfo_columns
 
-    def test_no_entry_ids_returns_all_rows(self, executed_node):
-        """Calling with entry_ids=None returns all executed rows."""
+    def test_no_base_entry_ids_returns_all_rows(self, executed_node):
+        """Calling with base_entry_ids=None returns all executed rows."""
         result = executed_node._fetch_joined_records()
         assert result is not None
         assert result.table.num_rows == 2
@@ -108,8 +108,8 @@ class TestFetchJoinedRecords:
         assert result.table.num_rows == 1
         assert result.table.column(_PIPELINE_BASE_ENTRY_ID_COL)[0].as_py() == base_entry_id_0
 
-    def test_empty_entry_ids_returns_zero_rows(self, executed_node):
-        """Passing entry_ids=[] returns a 0-row table, not None."""
+    def test_empty_base_entry_ids_returns_zero_rows(self, executed_node):
+        """Passing base_entry_ids=[] returns a 0-row table, not None."""
         result = executed_node._fetch_joined_records(base_entry_ids=[])
         assert result is not None
         assert result.table.num_rows == 0
