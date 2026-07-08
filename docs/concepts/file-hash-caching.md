@@ -8,8 +8,9 @@ works, how to turn it on, and when it helps.
 ## FileHasher, HashCacher, and CachedFileHasher
 
 `FileHasher` is the base hasher. When you call `hash_file(path)` on it, it
-reads the file's bytes from disk and returns a SHA-256 digest. It does this
-every time, with no memory of previous results.
+reads the file's bytes from disk and returns a content hash (SHA-256 by
+default, configurable via the `algorithm` argument). It does this every time,
+with no memory of previous results.
 
 `HashCacher` is a protocol for any object that maps a `FileHashKey` to a
 `ContentHash`. The key is a three-field struct:
@@ -85,13 +86,13 @@ You can override this path in two ways:
 To inspect cached entries using the SQLite command-line tool:
 
 ```bash
-sqlite3 ~/.orcapod/file_hash_cache.db "SELECT path, method FROM file_hashes LIMIT 10;"
+sqlite3 ~/.orcapod/file_hash_cache.db "SELECT path, size, cached_at FROM file_hash_cache LIMIT 10;"
 ```
 
 To clear all cached entries:
 
 ```bash
-sqlite3 ~/.orcapod/file_hash_cache.db "DELETE FROM file_hashes;"
+sqlite3 ~/.orcapod/file_hash_cache.db "DELETE FROM file_hash_cache;"
 ```
 
 ## When caching helps -- and when it doesn't

@@ -301,6 +301,12 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
     registry.register(File, FileHandler(cached_file_hasher))
 
     existing_dir_handler = registry.get_handler_for_type(Directory)
+    if existing_dir_handler is None:
+        raise RuntimeError(
+            "enable_file_hash_caching(): no DirectoryHandler registered for "
+            "orcapod.Directory in the default context. This should not happen "
+            "with the standard v0.1 context."
+        )
     existing_dir_hasher = existing_dir_handler.directory_hasher
     registry.register(
         Directory,
