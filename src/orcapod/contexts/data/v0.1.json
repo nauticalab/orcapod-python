@@ -11,6 +11,7 @@
     "directory_hasher": {
         "_class": "orcapod.hashing.directory_hashers.BasicDirectoryHasher",
         "_config": {
+            "file_hasher": {"_ref": "file_hasher"},
             "algorithm": "sha256"
         }
     },

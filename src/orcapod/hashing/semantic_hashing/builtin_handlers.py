@@ -455,7 +455,10 @@ def register_builtin_python_type_handlers(
 
     if directory_hasher is None:
         from orcapod.hashing.directory_hashers import BasicDirectoryHasher
-        directory_hasher = BasicDirectoryHasher(algorithm="sha256")
+        directory_hasher = BasicDirectoryHasher(
+            file_hasher=file_hasher,
+            algorithm="sha256",
+        )
 
     if function_info_extractor is None:
         from orcapod.hashing.semantic_hashing.function_info_extractors import (
