@@ -574,7 +574,8 @@ class TestUpsertRecordsMetadata:
         # "b" is novel — write called; metadata derived from original records
         mock_tbl.write.assert_called_once()
         mock_tbl.set_metadata.assert_called_once()
-        import json, base64 as b64mod
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
         kv = mock_tbl.set_metadata.call_args[0][0]
         blob = json.loads(kv["__arrow_metadata__"].decode())
         assert blob["schema"][b64mod.b64encode(b"version").decode()] == b64mod.b64encode(b"1").decode()
