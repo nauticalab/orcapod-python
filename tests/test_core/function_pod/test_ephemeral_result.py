@@ -898,3 +898,91 @@ class TestFetchJoinedRecordsGuards:
         # Result must be served (from result DB cache or recomputed)
         assert len(results) == 1
         assert results[0][1].as_dict()["result"] == 20
+
+
+# ---------------------------------------------------------------------------
+# Task 6 tests: concurrent asyncio Phase 2 serialisation
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentMissSerialization:
+    @pytest.mark.asyncio
+    async def test_two_concurrent_phase2_misses_produce_valid_pipeline_records(self):
+        """Two asyncio coroutines that simultaneously execute Phase 2 for the same input
+        each produce a valid pipeline record. A subsequent Phase 1 lookup finds a result
+        and does NOT recompute."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        pod = FunctionPod(pf)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+
+        tag, data = next(iter(stream.iter_data()))
+
+        # Two concurrent _async_process_data_internal calls on the same (tag, data).
+        # In asyncio cooperative multitasking, these serialise at add_pipeline_record
+        # (synchronous), so each gets a distinct recomputation_index.
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(node._async_process_data_internal(tag, data))
+            tg.create_task(node._async_process_data_internal(tag, data))
+
+        # At least one pipeline record must exist for this base_entry_id
+        pipeline_db.flush()
+        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        assert all_records is not None
+        assert all_records.num_rows >= 1
+
+        # Session 2: new node with the same DBs — Phase 1 must find a valid result
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        pod2 = FunctionPod(pf2)
+        node2 = FunctionJobNode(
+            function_pod=pod2,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        count_before_session2 = call_count["n"]
+        results = node2.execute(stream)
+        assert len(results) == 1
+        assert results[0][1].as_dict()["result"] == 20
+        assert call_count["n"] == count_before_session2  # NOT recomputed
+
+    @pytest.mark.asyncio
+    async def test_sequential_add_pipeline_record_increments_index_each_time(self):
+        """Two sequential add_pipeline_record calls for the same base_entry_id
+        write at indices 0 and 1 respectively (not blocked by the existing row)."""
+        from orcapod.core.nodes.function_node import (
+            _PIPELINE_BASE_ENTRY_ID_COL,
+            _PIPELINE_RECOMPUTATION_INDEX_COL,
+        )
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        node, _ = _make_node(stream, pipeline_db=pipeline_db)
+        tag, data = next(iter(stream.iter_data()))
+
+        node.add_pipeline_record(tag, data, data_record_id=uuid.uuid4(), computed=True)
+        node.add_pipeline_record(tag, data, data_record_id=uuid.uuid4(), computed=True)
+        pipeline_db.flush()
+
+        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        assert all_records is not None
+        assert all_records.num_rows == 2
+
+        base_ids = all_records.column(_PIPELINE_BASE_ENTRY_ID_COL).to_pylist()
+        assert base_ids[0] == base_ids[1]  # same base_entry_id
+
+        indices = all_records.column(_PIPELINE_RECOMPUTATION_INDEX_COL).to_pylist()
+        assert sorted(indices) == [0, 1]  # distinct indices
