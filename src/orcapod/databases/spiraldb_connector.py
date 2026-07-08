@@ -583,9 +583,13 @@ class SpiralDBConnector:
                 f"table key schema {pk_cols}."
             )
 
+        meta_kv = _serialize_arrow_metadata(records)
+
         if not skip_existing:
             # Always upsert-by-key: existing rows overwritten, novel rows inserted.
             tbl.write(records)
+            if meta_kv is not None:
+                tbl.set_metadata(meta_kv)
             return
 
         # skip_existing=True: full scan → client-side key filter → write novel rows.
@@ -604,6 +608,8 @@ class SpiralDBConnector:
         novel = records.filter(mask)
         if len(novel) > 0:
             tbl.write(novel)
+            if meta_kv is not None:
+                tbl.set_metadata(meta_kv)
 
     def validate_records(self, records: pa.Table) -> None:
         """No-op: ``SpiralDBConnector`` preserves Arrow field metadata via the native KV store."""

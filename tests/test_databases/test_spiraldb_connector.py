@@ -500,3 +500,92 @@ class TestValidateRecords:
             schema=schema,
         )
         connector.validate_records(table)  # must not raise — SpiralDB supports extension types
+
+
+# ---------------------------------------------------------------------------
+# TestUpsertRecordsMetadata
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertRecordsMetadata:
+    def _make_mock_table(self, mock_project, pk_cols: list[str]) -> MagicMock:
+        mock_table = MagicMock()
+        mock_table.key_schema.names = pk_cols
+        mock_project.table.return_value = mock_table
+        return mock_table
+
+    def test_set_metadata_called_after_write_when_schema_metadata_present(
+        self, connector, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        schema = pa.schema(
+            [pa.field("id", pa.string()), pa.field("val", pa.int64())],
+            metadata={b"origin": b"test"},
+        )
+        records = pa.table(
+            {"id": pa.array(["a"]), "val": pa.array([1], type=pa.int64())},
+            schema=schema,
+        )
+        connector.upsert_records("t", records, id_column="id")
+        mock_tbl.write.assert_called_once()
+        mock_tbl.set_metadata.assert_called_once()
+        kv = mock_tbl.set_metadata.call_args[0][0]
+        assert "__arrow_metadata__" in kv
+
+    def test_set_metadata_called_when_field_metadata_present(
+        self, connector, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        schema = pa.schema([
+            pa.field("id", pa.string()),
+            pa.field("val", pa.int64(), metadata={b"unit": b"m"}),
+        ])
+        records = pa.table(
+            {"id": pa.array(["a"]), "val": pa.array([1], type=pa.int64())},
+            schema=schema,
+        )
+        connector.upsert_records("t", records, id_column="id")
+        mock_tbl.set_metadata.assert_called_once()
+
+    def test_set_metadata_not_called_when_no_metadata(
+        self, connector, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        records = pa.table({"id": pa.array(["a"]), "val": pa.array([1])})
+        connector.upsert_records("t", records, id_column="id")
+        mock_tbl.write.assert_called_once()
+        mock_tbl.set_metadata.assert_not_called()
+
+    def test_set_metadata_called_for_skip_existing_path(
+        self, connector, mock_sp, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        existing = pa.table({"id": pa.array(["a"]), "val": pa.array([1])})
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+        schema = pa.schema(
+            [pa.field("id", pa.string()), pa.field("val", pa.int64())],
+            metadata={b"version": b"1"},
+        )
+        records = pa.table(
+            {"id": pa.array(["a", "b"]), "val": pa.array([1, 2], type=pa.int64())},
+            schema=schema,
+        )
+        connector.upsert_records("t", records, id_column="id", skip_existing=True)
+        # "b" is novel — write called; metadata derived from original records
+        mock_tbl.write.assert_called_once()
+        mock_tbl.set_metadata.assert_called_once()
+        import json, base64 as b64mod
+        kv = mock_tbl.set_metadata.call_args[0][0]
+        blob = json.loads(kv["__arrow_metadata__"].decode())
+        assert blob["schema"][b64mod.b64encode(b"version").decode()] == b64mod.b64encode(b"1").decode()
+
+    def test_set_metadata_not_called_when_skip_existing_all_exist(
+        self, connector, mock_sp, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        existing = pa.table({"id": pa.array(["a", "b"]), "val": pa.array([1, 2])})
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+        records = pa.table({"id": pa.array(["a", "b"]), "val": pa.array([10, 20])})
+        connector.upsert_records("t", records, id_column="id", skip_existing=True)
+        mock_tbl.write.assert_not_called()
+        mock_tbl.set_metadata.assert_not_called()
