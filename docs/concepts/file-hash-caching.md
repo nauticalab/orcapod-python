@@ -54,13 +54,11 @@ remain accessible at the same path if you use the same `db_path`.
 ## Directory hashing (op.Directory)
 
 When Orcapod hashes an `op.Directory`, it traverses the directory tree and
-builds a Merkle hash from all the files it finds. Each file's digest
-contributes to the directory's overall hash. Before ITL-511, this traversal
-called the file hasher directly, bypassing the per-file cache even when
-caching was enabled.
+builds a Merkle hash from all the files it finds. Each file's content hash
+contributes to the directory's overall hash.
 
-After ITL-511, the `DirectoryHandler`'s `BasicDirectoryHasher` uses the
-**same** `CachedFileHasher` instance as `FileHandler`. This means:
+The `DirectoryHandler`'s `BasicDirectoryHasher` uses the **same**
+`CachedFileHasher` instance as `FileHandler`. This means:
 
 - If a file was previously hashed as `op.File`, it is a cache hit the next
   time it appears during directory traversal.
