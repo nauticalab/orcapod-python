@@ -122,5 +122,4 @@ class PodNodeProtocol(cp.PodProtocol, Protocol):
         input_data: cp.DataProtocol,
         data_record_id: str,
         retrieved: bool | None = None,
-        skip_cache_lookup: bool = False,
     ) -> None: ...

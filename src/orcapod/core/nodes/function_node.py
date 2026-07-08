@@ -1479,35 +1479,53 @@ class FunctionJobNode(FunctionNodeBase):
         input_data: DataProtocol,
         data_record_id: uuid.UUID,
         computed: bool,
-        skip_cache_lookup: bool = False,
         is_ephemeral: bool = False,
     ) -> None:
         """Add a pipeline record to the database for a processed data.
 
+        Computes the next recomputation index by querying existing rows in the
+        pipeline DB that share the same ``base_entry_id``, then writes at
+        ``max_index + 1``. The write uses ``skip_duplicates=True`` so that
+        concurrent asyncio coroutines competing for the same versioned entry ID
+        are safely serialised: the first writer lands, subsequent writers whose
+        compute happened to produce the same hash are silently no-oped.
+
         The pipeline record stores:
+
         - Tag columns (including system tags)
-        - All source columns of the input data (provenance, not data)
+        - All source columns of the input data (provenance, not data values)
         - Output data record ID (for joining with result records)
+        - Base entry ID (``_PIPELINE_BASE_ENTRY_ID_COL``)
+        - Recomputation index (``_PIPELINE_RECOMPUTATION_INDEX_COL``)
         - Whether the result is stored in the ephemeral store
-        - Input data data context key
+        - Input data context key
         - Whether the result was freshly computed or cached
+
+        Args:
+            tag: The tag associated with the input data.
+            input_data: The input data that was processed.
+            data_record_id: UUID of the result record in the result database.
+            computed: Whether the result was freshly computed (``True``) or
+                served from a cache (``False``).
+            is_ephemeral: Whether the result is stored in the ephemeral store.
         """
         self._require_pipeline_database()
-        entry_id = self.compute_pipeline_entry_id(tag, input_data)
+        base_entry_id = self.compute_base_entry_id(tag, input_data)
 
-        # Check for existing entry
-        existing_record = None
-        if not skip_cache_lookup:
-            existing_record = self._pipeline_database.get_record_by_id(
-                self.node_identity_path,
-                entry_id,
-            )
+        # Determine the next recomputation index by reading all existing rows
+        # that share this base_entry_id.  Steps 1-5 below are fully synchronous
+        # (no await), so concurrent asyncio coroutines serialise naturally.
+        existing = self._pipeline_database.get_records_with_column_value(
+            self.node_identity_path,
+            {_PIPELINE_BASE_ENTRY_ID_COL: base_entry_id},
+        )
+        if existing is None or existing.num_rows == 0:
+            new_index = 0
+        else:
+            indices = existing.column(_PIPELINE_RECOMPUTATION_INDEX_COL).to_pylist()
+            new_index = max(indices) + 1
 
-        if existing_record is not None:
-            logger.debug(
-                f"Record with entry_id {entry_id} already exists. Skipping addition."
-            )
-            return
+        versioned_entry_id = self.compute_pipeline_entry_id(tag, input_data, new_index)
 
         # Extract source columns only (no data columns) from the input data
         input_table_with_source = input_data.as_table(columns={"source": True})
@@ -1536,6 +1554,12 @@ class FunctionJobNode(FunctionNodeBase):
                 constants.IS_EPHEMERAL_COL: pa.array(
                     [is_ephemeral], type=pa.bool_()
                 ),
+                _PIPELINE_BASE_ENTRY_ID_COL: pa.array(
+                    [base_entry_id], type=pa.large_binary()
+                ),
+                _PIPELINE_RECOMPUTATION_INDEX_COL: pa.array(
+                    [new_index], type=pa.int32()
+                ),
             }
         )
 
@@ -1548,9 +1572,9 @@ class FunctionJobNode(FunctionNodeBase):
 
         self._pipeline_database.add_record(
             self.node_identity_path,
-            entry_id,
+            versioned_entry_id,
             combined_record,
-            skip_duplicates=skip_cache_lookup,
+            skip_duplicates=True,
         )
 
     # ------------------------------------------------------------------
