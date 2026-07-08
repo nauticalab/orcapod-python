@@ -1117,12 +1117,12 @@ class FunctionJobNode(FunctionNodeBase):
         tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
         ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
-        # Collect upstream entries and resolve entry_ids
+        # Collect upstream entries and resolve base_entry_ids (stable across recomputation)
         upstream_entries: list[tuple[TagProtocol, DataProtocol, bytes]] = [
             (tag, data, self.compute_base_entry_id(tag, data))
             for tag, data in input_stream.iter_data()
         ]
-        entry_ids = [eid for _, _, eid in upstream_entries]
+        base_entry_ids = [eid for _, _, eid in upstream_entries]
 
         # Hot-load any already-computed results from DB into _cached_output_datas.
         # get_cached_results() is called for its side effect (populating the
@@ -1130,14 +1130,14 @@ class FunctionJobNode(FunctionNodeBase):
         # that the per-data cache-hit check below uses _cached_output_datas
         # directly — which includes None-output entries (function returned None)
         # and prevents spurious recomputation of already-processed data.
-        self.get_cached_results(base_entry_ids=entry_ids)
+        self.get_cached_results(base_entry_ids=base_entry_ids)
 
         output: list[tuple[TagProtocol, DataProtocol]] = []
-        for tag, data, entry_id in upstream_entries:
+        for tag, data, base_entry_id in upstream_entries:
             ctx_obs.on_data_start(node_label, tag, data)
 
-            if entry_id in self._cached_output_datas:
-                tag_out, result = self._cached_output_datas[entry_id]
+            if base_entry_id in self._cached_output_datas:
+                tag_out, result = self._cached_output_datas[base_entry_id]
                 ctx_obs.on_data_end(node_label, tag, data, result, cached=True)
                 if result is not None:
                     output.append((tag_out, result))
