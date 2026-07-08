@@ -168,7 +168,7 @@
             "Added spikeinterface.BaseSorting as a native value type via LogicalSISorting (large_string/JSON) and SISortingHandler (SHA-256 of JSON bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-468)",
             "Added spikeinterface.core.motion.Motion as a native value type via LogicalSIMotion (large_binary/.npz) and SIMotionHandler (SHA-256 of .npz bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-470)",
             "Added spikeinterface.core.SortingAnalyzer as a native value type via LogicalSISortingAnalyzer (large_string/JSON path reference {folder, format}) and SISortingAnalyzerHandler (SHA-256 of folder path string, phase 1); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-469)",
-            "Wired file_hasher reference into BasicDirectoryHasher so op.Directory hashing uses the same FileContentHasherProtocol as op.File hashing; required file_hasher constructor arg enforces explicit injection (ITL-511)"
+            "Wired file_hasher reference into BasicDirectoryHasher so op.Directory hashing uses the same FileContentHasherProtocol as op.File hashing; required file_hasher constructor arg enforces explicit injection"
         ]
     }
 }
