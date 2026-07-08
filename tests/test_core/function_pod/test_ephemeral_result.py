@@ -553,11 +553,10 @@ class TestEphemeralWritePath:
         """After a cross-session ephemeral miss triggers recompute via execute(),
         iter_data() serves the fresh result without triggering additional computation.
 
-        Covers ITL-513's explicit success criterion: "new test covers the stale-entry
-        recompute case across iter_data calls." With iter_data() strictly read-only
-        (since ENG-379), the test verifies that:
-        - the recomputed result is accessible via iter_data() after execute()
-        - repeated iter_data() calls do not trigger further recomputation
+        Verifies that:
+        - after clearing the in-memory cache, iter_data() hot-loads the recomputed
+          result from the pipeline + ephemeral DBs (exercises _load_cached_entries)
+        - repeated iter_data() calls return the same result without recomputing
         """
         call_count = {"n": 0}
 
@@ -593,6 +592,11 @@ class TestEphemeralWritePath:
         node2.set_ephemeral_store(ephemeral2)
         node2.execute(stream)
         assert call_count["n"] == 2  # recomputed once due to cross-session miss
+
+        # Clear in-memory cache to force _load_cached_entries() → _fetch_joined_records()
+        # This exercises the DB hot-load path, verifying the recomputed result is
+        # accessible via the ephemeral inner join, not just the in-memory dict.
+        node2._cached_output_datas.clear()
 
         # iter_data() must serve the recomputed result — no additional computation
         results = list(node2.iter_data())
