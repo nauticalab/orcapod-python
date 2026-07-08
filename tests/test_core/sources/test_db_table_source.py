@@ -76,6 +76,9 @@ class MockDBConnector:
     def upsert_records(self, *args: Any, **kwargs: Any) -> None:
         pass  # not used by DBTableSource
 
+    def validate_records(self, records: Any) -> None:
+        pass  # not used by DBTableSource
+
     def close(self) -> None:
         pass
 
