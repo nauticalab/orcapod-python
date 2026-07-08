@@ -593,9 +593,10 @@ class TestEphemeralWritePath:
         node2.execute(stream)
         assert call_count["n"] == 2  # recomputed once due to cross-session miss
 
-        # Clear in-memory cache to force _load_cached_entries() → _fetch_joined_records()
-        # This exercises the DB hot-load path, verifying the recomputed result is
-        # accessible via the ephemeral inner join, not just the in-memory dict.
+        # execute() calls _update_modified_time() at the end, so is_stale is False here.
+        # Manually clearing forces the iter_data() hot-load branch (_load_cached_entries →
+        # _fetch_joined_records) without relying on staleness, so this tests the DB join
+        # path explicitly rather than the in-memory dict fast-path.
         node2._cached_output_datas.clear()
 
         # iter_data() must serve the recomputed result — no additional computation
