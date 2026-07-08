@@ -467,3 +467,232 @@ class TestConfigSerialization:
         connector.close()
         with pytest.raises(RuntimeError, match="closed"):
             connector.to_config()
+
+
+# ---------------------------------------------------------------------------
+# TestValidateRecords
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRecords:
+    def test_no_op_for_plain_columns(self, connector):
+        """validate_records is a no-op on SpiralDBConnector for plain columns."""
+        table = pa.table({
+            "id": pa.array([b"a"], type=pa.large_binary()),
+            "value": pa.array([1], type=pa.int64()),
+        })
+        connector.validate_records(table)  # must not raise
+
+    def test_no_op_for_extension_typed_columns(self, connector):
+        """SpiralDBConnector.validate_records allows extension-typed columns."""
+        ext_field = pa.field(
+            "payload",
+            pa.large_string(),
+            metadata={
+                b"ARROW:extension:name": b"orcapod.path",
+                b"ARROW:extension:metadata": b"",
+            },
+        )
+        schema = pa.schema([pa.field("id", pa.large_binary()), ext_field])
+        table = pa.table(
+            {"id": pa.array([b"a"], type=pa.large_binary()),
+             "payload": pa.array(["/tmp/x"], type=pa.large_string())},
+            schema=schema,
+        )
+        connector.validate_records(table)  # must not raise — SpiralDB supports extension types
+
+
+# ---------------------------------------------------------------------------
+# TestUpsertRecordsMetadata
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertRecordsMetadata:
+    def _make_mock_table(self, mock_project, pk_cols: list[str]) -> MagicMock:
+        mock_table = MagicMock()
+        mock_table.key_schema.names = pk_cols
+        mock_project.table.return_value = mock_table
+        return mock_table
+
+    def test_set_metadata_called_after_write_when_schema_metadata_present(
+        self, connector, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        schema = pa.schema(
+            [pa.field("id", pa.string()), pa.field("val", pa.int64())],
+            metadata={b"origin": b"test"},
+        )
+        records = pa.table(
+            {"id": pa.array(["a"]), "val": pa.array([1], type=pa.int64())},
+            schema=schema,
+        )
+        connector.upsert_records("t", records, id_column="id")
+        mock_tbl.write.assert_called_once()
+        mock_tbl.set_metadata.assert_called_once()
+        kv = mock_tbl.set_metadata.call_args[0][0]
+        assert "__arrow_metadata__" in kv
+
+    def test_set_metadata_called_when_field_metadata_present(
+        self, connector, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        schema = pa.schema([
+            pa.field("id", pa.string()),
+            pa.field("val", pa.int64(), metadata={b"unit": b"m"}),
+        ])
+        records = pa.table(
+            {"id": pa.array(["a"]), "val": pa.array([1], type=pa.int64())},
+            schema=schema,
+        )
+        connector.upsert_records("t", records, id_column="id")
+        mock_tbl.set_metadata.assert_called_once()
+
+    def test_set_metadata_not_called_when_no_metadata(
+        self, connector, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        records = pa.table({"id": pa.array(["a"]), "val": pa.array([1])})
+        connector.upsert_records("t", records, id_column="id")
+        mock_tbl.write.assert_called_once()
+        mock_tbl.set_metadata.assert_not_called()
+
+    def test_set_metadata_called_for_skip_existing_path(
+        self, connector, mock_sp, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        existing = pa.table({"id": pa.array(["a"]), "val": pa.array([1])})
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+        schema = pa.schema(
+            [pa.field("id", pa.string()), pa.field("val", pa.int64())],
+            metadata={b"version": b"1"},
+        )
+        records = pa.table(
+            {"id": pa.array(["a", "b"]), "val": pa.array([1, 2], type=pa.int64())},
+            schema=schema,
+        )
+        connector.upsert_records("t", records, id_column="id", skip_existing=True)
+        # "b" is novel — write called; metadata derived from original records
+        mock_tbl.write.assert_called_once()
+        mock_tbl.set_metadata.assert_called_once()
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+        kv = mock_tbl.set_metadata.call_args[0][0]
+        blob = json.loads(kv["__arrow_metadata__"].decode())
+        assert blob["schema"][b64mod.b64encode(b"version").decode()] == b64mod.b64encode(b"1").decode()
+
+    def test_set_metadata_not_called_when_skip_existing_all_exist(
+        self, connector, mock_sp, mock_project
+    ):
+        mock_tbl = self._make_mock_table(mock_project, ["id"])
+        existing = pa.table({"id": pa.array(["a", "b"]), "val": pa.array([1, 2])})
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+        records = pa.table({"id": pa.array(["a", "b"]), "val": pa.array([10, 20])})
+        connector.upsert_records("t", records, id_column="id", skip_existing=True)
+        mock_tbl.write.assert_not_called()
+        mock_tbl.set_metadata.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestIterBatchesMetadata
+# ---------------------------------------------------------------------------
+
+
+class TestIterBatchesMetadata:
+    def _wire_scan(self, mock_sp, mock_project, batches: list, kv: dict | None = None) -> None:
+        mock_project.table.return_value.select.return_value = MagicMock()
+        mock_project.table.return_value.get_metadata.return_value = kv or {}
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = iter(batches)
+
+    def test_schema_metadata_reattached(self, connector, mock_sp, mock_project):
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+
+        stored_blob = json.dumps({
+            "schema": {
+                b64mod.b64encode(b"origin").decode(): b64mod.b64encode(b"test").decode()
+            }
+        }).encode()
+        raw_batch = pa.record_batch({"id": pa.array(["a"], type=pa.string())})
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert len(result) == 1
+        assert result[0].schema.metadata == {b"origin": b"test"}
+
+    def test_field_metadata_reattached(self, connector, mock_sp, mock_project):
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+
+        stored_blob = json.dumps({
+            "fields": {
+                "val": {"meta": {
+                    b64mod.b64encode(b"unit").decode(): b64mod.b64encode(b"meters").decode()
+                }}
+            }
+        }).encode()
+        raw_batch = pa.record_batch({
+            "id": pa.array(["a"], type=pa.string()),
+            "val": pa.array([1.0], type=pa.float64()),
+        })
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert result[0].schema.field("val").metadata == {b"unit": b"meters"}
+
+    def test_string_normalization_preserved_with_metadata(self, connector, mock_sp, mock_project):
+        """string → large_string normalization still applies when field metadata present."""
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+
+        stored_blob = json.dumps({
+            "fields": {
+                "label": {"meta": {
+                    b64mod.b64encode(b"ARROW:extension:name").decode(): b64mod.b64encode(b"orcapod.path").decode()
+                }}
+            }
+        }).encode()
+        # SpiralDB returns pa.string() at the wire
+        raw_batch = pa.record_batch({"label": pa.array(["x"], type=pa.string())})
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        batch = result[0]
+        # type must be large_string (normalized)
+        assert batch.schema.field("label").type == pa.large_string()
+        # metadata must be restored
+        assert batch.schema.field("label").metadata == {b"ARROW:extension:name": b"orcapod.path"}
+
+    def test_no_stored_metadata_behaves_as_before(self, connector, mock_sp, mock_project):
+        """Tables with no stored metadata are returned unchanged (backward compat)."""
+        raw_batch = pa.record_batch({"id": pa.array(["a"], type=pa.string()), "v": pa.array([1])})
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert result[0].schema.field("id").type == pa.large_string()
+        assert result[0].schema.metadata is None
+
+    def test_get_metadata_called_once_per_scan_not_per_batch(self, connector, mock_sp, mock_project):
+        b1 = pa.record_batch({"id": pa.array(["a"])})
+        b2 = pa.record_batch({"id": pa.array(["b"])})
+        self._wire_scan(mock_sp, mock_project, [b1, b2], {})
+        list(connector.iter_batches('SELECT * FROM "t"'))
+        mock_project.table.return_value.get_metadata.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestDeleteTable
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteTable:
+    def test_delete_existing_table_calls_drop_table(self, connector, mock_project):
+        r1 = MagicMock(dataset="default", table="my_table")
+        mock_project.list_tables.return_value = [r1]
+        connector.delete_table("my_table")
+        mock_project.drop_table.assert_called_once_with("default.my_table")
+
+    def test_delete_nonexistent_table_is_noop(self, connector, mock_project):
+        r1 = MagicMock(dataset="default", table="other_table")
+        mock_project.list_tables.return_value = [r1]
+        connector.delete_table("no_such")
+        mock_project.drop_table.assert_not_called()

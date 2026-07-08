@@ -41,6 +41,29 @@ from orcapod.databases import ConnectorArrowDatabase
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _field_has_metadata(field: pa.Field) -> bool:
+    """Return True if ``field`` or any nested child carries Arrow metadata."""
+    if isinstance(field.type, pa.ExtensionType) or field.metadata:
+        return True
+    if pa.types.is_struct(field.type):
+        return any(
+            _field_has_metadata(field.type.field(i))
+            for i in range(field.type.num_fields)
+        )
+    if (
+        pa.types.is_list(field.type)
+        or pa.types.is_large_list(field.type)
+        or pa.types.is_fixed_size_list(field.type)
+    ):
+        return _field_has_metadata(field.type.value_field)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # MockDBConnector — in-memory DBConnectorProtocol for tests
 # ---------------------------------------------------------------------------
 
@@ -130,6 +153,22 @@ class MockDBConnector:
             mask = pc.invert(pc.is_in(existing[id_column], pa.array(list(new_ids))))
             kept = existing.filter(mask)
             self._tables[table_name] = pa.concat_tables([kept, records])
+
+    def validate_records(self, records: pa.Table) -> None:
+        """Reject any Arrow field or schema metadata — mirrors real SQL connectors."""
+        problem_fields = [f.name for f in records.schema if _field_has_metadata(f)]
+        has_schema_meta = bool(records.schema.metadata)
+        if problem_fields or has_schema_meta:
+            parts: list[str] = []
+            if problem_fields:
+                fields_str = ", ".join(repr(n) for n in problem_fields)
+                parts.append(f"fields with metadata: {fields_str}")
+            if has_schema_meta:
+                parts.append("schema-level metadata")
+            raise ValueError(
+                f"MockDBConnector does not preserve Arrow metadata "
+                f"({', '.join(parts)})."
+            )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -429,6 +468,32 @@ class TestAddRecordsRoundTrip:
         db.add_records(self.PATH, empty, record_id_column="__record_id")
         assert db.get_all_records(self.PATH) is None
 
+    def test_get_all_records_returns_none_when_table_has_no_rows(self, db):
+        """Returns None when the table exists but iter_batches yields nothing."""
+        empty = pa.table({
+            "__record_id": pa.array([], type=pa.large_binary()),
+            "v": pa.array([], type=pa.int64()),
+        })
+        db._connector._tables["results"] = empty
+        result = db.get_all_records(("results",))
+        assert result is None
+
+    def test_add_records_raises_if_record_id_column_not_in_table(self, db):
+        table = pa.table({
+            "id": pa.array([b"x"], type=pa.large_binary()),
+            "v": pa.array([1]),
+        })
+        with pytest.raises(ValueError, match="not found in table columns"):
+            db.add_records(self.PATH, table, record_id_column="nonexistent")
+
+    def test_add_records_raises_if_record_id_type_is_not_binary(self, db):
+        table = pa.table({
+            "id": pa.array(["x"], type=pa.large_string()),
+            "v": pa.array([1]),
+        })
+        with pytest.raises(TypeError, match="large_binary"):
+            db.add_records(self.PATH, table, record_id_column="id")
+
 
 # ===========================================================================
 # 7. Duplicate handling
@@ -471,6 +536,41 @@ class TestDuplicateHandling:
         assert result is not None
         assert result.num_rows == 1
         assert result.column("value").to_pylist() == [2]
+
+    def test_skip_duplicates_true_filters_pending_conflicts(self, db):
+        """When skip_duplicates=True, pending-conflict IDs are filtered out."""
+        PATH = ("dup_test", "v1")
+        # Add first record to pending
+        db.add_records(PATH, make_table(__record_id=[b"id1"], value=[1]), record_id_column="__record_id")
+        # Add again with skip_duplicates=True — id1 conflicts, id2 is new
+        db.add_records(
+            PATH,
+            make_table(__record_id=[b"id1", b"id2"], value=[99, 2]),
+            record_id_column="__record_id",
+            skip_duplicates=True,
+        )
+        db.flush()
+        result = db.get_all_records(PATH, record_id_column="__record_id")
+        assert result is not None
+        ids = set(result["__record_id"].to_pylist())
+        assert b"id1" in ids  # original preserved
+        assert b"id2" in ids  # new one added
+
+    def test_skip_duplicates_true_all_filtered_returns_early(self, db):
+        """When all records conflict with pending, skip_duplicates=True returns without adding."""
+        PATH = ("dup_test2", "v1")
+        db.add_records(PATH, make_table(__record_id=[b"id1"], value=[1]), record_id_column="__record_id")
+        # Add same id again — should be a no-op
+        db.add_records(
+            PATH,
+            make_table(__record_id=[b"id1"], value=[99]),
+            record_id_column="__record_id",
+            skip_duplicates=True,
+        )
+        db.flush()
+        result = db.get_all_records(PATH)
+        assert result is not None
+        assert result.column("value").to_pylist() == [1]  # original value unchanged
 
 
 # ===========================================================================
@@ -588,6 +688,14 @@ class TestHierarchicalPath:
     def test_path_component_with_null_byte_raises(self, db):
         with pytest.raises(ValueError, match="invalid character"):
             db.add_record(("bad\x00path",), b"id-1", make_table(v=[1]))
+
+    def test_empty_string_component_raises(self, db):
+        with pytest.raises(ValueError, match="invalid"):
+            db.add_record(("",), b"id-1", make_table(v=[1]))
+
+    def test_non_string_component_raises(self, db):
+        with pytest.raises(ValueError, match="invalid"):
+            db._validate_record_path(("valid", 123))  # type: ignore[arg-type]
 
 
 class TestPathToTableName:
@@ -791,19 +899,21 @@ class TestAtMethod:
 # ---------------------------------------------------------------------------
 
 
-class TestExtensionTypeWriteGuard:
-    """add_records() rejects extension-typed columns.
+class TestMetadataWriteGuard:
+    """add_records() rejects tables carrying any Arrow field or schema metadata.
 
-    SQL connectors do not preserve ``ARROW:extension:*`` field metadata.
-    Writing extension-typed columns would cause silent type loss on read.
-    The guard fires at write time so the problem is surfaced immediately
-    rather than discovered when reading back corrupted data.
+    SQL connectors do not preserve Arrow field or schema metadata across
+    read/write cycles. Writing tables with metadata would cause silent data
+    loss on read. The guard fires at write time so the problem is surfaced
+    immediately rather than discovered when reading back corrupted data.
 
-    Two representations are tested:
-    - In-memory ``pa.ExtensionType`` (the type is registered in this process).
-    - Metadata-only columns (plain storage type + ``ARROW:extension:name``
-      field metadata, as produced when reading Parquet from a process that
-      had the type registered).
+    Cases covered:
+    - In-memory ``pa.ExtensionType`` (type registered in this process).
+    - Extension metadata-only columns (plain storage type + field metadata).
+    - Arbitrary non-extension field metadata (any key-value pair).
+    - Schema-level metadata on the table.
+    - Tables with no metadata at all (must be accepted).
+    - Permissive connector (must accept tables with metadata).
     """
 
     @pytest.fixture
@@ -833,7 +943,7 @@ class TestExtensionTypeWriteGuard:
             table = pa.table(
                 {"__record_id": rid_array, "payload": ext_array},
             )
-            with pytest.raises(ValueError, match="extension"):
+            with pytest.raises(ValueError, match="metadata"):
                 db.add_records(
                     ("results",),
                     table,
@@ -842,7 +952,7 @@ class TestExtensionTypeWriteGuard:
         finally:
             pa.unregister_extension_type("test.dummy")
 
-    def test_rejects_metadata_only_extension_column(self, db):
+    def test_rejects_extension_field_metadata_column(self, db):
         """add_records raises ValueError when a column has ARROW:extension:name field metadata.
 
         This is the "unregistered read" representation: the column type is a plain
@@ -869,15 +979,95 @@ class TestExtensionTypeWriteGuard:
             },
             schema=schema,
         )
-        with pytest.raises(ValueError, match="extension"):
+        with pytest.raises(ValueError, match="metadata"):
             db.add_records(
                 ("results",),
                 table,
                 record_id_column="__record_id",
             )
 
+    def test_rejects_arbitrary_field_metadata(self, db):
+        """add_records raises ValueError for any non-empty field metadata."""
+        import pyarrow as pa
+
+        field_with_meta = pa.field(
+            "value",
+            pa.int64(),
+            metadata={b"unit": b"meters"},
+        )
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), field_with_meta])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "value": pa.array([42], type=pa.int64()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_rejects_schema_level_metadata(self, db):
+        """add_records raises ValueError when the schema itself has metadata."""
+        import pyarrow as pa
+
+        schema = pa.schema(
+            [
+                pa.field("__record_id", pa.large_binary()),
+                pa.field("value", pa.int64()),
+            ],
+            metadata={b"origin": b"test"},
+        )
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "value": pa.array([42], type=pa.int64()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_rejects_nested_struct_child_metadata(self, db):
+        """add_records raises ValueError when a nested struct child has metadata."""
+        import pyarrow as pa
+
+        # Outer field has no metadata, but the inner struct child does.
+        inner_with_meta = pa.field("val", pa.float64(), metadata={b"unit": b"m"})
+        struct_field = pa.field("s", pa.struct([inner_with_meta]))
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), struct_field])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "s": pa.array(
+                    [{"val": 1.0}],
+                    type=pa.struct([pa.field("val", pa.float64())]),
+                ),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_rejects_nested_list_value_field_metadata(self, db):
+        """add_records raises ValueError when a list's value field has metadata."""
+        import pyarrow as pa
+
+        # Outer list field has no metadata, but the value field does.
+        value_field = pa.field("item", pa.int32(), metadata={b"desc": b"count"})
+        list_field = pa.field("lst", pa.list_(value_field))
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), list_field])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "lst": pa.array([[1, 2]], type=pa.list_(pa.int32())),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
     def test_plain_column_not_rejected(self, db):
-        """add_records accepts tables with no extension-typed columns."""
+        """add_records accepts tables with no field or schema metadata."""
         import pyarrow as pa
 
         table = pa.table(
@@ -888,3 +1078,26 @@ class TestExtensionTypeWriteGuard:
         )
         # Should not raise
         db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_permissive_connector_allows_metadata(self):
+        """A connector with a permissive validate_records lets metadata through."""
+        class PermissiveConnector(MockDBConnector):
+            def validate_records(self, records: pa.Table) -> None:
+                pass  # no-op — this connector supports metadata
+
+        db = ConnectorArrowDatabase(PermissiveConnector())
+        ext_field = pa.field(
+            "payload",
+            pa.large_string(),
+            metadata={
+                b"ARROW:extension:name": b"orcapod.path",
+                b"ARROW:extension:metadata": b"",
+            },
+        )
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), ext_field])
+        table = pa.table(
+            {"__record_id": pa.array([b"id1"], type=pa.large_binary()),
+             "payload": pa.array(["/tmp/test"], type=pa.large_string())},
+            schema=schema,
+        )
+        db.add_records(("results",), table, record_id_column="__record_id")  # must not raise

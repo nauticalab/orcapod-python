@@ -16,6 +16,8 @@ Example::
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
 from collections.abc import Iterator
@@ -33,6 +35,231 @@ else:
     sp = LazyModule("spiral")
 
 logger = logging.getLogger(__name__)
+
+_ARROW_METADATA_KEY = "__arrow_metadata__"
+
+
+def _serialize_field_meta_tree(field: pa.Field) -> dict | None:
+    """Recursively build the metadata tree for a single ``pa.Field``.
+
+    Walks the field's type tree, collecting ``field.metadata`` at each level.
+    Covers struct inner fields, list/large_list/fixed_size_list value fields.
+    Map key/item fields are not recursed (``pa.map_`` constructor does not
+    accept field-level metadata on key/item).
+
+    Args:
+        field: The ``pa.Field`` to serialize.
+
+    Returns:
+        A dict with optional ``"meta"`` (base64-encoded k/v pairs) and
+        ``"children"`` (recursive trees for composite type children) keys,
+        or ``None`` if this field and all its descendants have no metadata.
+    """
+    import pyarrow as _pa  # noqa: PLC0415
+
+    node: dict = {}
+
+    if field.metadata:
+        node["meta"] = {
+            base64.b64encode(k).decode(): base64.b64encode(v).decode()
+            for k, v in field.metadata.items()
+        }
+
+    ftype = field.type
+    child_fields: list = []
+    if _pa.types.is_struct(ftype):
+        child_fields = [ftype.field(i) for i in range(ftype.num_fields)]
+    elif (
+        _pa.types.is_fixed_size_list(ftype)
+        or _pa.types.is_list(ftype)
+        or _pa.types.is_large_list(ftype)
+    ):
+        child_fields = [ftype.value_field]
+
+    if child_fields:
+        children: dict = {}
+        for child in child_fields:
+            child_tree = _serialize_field_meta_tree(child)
+            if child_tree is not None:
+                children[child.name] = child_tree
+        if children:
+            node["children"] = children
+
+    return node if node else None
+
+
+def _serialize_arrow_metadata(table: pa.Table) -> dict[str, bytes] | None:
+    """Encode all Arrow metadata from ``table`` into a single SpiralDB KV entry.
+
+    Serializes both schema-level (``table.schema.metadata``) and per-field
+    metadata (including nested struct/list field metadata) into a single JSON
+    blob stored under ``_ARROW_METADATA_KEY``.
+
+    Args:
+        table: The Arrow table whose metadata to encode.
+
+    Returns:
+        ``{"__arrow_metadata__": blob_bytes}`` if any metadata exists anywhere
+        in the schema, or ``None`` if the schema and all fields (at every depth)
+        have no metadata.
+    """
+    blob: dict = {}
+
+    if table.schema.metadata:
+        blob["schema"] = {
+            base64.b64encode(k).decode(): base64.b64encode(v).decode()
+            for k, v in table.schema.metadata.items()
+        }
+
+    field_trees: dict = {}
+    for field in table.schema:
+        tree = _serialize_field_meta_tree(field)
+        if tree is not None:
+            field_trees[field.name] = tree
+    if field_trees:
+        blob["fields"] = field_trees
+
+    if not blob:
+        return None
+
+    return {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
+
+
+def _load_arrow_metadata(
+    kv: dict[str, bytes],
+) -> tuple[dict[bytes, bytes] | None, dict[str, dict]]:
+    """Decode Arrow metadata from a SpiralDB table KV store.
+
+    Parses the JSON blob stored under ``_ARROW_METADATA_KEY`` and returns
+    the schema-level metadata and per-field metadata trees for the caller
+    to apply to a reconstructed Arrow schema.
+
+    Args:
+        kv: The dict returned by ``tbl.get_metadata()`` on a SpiralDB table
+            handle. May be empty or lack the ``_ARROW_METADATA_KEY`` key.
+
+    Returns:
+        A 2-tuple ``(schema_meta, field_trees)`` where:
+        - ``schema_meta`` is a ``dict[bytes, bytes]`` of schema-level metadata
+          (base64-decoded), or ``None`` if no schema metadata was stored.
+        - ``field_trees`` is a ``dict[str, dict]`` mapping top-level column
+          name to its raw metadata tree dict (as stored in the blob), or
+          ``{}`` if no field metadata was stored.
+    """
+    if _ARROW_METADATA_KEY not in kv:
+        return (None, {})
+
+    try:
+        blob = json.loads(kv[_ARROW_METADATA_KEY].decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning(
+            "Ignoring malformed Arrow metadata in SpiralDB KV store "
+            "(%s: %s); table will be read without metadata restoration.",
+            type(exc).__name__,
+            exc,
+        )
+        return (None, {})
+
+    schema_meta: dict[bytes, bytes] | None = None
+    if "schema" in blob:
+        schema_meta = {
+            base64.b64decode(k): base64.b64decode(v)
+            for k, v in blob["schema"].items()
+        }
+
+    field_trees: dict[str, dict] = blob.get("fields", {})
+
+    return (schema_meta, field_trees)
+
+
+def _restore_field(field: pa.Field, stored: dict | None) -> tuple[pa.Field, bool]:
+    """Recursively restore a field's metadata and rebuild its nested type.
+
+    Walks the stored metadata tree in parallel with the field's type tree,
+    reattaching ``field.metadata`` at every level and reconstructing composite
+    types bottom-up when any descendant has metadata to restore.
+
+    Handles: struct inner fields, list/large_list/fixed_size_list value fields.
+    Map key/item fields are not recursed (consistent with serialization).
+
+    Args:
+        field: The ``pa.Field`` from the Arrow schema returned by SpiralDB.
+        stored: The metadata tree dict for this field (as stored in the blob),
+            or ``None`` if no metadata was stored for this field.
+
+    Returns:
+        A 2-tuple ``(restored_field, changed)`` where:
+        - ``restored_field`` is the field with metadata restored (new object
+          if any change was made, original object if not).
+        - ``changed`` is True if any metadata or nested type was modified.
+    """
+    import pyarrow as _pa  # noqa: PLC0415
+
+    if stored is None or stored == {}:
+        return (field, False)
+
+    # Decode own metadata from stored tree if present
+    new_meta: dict[bytes, bytes] | None = None
+    has_new_meta = False
+    if "meta" in stored:
+        new_meta = {
+            base64.b64decode(k): base64.b64decode(v)
+            for k, v in stored["meta"].items()
+        }
+        has_new_meta = True
+    else:
+        new_meta = field.metadata
+
+    ftype = field.type
+    children = stored.get("children", {})
+    type_changed = False
+    new_type = ftype
+
+    if _pa.types.is_struct(ftype):
+        restored_children = []
+        any_child_changed = False
+        for i in range(ftype.num_fields):
+            child = ftype.field(i)
+            child_stored = children.get(child.name)
+            restored_child, child_changed = _restore_field(child, child_stored)
+            restored_children.append(restored_child)
+            if child_changed:
+                any_child_changed = True
+        if any_child_changed:
+            new_type = _pa.struct(restored_children)
+            type_changed = True
+    elif _pa.types.is_fixed_size_list(ftype):
+        value_field = ftype.value_field
+        child_stored = children.get(value_field.name)
+        restored_vf, child_changed = _restore_field(value_field, child_stored)
+        if child_changed:
+            new_type = _pa.list_(restored_vf, ftype.list_size)
+            type_changed = True
+    elif _pa.types.is_list(ftype):
+        value_field = ftype.value_field
+        child_stored = children.get(value_field.name)
+        restored_vf, child_changed = _restore_field(value_field, child_stored)
+        if child_changed:
+            new_type = _pa.list_(restored_vf)
+            type_changed = True
+    elif _pa.types.is_large_list(ftype):
+        value_field = ftype.value_field
+        child_stored = children.get(value_field.name)
+        restored_vf, child_changed = _restore_field(value_field, child_stored)
+        if child_changed:
+            new_type = _pa.large_list(restored_vf)
+            type_changed = True
+
+    meta_changed = has_new_meta and new_meta != field.metadata
+    changed = meta_changed or type_changed
+
+    if not changed:
+        return (field, False)
+
+    if type_changed:
+        return (_pa.field(field.name, new_type, field.nullable, new_meta), True)
+    else:
+        return (field.with_metadata(new_meta), True)
 
 
 # ---------------------------------------------------------------------------
@@ -206,12 +433,14 @@ class SpiralDBConnector:
                 non-default value is passed.
 
         Yields:
-            Arrow RecordBatch objects, with ``pa.string()`` normalized to
-            ``pa.large_string()`` and ``pa.binary()`` to ``pa.large_binary()``.
-            This matches the types reported by ``get_column_info`` and those
-            used by ``ConnectorArrowDatabase`` for pending records, preventing
-            schema mismatches in ``pa.concat_tables`` calls. Yields nothing for
-            an empty table.
+            Arrow RecordBatch objects. Each batch has:
+            - ``pa.string()`` normalized to ``pa.large_string()`` and
+              ``pa.binary()`` to ``pa.large_binary()``.
+            - Field metadata (including nested struct/list field metadata)
+              restored from the SpiralDB native KV store, if any was written
+              by ``upsert_records``.
+            - Schema-level metadata restored from the KV store.
+            Yields nothing for an empty table.
         """
         import pyarrow as _pa  # noqa: PLC0415
 
@@ -231,27 +460,41 @@ class SpiralDBConnector:
             )
         table_name = _parse_table_name(query)
         tbl = self._project.table(self._table_id(table_name))
+        schema_meta, field_trees = _load_arrow_metadata(tbl.get_metadata())
         reader = self._spiral.scan(tbl.select()).to_record_batches()
         for batch in reader:
             schema = batch.schema
             new_fields = []
-            needs_cast = False
+            needs_rebuild = False
             for field in schema:
-                ftype = field.type
-                if ftype == _pa.string():
-                    new_fields.append(
-                        _pa.field(field.name, _pa.large_string(), field.nullable, field.metadata)
+                # Recursively restore field metadata (including nested struct/list).
+                restored_field, field_changed = _restore_field(field, field_trees.get(field.name))
+                # Apply large_string / large_binary normalization on the top-level type.
+                if restored_field.type == _pa.string():
+                    restored_field = _pa.field(
+                        restored_field.name,
+                        _pa.large_string(),
+                        restored_field.nullable,
+                        restored_field.metadata,
                     )
-                    needs_cast = True
-                elif ftype == _pa.binary():
-                    new_fields.append(
-                        _pa.field(field.name, _pa.large_binary(), field.nullable, field.metadata)
+                    field_changed = True
+                elif restored_field.type == _pa.binary():
+                    restored_field = _pa.field(
+                        restored_field.name,
+                        _pa.large_binary(),
+                        restored_field.nullable,
+                        restored_field.metadata,
                     )
-                    needs_cast = True
-                else:
-                    new_fields.append(field)
-            if needs_cast:
-                target_schema = _pa.schema(new_fields, metadata=schema.metadata)
+                    field_changed = True
+                new_fields.append(restored_field)
+                needs_rebuild = needs_rebuild or field_changed
+
+            restored_schema_meta = schema_meta if schema_meta is not None else schema.metadata
+            if restored_schema_meta != schema.metadata:
+                needs_rebuild = True
+
+            if needs_rebuild:
+                target_schema = _pa.schema(new_fields, metadata=restored_schema_meta)
                 batch = batch.cast(target_schema)
             yield batch
 
@@ -365,9 +608,13 @@ class SpiralDBConnector:
                 f"table key schema {pk_cols}."
             )
 
+        meta_kv = _serialize_arrow_metadata(records)
+
         if not skip_existing:
             # Always upsert-by-key: existing rows overwritten, novel rows inserted.
             tbl.write(records)
+            if meta_kv is not None:
+                tbl.set_metadata(meta_kv)
             return
 
         # skip_existing=True: full scan → client-side key filter → write novel rows.
@@ -386,6 +633,11 @@ class SpiralDBConnector:
         novel = records.filter(mask)
         if len(novel) > 0:
             tbl.write(novel)
+            if meta_kv is not None:
+                tbl.set_metadata(meta_kv)
+
+    def validate_records(self, records: pa.Table) -> None:
+        """No-op: ``SpiralDBConnector`` preserves Arrow field metadata via the native KV store."""
 
     def close(self) -> None:
         """Mark this connector as closed. Idempotent. No network teardown needed."""
