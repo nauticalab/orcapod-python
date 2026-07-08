@@ -1181,7 +1181,7 @@ class FunctionJobNode(FunctionNodeBase):
         """Core compute + persist + cache.
 
         Used by ``execute_data`` and ``execute``.
-        Stores result in ``_cached_output_datas`` keyed by entry_id.
+        Stores result in ``_cached_output_datas`` keyed by base_entry_id.
         Exceptions propagate to the caller — no error handling here.
 
         When ``node_config.is_result_ephemeral=True``:
@@ -2074,15 +2074,15 @@ class FunctionJobNode(FunctionNodeBase):
                 if loaded:
                     self._cached_output_table = None
                     self._cached_content_hash_column = None
-                cached_by_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
+                cached_by_base_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
 
                 # Phase 2: drive output from input channel — cached or compute
                 async def _process_one_db(
                     tag: TagProtocol, data: DataProtocol
                 ) -> None:
-                    entry_id = self.compute_base_entry_id(tag, data)
-                    if entry_id in cached_by_entry_id:
-                        tag_out, result_data = cached_by_entry_id[entry_id]
+                    base_entry_id = self.compute_base_entry_id(tag, data)
+                    if base_entry_id in cached_by_base_entry_id:
+                        tag_out, result_data = cached_by_base_entry_id[base_entry_id]
                         ctx_obs.on_data_start(node_label, tag, data)
                         ctx_obs.on_data_end(
                             node_label, tag, data, result_data, cached=True
