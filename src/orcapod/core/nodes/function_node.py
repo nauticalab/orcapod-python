@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from abc import abstractmethod
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
@@ -391,6 +392,19 @@ class FunctionNodeBase(StreamBase):
             f"input_stream={self._input_stream!r})"
         )
 
+    @abstractmethod
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """Assign or remove the ephemeral result store for this node.
+
+        ``FunctionJobNode`` overrides this with a real implementation that routes
+        new computation results to ``store`` instead of the persistent result
+        database. ``FunctionNode`` (blueprint) provides a no-op override.
+
+        Args:
+            store: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
+                to detach.
+        """
+
 
 # ---------------------------------------------------------------------------
 # FunctionNode — thin blueprint (no DB)
@@ -428,6 +442,9 @@ class FunctionNode(FunctionNodeBase):
         # Blueprint nodes have no in-memory output table cache
         self._cached_output_table: "pa.Table | None" = None
         self._cached_content_hash_column: "pa.Array | None" = None
+
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """No-op — blueprint nodes carry no database references."""
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -684,6 +701,7 @@ class FunctionJobNode(FunctionNodeBase):
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
+        ephemeral_database: ArrowDatabaseProtocol | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         super().__init__(
@@ -706,11 +724,15 @@ class FunctionJobNode(FunctionNodeBase):
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cached_function_pod: CachedFunctionPod | None = None
 
-        if pipeline_database is not None:
-            self.attach_databases(
-                pipeline_database=pipeline_database,
-                result_database=result_database,
-            )
+        # Ephemeral result store (None until set_ephemeral_store() is called by the pipeline)
+        self.ephemeral_result_store: "ArrowDatabaseProtocol | None" = None
+        self._ephemeral_cached_pod: CachedFunctionPod | None = None
+
+        self.attach_databases(
+            pipeline_database=pipeline_database,
+            result_database=result_database,
+            ephemeral_database=ephemeral_database,
+        )
 
     # ------------------------------------------------------------------
     # attach_databases
@@ -718,8 +740,9 @@ class FunctionJobNode(FunctionNodeBase):
 
     def attach_databases(
         self,
-        pipeline_database: ArrowDatabaseProtocol,
+        pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
+        ephemeral_database: ArrowDatabaseProtocol | None = None,
     ) -> None:
         """Attach databases for persistent caching and pipeline records.
 
@@ -730,42 +753,58 @@ class FunctionJobNode(FunctionNodeBase):
         using the record path stored in the descriptor so that
         ``get_all_records()`` and ``_load_cached_entries()`` still work.
 
+        When ``pipeline_database`` is ``None``, the persistent-DB portion of
+        setup is skipped entirely — no ``CachedFunctionPod`` is created and
+        ``_pipeline_database`` is left as ``None``.  Only
+        ``ephemeral_database`` wiring proceeds in that case.
+
         The databases are expected to be pre-scoped by the pipeline (via
         ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
         prefix is needed here.
 
         Args:
-            pipeline_database: Database for pipeline records.
+            pipeline_database: Database for pipeline records. Pass ``None``
+                to skip persistent-DB setup (ephemeral-only or deferred
+                wiring).
             result_database: Database for cached results. Defaults to
-                ``pipeline_database.at("_result")``.
+                ``pipeline_database.at("_result")`` when ``pipeline_database``
+                is not ``None``.
+            ephemeral_database: Optional ephemeral store to attach immediately
+                via ``set_ephemeral_store()``. Equivalent to calling
+                ``set_ephemeral_store(ephemeral_database)`` after
+                ``attach_databases()``.
         """
-        if result_database is None:
-            # Default result database is pipeline_database scoped to "_result"
-            # so that results are stored separately from pipeline-level records.
-            result_database = pipeline_database.at("_result")
+        if pipeline_database is not None:
+            if result_database is None:
+                # Default result database is pipeline_database scoped to "_result"
+                # so that results are stored separately from pipeline-level records.
+                result_database = pipeline_database.at("_result")
 
-        if self._function_pod is not None:
-            # Normal path: wrap in CachedFunctionPod for compute + cache.
-            self._cached_function_pod = CachedFunctionPod(
-                self._function_pod,
-                result_database=result_database,
-            )
-        else:
-            # Read-only stub path (loaded job without a live function pod).
-            # Use the record path stored from the descriptor so that
-            # get_all_records() / _load_cached_entries() can query the DB.
-            self._cached_function_pod = _ResultDatabaseReader(  # type: ignore[assignment]
-                result_database=result_database,
-                record_path=self._stored_result_record_path,
-            )
+            if self._function_pod is not None:
+                # Normal path: wrap in CachedFunctionPod for compute + cache.
+                self._cached_function_pod = CachedFunctionPod(
+                    self._function_pod,
+                    result_database=result_database,
+                )
+            else:
+                # Read-only stub path (loaded job without a live function pod).
+                # Use the record path stored from the descriptor so that
+                # get_all_records() / _load_cached_entries() can query the DB.
+                self._cached_function_pod = _ResultDatabaseReader(  # type: ignore[assignment]
+                    result_database=result_database,
+                    record_path=self._stored_result_record_path,
+                )
 
-        self._pipeline_database = pipeline_database
+            self._pipeline_database = pipeline_database
 
-        # Clear all caches
-        self._node_identity_path_cache = None
-        self.clear_cache()
-        self._invalidate_content_hash_cache()
-        self._invalidate_pipeline_hash_cache()
+            # Clear all caches
+            self._node_identity_path_cache = None
+            self.clear_cache()
+            self._invalidate_content_hash_cache()
+            self._invalidate_pipeline_hash_cache()
+
+        if ephemeral_database is not None:
+            self.set_ephemeral_store(ephemeral_database)
 
     # ------------------------------------------------------------------
     # from_descriptor — read-only stub for loaded jobs
@@ -921,6 +960,33 @@ class FunctionJobNode(FunctionNodeBase):
         self._cached_output_datas.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
+
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """Assign or remove the ephemeral result store.
+
+        When *store* is not ``None``, creates a ``CachedFunctionPod`` backed by
+        *store* so that ephemeral writes use the same format as persistent writes.
+        When *store* is ``None``, clears both the store and the ephemeral pod.
+
+        Note:
+            For deserialized read-only nodes where ``_function_pod`` is ``None``,
+            ``ephemeral_result_store`` is assigned but ``_ephemeral_cached_pod``
+            remains ``None``. Such nodes cannot compute new results anyway, so
+            ``_process_data_internal`` must guard against this by checking
+            ``_ephemeral_cached_pod is not None`` before attempting ephemeral writes.
+
+        Args:
+            store: The ``ArrowDatabaseProtocol`` to use for ephemeral result
+                storage, or ``None`` to detach and revert to persistent-only writes.
+        """
+        self.ephemeral_result_store = store
+        if store is not None and self._function_pod is not None:
+            self._ephemeral_cached_pod = CachedFunctionPod(
+                self._function_pod,
+                result_database=store,
+            )
+        else:
+            self._ephemeral_cached_pod = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -1109,14 +1175,56 @@ class FunctionJobNode(FunctionNodeBase):
         Stores result in ``_cached_output_datas`` keyed by entry_id.
         Exceptions propagate to the caller — no error handling here.
 
+        When ``node_config.is_result_ephemeral=True``:
+        - Uses ``_ephemeral_cached_pod`` for both compute and storage.
+        - Raises ``RuntimeError`` if no ephemeral store has been set.
+        - Writes the pipeline record with ``is_ephemeral=True`` and
+          ``skip_cache_lookup=True`` (append strategy for recompute-after-miss).
+
+        When ``node_config.is_result_ephemeral=False`` (default):
+        - Uses ``_cached_function_pod`` (persistent DB) or raw function pod.
+        - Writes the pipeline record with ``skip_cache_lookup=True`` (prevents
+          infinite miss cycle when a stale pipeline entry exists).
+
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
-        if self._cached_function_pod is not None:
+        node_config = (
+            self._function_pod.node_config if self._function_pod is not None else None
+        )
+        ephemeral_result = (
+            node_config.is_result_ephemeral if node_config is not None else False
+        )
+
+        if ephemeral_result:
+            if self._ephemeral_cached_pod is None:
+                raise RuntimeError(
+                    f"FunctionJobNode '{self.label}' has is_result_ephemeral=True but no "
+                    "ephemeral store has been assigned. Call set_ephemeral_store() with "
+                    "an ArrowDatabaseProtocol before executing this node."
+                )
+            tag_out, output_data = self._ephemeral_cached_pod.process_data(
+                tag, data, logger=logger
+            )
+            if output_data is not None:
+                result_computed = bool(
+                    output_data.get_meta_value(
+                        self._ephemeral_cached_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                if self._pipeline_database is not None:
+                    self.add_pipeline_record(
+                        tag,
+                        data,
+                        data_record_id=output_data.datagram_uuid,
+                        computed=result_computed,
+                        skip_cache_lookup=True,
+                        is_ephemeral=True,
+                    )
+        elif self._cached_function_pod is not None:
             tag_out, output_data = self._cached_function_pod.process_data(
                 tag, data, logger=logger
             )
-
             if output_data is not None:
                 result_computed = bool(
                     output_data.get_meta_value(
@@ -1128,6 +1236,7 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
+                    skip_cache_lookup=True,
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
@@ -1192,19 +1301,49 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``_process_data_internal``.
 
-        Computes via async path, writes pipeline provenance, caches by entry_id.
-        Exceptions propagate.
+        Mirrors the sync ephemeral/persistent branch logic using async variants
+        of ``process_data``. See ``_process_data_internal`` for full behaviour
+        documentation.
 
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
-        if self._cached_function_pod is not None:
-            tag_out, output_data = (
-                await self._cached_function_pod.async_process_data(
-                    tag, data, logger=logger
-                )
-            )
+        node_config = (
+            self._function_pod.node_config if self._function_pod is not None else None
+        )
+        ephemeral_result = (
+            node_config.is_result_ephemeral if node_config is not None else False
+        )
 
+        if ephemeral_result:
+            if self._ephemeral_cached_pod is None:
+                raise RuntimeError(
+                    f"FunctionJobNode '{self.label}' has is_result_ephemeral=True but no "
+                    "ephemeral store has been assigned. Call set_ephemeral_store() with "
+                    "an ArrowDatabaseProtocol before executing this node."
+                )
+            tag_out, output_data = await self._ephemeral_cached_pod.async_process_data(
+                tag, data, logger=logger
+            )
+            if output_data is not None:
+                result_computed = bool(
+                    output_data.get_meta_value(
+                        self._ephemeral_cached_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                if self._pipeline_database is not None:
+                    self.add_pipeline_record(
+                        tag,
+                        data,
+                        data_record_id=output_data.datagram_uuid,
+                        computed=result_computed,
+                        skip_cache_lookup=True,
+                        is_ephemeral=True,
+                    )
+        elif self._cached_function_pod is not None:
+            tag_out, output_data = await self._cached_function_pod.async_process_data(
+                tag, data, logger=logger
+            )
             if output_data is not None:
                 result_computed = bool(
                     output_data.get_meta_value(
@@ -1216,12 +1355,11 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
+                    skip_cache_lookup=True,
                 )
         else:
-            tag_out, output_data = (
-                await self._function_pod.async_process_data(
-                    tag, data, logger=logger
-                )
+            tag_out, output_data = await self._function_pod.async_process_data(
+                tag, data, logger=logger
             )
 
         # Store by entry_id and invalidate derived caches
@@ -1271,6 +1409,7 @@ class FunctionJobNode(FunctionNodeBase):
         data_record_id: uuid.UUID,
         computed: bool,
         skip_cache_lookup: bool = False,
+        is_ephemeral: bool = False,
     ) -> None:
         """Add a pipeline record to the database for a processed data.
 
@@ -1278,6 +1417,7 @@ class FunctionJobNode(FunctionNodeBase):
         - Tag columns (including system tags)
         - All source columns of the input data (provenance, not data)
         - Output data record ID (for joining with result records)
+        - Whether the result is stored in the ephemeral store
         - Input data data context key
         - Whether the result was freshly computed or cached
         """
@@ -1322,6 +1462,9 @@ class FunctionJobNode(FunctionNodeBase):
                 f"{constants.META_PREFIX}computed": pa.array(
                     [computed], type=pa.bool_()
                 ),
+                constants.IS_EPHEMERAL_COL: pa.array(
+                    [is_ephemeral], type=pa.bool_()
+                ),
             }
         )
 
@@ -1336,7 +1479,7 @@ class FunctionJobNode(FunctionNodeBase):
             self.node_identity_path,
             entry_id,
             combined_record,
-            skip_duplicates=False,
+            skip_duplicates=skip_cache_lookup,
         )
 
     # ------------------------------------------------------------------
@@ -1438,21 +1581,19 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         entry_ids: list[bytes] | None = None,
     ) -> _JoinedRecords | None:
-        """Internal primitive: fetch both DBs, content-hash-filter, and inner-join.
+        """Internal primitive: fetch both DBs and inner-join, supporting two stores.
 
-        Fetches ``taginfo`` from the pipeline database with
-        ``_PIPELINE_ENTRY_ID_COL`` as the row-key column, fetches ``results``
-        from the result database, applies ``_filter_by_content_hash``, and
-        inner-joins the two tables on ``DATA_RECORD_ID`` via polars.
+        Fetches ``taginfo`` from the pipeline database, partitions rows by
+        ``IS_EPHEMERAL_COL`` into persistent and ephemeral groups, performs two
+        independent inner joins (one per store), merges with persistent priority
+        via an anti-join, and returns the combined result.
 
-        If ``entry_ids`` is provided, the polars DataFrame is filtered to
-        matching ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow,
-        avoiding a round-trip.
+        Persistent miss rows (tag entry with no matching result DB row) emit a
+        WARNING-level log. Ephemeral miss rows (cross-session miss) are silently
+        dropped.
 
-        Does NOT apply ``ColumnConfig`` column dropping (that is
-        ``get_all_records``'s job), convert rows to ``(tag, data)`` tuples
-        (that is ``_load_cached_entries``'s job), or touch the in-memory cache
-        (that is ``get_cached_results``'s job).
+        If ``entry_ids`` is provided, the result is filtered to matching
+        ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow.
 
         Args:
             entry_ids: If given, return only rows whose
@@ -1462,10 +1603,9 @@ class FunctionJobNode(FunctionNodeBase):
         Returns:
             A ``_JoinedRecords`` whose ``table`` always includes a
             ``_PIPELINE_ENTRY_ID_COL`` column, or ``None`` when either
-            database is absent or either DB fetch returns ``None``. A 0-row
-            table is returned (not ``None``) when both fetches succeed but the
-            join finds no matching rows — callers check ``num_rows``
-            themselves.
+            the pipeline database or cached function pod is absent. A 0-row
+            table (not ``None``) is returned when both fetches succeed but
+            no matching rows exist — callers check ``num_rows`` themselves.
         """
         if self._cached_function_pod is None or self._pipeline_database is None:
             return None
@@ -1474,32 +1614,114 @@ class FunctionJobNode(FunctionNodeBase):
             self.node_identity_path,
             record_id_column=_PIPELINE_ENTRY_ID_COL,
         )
-        results = self._cached_function_pod.result_database.get_all_records(
-            self._cached_function_pod.record_path,
-            record_id_column=constants.DATA_RECORD_ID,
-        )
 
-        if taginfo is None or results is None:
+        if taginfo is None:
             return None
 
         taginfo_columns = tuple(taginfo.column_names)
         taginfo = self._filter_by_content_hash(taginfo)
         taginfo_schema = taginfo.schema
-        results_schema = results.schema
 
-        joined_df = pl.DataFrame(taginfo).join(
-            pl.DataFrame(results),
-            on=constants.DATA_RECORD_ID,
-            how="inner",
-        )
+        is_ephemeral_col = constants.IS_EPHEMERAL_COL
+        taginfo_df = pl.DataFrame(taginfo)
+
+        # Partition by IS_EPHEMERAL_COL (backward-compat: missing col → all persistent)
+        if is_ephemeral_col in taginfo.column_names:
+            persistent_taginfo_df = taginfo_df.filter(
+                ~pl.col(is_ephemeral_col).fill_null(False)
+            )
+            ephemeral_taginfo_df = taginfo_df.filter(
+                pl.col(is_ephemeral_col).fill_null(False)
+            )
+        else:
+            persistent_taginfo_df = taginfo_df
+            ephemeral_taginfo_df = pl.DataFrame()
+
+        # ------------------------------------------------------------------
+        # Persistent join
+        # ------------------------------------------------------------------
+        results_schema = None
+        persistent_df = pl.DataFrame()
+        if persistent_taginfo_df.height > 0:
+            results = self._cached_function_pod.result_database.get_all_records(
+                self._cached_function_pod.record_path,
+                record_id_column=constants.DATA_RECORD_ID,
+            )
+            if results is None:
+                # Tag table has persistent entries but result DB is empty — data loss
+                logger.warning(
+                    "%d pipeline DB entries have no match in persistent result DB "
+                    "— data may have been deleted externally. "
+                    "These inputs will be recomputed.",
+                    persistent_taginfo_df.height,
+                )
+            else:
+                results_schema = results.schema
+                full_persistent_df = persistent_taginfo_df.join(
+                    pl.DataFrame(results),
+                    on=constants.DATA_RECORD_ID,
+                    how="inner",
+                )
+                # Warn about persistent tag rows that found no match in the result DB
+                missing_count = persistent_taginfo_df.height - full_persistent_df.height
+                if missing_count > 0:
+                    logger.warning(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— data may have been deleted externally. "
+                        "These inputs will be recomputed.",
+                        missing_count,
+                    )
+                persistent_df = full_persistent_df
+
+        # ------------------------------------------------------------------
+        # Ephemeral join
+        # ------------------------------------------------------------------
+        ephemeral_df = pl.DataFrame()
+        if ephemeral_taginfo_df.height > 0 and self._ephemeral_cached_pod is not None:
+            eph_results = self._ephemeral_cached_pod.result_database.get_all_records(
+                self._ephemeral_cached_pod.record_path,
+                record_id_column=constants.DATA_RECORD_ID,
+            )
+            if eph_results is not None:
+                if results_schema is None:
+                    results_schema = eph_results.schema
+                ephemeral_df = ephemeral_taginfo_df.join(
+                    pl.DataFrame(eph_results),
+                    on=constants.DATA_RECORD_ID,
+                    how="inner",
+                )
+            # Cross-session miss: eph_results is None → silently drop ephemeral entries
+
+        # ------------------------------------------------------------------
+        # Merge with persistent priority (anti-join + concat)
+        # ------------------------------------------------------------------
+        if ephemeral_df.height > 0 and persistent_df.height > 0:
+            ephemeral_only_df = ephemeral_df.join(
+                persistent_df.select([_PIPELINE_ENTRY_ID_COL]),
+                on=_PIPELINE_ENTRY_ID_COL,
+                how="anti",
+            )
+            merged_df = pl.concat([persistent_df, ephemeral_only_df], how="diagonal")
+        elif ephemeral_df.height > 0:
+            merged_df = ephemeral_df
+        elif persistent_df.height > 0:
+            merged_df = persistent_df
+        else:
+            # No results found in either store — return empty table preserving taginfo schema
+            empty_table = taginfo.slice(0, 0)
+            return _JoinedRecords(table=empty_table, taginfo_columns=taginfo_columns)
+
+        # Apply entry_id filter if requested
         if entry_ids is not None:
-            joined_df = joined_df.filter(
+            merged_df = merged_df.filter(
                 pl.col(_PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
             )
-        joined = joined_df.to_arrow()
-        joined = arrow_utils.restore_schema_nullability(
-            joined, taginfo_schema, results_schema
-        )
+
+        joined = merged_df.to_arrow()
+        if results_schema is not None:
+            joined = arrow_utils.restore_schema_nullability(
+                joined, taginfo_schema, results_schema
+            )
         return _JoinedRecords(table=joined, taginfo_columns=taginfo_columns)
 
     def _load_cached_entries(
