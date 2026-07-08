@@ -549,6 +549,63 @@ class TestEphemeralWritePath:
         node3.execute(stream)
         assert call_count["n"] == 2  # NOT recomputed
 
+    def test_iter_data_serves_result_after_cross_session_recompute(self):
+        """After a cross-session ephemeral miss triggers recompute via execute(),
+        iter_data() serves the fresh result without triggering additional computation.
+
+        Covers ITL-513's explicit success criterion: "new test covers the stale-entry
+        recompute case across iter_data calls." With iter_data() strictly read-only
+        (since ENG-379), the test verifies that:
+        - the recomputed result is accessible via iter_data() after execute()
+        - repeated iter_data() calls do not trigger further recomputation
+        """
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+
+        # Session 1: compute with ephemeral store 1 → pipeline DB gets index-0 record
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        cfg = NodeConfig(is_result_ephemeral=True)
+        pod = FunctionPod(pf, node_config=cfg)
+        node1 = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node1.set_ephemeral_store(InMemoryArrowDatabase())
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        # Session 2: fresh ephemeral store → cross-session miss → recompute → index-1 record written
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        pod2 = FunctionPod(pf2, node_config=cfg)
+        ephemeral2 = InMemoryArrowDatabase()
+        node2 = FunctionJobNode(
+            function_pod=pod2,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+        )
+        node2.set_ephemeral_store(ephemeral2)
+        node2.execute(stream)
+        assert call_count["n"] == 2  # recomputed once due to cross-session miss
+
+        # iter_data() must serve the recomputed result — no additional computation
+        results = list(node2.iter_data())
+        assert len(results) == 1
+        assert results[0][1].as_dict()["result"] == 20
+        assert call_count["n"] == 2  # NOT recomputed again
+
+        # A second iter_data() call must also return the same result without recomputing
+        results2 = list(node2.iter_data())
+        assert len(results2) == 1
+        assert results2[0][1].as_dict()["result"] == 20
+        assert call_count["n"] == 2  # still NOT recomputed
+
 
 # ---------------------------------------------------------------------------
 # Task 9 tests: pipeline propagation
