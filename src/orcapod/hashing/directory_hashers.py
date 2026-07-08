@@ -10,7 +10,7 @@ from collections.abc import Callable
 
 from upath import UPath
 
-from orcapod.hashing.hash_utils import hash_file
+from orcapod.protocols.hashing_protocols import FileContentHasherProtocol
 from orcapod.types import ContentHash, PathLike
 
 logger = logging.getLogger(__name__)
@@ -45,15 +45,15 @@ def _hash_dir(
     path: UPath,
     filter_fn: Callable[[UPath], bool] | None,
     algorithm: str,
-    buffer_size: int,
+    file_hasher: FileContentHasherProtocol,
 ) -> bytes:
     """Recursively compute the Merkle hash of a directory.
 
     Args:
         path: The directory to hash.
         filter_fn: Optional filter callable; return ``True`` to exclude an entry.
-        algorithm: Hash algorithm name used for all structural and file-leaf hashing.
-        buffer_size: Read buffer size in bytes for file content.
+        algorithm: Hash algorithm name used for structural (entry and node) hashing.
+        file_hasher: Hasher used to compute ``ContentHash`` for each file leaf.
 
     Returns:
         The raw digest bytes for this directory node (length depends on the algorithm).
@@ -71,10 +71,10 @@ def _hash_dir(
             target = os.readlink(child)
             entry_bytes = b"symlink\x00" + name_bytes + b"\x00" + target.encode("utf-8")
         elif child.is_file():
-            file_hash = hash_file(child, algorithm=algorithm, buffer_size=buffer_size)
+            file_hash = file_hasher.hash_file(child)
             entry_bytes = b"file\x00" + name_bytes + b"\x00" + file_hash.digest
         elif child.is_dir():
-            subdir_digest = _hash_dir(child, filter_fn, algorithm, buffer_size)
+            subdir_digest = _hash_dir(child, filter_fn, algorithm, file_hasher)
             entry_bytes = b"dir\x00" + name_bytes + b"\x00" + subdir_digest
         else:
             # Special file (socket, device node, named pipe) — skip silently.
@@ -98,22 +98,37 @@ class BasicDirectoryHasher:
     """Recursive Merkle tree hasher for directory trees.
 
     Computes a stable content hash of a directory tree using a recursive Merkle scheme:
-    file leaves hash their content, subdirectory nodes hash their sorted children, and
-    the root hash propagates the entire tree. Symlinks are recorded as ``(symlink, target)``
-    without dereferencing — cycle-safe and deterministic.
+    file leaves hash their content via the injected ``file_hasher``, subdirectory nodes
+    hash their sorted children, and the root hash propagates the entire tree. Symlinks
+    are recorded as ``(symlink, target)`` without dereferencing — cycle-safe and
+    deterministic.
+
+    Pass a ``CachedFileHasher`` as ``file_hasher`` to avoid re-reading unchanged files
+    on repeated calls (e.g. across pipeline runs).
 
     Args:
-        algorithm: Hash algorithm for all structural and file-leaf hashing. Defaults to ``"sha256"``.
-        buffer_size: Read buffer size in bytes for file content. Defaults to 65536.
+        file_hasher: Hasher used to compute the ``ContentHash`` for each file leaf in
+            the tree. Any object with a ``hash_file(path) -> ContentHash`` method.
+        algorithm: Hash algorithm for structural (Merkle entry and node) hashing.
+            Defaults to ``"sha256"``.
+        buffer_size: Retained for context round-trip use. File content buffer sizing
+            is owned by ``file_hasher``. Defaults to 65536.
 
     Example:
-        >>> hasher = BasicDirectoryHasher()
+        >>> from orcapod.hashing.file_hashers import FileHasher
+        >>> hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         >>> result = hasher.hash_directory("/tmp/mydir")
         >>> result.method
         'merkle_sha256'
     """
 
-    def __init__(self, algorithm: str = "sha256", buffer_size: int = 65536) -> None:
+    def __init__(
+        self,
+        file_hasher: FileContentHasherProtocol,
+        algorithm: str = "sha256",
+        buffer_size: int = 65536,
+    ) -> None:
+        self.file_hasher = file_hasher
         self.algorithm = algorithm
         self.buffer_size = buffer_size
 
@@ -140,5 +155,5 @@ class BasicDirectoryHasher:
         """
         path = UPath(directory_path)
         filter_fn = _compile_ignore(ignore)
-        digest = _hash_dir(path, filter_fn, self.algorithm, self.buffer_size)
+        digest = _hash_dir(path, filter_fn, self.algorithm, self.file_hasher)
         return ContentHash(method=f"merkle_{self.algorithm}", digest=digest)
