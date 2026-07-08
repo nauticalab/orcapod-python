@@ -1130,7 +1130,7 @@ class FunctionJobNode(FunctionNodeBase):
         # that the per-data cache-hit check below uses _cached_output_datas
         # directly — which includes None-output entries (function returned None)
         # and prevents spurious recomputation of already-processed data.
-        self.get_cached_results(entry_ids=entry_ids)
+        self.get_cached_results(base_entry_ids=entry_ids)
 
         output: list[tuple[TagProtocol, DataProtocol]] = []
         for tag, data, entry_id in upstream_entries:
@@ -1261,32 +1261,32 @@ class FunctionJobNode(FunctionNodeBase):
         return tag_out, output_data
 
     def get_cached_results(
-        self, entry_ids: list[bytes]
+        self, base_entry_ids: list[bytes]
     ) -> dict[bytes, tuple[TagProtocol, DataProtocol]]:
-        """Public cache façade: return already-computed results for the given entry IDs.
+        """Public cache façade: return already-computed results for the given base entry IDs.
 
         Serves hits directly from the in-memory cache (``_cached_output_datas``).
         For IDs not yet cached, delegates to ``_load_cached_entries`` which calls
         ``_fetch_joined_records`` to load from the pipeline and result databases.
         Add-only semantics: existing in-memory entries are never cleared or
-        overwritten (safe because in-memory and DB entries for the same entry_id
-        are always semantically equivalent).
+        overwritten.
 
         Does NOT apply user-facing column filtering — see ``get_all_records``
         for that.
 
         Args:
-            entry_ids: Pipeline entry IDs to look up.
+            base_entry_ids: Stable base entry IDs (from ``compute_base_entry_id``)
+                to look up.
 
         Returns:
-            Mapping from entry_id to ``(tag, output_data)`` for found entries.
-            Empty dict if no DB is attached, ``entry_ids`` is empty, or no
+            Mapping from base_entry_id to ``(tag, output_data)`` for found entries.
+            Empty dict if no DB is attached, ``base_entry_ids`` is empty, or no
             matches are found.
         """
-        if self._cached_function_pod is None or not entry_ids:
+        if self._cached_function_pod is None or not base_entry_ids:
             return {}
 
-        missing = [eid for eid in entry_ids if eid not in self._cached_output_datas]
+        missing = [eid for eid in base_entry_ids if eid not in self._cached_output_datas]
         if missing:
             loaded = self._load_cached_entries(missing)
             self._cached_output_datas.update(loaded)
@@ -1296,7 +1296,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         return {
             eid: self._cached_output_datas[eid]
-            for eid in entry_ids
+            for eid in base_entry_ids
             if eid in self._cached_output_datas
             and self._cached_output_datas[eid][1] is not None
         }
@@ -1618,7 +1618,12 @@ class FunctionJobNode(FunctionNodeBase):
         # the meta drop in the default case, but must be listed explicitly
         # here so it is also dropped when all_info=True (which skips the
         # meta-prefix sweep).
-        drop_columns = [constants.NODE_CONTENT_HASH_COL, _PIPELINE_ENTRY_ID_COL]
+        drop_columns = [
+            constants.NODE_CONTENT_HASH_COL,
+            _PIPELINE_ENTRY_ID_COL,
+            _PIPELINE_BASE_ENTRY_ID_COL,
+            _PIPELINE_RECOMPUTATION_INDEX_COL,
+        ]
         if not column_config.meta and not column_config.all_info:
             drop_columns.extend(
                 c for c in joined.column_names if c.startswith(constants.META_PREFIX)
@@ -1672,7 +1677,7 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _fetch_joined_records(
         self,
-        entry_ids: list[bytes] | None = None,
+        base_entry_ids: list[bytes] | None = None,
     ) -> _JoinedRecords | None:
         """Internal primitive: fetch both DBs and inner-join, supporting two stores.
 
@@ -1685,17 +1690,17 @@ class FunctionJobNode(FunctionNodeBase):
         WARNING-level log. Ephemeral miss rows (cross-session miss) are silently
         dropped.
 
-        If ``entry_ids`` is provided, the result is filtered to matching
-        ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow.
+        If ``base_entry_ids`` is provided, the result is filtered to matching
+        ``_PIPELINE_BASE_ENTRY_ID_COL`` values before conversion to Arrow.
 
         Args:
-            entry_ids: If given, return only rows whose
-                ``_PIPELINE_ENTRY_ID_COL`` value is in this list.
+            base_entry_ids: If given, return only rows whose
+                ``_PIPELINE_BASE_ENTRY_ID_COL`` value is in this list.
                 If ``None``, return all rows.
 
         Returns:
             A ``_JoinedRecords`` whose ``table`` always includes a
-            ``_PIPELINE_ENTRY_ID_COL`` column, or ``None`` when either
+            ``_PIPELINE_BASE_ENTRY_ID_COL`` column, or ``None`` when either
             the pipeline database or cached function pod is absent. A 0-row
             table (not ``None``) is returned when both fetches succeed but
             no matching rows exist — callers check ``num_rows`` themselves.
@@ -1790,8 +1795,8 @@ class FunctionJobNode(FunctionNodeBase):
         # ------------------------------------------------------------------
         if ephemeral_df.height > 0 and persistent_df.height > 0:
             ephemeral_only_df = ephemeral_df.join(
-                persistent_df.select([_PIPELINE_ENTRY_ID_COL]),
-                on=_PIPELINE_ENTRY_ID_COL,
+                persistent_df.select([_PIPELINE_BASE_ENTRY_ID_COL]),
+                on=_PIPELINE_BASE_ENTRY_ID_COL,
                 how="anti",
             )
             merged_df = pl.concat([persistent_df, ephemeral_only_df], how="diagonal")
@@ -1804,10 +1809,10 @@ class FunctionJobNode(FunctionNodeBase):
             empty_table = taginfo.slice(0, 0)
             return _JoinedRecords(table=empty_table, taginfo_columns=taginfo_columns)
 
-        # Apply entry_id filter if requested
-        if entry_ids is not None:
+        # Apply base_entry_id filter if requested
+        if base_entry_ids is not None:
             merged_df = merged_df.filter(
-                pl.col(_PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
+                pl.col(_PIPELINE_BASE_ENTRY_ID_COL).is_in(base_entry_ids)
             )
 
         joined = merged_df.to_arrow()
@@ -1819,14 +1824,14 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _load_cached_entries(
         self,
-        entry_ids: list[bytes] | None = None,
+        base_entry_ids: list[bytes] | None = None,
     ) -> "dict[bytes, tuple[TagProtocol, DataProtocol]]":
         """DB loader: fetch ``(tag, data)`` pairs from the pipeline and result databases.
 
         Calls ``_fetch_joined_records`` to obtain the raw joined table, then
-        converts each row into a ``(tag, data)`` tuple keyed by pipeline entry ID.
+        converts each row into a ``(tag, data)`` tuple keyed by base entry ID.
 
-        If ``entry_ids`` is given, only those entries are fetched from DB.
+        If ``base_entry_ids`` is given, only those entries are fetched from DB.
         If ``None``, all records for this node are loaded.
 
         Does NOT read from or write to the in-memory cache
@@ -1837,15 +1842,15 @@ class FunctionJobNode(FunctionNodeBase):
         for that.
 
         Args:
-            entry_ids: If provided, load only these specific entry IDs.
+            base_entry_ids: If provided, load only these specific base entry IDs.
                 If ``None``, load all records for this node.
 
         Returns:
-            dict mapping entry_id → ``(tag, data)``. Empty dict when either
+            dict mapping base_entry_id → ``(tag, data)``. Empty dict when either
             database is absent, either DB fetch returns ``None``, or no rows
             match after joining.
         """
-        fetched = self._fetch_joined_records(entry_ids=entry_ids)
+        fetched = self._fetch_joined_records(base_entry_ids=base_entry_ids)
         if fetched is None or fetched.table.num_rows == 0:
             return {}
 
@@ -1869,9 +1874,9 @@ class FunctionJobNode(FunctionNodeBase):
             )
 
         # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it).
-        # _PIPELINE_ENTRY_ID_COL starts with META_PREFIX ("__") so it is covered
-        # by the startswith check without needing to be listed explicitly.
-        entry_ids_col = joined.column(_PIPELINE_ENTRY_ID_COL).to_pylist()
+        # All meta columns (starting with META_PREFIX "__") are dropped including
+        # _PIPELINE_ENTRY_ID_COL and _PIPELINE_BASE_ENTRY_ID_COL.
+        base_entry_ids_col = joined.column(_PIPELINE_BASE_ENTRY_ID_COL).to_pylist()
         drop_cols = [
             c
             for c in joined.column_names
@@ -1882,8 +1887,8 @@ class FunctionJobNode(FunctionNodeBase):
         stream = ArrowTableStream(data_table, tag_columns=tag_keys)
 
         loaded: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
-        for eid, (tag, data) in zip(entry_ids_col, stream.iter_data()):
-            loaded[eid] = (tag, data)
+        for base_eid, (tag, data) in zip(base_entry_ids_col, stream.iter_data()):
+            loaded[base_eid] = (tag, data)
         return loaded
 
     async def _async_execute_cache_only(

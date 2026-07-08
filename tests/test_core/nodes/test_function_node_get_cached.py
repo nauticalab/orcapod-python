@@ -58,45 +58,45 @@ class TestGetCachedResults:
 
     def test_returns_cached_results_for_matching_entry_ids(self, function_node_with_db):
         node = function_node_with_db
-        data = list(node._input_stream.iter_data())
+        all_pairs = list(node._input_stream.iter_data())
 
-        entry_ids = []
-        for tag, data in data:
+        base_entry_ids = []
+        for tag, data in all_pairs:
             node.execute_data(tag, data)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
+            base_entry_ids.append(node.compute_base_entry_id(tag, data))
 
-        cached = node.get_cached_results(entry_ids)
+        cached = node.get_cached_results(base_entry_ids)
         assert len(cached) == 2
-        assert all(eid in cached for eid in entry_ids)
+        assert all(eid in cached for eid in base_entry_ids)
 
     def test_filters_to_requested_entry_ids_only(self, function_node_with_db):
         node = function_node_with_db
-        data = list(node._input_stream.iter_data())
+        all_pairs = list(node._input_stream.iter_data())
 
-        entry_ids = []
-        for tag, data in data:
+        base_entry_ids = []
+        for tag, data in all_pairs:
             node.execute_data(tag, data)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
+            base_entry_ids.append(node.compute_base_entry_id(tag, data))
 
-        cached = node.get_cached_results([entry_ids[0]])
+        cached = node.get_cached_results([base_entry_ids[0]])
         assert len(cached) == 1
-        assert entry_ids[0] in cached
-        assert entry_ids[1] not in cached
+        assert base_entry_ids[0] in cached
+        assert base_entry_ids[1] not in cached
 
     def test_get_cached_results_populates_internal_cache(self, function_node_with_db):
-        """get_cached_results should populate _cached_output_datas."""
+        """get_cached_results should populate _cached_output_datas keyed by base_entry_id."""
         node = function_node_with_db
-        data = list(node._input_stream.iter_data())
+        all_pairs = list(node._input_stream.iter_data())
 
-        entry_ids = []
-        for tag, data in data:
+        base_entry_ids = []
+        for tag, data in all_pairs:
             node.execute_data(tag, data)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
+            base_entry_ids.append(node.compute_base_entry_id(tag, data))
 
         # Clear internal cache
         node._cached_output_datas.clear()
         assert len(node._cached_output_datas) == 0
 
         # get_cached_results should repopulate
-        node.get_cached_results(entry_ids)
+        node.get_cached_results(base_entry_ids)
         assert len(node._cached_output_datas) == 2
