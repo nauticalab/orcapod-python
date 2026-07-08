@@ -339,9 +339,16 @@ class NodeConfig:
         max_concurrency: Override for this node's concurrency limit.
             ``None`` inherits from ``PipelineConfig.default_max_concurrency``.
             ``1`` means sequential (rate-limited APIs, preserves ordering).
+        is_result_ephemeral: If ``True``, new computation results are written to
+            the pipeline-scoped ephemeral store (``ArrowDatabaseProtocol``)
+            instead of the persistent result database. Persistent cache hits
+            are still served when available. Raises ``RuntimeError`` at
+            execution time if ``is_result_ephemeral=True`` but no ephemeral
+            store has been injected via ``set_ephemeral_store()``.
     """
 
     max_concurrency: int | None = None
+    is_result_ephemeral: bool = False
 
 
 def resolve_concurrency(

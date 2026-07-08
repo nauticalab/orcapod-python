@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from abc import abstractmethod
 from collections.abc import Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -280,6 +281,18 @@ class OperatorNodeBase(StreamBase):
             f"upstreams={self._input_streams!r})"
         )
 
+    @abstractmethod
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """Assign or remove the ephemeral result store for this node.
+
+        No-op for operator nodes — full ephemeral support for operators
+        is deferred to ITL-509.
+
+        Args:
+            store: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
+                to detach. Ignored by operator nodes in v1.
+        """
+
 
 # ---------------------------------------------------------------------------
 # OperatorNode — thin blueprint (no DB)
@@ -450,6 +463,9 @@ class OperatorNode(OperatorNodeBase):
 
         return node
 
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """No-op — blueprint operator nodes carry no database references."""
+
     def as_node(self) -> OperatorNode:
         """Return the lightweight blueprint equivalent of this node.
 
@@ -568,6 +584,9 @@ class OperatorJobNode(OperatorNodeBase):
             table_scope=self._table_scope,
             tracker_manager=self.tracker_manager,
         )
+
+    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+        """No-op — full ephemeral support for operators is deferred to ITL-509."""
 
     # ------------------------------------------------------------------
     # Override clear_cache to also clear output stream caches
