@@ -125,36 +125,132 @@ def _serialize_arrow_metadata(table: pa.Table) -> dict[str, bytes] | None:
     return {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
 
 
-def _load_arrow_metadata(kv: dict[str, bytes]) -> dict:
-    """Decode the Arrow metadata blob from a SpiralDB KV store entry.
+def _load_arrow_metadata(
+    kv: dict[str, bytes],
+) -> tuple[dict[bytes, bytes] | None, dict[str, dict]]:
+    """Decode Arrow metadata from a SpiralDB table KV store.
+
+    Parses the JSON blob stored under ``_ARROW_METADATA_KEY`` and returns
+    the schema-level metadata and per-field metadata trees for the caller
+    to apply to a reconstructed Arrow schema.
 
     Args:
-        kv: Dict containing the ``_ARROW_METADATA_KEY`` entry as produced by
-            ``_serialize_arrow_metadata``.
+        kv: The dict returned by ``tbl.get_metadata()`` on a SpiralDB table
+            handle. May be empty or lack the ``_ARROW_METADATA_KEY`` key.
 
     Returns:
-        Decoded metadata dict with ``"schema"`` and/or ``"fields"`` keys.
-
-    Note:
-        Not yet implemented — placeholder for Task 3.
+        A 2-tuple ``(schema_meta, field_trees)`` where:
+        - ``schema_meta`` is a ``dict[bytes, bytes]`` of schema-level metadata
+          (base64-decoded), or ``None`` if no schema metadata was stored.
+        - ``field_trees`` is a ``dict[str, dict]`` mapping top-level column
+          name to its raw metadata tree dict (as stored in the blob), or
+          ``{}`` if no field metadata was stored.
     """
-    raise NotImplementedError("_load_arrow_metadata is not yet implemented (Task 3)")
+    if _ARROW_METADATA_KEY not in kv:
+        return (None, {})
+
+    blob = json.loads(kv[_ARROW_METADATA_KEY].decode("utf-8"))
+
+    schema_meta: dict[bytes, bytes] | None = None
+    if "schema" in blob:
+        schema_meta = {
+            base64.b64decode(k): base64.b64decode(v)
+            for k, v in blob["schema"].items()
+        }
+
+    field_trees: dict[str, dict] = blob.get("fields", {})
+
+    return (schema_meta, field_trees)
 
 
-def _restore_field(field: pa.Field, tree: dict) -> pa.Field:
-    """Restore metadata onto a ``pa.Field`` from a serialized metadata tree.
+def _restore_field(field: pa.Field, stored: dict | None) -> tuple[pa.Field, bool]:
+    """Recursively restore a field's metadata and rebuild its nested type.
+
+    Walks the stored metadata tree in parallel with the field's type tree,
+    reattaching ``field.metadata`` at every level and reconstructing composite
+    types bottom-up when any descendant has metadata to restore.
+
+    Handles: struct inner fields, list/large_list/fixed_size_list value fields.
+    Map key/item fields are not recursed (consistent with serialization).
 
     Args:
-        field: The ``pa.Field`` to restore metadata onto.
-        tree: Metadata tree dict as produced by ``_serialize_field_meta_tree``.
+        field: The ``pa.Field`` from the Arrow schema returned by SpiralDB.
+        stored: The metadata tree dict for this field (as stored in the blob),
+            or ``None`` if no metadata was stored for this field.
 
     Returns:
-        A new ``pa.Field`` with metadata restored.
-
-    Note:
-        Not yet implemented — placeholder for Task 3.
+        A 2-tuple ``(restored_field, changed)`` where:
+        - ``restored_field`` is the field with metadata restored (new object
+          if any change was made, original object if not).
+        - ``changed`` is True if any metadata or nested type was modified.
     """
-    raise NotImplementedError("_restore_field is not yet implemented (Task 3)")
+    import pyarrow as _pa  # noqa: PLC0415
+
+    if stored is None or stored == {}:
+        return (field, False)
+
+    # Decode own metadata from stored tree if present
+    new_meta: dict[bytes, bytes] | None = None
+    has_new_meta = False
+    if "meta" in stored:
+        new_meta = {
+            base64.b64decode(k): base64.b64decode(v)
+            for k, v in stored["meta"].items()
+        }
+        has_new_meta = True
+    else:
+        new_meta = field.metadata
+
+    ftype = field.type
+    children = stored.get("children", {})
+    type_changed = False
+    new_type = ftype
+
+    if _pa.types.is_struct(ftype):
+        restored_children = []
+        any_child_changed = False
+        for i in range(ftype.num_fields):
+            child = ftype.field(i)
+            child_stored = children.get(child.name)
+            restored_child, child_changed = _restore_field(child, child_stored)
+            restored_children.append(restored_child)
+            if child_changed:
+                any_child_changed = True
+        if any_child_changed:
+            new_type = _pa.struct(restored_children)
+            type_changed = True
+    elif _pa.types.is_fixed_size_list(ftype):
+        value_field = ftype.value_field
+        child_stored = children.get(value_field.name)
+        restored_vf, child_changed = _restore_field(value_field, child_stored)
+        if child_changed:
+            new_type = _pa.list_(restored_vf, ftype.list_size)
+            type_changed = True
+    elif _pa.types.is_list(ftype):
+        value_field = ftype.value_field
+        child_stored = children.get(value_field.name)
+        restored_vf, child_changed = _restore_field(value_field, child_stored)
+        if child_changed:
+            new_type = _pa.list_(restored_vf)
+            type_changed = True
+    elif _pa.types.is_large_list(ftype):
+        value_field = ftype.value_field
+        child_stored = children.get(value_field.name)
+        restored_vf, child_changed = _restore_field(value_field, child_stored)
+        if child_changed:
+            new_type = _pa.large_list(restored_vf)
+            type_changed = True
+
+    meta_changed = has_new_meta and new_meta != field.metadata
+    changed = meta_changed or type_changed
+
+    if not changed:
+        return (field, False)
+
+    if type_changed:
+        return (_pa.field(field.name, new_type, field.nullable, new_meta), True)
+    else:
+        return (field.with_metadata(new_meta), True)
 
 
 # ---------------------------------------------------------------------------

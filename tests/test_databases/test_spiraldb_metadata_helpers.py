@@ -172,3 +172,200 @@ class TestSerializeArrowMetadata:
         table = pa.table({"x": pa.array([1])}, schema=schema)
         result = _serialize_arrow_metadata(table)
         assert isinstance(result[_ARROW_METADATA_KEY], bytes)
+
+
+# ---------------------------------------------------------------------------
+# _load_arrow_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestLoadArrowMetadata:
+    def test_empty_kv_returns_none_schema_and_empty_fields(self):
+        schema_meta, field_trees = _load_arrow_metadata({})
+        assert schema_meta is None
+        assert field_trees == {}
+
+    def test_key_absent_returns_none_schema_and_empty_fields(self):
+        schema_meta, field_trees = _load_arrow_metadata({"other": b"val"})
+        assert schema_meta is None
+        assert field_trees == {}
+
+    def test_schema_metadata_decoded(self):
+        blob = {"schema": {b64(b"origin"): b64(b"test"), b64(b"key2"): b64(b"val2")}}
+        kv = {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
+        schema_meta, field_trees = _load_arrow_metadata(kv)
+        assert schema_meta == {b"origin": b"test", b"key2": b"val2"}
+        assert field_trees == {}
+
+    def test_field_trees_returned_raw(self):
+        raw_fields = {
+            "col1": {"meta": {b64(b"unit"): b64(b"meters")}},
+            "col2": {
+                "children": {
+                    "item": {"meta": {b64(b"k"): b64(b"v")}}
+                }
+            },
+        }
+        blob = {"fields": raw_fields}
+        kv = {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
+        schema_meta, field_trees = _load_arrow_metadata(kv)
+        assert schema_meta is None
+        assert field_trees == raw_fields
+
+    def test_schema_and_fields_together(self):
+        blob = {
+            "schema": {b64(b"origin"): b64(b"test")},
+            "fields": {
+                "x": {"meta": {b64(b"unit"): b64(b"m")}}
+            },
+        }
+        kv = {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
+        schema_meta, field_trees = _load_arrow_metadata(kv)
+        assert schema_meta == {b"origin": b"test"}
+        assert field_trees == {"x": {"meta": {b64(b"unit"): b64(b"m")}}}
+
+    def test_roundtrip_with_serialize(self):
+        inner = pa.field("val", pa.float64(), metadata={b"desc": b"the value"})
+        schema = pa.schema(
+            [
+                pa.field("x", pa.int64(), metadata={b"unit": b"meters"}),
+                pa.field("s", pa.struct([inner])),
+            ],
+            metadata={b"origin": b"roundtrip_test"},
+        )
+        table = pa.table(
+            {
+                "x": pa.array([1, 2], type=pa.int64()),
+                "s": pa.array(
+                    [{"val": 1.0}, {"val": 2.0}],
+                    type=pa.struct([pa.field("val", pa.float64())]),
+                ),
+            },
+            schema=schema,
+        )
+        serialized = _serialize_arrow_metadata(table)
+        assert serialized is not None
+        schema_meta, field_trees = _load_arrow_metadata(serialized)
+        assert schema_meta == {b"origin": b"roundtrip_test"}
+        assert "x" in field_trees
+        assert field_trees["x"]["meta"] == {b64(b"unit"): b64(b"meters")}
+        assert "s" in field_trees
+        assert "children" in field_trees["s"]
+        assert "val" in field_trees["s"]["children"]
+
+
+# ---------------------------------------------------------------------------
+# _restore_field
+# ---------------------------------------------------------------------------
+
+
+class TestRestoreField:
+    def test_none_stored_returns_unchanged(self):
+        field = pa.field("x", pa.int64())
+        restored, changed = _restore_field(field, None)
+        assert restored is field
+        assert changed is False
+
+    def test_empty_dict_stored_returns_unchanged(self):
+        field = pa.field("x", pa.int64())
+        restored, changed = _restore_field(field, {})
+        assert restored is field
+        assert changed is False
+
+    def test_primitive_with_meta_restored(self):
+        field = pa.field("x", pa.int64())
+        stored = {"meta": {b64(b"unit"): b64(b"meters")}}
+        restored, changed = _restore_field(field, stored)
+        assert changed is True
+        assert restored.metadata == {b"unit": b"meters"}
+        assert restored.name == "x"
+        assert restored.type == pa.int64()
+
+    def test_primitive_already_has_different_meta_overwritten(self):
+        field = pa.field("x", pa.int64(), metadata={b"old": b"meta"})
+        stored = {"meta": {b64(b"new"): b64(b"meta2")}}
+        restored, changed = _restore_field(field, stored)
+        assert changed is True
+        assert restored.metadata == {b"new": b"meta2"}
+
+    def test_struct_child_meta_restored(self):
+        inner = pa.field("val", pa.float64())
+        field = pa.field("s", pa.struct([inner]))
+        stored = {
+            "children": {
+                "val": {"meta": {b64(b"desc"): b64(b"the value")}}
+            }
+        }
+        restored, changed = _restore_field(field, stored)
+        assert changed is True
+        assert pa.types.is_struct(restored.type)
+        restored_inner = restored.type.field("val")
+        assert restored_inner.metadata == {b"desc": b"the value"}
+
+    def test_struct_no_child_meta_unchanged(self):
+        inner = pa.field("val", pa.float64())
+        field = pa.field("s", pa.struct([inner]))
+        stored = {}
+        restored, changed = _restore_field(field, stored)
+        assert restored is field
+        assert changed is False
+
+    def test_list_value_field_meta_restored(self):
+        vf = pa.field("item", pa.int32())
+        field = pa.field("lst", pa.list_(vf))
+        stored = {
+            "children": {
+                "item": {"meta": {b64(b"k"): b64(b"v")}}
+            }
+        }
+        restored, changed = _restore_field(field, stored)
+        assert changed is True
+        assert pa.types.is_list(restored.type)
+        restored_vf = restored.type.value_field
+        assert restored_vf.metadata == {b"k": b"v"}
+
+    def test_large_list_value_field_meta_restored(self):
+        vf = pa.field("item", pa.int32())
+        field = pa.field("lst", pa.large_list(vf))
+        stored = {
+            "children": {
+                "item": {"meta": {b64(b"k"): b64(b"v")}}
+            }
+        }
+        restored, changed = _restore_field(field, stored)
+        assert changed is True
+        assert pa.types.is_large_list(restored.type)
+        restored_vf = restored.type.value_field
+        assert restored_vf.metadata == {b"k": b"v"}
+
+    def test_nested_struct_deep_meta_restored(self):
+        leaf = pa.field("z", pa.int8())
+        inner_struct_field = pa.field("inner", pa.struct([leaf]))
+        outer_field = pa.field("outer", pa.struct([inner_struct_field]))
+        stored = {
+            "children": {
+                "inner": {
+                    "children": {
+                        "z": {"meta": {b64(b"deep"): b64(b"yes")}}
+                    }
+                }
+            }
+        }
+        restored, changed = _restore_field(outer_field, stored)
+        assert changed is True
+        assert pa.types.is_struct(restored.type)
+        inner_restored = restored.type.field("inner")
+        assert pa.types.is_struct(inner_restored.type)
+        leaf_restored = inner_restored.type.field("z")
+        assert leaf_restored.metadata == {b"deep": b"yes"}
+
+    def test_changed_false_when_nothing_to_restore(self):
+        field = pa.field("x", pa.int64())
+        _, changed = _restore_field(field, None)
+        assert changed is False
+
+    def test_changed_true_when_meta_restored(self):
+        field = pa.field("x", pa.int64())
+        stored = {"meta": {b64(b"unit"): b64(b"meters")}}
+        _, changed = _restore_field(field, stored)
+        assert changed is True
