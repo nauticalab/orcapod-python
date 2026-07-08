@@ -72,6 +72,15 @@ else:
 # database. Always present in the table returned by _fetch_joined_records.
 _PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
 
+# Column name for the stable base entry ID (no recomputation index).
+# Stores the per-logical-input identity; later tasks wire this into the
+# Phase 1 filter and the in-memory cache key.
+_PIPELINE_BASE_ENTRY_ID_COL = "__pipeline_base_entry_id"
+
+# Column storing the recomputation chain index (pa.int32).
+# 0 for the first computation, N+1 for each miss-triggered recompute.
+_PIPELINE_RECOMPUTATION_INDEX_COL = "__pipeline_recomputation_index"
+
 
 def _executor_supports_concurrent(
     data_function: DataFunctionProtocol,
@@ -1108,12 +1117,12 @@ class FunctionJobNode(FunctionNodeBase):
         tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
         ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
-        # Collect upstream entries and resolve entry_ids
+        # Collect upstream entries and resolve base_entry_ids (stable across recomputation)
         upstream_entries: list[tuple[TagProtocol, DataProtocol, bytes]] = [
-            (tag, data, self.compute_pipeline_entry_id(tag, data))
+            (tag, data, self.compute_base_entry_id(tag, data))
             for tag, data in input_stream.iter_data()
         ]
-        entry_ids = [eid for _, _, eid in upstream_entries]
+        base_entry_ids = [eid for _, _, eid in upstream_entries]
 
         # Hot-load any already-computed results from DB into _cached_output_datas.
         # get_cached_results() is called for its side effect (populating the
@@ -1121,14 +1130,14 @@ class FunctionJobNode(FunctionNodeBase):
         # that the per-data cache-hit check below uses _cached_output_datas
         # directly — which includes None-output entries (function returned None)
         # and prevents spurious recomputation of already-processed data.
-        self.get_cached_results(entry_ids=entry_ids)
+        self.get_cached_results(base_entry_ids=base_entry_ids)
 
         output: list[tuple[TagProtocol, DataProtocol]] = []
-        for tag, data, entry_id in upstream_entries:
+        for tag, data, base_entry_id in upstream_entries:
             ctx_obs.on_data_start(node_label, tag, data)
 
-            if entry_id in self._cached_output_datas:
-                tag_out, result = self._cached_output_datas[entry_id]
+            if base_entry_id in self._cached_output_datas:
+                tag_out, result = self._cached_output_datas[base_entry_id]
                 ctx_obs.on_data_end(node_label, tag, data, result, cached=True)
                 if result is not None:
                     output.append((tag_out, result))
@@ -1172,19 +1181,21 @@ class FunctionJobNode(FunctionNodeBase):
         """Core compute + persist + cache.
 
         Used by ``execute_data`` and ``execute``.
-        Stores result in ``_cached_output_datas`` keyed by entry_id.
+        Stores result in ``_cached_output_datas`` keyed by base_entry_id.
         Exceptions propagate to the caller — no error handling here.
 
         When ``node_config.is_result_ephemeral=True``:
         - Uses ``_ephemeral_cached_pod`` for both compute and storage.
         - Raises ``RuntimeError`` if no ephemeral store has been set.
-        - Writes the pipeline record with ``is_ephemeral=True`` and
-          ``skip_cache_lookup=True`` (append strategy for recompute-after-miss).
+        - Calls ``add_pipeline_record`` which computes the next recomputation
+          index (``max_index + 1``) and writes with ``skip_duplicates=True``
+          so concurrent coroutines are safely serialised.
 
         When ``node_config.is_result_ephemeral=False`` (default):
         - Uses ``_cached_function_pod`` (persistent DB) or raw function pod.
-        - Writes the pipeline record with ``skip_cache_lookup=True`` (prevents
-          infinite miss cycle when a stale pipeline entry exists).
+        - Calls ``add_pipeline_record`` which computes the next recomputation
+          index (``max_index + 1``) and writes with ``skip_duplicates=True``
+          so concurrent coroutines are safely serialised.
 
         Returns:
             A ``(tag, output_data)`` 2-tuple.
@@ -1218,7 +1229,6 @@ class FunctionJobNode(FunctionNodeBase):
                         data,
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
-                        skip_cache_lookup=True,
                         is_ephemeral=True,
                     )
         elif self._cached_function_pod is not None:
@@ -1236,48 +1246,47 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
-                    skip_cache_lookup=True,
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
                 tag, data, logger=logger
             )
 
-        # Store by entry_id and invalidate derived caches
-        entry_id = self.compute_pipeline_entry_id(tag, data)
-        self._cached_output_datas[entry_id] = (tag_out, output_data)
+        # Store by base_entry_id (stable across recomputation cycles) and invalidate caches
+        base_entry_id = self.compute_base_entry_id(tag, data)
+        self._cached_output_datas[base_entry_id] = (tag_out, output_data)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
         return tag_out, output_data
 
     def get_cached_results(
-        self, entry_ids: list[bytes]
+        self, base_entry_ids: list[bytes]
     ) -> dict[bytes, tuple[TagProtocol, DataProtocol]]:
-        """Public cache façade: return already-computed results for the given entry IDs.
+        """Public cache façade: return already-computed results for the given base entry IDs.
 
         Serves hits directly from the in-memory cache (``_cached_output_datas``).
         For IDs not yet cached, delegates to ``_load_cached_entries`` which calls
         ``_fetch_joined_records`` to load from the pipeline and result databases.
         Add-only semantics: existing in-memory entries are never cleared or
-        overwritten (safe because in-memory and DB entries for the same entry_id
-        are always semantically equivalent).
+        overwritten.
 
         Does NOT apply user-facing column filtering — see ``get_all_records``
         for that.
 
         Args:
-            entry_ids: Pipeline entry IDs to look up.
+            base_entry_ids: Stable base entry IDs (from ``compute_base_entry_id``)
+                to look up.
 
         Returns:
-            Mapping from entry_id to ``(tag, output_data)`` for found entries.
-            Empty dict if no DB is attached, ``entry_ids`` is empty, or no
+            Mapping from base_entry_id to ``(tag, output_data)`` for found entries.
+            Empty dict if no DB is attached, ``base_entry_ids`` is empty, or no
             matches are found.
         """
-        if self._cached_function_pod is None or not entry_ids:
+        if self._cached_function_pod is None or not base_entry_ids:
             return {}
 
-        missing = [eid for eid in entry_ids if eid not in self._cached_output_datas]
+        missing = [eid for eid in base_entry_ids if eid not in self._cached_output_datas]
         if missing:
             loaded = self._load_cached_entries(missing)
             self._cached_output_datas.update(loaded)
@@ -1287,7 +1296,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         return {
             eid: self._cached_output_datas[eid]
-            for eid in entry_ids
+            for eid in base_entry_ids
             if eid in self._cached_output_datas
             and self._cached_output_datas[eid][1] is not None
         }
@@ -1337,7 +1346,6 @@ class FunctionJobNode(FunctionNodeBase):
                         data,
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
-                        skip_cache_lookup=True,
                         is_ephemeral=True,
                     )
         elif self._cached_function_pod is not None:
@@ -1355,41 +1363,39 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
-                    skip_cache_lookup=True,
                 )
         else:
             tag_out, output_data = await self._function_pod.async_process_data(
                 tag, data, logger=logger
             )
 
-        # Store by entry_id and invalidate derived caches
-        entry_id = self.compute_pipeline_entry_id(tag, data)
-        self._cached_output_datas[entry_id] = (tag_out, output_data)
+        # Store by base_entry_id (stable across recomputation cycles) and invalidate caches
+        base_entry_id = self.compute_base_entry_id(tag, data)
+        self._cached_output_datas[base_entry_id] = (tag_out, output_data)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
         return tag_out, output_data
 
-    def compute_pipeline_entry_id(
-        self, tag: TagProtocol, input_data: DataProtocol
-    ) -> bytes:
-        """Compute a unique pipeline entry ID from tag + system tags + input data hash.
+    def _build_entry_id_preimage(
+        self,
+        tag: TagProtocol,
+        input_data: DataProtocol,
+    ) -> pa.Table:
+        """Builds the shared Arrow preimage used by both entry-ID methods.
 
-        ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
-        identical inputs each get a distinct entry ID, regardless of table scope.
-        This prevents the second run's pipeline record from being silently skipped
-        by the duplicate entry_id check.
+        Combines the tag's system columns with the input data hash and
+        node content hash into a single-row Arrow table.
 
         Args:
-            tag: The tag (including system tags).
-            input_data: The input data.
+            tag: The tag datagram for the input row.
+            input_data: The data datagram for the input row.
 
         Returns:
-            Method-prefixed raw bytes (``b"{method}:{digest}"``) uniquely
-            identifying this (tag, input_data, node run) combination.  Suitable
-            for storage in a ``pa.large_binary()`` column.
+            A single-row ``pa.Table`` with system-tag columns,
+            ``INPUT_DATA_HASH_COL``, and ``NODE_CONTENT_HASH_COL``.
         """
-        tag_with_hash = (
+        return (
             tag.as_table(columns={"system_tags": True})
             .append_column(
                 constants.INPUT_DATA_HASH_COL,
@@ -1400,7 +1406,70 @@ class FunctionJobNode(FunctionNodeBase):
                 pa.array([self.content_hash().to_string()], type=pa.large_string()),
             )
         )
-        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_prefixed_digest()
+
+    def compute_base_entry_id(
+        self,
+        tag: TagProtocol,
+        input_data: DataProtocol,
+    ) -> bytes:
+        """Computes the stable (recomputation-index-free) entry ID for a (tag, data) pair.
+
+        This value is identical to the pre-ITL-508 ``compute_pipeline_entry_id`` output:
+        it hashes the tag's system columns plus ``INPUT_DATA_HASH_COL`` and
+        ``NODE_CONTENT_HASH_COL``. Because it excludes the recomputation index it is
+        stable across all recomputation attempts for the same logical input.
+
+        The base entry ID is stored in ``_PIPELINE_BASE_ENTRY_ID_COL`` and will be
+        used as the in-memory cache key and Phase 1 filter in subsequent tasks.
+
+        Args:
+            tag: The tag datagram for the input row.
+            input_data: The data datagram for the input row.
+
+        Returns:
+            A bytes value in ``b"{method}:{digest}"`` format.
+        """
+        return self.data_context.arrow_hasher.hash_table(
+            self._build_entry_id_preimage(tag, input_data)
+        ).to_prefixed_digest()
+
+    def compute_pipeline_entry_id(
+        self,
+        tag: TagProtocol,
+        input_data: DataProtocol,
+        recomputation_index: int = 0,
+    ) -> bytes:
+        """Compute a versioned pipeline entry ID from tag + system tags + input data hash + index.
+
+        Extends the base preimage (see ``_build_entry_id_preimage``) with a
+        ``_PIPELINE_RECOMPUTATION_INDEX_COL`` column (value: ``recomputation_index``,
+        type ``pa.int32()``) so that each recomputation attempt receives a distinct
+        DB primary key.
+
+        At ``recomputation_index=0`` this produces a hash that differs from the
+        pre-ITL-508 implementation (the index column is now part of the preimage).
+        Existing pipeline DB records are implicitly invalidated — acceptable
+        because the project is pre-v0.1.0.
+
+        ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
+        identical inputs each get a distinct entry ID, regardless of table scope.
+
+        Args:
+            tag: The tag datagram for the input row.
+            input_data: The data datagram for the input row.
+            recomputation_index: Position in the recomputation chain. ``0`` for
+                the first computation, ``N+1`` for each miss-triggered recompute.
+
+        Returns:
+            Method-prefixed raw bytes (``b"{method}:{digest}"``) uniquely
+            identifying this (tag, input_data, node run, recomputation attempt).
+            Suitable for storage in a ``pa.large_binary()`` column.
+        """
+        preimage = self._build_entry_id_preimage(tag, input_data).append_column(
+            _PIPELINE_RECOMPUTATION_INDEX_COL,
+            pa.array([recomputation_index], type=pa.int32()),
+        )
+        return self.data_context.arrow_hasher.hash_table(preimage).to_prefixed_digest()
 
     def add_pipeline_record(
         self,
@@ -1408,35 +1477,70 @@ class FunctionJobNode(FunctionNodeBase):
         input_data: DataProtocol,
         data_record_id: uuid.UUID,
         computed: bool,
-        skip_cache_lookup: bool = False,
         is_ephemeral: bool = False,
     ) -> None:
         """Add a pipeline record to the database for a processed data.
 
+        Computes the next recomputation index by querying existing rows in the
+        pipeline DB that share the same ``base_entry_id``, then writes at
+        ``max_index + 1``. The write uses ``skip_duplicates=True`` so that
+        concurrent asyncio coroutines competing for the same versioned entry ID
+        are safely serialised: the first writer lands, subsequent writers whose
+        compute happened to produce the same hash are silently no-oped.
+
         The pipeline record stores:
+
         - Tag columns (including system tags)
-        - All source columns of the input data (provenance, not data)
+        - All source columns of the input data (provenance, not data values)
         - Output data record ID (for joining with result records)
+        - Base entry ID (``_PIPELINE_BASE_ENTRY_ID_COL``)
+        - Recomputation index (``_PIPELINE_RECOMPUTATION_INDEX_COL``)
         - Whether the result is stored in the ephemeral store
-        - Input data data context key
+        - Input data context key
         - Whether the result was freshly computed or cached
+
+        Args:
+            tag: The tag associated with the input data.
+            input_data: The input data that was processed.
+            data_record_id: UUID of the result record in the result database.
+            computed: Whether the result was freshly computed (``True``) or
+                served from a cache (``False``).
+            is_ephemeral: Whether the result is stored in the ephemeral store.
         """
         self._require_pipeline_database()
-        entry_id = self.compute_pipeline_entry_id(tag, input_data)
+        base_entry_id = self.compute_base_entry_id(tag, input_data)
 
-        # Check for existing entry
-        existing_record = None
-        if not skip_cache_lookup:
-            existing_record = self._pipeline_database.get_record_by_id(
-                self.node_identity_path,
-                entry_id,
-            )
+        # Guard against pre-ITL-508 pipeline DB records that are missing the new
+        # versioning columns. If such records exist, fail fast with a clear message
+        # rather than letting the subsequent filter crash with a cryptic Arrow error.
+        _all_existing = self._pipeline_database.get_all_records(self.node_identity_path)
+        if _all_existing is not None and _all_existing.num_rows > 0:
+            _missing = [
+                col
+                for col in (_PIPELINE_BASE_ENTRY_ID_COL, _PIPELINE_RECOMPUTATION_INDEX_COL)
+                if col not in _all_existing.schema.names
+            ]
+            if _missing:
+                raise ValueError(
+                    f"Pipeline database at {self.node_identity_path!r} contains records "
+                    f"that are missing required ITL-508 columns: {_missing!r}. "
+                    "Please clear or migrate the pipeline database before using this node."
+                )
 
-        if existing_record is not None:
-            logger.debug(
-                f"Record with entry_id {entry_id} already exists. Skipping addition."
-            )
-            return
+        # Determine the next recomputation index by querying all existing rows
+        # for this base_entry_id. No await is used here, so within a single-threaded
+        # asyncio event loop this read-then-write sequence is uninterrupted.
+        existing = self._pipeline_database.get_records_with_column_value(
+            self.node_identity_path,
+            {_PIPELINE_BASE_ENTRY_ID_COL: base_entry_id},
+        )
+        if existing is None or existing.num_rows == 0:
+            new_index = 0
+        else:
+            indices = existing.column(_PIPELINE_RECOMPUTATION_INDEX_COL).to_pylist()
+            new_index = max(indices) + 1
+
+        versioned_entry_id = self.compute_pipeline_entry_id(tag, input_data, new_index)
 
         # Extract source columns only (no data columns) from the input data
         input_table_with_source = input_data.as_table(columns={"source": True})
@@ -1465,6 +1569,12 @@ class FunctionJobNode(FunctionNodeBase):
                 constants.IS_EPHEMERAL_COL: pa.array(
                     [is_ephemeral], type=pa.bool_()
                 ),
+                _PIPELINE_BASE_ENTRY_ID_COL: pa.array(
+                    [base_entry_id], type=pa.large_binary()
+                ),
+                _PIPELINE_RECOMPUTATION_INDEX_COL: pa.array(
+                    [new_index], type=pa.int32()
+                ),
             }
         )
 
@@ -1477,9 +1587,9 @@ class FunctionJobNode(FunctionNodeBase):
 
         self._pipeline_database.add_record(
             self.node_identity_path,
-            entry_id,
+            versioned_entry_id,
             combined_record,
-            skip_duplicates=skip_cache_lookup,
+            skip_duplicates=True,
         )
 
     # ------------------------------------------------------------------
@@ -1525,7 +1635,12 @@ class FunctionJobNode(FunctionNodeBase):
         # the meta drop in the default case, but must be listed explicitly
         # here so it is also dropped when all_info=True (which skips the
         # meta-prefix sweep).
-        drop_columns = [constants.NODE_CONTENT_HASH_COL, _PIPELINE_ENTRY_ID_COL]
+        drop_columns = [
+            constants.NODE_CONTENT_HASH_COL,
+            _PIPELINE_ENTRY_ID_COL,
+            _PIPELINE_BASE_ENTRY_ID_COL,
+            _PIPELINE_RECOMPUTATION_INDEX_COL,
+        ]
         if not column_config.meta and not column_config.all_info:
             drop_columns.extend(
                 c for c in joined.column_names if c.startswith(constants.META_PREFIX)
@@ -1579,7 +1694,7 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _fetch_joined_records(
         self,
-        entry_ids: list[bytes] | None = None,
+        base_entry_ids: list[bytes] | None = None,
     ) -> _JoinedRecords | None:
         """Internal primitive: fetch both DBs and inner-join, supporting two stores.
 
@@ -1592,17 +1707,17 @@ class FunctionJobNode(FunctionNodeBase):
         WARNING-level log. Ephemeral miss rows (cross-session miss) are silently
         dropped.
 
-        If ``entry_ids`` is provided, the result is filtered to matching
-        ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow.
+        If ``base_entry_ids`` is provided, the result is filtered to matching
+        ``_PIPELINE_BASE_ENTRY_ID_COL`` values before conversion to Arrow.
 
         Args:
-            entry_ids: If given, return only rows whose
-                ``_PIPELINE_ENTRY_ID_COL`` value is in this list.
+            base_entry_ids: If given, return only rows whose
+                ``_PIPELINE_BASE_ENTRY_ID_COL`` value is in this list.
                 If ``None``, return all rows.
 
         Returns:
             A ``_JoinedRecords`` whose ``table`` always includes a
-            ``_PIPELINE_ENTRY_ID_COL`` column, or ``None`` when either
+            ``_PIPELINE_BASE_ENTRY_ID_COL`` column, or ``None`` when either
             the pipeline database or cached function pod is absent. A 0-row
             table (not ``None``) is returned when both fetches succeed but
             no matching rows exist — callers check ``num_rows`` themselves.
@@ -1697,8 +1812,8 @@ class FunctionJobNode(FunctionNodeBase):
         # ------------------------------------------------------------------
         if ephemeral_df.height > 0 and persistent_df.height > 0:
             ephemeral_only_df = ephemeral_df.join(
-                persistent_df.select([_PIPELINE_ENTRY_ID_COL]),
-                on=_PIPELINE_ENTRY_ID_COL,
+                persistent_df.select([_PIPELINE_BASE_ENTRY_ID_COL]),
+                on=_PIPELINE_BASE_ENTRY_ID_COL,
                 how="anti",
             )
             merged_df = pl.concat([persistent_df, ephemeral_only_df], how="diagonal")
@@ -1711,10 +1826,10 @@ class FunctionJobNode(FunctionNodeBase):
             empty_table = taginfo.slice(0, 0)
             return _JoinedRecords(table=empty_table, taginfo_columns=taginfo_columns)
 
-        # Apply entry_id filter if requested
-        if entry_ids is not None:
+        # Apply base_entry_id filter if requested
+        if base_entry_ids is not None:
             merged_df = merged_df.filter(
-                pl.col(_PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
+                pl.col(_PIPELINE_BASE_ENTRY_ID_COL).is_in(base_entry_ids)
             )
 
         joined = merged_df.to_arrow()
@@ -1726,14 +1841,14 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _load_cached_entries(
         self,
-        entry_ids: list[bytes] | None = None,
+        base_entry_ids: list[bytes] | None = None,
     ) -> "dict[bytes, tuple[TagProtocol, DataProtocol]]":
         """DB loader: fetch ``(tag, data)`` pairs from the pipeline and result databases.
 
         Calls ``_fetch_joined_records`` to obtain the raw joined table, then
-        converts each row into a ``(tag, data)`` tuple keyed by pipeline entry ID.
+        converts each row into a ``(tag, data)`` tuple keyed by base entry ID.
 
-        If ``entry_ids`` is given, only those entries are fetched from DB.
+        If ``base_entry_ids`` is given, only those entries are fetched from DB.
         If ``None``, all records for this node are loaded.
 
         Does NOT read from or write to the in-memory cache
@@ -1744,15 +1859,15 @@ class FunctionJobNode(FunctionNodeBase):
         for that.
 
         Args:
-            entry_ids: If provided, load only these specific entry IDs.
+            base_entry_ids: If provided, load only these specific base entry IDs.
                 If ``None``, load all records for this node.
 
         Returns:
-            dict mapping entry_id → ``(tag, data)``. Empty dict when either
+            dict mapping base_entry_id → ``(tag, data)``. Empty dict when either
             database is absent, either DB fetch returns ``None``, or no rows
             match after joining.
         """
-        fetched = self._fetch_joined_records(entry_ids=entry_ids)
+        fetched = self._fetch_joined_records(base_entry_ids=base_entry_ids)
         if fetched is None or fetched.table.num_rows == 0:
             return {}
 
@@ -1776,9 +1891,9 @@ class FunctionJobNode(FunctionNodeBase):
             )
 
         # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it).
-        # _PIPELINE_ENTRY_ID_COL starts with META_PREFIX ("__") so it is covered
-        # by the startswith check without needing to be listed explicitly.
-        entry_ids_col = joined.column(_PIPELINE_ENTRY_ID_COL).to_pylist()
+        # All meta columns (starting with META_PREFIX "__") are dropped including
+        # _PIPELINE_ENTRY_ID_COL and _PIPELINE_BASE_ENTRY_ID_COL.
+        base_entry_ids_col = joined.column(_PIPELINE_BASE_ENTRY_ID_COL).to_pylist()
         drop_cols = [
             c
             for c in joined.column_names
@@ -1789,8 +1904,8 @@ class FunctionJobNode(FunctionNodeBase):
         stream = ArrowTableStream(data_table, tag_columns=tag_keys)
 
         loaded: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
-        for eid, (tag, data) in zip(entry_ids_col, stream.iter_data()):
-            loaded[eid] = (tag, data)
+        for base_eid, (tag, data) in zip(base_entry_ids_col, stream.iter_data()):
+            loaded[base_eid] = (tag, data)
         return loaded
 
     async def _async_execute_cache_only(
@@ -1981,15 +2096,15 @@ class FunctionJobNode(FunctionNodeBase):
                 if loaded:
                     self._cached_output_table = None
                     self._cached_content_hash_column = None
-                cached_by_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
+                cached_by_base_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
 
                 # Phase 2: drive output from input channel — cached or compute
                 async def _process_one_db(
                     tag: TagProtocol, data: DataProtocol
                 ) -> None:
-                    entry_id = self.compute_pipeline_entry_id(tag, data)
-                    if entry_id in cached_by_entry_id:
-                        tag_out, result_data = cached_by_entry_id[entry_id]
+                    base_entry_id = self.compute_base_entry_id(tag, data)
+                    if base_entry_id in cached_by_base_entry_id:
+                        tag_out, result_data = cached_by_base_entry_id[base_entry_id]
                         ctx_obs.on_data_start(node_label, tag, data)
                         ctx_obs.on_data_end(
                             node_label, tag, data, result_data, cached=True

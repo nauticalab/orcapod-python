@@ -8,7 +8,11 @@ import pytest
 
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes.function_node import FunctionJobNode, _PIPELINE_ENTRY_ID_COL
+from orcapod.core.nodes.function_node import (
+    FunctionJobNode,
+    _PIPELINE_ENTRY_ID_COL,
+    _PIPELINE_BASE_ENTRY_ID_COL,
+)
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 
@@ -87,25 +91,25 @@ class TestFetchJoinedRecords:
         assert all(isinstance(c, str) for c in result.taginfo_columns)
         assert _PIPELINE_ENTRY_ID_COL in result.taginfo_columns
 
-    def test_no_entry_ids_returns_all_rows(self, executed_node):
-        """Calling with entry_ids=None returns all executed rows."""
+    def test_no_base_entry_ids_returns_all_rows(self, executed_node):
+        """Calling with base_entry_ids=None returns all executed rows."""
         result = executed_node._fetch_joined_records()
         assert result is not None
         assert result.table.num_rows == 2
 
     def test_entry_ids_filter_narrows_rows(self, executed_node):
-        """Passing a single entry_id returns only that row."""
+        """Passing a single base_entry_id returns only that row."""
         node = executed_node
         input_pairs = list(node._input_stream.iter_data())
-        entry_id_0 = node.compute_pipeline_entry_id(input_pairs[0][0], input_pairs[0][1])
+        base_entry_id_0 = node.compute_base_entry_id(input_pairs[0][0], input_pairs[0][1])
 
-        result = node._fetch_joined_records(entry_ids=[entry_id_0])
+        result = node._fetch_joined_records(base_entry_ids=[base_entry_id_0])
         assert result is not None
         assert result.table.num_rows == 1
-        assert result.table.column(_PIPELINE_ENTRY_ID_COL)[0].as_py() == entry_id_0
+        assert result.table.column(_PIPELINE_BASE_ENTRY_ID_COL)[0].as_py() == base_entry_id_0
 
-    def test_empty_entry_ids_returns_zero_rows(self, executed_node):
-        """Passing entry_ids=[] returns a 0-row table, not None."""
-        result = executed_node._fetch_joined_records(entry_ids=[])
+    def test_empty_base_entry_ids_returns_zero_rows(self, executed_node):
+        """Passing base_entry_ids=[] returns a 0-row table, not None."""
+        result = executed_node._fetch_joined_records(base_entry_ids=[])
         assert result is not None
         assert result.table.num_rows == 0

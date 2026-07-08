@@ -402,3 +402,78 @@ class TestPipelineRecordSourceColumns:
         # "x" is the input data data column — should not appear
         assert "x" not in pipeline_records.column_names
         assert "_input_x" not in pipeline_records.column_names
+
+
+# ---------------------------------------------------------------------------
+# compute_base_entry_id
+# ---------------------------------------------------------------------------
+
+
+class TestComputeBaseEntryId:
+    def test_returns_non_empty_bytes(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        base_entry_id = node.compute_base_entry_id(tag, data)
+        assert isinstance(base_entry_id, bytes)
+        assert len(base_entry_id) > 0
+        assert b":" in base_entry_id
+
+    def test_same_inputs_produce_same_id(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        assert node.compute_base_entry_id(tag, data) == node.compute_base_entry_id(tag, data)
+
+    def test_different_tags_produce_different_ids(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        data = Data({"x": 10})
+        assert node.compute_base_entry_id(Tag({"id": 0}), data) != node.compute_base_entry_id(Tag({"id": 1}), data)
+
+    def test_different_data_produce_different_ids(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        assert node.compute_base_entry_id(tag, Data({"x": 10})) != node.compute_base_entry_id(tag, Data({"x": 99}))
+
+    def test_differs_from_versioned_entry_id_at_index_zero(self):
+        """After ITL-508, compute_pipeline_entry_id includes the index in the preimage,
+        so compute_pipeline_entry_id(tag, data, 0) != compute_base_entry_id(tag, data)."""
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        base_id = node.compute_base_entry_id(tag, data)
+        versioned_id_0 = node.compute_pipeline_entry_id(tag, data, 0)
+        assert base_id != versioned_id_0
+
+
+# ---------------------------------------------------------------------------
+# compute_pipeline_entry_id with recomputation_index
+# ---------------------------------------------------------------------------
+
+
+class TestVersionedEntryIdDiffersByIndex:
+    def test_different_indices_produce_different_ids(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        assert node.compute_pipeline_entry_id(tag, data, 0) != node.compute_pipeline_entry_id(tag, data, 1)
+
+    def test_same_index_produces_same_id(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        assert node.compute_pipeline_entry_id(tag, data, 1) == node.compute_pipeline_entry_id(tag, data, 1)
+
+    def test_default_index_zero_is_consistent(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        node, _ = _make_node(stream)
+        tag = Tag({"id": 0})
+        data = Data({"x": 10})
+        assert node.compute_pipeline_entry_id(tag, data) == node.compute_pipeline_entry_id(tag, data, 0)
