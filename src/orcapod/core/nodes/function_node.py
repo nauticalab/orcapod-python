@@ -72,8 +72,9 @@ else:
 # database. Always present in the table returned by _fetch_joined_records.
 _PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
 
-# Column storing the stable base entry ID (hash without recomputation index).
-# Used for filtering in _fetch_joined_records and as the in-memory cache key.
+# Column name for the stable base entry ID (no recomputation index).
+# Stores the per-logical-input identity; later tasks wire this into the
+# Phase 1 filter and the in-memory cache key.
 _PIPELINE_BASE_ENTRY_ID_COL = "__pipeline_base_entry_id"
 
 # Column storing the recomputation chain index (pa.int32).
@@ -1378,26 +1379,25 @@ class FunctionJobNode(FunctionNodeBase):
 
         return tag_out, output_data
 
-    def compute_base_entry_id(
-        self, tag: TagProtocol, input_data: DataProtocol
-    ) -> bytes:
-        """Compute the stable base entry ID for a (tag, input_data, node) combination.
+    def _build_entry_id_preimage(
+        self,
+        tag: TagProtocol,
+        input_data: DataProtocol,
+    ) -> pa.Table:
+        """Builds the shared Arrow preimage used by both entry-ID methods.
 
-        Identical to the pre-ITL-508 ``compute_pipeline_entry_id`` implementation.
-        Stable across all recomputation attempts for the same logical input.
-        Used as the in-memory cache key (``_cached_output_datas``) and stored in
-        ``_PIPELINE_BASE_ENTRY_ID_COL``.
+        Combines the tag's system columns with the input data hash and
+        node content hash into a single-row Arrow table.
 
         Args:
-            tag: The tag (including system tags).
-            input_data: The input data.
+            tag: The tag datagram for the input row.
+            input_data: The data datagram for the input row.
 
         Returns:
-            Method-prefixed raw bytes (``b"{method}:{digest}"``) uniquely
-            identifying this (tag, input_data, node) combination. Suitable
-            for storage in a ``pa.large_binary()`` column.
+            A single-row ``pa.Table`` with system-tag columns,
+            ``INPUT_DATA_HASH_COL``, and ``NODE_CONTENT_HASH_COL``.
         """
-        tag_with_hash = (
+        return (
             tag.as_table(columns={"system_tags": True})
             .append_column(
                 constants.INPUT_DATA_HASH_COL,
@@ -1408,7 +1408,32 @@ class FunctionJobNode(FunctionNodeBase):
                 pa.array([self.content_hash().to_string()], type=pa.large_string()),
             )
         )
-        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_prefixed_digest()
+
+    def compute_base_entry_id(
+        self,
+        tag: TagProtocol,
+        input_data: DataProtocol,
+    ) -> bytes:
+        """Computes the stable (recomputation-index-free) entry ID for a (tag, data) pair.
+
+        This value is identical to the pre-ITL-508 ``compute_pipeline_entry_id`` output:
+        it hashes the tag's system columns plus ``INPUT_DATA_HASH_COL`` and
+        ``NODE_CONTENT_HASH_COL``. Because it excludes the recomputation index it is
+        stable across all recomputation attempts for the same logical input.
+
+        The base entry ID is stored in ``_PIPELINE_BASE_ENTRY_ID_COL`` and will be
+        used as the in-memory cache key and Phase 1 filter in subsequent tasks.
+
+        Args:
+            tag: The tag datagram for the input row.
+            input_data: The data datagram for the input row.
+
+        Returns:
+            A bytes value in ``b"{method}:{digest}"`` format.
+        """
+        return self.data_context.arrow_hasher.hash_table(
+            self._build_entry_id_preimage(tag, input_data)
+        ).to_prefixed_digest()
 
     def compute_pipeline_entry_id(
         self,
@@ -1418,9 +1443,10 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> bytes:
         """Compute a versioned pipeline entry ID from tag + system tags + input data hash + index.
 
-        Appends a ``_PIPELINE_RECOMPUTATION_INDEX_COL`` column (value:
-        ``recomputation_index``, type ``pa.int32()``) to the hash preimage so
-        that each recomputation attempt receives a distinct DB primary key.
+        Extends the base preimage (see ``_build_entry_id_preimage``) with a
+        ``_PIPELINE_RECOMPUTATION_INDEX_COL`` column (value: ``recomputation_index``,
+        type ``pa.int32()``) so that each recomputation attempt receives a distinct
+        DB primary key.
 
         At ``recomputation_index=0`` this produces a hash that differs from the
         pre-ITL-508 implementation (the index column is now part of the preimage).
@@ -1431,8 +1457,8 @@ class FunctionJobNode(FunctionNodeBase):
         identical inputs each get a distinct entry ID, regardless of table scope.
 
         Args:
-            tag: The tag (including system tags).
-            input_data: The input data.
+            tag: The tag datagram for the input row.
+            input_data: The data datagram for the input row.
             recomputation_index: Position in the recomputation chain. ``0`` for
                 the first computation, ``N+1`` for each miss-triggered recompute.
 
@@ -1441,22 +1467,11 @@ class FunctionJobNode(FunctionNodeBase):
             identifying this (tag, input_data, node run, recomputation attempt).
             Suitable for storage in a ``pa.large_binary()`` column.
         """
-        tag_with_hash = (
-            tag.as_table(columns={"system_tags": True})
-            .append_column(
-                constants.INPUT_DATA_HASH_COL,
-                pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                constants.NODE_CONTENT_HASH_COL,
-                pa.array([self.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                _PIPELINE_RECOMPUTATION_INDEX_COL,
-                pa.array([recomputation_index], type=pa.int32()),
-            )
+        preimage = self._build_entry_id_preimage(tag, input_data).append_column(
+            _PIPELINE_RECOMPUTATION_INDEX_COL,
+            pa.array([recomputation_index], type=pa.int32()),
         )
-        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_prefixed_digest()
+        return self.data_context.arrow_hasher.hash_table(preimage).to_prefixed_digest()
 
     def add_pipeline_record(
         self,
