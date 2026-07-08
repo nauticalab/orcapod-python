@@ -16,6 +16,8 @@ Example::
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
 from collections.abc import Iterator
@@ -34,13 +36,10 @@ else:
 
 logger = logging.getLogger(__name__)
 
-import base64
-import json
-
 _ARROW_METADATA_KEY = "__arrow_metadata__"
 
 
-def _serialize_field_meta_tree(field: "pa.Field") -> "dict | None":
+def _serialize_field_meta_tree(field: pa.Field) -> dict | None:
     """Recursively build the metadata tree for a single ``pa.Field``.
 
     Walks the field's type tree, collecting ``field.metadata`` at each level.
@@ -89,7 +88,7 @@ def _serialize_field_meta_tree(field: "pa.Field") -> "dict | None":
     return node if node else None
 
 
-def _serialize_arrow_metadata(table: "pa.Table") -> "dict[str, bytes] | None":
+def _serialize_arrow_metadata(table: pa.Table) -> dict[str, bytes] | None:
     """Encode all Arrow metadata from ``table`` into a single SpiralDB KV entry.
 
     Serializes both schema-level (``table.schema.metadata``) and per-field
@@ -126,7 +125,7 @@ def _serialize_arrow_metadata(table: "pa.Table") -> "dict[str, bytes] | None":
     return {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
 
 
-def _load_arrow_metadata(kv: "dict[str, bytes]") -> "dict":
+def _load_arrow_metadata(kv: dict[str, bytes]) -> dict:
     """Decode the Arrow metadata blob from a SpiralDB KV store entry.
 
     Args:
@@ -142,7 +141,7 @@ def _load_arrow_metadata(kv: "dict[str, bytes]") -> "dict":
     raise NotImplementedError("_load_arrow_metadata is not yet implemented (Task 3)")
 
 
-def _restore_field(field: "pa.Field", tree: "dict") -> "pa.Field":
+def _restore_field(field: pa.Field, tree: dict) -> pa.Field:
     """Restore metadata onto a ``pa.Field`` from a serialized metadata tree.
 
     Args:
