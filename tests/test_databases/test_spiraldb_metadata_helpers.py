@@ -369,3 +369,13 @@ class TestRestoreField:
         stored = {"meta": {b64(b"unit"): b64(b"meters")}}
         _, changed = _restore_field(field, stored)
         assert changed is True
+
+    def test_primitive_already_has_same_meta_unchanged(self):
+        # When stored metadata equals the field's existing metadata,
+        # the function should return the original field (identity) and changed=False.
+        field = pa.field("x", pa.int64(), metadata={b"unit": b"meters"})
+        # Simulate what _restore_field receives: the stored tree has the same metadata
+        stored = {"meta": {b64(b"unit"): b64(b"meters")}}
+        restored, changed = _restore_field(field, stored)
+        assert not changed
+        assert restored is field

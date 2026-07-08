@@ -70,9 +70,9 @@ def _serialize_field_meta_tree(field: pa.Field) -> dict | None:
     if _pa.types.is_struct(ftype):
         child_fields = [ftype.field(i) for i in range(ftype.num_fields)]
     elif (
-        _pa.types.is_list(ftype)
+        _pa.types.is_fixed_size_list(ftype)
+        or _pa.types.is_list(ftype)
         or _pa.types.is_large_list(ftype)
-        or _pa.types.is_fixed_size_list(ftype)
     ):
         child_fields = [ftype.value_field]
 
