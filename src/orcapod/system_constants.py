@@ -18,6 +18,7 @@ POD_TIMESTAMP = "pod_ts"
 FIELD_SEPARATOR = ":"
 BLOCK_SEPARATOR = "::"
 ENV_INFO = "env_info"
+IS_EPHEMERAL_COL = "is_ephemeral"
 
 
 class SystemConstant:
@@ -99,6 +100,10 @@ class SystemConstant:
     @property
     def ENV_INFO(self) -> str:
         return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{ENV_INFO}"
+
+    @property
+    def IS_EPHEMERAL_COL(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{IS_EPHEMERAL_COL}"
 
 
 constants = SystemConstant()
