@@ -103,6 +103,19 @@ class TestSerializeFieldMetaTree:
         field = pa.field("s", pa.struct([inner]))
         assert _serialize_field_meta_tree(field) is None
 
+    def test_map_children_not_recursed(self):
+        # pa.map_ key/item fields are not recursed — pa.map_() constructor
+        # does not support field-level metadata on key/item fields.
+        field = pa.field("m", pa.map_(pa.string(), pa.int32()))
+        # No metadata on the outer field, no recursion into map children
+        assert _serialize_field_meta_tree(field) is None
+
+        # Even if the outer field has metadata, children are not in the result
+        field_with_meta = pa.field("m", pa.map_(pa.string(), pa.int32()), metadata={b"tag": b"yes"})
+        result = _serialize_field_meta_tree(field_with_meta)
+        assert result == {"meta": {b64(b"tag"): b64(b"yes")}}
+        assert "children" not in result
+
 
 # ---------------------------------------------------------------------------
 # _serialize_arrow_metadata
