@@ -172,15 +172,18 @@ class TestSqliteHashCacher:
 
 @pytest.fixture()
 def restore_default_file_handler():
-    """Restore the default FileHandler after each test to prevent cross-test pollution."""
+    """Restore the default FileHandler and DirectoryHandler after each test."""
     from orcapod.contexts import get_default_context
+    from orcapod.extension_types.directory_type import Directory
     from orcapod.extension_types.file_type import File
 
     context = get_default_context()
     registry = context.semantic_hasher.type_handler_registry
-    original_handler = registry.get_handler_for_type(File)
+    original_file_handler = registry.get_handler_for_type(File)
+    original_dir_handler = registry.get_handler_for_type(Directory)
     yield
-    registry.register(File, original_handler)
+    registry.register(File, original_file_handler)
+    registry.register(Directory, original_dir_handler)
 
 
 class TestEnableFileHashCaching:
@@ -232,3 +235,36 @@ class TestEnableFileHashCaching:
         handler = registry.get_handler_for_type(File)
         # The base FileHasher should still use sha256 (from v0.1.json)
         assert handler.file_hasher.file_hasher.algorithm == "sha256"
+
+    def test_directory_handler_uses_cached_file_hasher(
+        self, restore_default_file_handler, tmp_path
+    ):
+        """After enable_file_hash_caching(), DirectoryHandler uses CachedFileHasher."""
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.directory_type import Directory
+        from orcapod.hashing.file_hashers import CachedFileHasher
+
+        enable_file_hash_caching(db_path=tmp_path / "cache.db")
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        dir_handler = registry.get_handler_for_type(Directory)
+        assert isinstance(dir_handler.directory_hasher.file_hasher, CachedFileHasher)
+
+    def test_shared_cache_between_file_and_directory_handlers(
+        self, restore_default_file_handler, tmp_path
+    ):
+        """FileHandler and DirectoryHandler share the exact same CachedFileHasher instance."""
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.directory_type import Directory
+        from orcapod.extension_types.file_type import File
+
+        enable_file_hash_caching(db_path=tmp_path / "cache.db")
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+
+        file_hasher = registry.get_handler_for_type(File).file_hasher
+        dir_file_hasher = registry.get_handler_for_type(Directory).directory_hasher.file_hasher
+
+        assert file_hasher is dir_file_hasher

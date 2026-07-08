@@ -248,6 +248,11 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
     construct a ``CachedFileHasher`` manually and register it directly via
     the context's ``type_handler_registry`` instead.
 
+    Also patches ``DirectoryHandler`` for ``orcapod.Directory``, using the
+    **same** ``CachedFileHasher`` instance. This means a file that was
+    cached via a direct ``op.File`` hash is also a cache hit when the same
+    file is encountered during directory traversal.
+
     Args:
         db_path: Path to the SQLite cache database. Defaults to
             ``~/.orcapod/file_hash_cache.db`` or the
@@ -284,12 +289,26 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
                 cacher.close()
             base_hasher = base_hasher.file_hasher
 
+    from orcapod.extension_types.directory_type import Directory
+    from orcapod.hashing.directory_hashers import BasicDirectoryHasher
+    from orcapod.hashing.semantic_hashing.builtin_handlers import DirectoryHandler
+
+    cached_file_hasher = CachedFileHasher(
+        file_hasher=base_hasher,
+        cacher=SqliteHashCacher(db_path),
+    )
+
+    registry.register(File, FileHandler(cached_file_hasher))
+
+    existing_dir_handler = registry.get_handler_for_type(Directory)
+    existing_dir_hasher = existing_dir_handler.directory_hasher
     registry.register(
-        File,
-        FileHandler(
-            CachedFileHasher(
-                file_hasher=base_hasher,
-                cacher=SqliteHashCacher(db_path),
+        Directory,
+        DirectoryHandler(
+            BasicDirectoryHasher(
+                file_hasher=cached_file_hasher,
+                algorithm=existing_dir_hasher.algorithm,
+                buffer_size=existing_dir_hasher.buffer_size,
             )
         ),
     )
