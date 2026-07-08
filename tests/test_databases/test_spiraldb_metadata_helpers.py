@@ -5,7 +5,6 @@ import base64
 import json
 
 import pyarrow as pa
-import pytest
 
 from orcapod.databases.spiraldb_connector import (
     _ARROW_METADATA_KEY,
