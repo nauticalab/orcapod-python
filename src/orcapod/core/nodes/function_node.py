@@ -1119,7 +1119,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         # Collect upstream entries and resolve entry_ids
         upstream_entries: list[tuple[TagProtocol, DataProtocol, bytes]] = [
-            (tag, data, self.compute_pipeline_entry_id(tag, data))
+            (tag, data, self.compute_base_entry_id(tag, data))
             for tag, data in input_stream.iter_data()
         ]
         entry_ids = [eid for _, _, eid in upstream_entries]
@@ -1252,9 +1252,9 @@ class FunctionJobNode(FunctionNodeBase):
                 tag, data, logger=logger
             )
 
-        # Store by entry_id and invalidate derived caches
-        entry_id = self.compute_pipeline_entry_id(tag, data)
-        self._cached_output_datas[entry_id] = (tag_out, output_data)
+        # Store by base_entry_id (stable across recomputation cycles) and invalidate caches
+        base_entry_id = self.compute_base_entry_id(tag, data)
+        self._cached_output_datas[base_entry_id] = (tag_out, output_data)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
@@ -1369,9 +1369,9 @@ class FunctionJobNode(FunctionNodeBase):
                 tag, data, logger=logger
             )
 
-        # Store by entry_id and invalidate derived caches
-        entry_id = self.compute_pipeline_entry_id(tag, data)
-        self._cached_output_datas[entry_id] = (tag_out, output_data)
+        # Store by base_entry_id (stable across recomputation cycles) and invalidate caches
+        base_entry_id = self.compute_base_entry_id(tag, data)
+        self._cached_output_datas[base_entry_id] = (tag_out, output_data)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
@@ -2080,7 +2080,7 @@ class FunctionJobNode(FunctionNodeBase):
                 async def _process_one_db(
                     tag: TagProtocol, data: DataProtocol
                 ) -> None:
-                    entry_id = self.compute_pipeline_entry_id(tag, data)
+                    entry_id = self.compute_base_entry_id(tag, data)
                     if entry_id in cached_by_entry_id:
                         tag_out, result_data = cached_by_entry_id[entry_id]
                         ctx_obs.on_data_start(node_label, tag, data)
