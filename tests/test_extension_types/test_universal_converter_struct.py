@@ -31,7 +31,12 @@ PLAIN_STRUCT = pa.struct([
 
 @pytest.fixture
 def converter():
-    """Fresh UniversalTypeConverter from the default DataContext."""
+    """``UniversalTypeConverter`` from the default ``DataContext``.
+
+    Note: ``get_default_context()`` returns a cached singleton, so the returned
+    converter may be shared across tests. The tests in this module are written to
+    be order-independent under that constraint.
+    """
     return get_default_context().type_converter
 
 
