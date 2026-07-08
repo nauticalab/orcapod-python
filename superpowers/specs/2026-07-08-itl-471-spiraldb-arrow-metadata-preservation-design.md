@@ -81,46 +81,80 @@ The value is a UTF-8–encoded JSON blob with this structure:
 ```json
 {
   "schema": {
-    "<base64(meta_key)>": "<base64(meta_value)>",
-    ...
+    "<base64(meta_key)>": "<base64(meta_value)>"
   },
   "fields": {
     "<col_name>": {
-      "<base64(meta_key)>": "<base64(meta_value)>",
-      ...
-    },
-    ...
+      "meta": {
+        "<base64(meta_key)>": "<base64(meta_value)>"
+      },
+      "children": {
+        "<child_field_name>": {
+          "meta": { "<base64(meta_key)>": "<base64(meta_value)>" },
+          "children": { ... }
+        }
+      }
+    }
   }
 }
 ```
 
 - `"schema"` holds the table-level `schema.metadata` entries. Arrow metadata keys and
-  values are `bytes`; they are base64-encoded (standard, no padding stripped) for safe
+  values are `bytes`; they are base64-encoded (standard `base64.b64encode`) for safe
   embedding in JSON.
-- `"fields"` holds per-column `field.metadata` entries. Column names are used directly as
-  JSON object keys (always plain strings). Within each column's dict, keys and values are
-  again base64-encoded bytes.
-- If there is **no Arrow metadata at all** (schema.metadata is None, all field.metadata is
-  None), `set_metadata` is **not called**. On read, absence of the key means no metadata
-  to restore — backward compatible with tables written before this change.
+- `"fields"` holds a **recursive metadata tree** for each top-level column. Each node in
+  the tree has two optional keys:
+  - `"meta"`: the field's own `field.metadata`, base64-encoded k/v pairs. Omitted if the
+    field has no metadata.
+  - `"children"`: a dict mapping child field names to their recursive metadata trees.
+    Populated for composite types — `struct` (inner fields), `list_`/`large_list`/
+    `fixed_size_list` (value field), `map_` (key and item fields). Omitted for primitives
+    or when no child has any metadata.
+- An entry in `"fields"` is only present if that top-level column or any of its
+  descendants has metadata. If there is **no Arrow metadata at all** (schema.metadata is
+  None, all fields and their descendants have no metadata), `set_metadata` is **not
+  called**. On read, absence of the key means no metadata to restore — backward
+  compatible with tables written before this change.
 
-Two private module-level helpers live in `spiraldb_connector.py`:
+Four private module-level helpers live in `spiraldb_connector.py`:
 
 ```python
 def _serialize_arrow_metadata(table: pa.Table) -> dict[str, bytes] | None:
     """Encode all Arrow metadata from ``table`` into a single KV entry.
 
-    Returns ``{"__arrow_metadata__": blob}`` if any metadata exists,
-    or ``None`` if both schema.metadata and all field.metadata are absent.
+    Recursively walks each column's type tree. Returns
+    ``{"__arrow_metadata__": blob}`` if any metadata exists anywhere in the
+    schema (including nested struct/list/map fields), or ``None`` if the schema
+    and all fields (at every depth) have no metadata.
+    """
+
+def _serialize_field_meta_tree(field: pa.Field) -> dict | None:
+    """Recursively build the metadata tree for a single field.
+
+    Returns a dict with optional ``"meta"`` and ``"children"`` keys, or
+    ``None`` if this field and all its descendants have no metadata.
     """
 
 def _load_arrow_metadata(
     kv: dict[str, bytes],
-) -> tuple[dict[bytes, bytes] | None, dict[str, dict[bytes, bytes]]]:
+) -> tuple[dict[bytes, bytes] | None, dict[str, dict]]:
     """Decode Arrow metadata from a SpiralDB table KV store.
 
-    Returns ``(schema_meta, field_metas)`` where ``schema_meta`` is None if
-    absent and ``field_metas`` maps column name → decoded field metadata dict.
+    Returns ``(schema_meta, field_trees)`` where ``schema_meta`` is None if
+    absent and ``field_trees`` maps top-level column name → raw metadata tree
+    dict (as stored in the blob).
+    """
+
+def _restore_field(field: pa.Field, stored: dict | None) -> tuple[pa.Field, bool]:
+    """Recursively restore a field's metadata and rebuild its nested type.
+
+    Walks the stored metadata tree in parallel with the field's type tree,
+    reattaching ``field.metadata`` at every level and reconstructing composite
+    types (``struct``, ``list_``, ``large_list``, ``fixed_size_list``, ``map_``)
+    bottom-up when any descendant has metadata to restore.
+
+    Returns ``(restored_field, changed)`` where ``changed`` is True if any
+    metadata or type was modified.
     """
 ```
 
@@ -145,12 +179,13 @@ if meta_kv is not None:
 
 ### 3. Read Path (`iter_batches`)
 
-Load KV metadata **once** before the scan, then reattach it during the existing
-field-rebuild loop — unifying string/binary normalization with metadata restoration:
+Load KV metadata **once** before the scan, then use `_restore_field` recursively during
+the existing field-rebuild loop — unifying string/binary normalization with full-depth
+metadata restoration:
 
 ```python
 tbl = self._project.table(self._table_id(table_name))
-schema_meta, field_metas = _load_arrow_metadata(tbl.get_metadata())
+schema_meta, field_trees = _load_arrow_metadata(tbl.get_metadata())
 reader = self._spiral.scan(tbl.select()).to_record_batches()
 
 for batch in reader:
@@ -159,24 +194,21 @@ for batch in reader:
     needs_rebuild = False
 
     for field in schema:
-        restored_meta = field_metas.get(field.name) or field.metadata
+        # _restore_field recurses into struct/list/map children, rebuilding
+        # the type tree bottom-up and reattaching metadata at every level.
+        restored_field, field_changed = _restore_field(field, field_trees.get(field.name))
 
-        if field.type == _pa.string():
-            new_fields.append(
-                _pa.field(field.name, _pa.large_string(), field.nullable, restored_meta)
-            )
-            needs_rebuild = True
-        elif field.type == _pa.binary():
-            new_fields.append(
-                _pa.field(field.name, _pa.large_binary(), field.nullable, restored_meta)
-            )
-            needs_rebuild = True
-        else:
-            new_fields.append(
-                _pa.field(field.name, field.type, field.nullable, restored_meta)
-            )
-            if restored_meta != field.metadata:
-                needs_rebuild = True
+        # Apply large_string / large_binary normalization on top of the
+        # recursively-restored field.
+        if restored_field.type == _pa.string():
+            restored_field = restored_field.with_type(_pa.large_string())
+            field_changed = True
+        elif restored_field.type == _pa.binary():
+            restored_field = restored_field.with_type(_pa.large_binary())
+            field_changed = True
+
+        new_fields.append(restored_field)
+        needs_rebuild = needs_rebuild or field_changed
 
     restored_schema_meta = schema_meta if schema_meta is not None else schema.metadata
     if restored_schema_meta != schema.metadata:
@@ -190,10 +222,14 @@ for batch in reader:
 ```
 
 - `tbl.get_metadata()` is called **once per scan**, not once per batch.
-- `needs_rebuild` (replacing the old `needs_cast`) is True for any field whose type or
-  metadata differs from the wire representation, or when schema-level metadata differs.
+- `_restore_field` handles the recursive type rebuilding. The string/binary normalization
+  is applied **after** restoration on the top-level field type only (SpiralDB only
+  normalises top-level string/binary; nested strings inside a struct remain as-is from
+  the wire, which is consistent with current behaviour).
+- `needs_rebuild` is True if any field at any depth changed type or metadata, or when
+  schema-level metadata differs.
 - `batch.cast(target_schema)` handles both type changes and metadata updates — PyArrow
-  applies `target_schema` in full including field metadata.
+  applies `target_schema` in full including nested field metadata.
 - Tables with no stored metadata behave exactly as before (backward compatible).
 
 ### 4. Protocol Extension (`validate_records`)
@@ -263,9 +299,13 @@ No other changes to `ConnectorArrowDatabase`.
 
 ### Unit Tests (`tests/test_databases/test_spiraldb_connector.py`)
 
-- `TestSerializeArrowMetadata` / `TestLoadArrowMetadata`: pure-function roundtrip tests —
+- `TestSerializeFieldMetaTree` / `TestRestoreField`: pure-function tests for the recursive
+  helpers — primitive field with metadata, struct with nested field metadata, list with
+  value field metadata, deeply nested struct-in-struct, fields with no metadata (returns
+  None / unchanged), round-trip fidelity.
+- `TestSerializeArrowMetadata` / `TestLoadArrowMetadata`: top-level roundtrip tests —
   schema-only, fields-only, mixed, no metadata (returns None), column names with special
-  characters, multiple fields, empty metadata dicts.
+  characters, multiple fields, nested struct columns.
 - `TestIterBatchesMetadata`: mock `tbl.get_metadata()` — field metadata reattached to
   yielded batches; string/binary normalization preserved when field metadata present;
   no stored metadata → batches unchanged (backward compat).
@@ -292,6 +332,9 @@ New class `TestArrowMetadataRoundTrip` (gated on `SPIRAL_INTEGRATION_TESTS=1`):
 - `test_extension_type_metadata_round_trip`: write with `ARROW:extension:name` /
   `ARROW:extension:metadata` in field metadata (storage type `large_string`), read back,
   assert field metadata survives and schema is usable with `register_discovered_extensions`.
+- `test_nested_struct_field_metadata_round_trip`: write a table with a `struct` column
+  whose inner fields carry `field.metadata`, read back, assert inner field metadata is
+  restored at the correct depth.
 - `test_no_metadata_backward_compatible`: plain table with no Arrow metadata — read back
   yields None schema.metadata and None field.metadata (no spurious KV entries).
 - `test_connector_arrow_database_extension_type_round_trip`: full `ConnectorArrowDatabase`
