@@ -8,6 +8,7 @@ import pytest
 
 from orcapod.extension_types.directory_type import Directory
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
+from orcapod.hashing.file_hashers import FileHasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
     DirectoryHandler,
     register_builtin_python_type_handlers,
@@ -21,7 +22,7 @@ class TestBasicDirectoryHasher:
     def test_empty_directory_returns_content_hash(self, tmp_path):
         empty = tmp_path / "empty"
         empty.mkdir()
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         result = hasher.hash_directory(empty)
         assert isinstance(result, ContentHash)
         assert result.method == "merkle_sha256"
@@ -31,7 +32,7 @@ class TestBasicDirectoryHasher:
         d2 = tmp_path / "d2"
         d1.mkdir()
         d2.mkdir()
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2)
 
     def test_identical_content_same_hash(self, tmp_path):
@@ -41,7 +42,7 @@ class TestBasicDirectoryHasher:
         d2.mkdir()
         (d1 / "file.txt").write_bytes(b"hello")
         (d2 / "file.txt").write_bytes(b"hello")
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2)
 
     def test_different_content_different_hash(self, tmp_path):
@@ -51,7 +52,7 @@ class TestBasicDirectoryHasher:
         d2.mkdir()
         (d1 / "file.txt").write_bytes(b"hello")
         (d2 / "file.txt").write_bytes(b"world")
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) != hasher.hash_directory(d2)
 
     def test_single_byte_change_in_nested_file_changes_hash(self, tmp_path):
@@ -62,14 +63,14 @@ class TestBasicDirectoryHasher:
             (base / "sub" / "deep" / "unchanged.txt").write_bytes(b"same content")
         (d1 / "sub" / "deep" / "target.txt").write_bytes(b"hello world")
         (d2 / "sub" / "deep" / "target.txt").write_bytes(b"hello World")  # capital W
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) != hasher.hash_directory(d2)
 
     def test_adding_file_changes_hash(self, tmp_path):
         d = tmp_path / "d"
         d.mkdir()
         (d / "a.txt").write_bytes(b"content")
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         h1 = hasher.hash_directory(d)
         (d / "b.txt").write_bytes(b"new file")
         h2 = hasher.hash_directory(d)
@@ -80,7 +81,7 @@ class TestBasicDirectoryHasher:
         d.mkdir()
         (d / "a.txt").write_bytes(b"content")
         (d / "b.txt").write_bytes(b"to remove")
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         h1 = hasher.hash_directory(d)
         (d / "b.txt").unlink()
         h2 = hasher.hash_directory(d)
@@ -93,7 +94,7 @@ class TestBasicDirectoryHasher:
         d2.mkdir()
         (d1 / "file.txt").write_bytes(b"same")
         (d2 / "file.txt").write_bytes(b"same")
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         h1 = hasher.hash_directory(d1)
         (d2 / ".hidden").write_bytes(b"dotfile")
         h2 = hasher.hash_directory(d2)
@@ -107,7 +108,7 @@ class TestBasicDirectoryHasher:
         (d1 / "app.py").write_bytes(b"code")
         (d2 / "app.py").write_bytes(b"code")
         (d2 / "app.pyc").write_bytes(b"compiled")  # extra .pyc, excluded
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
 
     def test_ignore_callable_excludes_entries(self, tmp_path):
@@ -118,7 +119,7 @@ class TestBasicDirectoryHasher:
         (d1 / "app.py").write_bytes(b"code")
         (d2 / "app.py").write_bytes(b"code")
         (d2 / "excluded.txt").write_bytes(b"extra")
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         h1 = hasher.hash_directory(d1)
         h2 = hasher.hash_directory(d2, ignore=lambda p: p.name == "excluded.txt")
         assert h1 == h2
@@ -133,7 +134,7 @@ class TestBasicDirectoryHasher:
         d2.mkdir()
         (d1 / "link").symlink_to(real_file)
         (d2 / "link").symlink_to(real_file)
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2)
 
     def test_symlink_cycle_safe(self, tmp_path):
@@ -141,7 +142,7 @@ class TestBasicDirectoryHasher:
         d = tmp_path / "d"
         d.mkdir()
         (d / "self_link").symlink_to(d)  # points to its own parent
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         result = hasher.hash_directory(d)  # must complete without error
         assert isinstance(result, ContentHash)
 
@@ -152,7 +153,7 @@ class TestBasicDirectoryHasher:
             sub.mkdir()
             for j in range(20):
                 (sub / f"file_{j:03d}.txt").write_bytes(f"content {i} {j}".encode())
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         result = hasher.hash_directory(tmp_path)
         assert isinstance(result, ContentHash)
 
@@ -164,7 +165,7 @@ class TestBasicDirectoryHasher:
         d2.mkdir()
         (d1 / "original.txt").write_bytes(b"content")
         (d2 / "renamed.txt").write_bytes(b"content")  # same content, different name
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) != hasher.hash_directory(d2)
 
     def test_ignore_applied_recursively(self, tmp_path):
@@ -178,7 +179,7 @@ class TestBasicDirectoryHasher:
         (d1 / "sub" / "app.py").write_bytes(b"code")
         (d2 / "sub" / "app.py").write_bytes(b"code")
         (d2 / "sub" / "app.pyc").write_bytes(b"compiled")  # nested .pyc, should be excluded
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="mkfifo not available on this platform")
@@ -191,7 +192,7 @@ class TestBasicDirectoryHasher:
         (d1 / "file.txt").write_bytes(b"content")
         (d2 / "file.txt").write_bytes(b"content")
         os.mkfifo(str(d2 / "myfifo"))  # special file — should be silently skipped
-        hasher = BasicDirectoryHasher()
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         # The FIFO is excluded from the hash, so both directories are identical
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2)
 
@@ -199,7 +200,7 @@ class TestBasicDirectoryHasher:
 class TestDirectoryHandler:
     @pytest.fixture
     def handler(self):
-        return DirectoryHandler(BasicDirectoryHasher())
+        return DirectoryHandler(BasicDirectoryHasher(file_hasher=FileHasher()))
 
     @pytest.fixture
     def hasher(self):
