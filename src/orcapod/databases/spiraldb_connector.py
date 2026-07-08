@@ -424,12 +424,14 @@ class SpiralDBConnector:
                 non-default value is passed.
 
         Yields:
-            Arrow RecordBatch objects, with ``pa.string()`` normalized to
-            ``pa.large_string()`` and ``pa.binary()`` to ``pa.large_binary()``.
-            This matches the types reported by ``get_column_info`` and those
-            used by ``ConnectorArrowDatabase`` for pending records, preventing
-            schema mismatches in ``pa.concat_tables`` calls. Yields nothing for
-            an empty table.
+            Arrow RecordBatch objects. Each batch has:
+            - ``pa.string()`` normalized to ``pa.large_string()`` and
+              ``pa.binary()`` to ``pa.large_binary()``.
+            - Field metadata (including nested struct/list field metadata)
+              restored from the SpiralDB native KV store, if any was written
+              by ``upsert_records``.
+            - Schema-level metadata restored from the KV store.
+            Yields nothing for an empty table.
         """
         import pyarrow as _pa  # noqa: PLC0415
 
@@ -449,27 +451,41 @@ class SpiralDBConnector:
             )
         table_name = _parse_table_name(query)
         tbl = self._project.table(self._table_id(table_name))
+        schema_meta, field_trees = _load_arrow_metadata(tbl.get_metadata())
         reader = self._spiral.scan(tbl.select()).to_record_batches()
         for batch in reader:
             schema = batch.schema
             new_fields = []
-            needs_cast = False
+            needs_rebuild = False
             for field in schema:
-                ftype = field.type
-                if ftype == _pa.string():
-                    new_fields.append(
-                        _pa.field(field.name, _pa.large_string(), field.nullable, field.metadata)
+                # Recursively restore field metadata (including nested struct/list).
+                restored_field, field_changed = _restore_field(field, field_trees.get(field.name))
+                # Apply large_string / large_binary normalization on the top-level type.
+                if restored_field.type == _pa.string():
+                    restored_field = _pa.field(
+                        restored_field.name,
+                        _pa.large_string(),
+                        restored_field.nullable,
+                        restored_field.metadata,
                     )
-                    needs_cast = True
-                elif ftype == _pa.binary():
-                    new_fields.append(
-                        _pa.field(field.name, _pa.large_binary(), field.nullable, field.metadata)
+                    field_changed = True
+                elif restored_field.type == _pa.binary():
+                    restored_field = _pa.field(
+                        restored_field.name,
+                        _pa.large_binary(),
+                        restored_field.nullable,
+                        restored_field.metadata,
                     )
-                    needs_cast = True
-                else:
-                    new_fields.append(field)
-            if needs_cast:
-                target_schema = _pa.schema(new_fields, metadata=schema.metadata)
+                    field_changed = True
+                new_fields.append(restored_field)
+                needs_rebuild = needs_rebuild or field_changed
+
+            restored_schema_meta = schema_meta if schema_meta is not None else schema.metadata
+            if restored_schema_meta != schema.metadata:
+                needs_rebuild = True
+
+            if needs_rebuild:
+                target_schema = _pa.schema(new_fields, metadata=restored_schema_meta)
                 batch = batch.cast(target_schema)
             yield batch
 

@@ -590,3 +590,90 @@ class TestUpsertRecordsMetadata:
         connector.upsert_records("t", records, id_column="id", skip_existing=True)
         mock_tbl.write.assert_not_called()
         mock_tbl.set_metadata.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestIterBatchesMetadata
+# ---------------------------------------------------------------------------
+
+
+class TestIterBatchesMetadata:
+    def _wire_scan(self, mock_sp, mock_project, batches: list, kv: dict | None = None) -> None:
+        mock_project.table.return_value.select.return_value = MagicMock()
+        mock_project.table.return_value.get_metadata.return_value = kv or {}
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = iter(batches)
+
+    def test_schema_metadata_reattached(self, connector, mock_sp, mock_project):
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+
+        stored_blob = json.dumps({
+            "schema": {
+                b64mod.b64encode(b"origin").decode(): b64mod.b64encode(b"test").decode()
+            }
+        }).encode()
+        raw_batch = pa.record_batch({"id": pa.array(["a"], type=pa.string())})
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert len(result) == 1
+        assert result[0].schema.metadata == {b"origin": b"test"}
+
+    def test_field_metadata_reattached(self, connector, mock_sp, mock_project):
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+
+        stored_blob = json.dumps({
+            "fields": {
+                "val": {"meta": {
+                    b64mod.b64encode(b"unit").decode(): b64mod.b64encode(b"meters").decode()
+                }}
+            }
+        }).encode()
+        raw_batch = pa.record_batch({
+            "id": pa.array(["a"], type=pa.string()),
+            "val": pa.array([1.0], type=pa.float64()),
+        })
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert result[0].schema.field("val").metadata == {b"unit": b"meters"}
+
+    def test_string_normalization_preserved_with_metadata(self, connector, mock_sp, mock_project):
+        """string → large_string normalization still applies when field metadata present."""
+        import json  # noqa: PLC0415
+        import base64 as b64mod  # noqa: PLC0415
+
+        stored_blob = json.dumps({
+            "fields": {
+                "label": {"meta": {
+                    b64mod.b64encode(b"ARROW:extension:name").decode(): b64mod.b64encode(b"orcapod.path").decode()
+                }}
+            }
+        }).encode()
+        # SpiralDB returns pa.string() at the wire
+        raw_batch = pa.record_batch({"label": pa.array(["x"], type=pa.string())})
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        batch = result[0]
+        # type must be large_string (normalized)
+        assert batch.schema.field("label").type == pa.large_string()
+        # metadata must be restored
+        assert batch.schema.field("label").metadata == {b"ARROW:extension:name": b"orcapod.path"}
+
+    def test_no_stored_metadata_behaves_as_before(self, connector, mock_sp, mock_project):
+        """Tables with no stored metadata are returned unchanged (backward compat)."""
+        raw_batch = pa.record_batch({"id": pa.array(["a"], type=pa.string()), "v": pa.array([1])})
+        self._wire_scan(mock_sp, mock_project, [raw_batch], {})
+
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert result[0].schema.field("id").type == pa.large_string()
+        assert result[0].schema.metadata is None
+
+    def test_get_metadata_called_once_per_scan_not_per_batch(self, connector, mock_sp, mock_project):
+        b1 = pa.record_batch({"id": pa.array(["a"])})
+        b2 = pa.record_batch({"id": pa.array(["b"])})
+        self._wire_scan(mock_sp, mock_project, [b1, b2], {})
+        list(connector.iter_batches('SELECT * FROM "t"'))
+        mock_project.table.return_value.get_metadata.assert_called_once()
