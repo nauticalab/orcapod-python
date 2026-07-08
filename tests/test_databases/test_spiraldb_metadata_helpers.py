@@ -396,3 +396,13 @@ class TestRestoreField:
         restored, changed = _restore_field(field, stored)
         assert not changed
         assert restored is field
+
+    def test_fixed_size_list_value_field_meta_restored(self):
+        vf = pa.field("item", pa.float32())
+        field = pa.field("lst", pa.list_(vf, 4))  # fixed_size_list[4]
+        stored = {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}}
+        restored, changed = _restore_field(field, stored)
+        assert changed is True
+        assert pa.types.is_fixed_size_list(restored.type)
+        restored_vf = restored.type.value_field
+        assert restored_vf.metadata == {b"k": b"v"}

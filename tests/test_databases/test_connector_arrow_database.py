@@ -468,6 +468,32 @@ class TestAddRecordsRoundTrip:
         db.add_records(self.PATH, empty, record_id_column="__record_id")
         assert db.get_all_records(self.PATH) is None
 
+    def test_get_all_records_returns_none_when_table_has_no_rows(self, db):
+        """Returns None when the table exists but iter_batches yields nothing."""
+        empty = pa.table({
+            "__record_id": pa.array([], type=pa.large_binary()),
+            "v": pa.array([], type=pa.int64()),
+        })
+        db._connector._tables["results"] = empty
+        result = db.get_all_records(("results",))
+        assert result is None
+
+    def test_add_records_raises_if_record_id_column_not_in_table(self, db):
+        table = pa.table({
+            "id": pa.array([b"x"], type=pa.large_binary()),
+            "v": pa.array([1]),
+        })
+        with pytest.raises(ValueError, match="not found in table columns"):
+            db.add_records(self.PATH, table, record_id_column="nonexistent")
+
+    def test_add_records_raises_if_record_id_type_is_not_binary(self, db):
+        table = pa.table({
+            "id": pa.array(["x"], type=pa.large_string()),
+            "v": pa.array([1]),
+        })
+        with pytest.raises(TypeError, match="large_binary"):
+            db.add_records(self.PATH, table, record_id_column="id")
+
 
 # ===========================================================================
 # 7. Duplicate handling
@@ -510,6 +536,41 @@ class TestDuplicateHandling:
         assert result is not None
         assert result.num_rows == 1
         assert result.column("value").to_pylist() == [2]
+
+    def test_skip_duplicates_true_filters_pending_conflicts(self, db):
+        """When skip_duplicates=True, pending-conflict IDs are filtered out."""
+        PATH = ("dup_test", "v1")
+        # Add first record to pending
+        db.add_records(PATH, make_table(__record_id=[b"id1"], value=[1]), record_id_column="__record_id")
+        # Add again with skip_duplicates=True — id1 conflicts, id2 is new
+        db.add_records(
+            PATH,
+            make_table(__record_id=[b"id1", b"id2"], value=[99, 2]),
+            record_id_column="__record_id",
+            skip_duplicates=True,
+        )
+        db.flush()
+        result = db.get_all_records(PATH, record_id_column="__record_id")
+        assert result is not None
+        ids = set(result["__record_id"].to_pylist())
+        assert b"id1" in ids  # original preserved
+        assert b"id2" in ids  # new one added
+
+    def test_skip_duplicates_true_all_filtered_returns_early(self, db):
+        """When all records conflict with pending, skip_duplicates=True returns without adding."""
+        PATH = ("dup_test2", "v1")
+        db.add_records(PATH, make_table(__record_id=[b"id1"], value=[1]), record_id_column="__record_id")
+        # Add same id again — should be a no-op
+        db.add_records(
+            PATH,
+            make_table(__record_id=[b"id1"], value=[99]),
+            record_id_column="__record_id",
+            skip_duplicates=True,
+        )
+        db.flush()
+        result = db.get_all_records(PATH)
+        assert result is not None
+        assert result.column("value").to_pylist() == [1]  # original value unchanged
 
 
 # ===========================================================================
@@ -627,6 +688,14 @@ class TestHierarchicalPath:
     def test_path_component_with_null_byte_raises(self, db):
         with pytest.raises(ValueError, match="invalid character"):
             db.add_record(("bad\x00path",), b"id-1", make_table(v=[1]))
+
+    def test_empty_string_component_raises(self, db):
+        with pytest.raises(ValueError, match="invalid"):
+            db.add_record(("",), b"id-1", make_table(v=[1]))
+
+    def test_non_string_component_raises(self, db):
+        with pytest.raises(ValueError, match="invalid"):
+            db._validate_record_path(("valid", 123))  # type: ignore[arg-type]
 
 
 class TestPathToTableName:

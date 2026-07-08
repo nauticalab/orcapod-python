@@ -677,3 +677,22 @@ class TestIterBatchesMetadata:
         self._wire_scan(mock_sp, mock_project, [b1, b2], {})
         list(connector.iter_batches('SELECT * FROM "t"'))
         mock_project.table.return_value.get_metadata.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestDeleteTable
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteTable:
+    def test_delete_existing_table_calls_drop_table(self, connector, mock_project):
+        r1 = MagicMock(dataset="default", table="my_table")
+        mock_project.list_tables.return_value = [r1]
+        connector.delete_table("my_table")
+        mock_project.drop_table.assert_called_once_with("default.my_table")
+
+    def test_delete_nonexistent_table_is_noop(self, connector, mock_project):
+        r1 = MagicMock(dataset="default", table="other_table")
+        mock_project.list_tables.return_value = [r1]
+        connector.delete_table("no_such")
+        mock_project.drop_table.assert_not_called()

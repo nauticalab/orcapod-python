@@ -84,6 +84,13 @@ class TestArrowTypeToSqliteSql:
     def test_bool(self):
         assert _arrow_type_to_sqlite_sql(pa.bool_()) == "BOOLEAN"
 
+    def test_unsupported_type_logs_warning_and_returns_text(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            result = _arrow_type_to_sqlite_sql(pa.list_(pa.int64()))
+        assert result == "TEXT"
+        assert "Unsupported Arrow type" in caplog.text
+
 
 class TestSQLiteConnectorScaffold:
     def test_isinstance_dbconnector_protocol(self) -> None:
@@ -399,6 +406,18 @@ class TestIterBatches:
         batches = list(connector.iter_batches('SELECT * FROM "data" WHERE 1=0'))
         assert batches == []
 
+    def test_non_select_query_yields_nothing(self, connector: SQLiteConnector) -> None:
+        """cursor.description is None for DDL/DML queries; iter_batches should yield nothing."""
+        batches = list(connector.iter_batches("CREATE TABLE IF NOT EXISTS tmp (x INTEGER)"))
+        assert batches == []
+
+    def test_unquoted_table_name_in_query(self, connector: SQLiteConnector) -> None:
+        """iter_batches falls back to unquoted table name regex."""
+        self._setup_data(connector)
+        batches = list(connector.iter_batches("SELECT * FROM data"))
+        total_rows = sum(b.num_rows for b in batches)
+        assert total_rows == 3
+
 
 class TestRowidTyping:
     def test_rowid_column_typed_as_int64(self, connector):
@@ -426,3 +445,83 @@ class TestRowidTyping:
         assert "rowid" in batch.schema.names
         # Should remain large_string (declared type), not int64
         assert batch.schema.field("rowid").type == pa.large_string()
+
+
+# ---------------------------------------------------------------------------
+# validate_records
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRecords:
+    """SQLiteConnector.validate_records rejects any Arrow metadata."""
+
+    @pytest.fixture
+    def c(self):
+        conn = SQLiteConnector(":memory:")
+        yield conn
+        conn.close()
+
+    def test_accepts_plain_table(self, c):
+        table = pa.table({
+            "id": pa.array([b"a"], type=pa.large_binary()),
+            "v": pa.array([1]),
+        })
+        c.validate_records(table)  # must not raise
+
+    def test_rejects_field_with_metadata(self, c):
+        field = pa.field("v", pa.int64(), metadata={b"unit": b"meters"})
+        table = pa.table(
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "v": pa.array([1], type=pa.int64()),
+            },
+            schema=pa.schema([pa.field("id", pa.large_binary()), field]),
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            c.validate_records(table)
+
+    def test_rejects_schema_metadata(self, c):
+        schema = pa.schema(
+            [pa.field("id", pa.large_binary()), pa.field("v", pa.int64())],
+            metadata={b"origin": b"test"},
+        )
+        table = pa.table(
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "v": pa.array([1], type=pa.int64()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            c.validate_records(table)
+
+    def test_rejects_nested_struct_child_metadata(self, c):
+        inner = pa.field("val", pa.float64(), metadata={b"k": b"v"})
+        struct_field = pa.field("s", pa.struct([inner]))
+        schema = pa.schema([pa.field("id", pa.large_binary()), struct_field])
+        table = pa.table(
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "s": pa.array(
+                    [{"val": 1.0}],
+                    type=pa.struct([pa.field("val", pa.float64())]),
+                ),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            c.validate_records(table)
+
+    def test_rejects_nested_list_value_field_metadata(self, c):
+        vf = pa.field("item", pa.int32(), metadata={b"k": b"v"})
+        list_field = pa.field("lst", pa.list_(vf))
+        schema = pa.schema([pa.field("id", pa.large_binary()), list_field])
+        table = pa.table(
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "lst": pa.array([[1, 2]], type=pa.list_(pa.int32())),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            c.validate_records(table)
