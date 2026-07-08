@@ -358,35 +358,37 @@ class SQLiteConnector:
             conn.executemany(sql, rows)
 
     def validate_records(self, records: pa.Table) -> None:
-        """Reject Arrow extension-typed columns.
+        """Reject tables carrying any Arrow field or schema metadata.
 
-        ``SQLiteConnector`` does not preserve ``ARROW:extension:*`` field
-        metadata — extension types would be silently demoted to their storage
-        type on read.
+        ``SQLiteConnector`` does not preserve Arrow field or schema metadata
+        across read/write cycles — any metadata present would be silently lost.
+        This includes Arrow extension types, which encode their identity in field
+        metadata and would be demoted to their plain storage type on read.
 
         Args:
             records: Arrow table to validate.
 
         Raises:
-            ValueError: If any column carries an Arrow extension type.
+            ValueError: If any field carries metadata (including Arrow extension
+                types), or if the schema itself carries metadata.
         """
         import pyarrow as _pa  # noqa: PLC0415
 
-        _EXT_NAME_KEY = b"ARROW:extension:name"
-        ext_fields: list[tuple[str, str]] = []
+        problem_fields: list[str] = []
         for field in records.schema:
-            if isinstance(field.type, _pa.ExtensionType):
-                ext_fields.append((field.name, field.type.extension_name))
-            elif field.metadata and _EXT_NAME_KEY in field.metadata:
-                ext_fields.append(
-                    (field.name, field.metadata[_EXT_NAME_KEY].decode("utf-8", errors="replace"))
-                )
-        if ext_fields:
-            ext_info = ", ".join(f"{name!r}: {ext_name!r}" for name, ext_name in ext_fields)
+            if isinstance(field.type, _pa.ExtensionType) or field.metadata:
+                problem_fields.append(field.name)
+        has_schema_meta = bool(records.schema.metadata)
+        if problem_fields or has_schema_meta:
+            parts: list[str] = []
+            if problem_fields:
+                fields_str = ", ".join(repr(n) for n in problem_fields)
+                parts.append(f"fields with metadata: {fields_str}")
+            if has_schema_meta:
+                parts.append("schema-level metadata")
             raise ValueError(
-                f"SQLiteConnector does not support Arrow extension-typed columns "
-                f"({ext_info}). SQLiteConnector does not preserve ARROW:extension:* "
-                "field metadata across read/write cycles."
+                f"SQLiteConnector does not preserve Arrow metadata "
+                f"({', '.join(parts)})."
             )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────

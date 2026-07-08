@@ -132,20 +132,22 @@ class MockDBConnector:
             self._tables[table_name] = pa.concat_tables([kept, records])
 
     def validate_records(self, records: pa.Table) -> None:
-        """Rejecting default — mirrors real SQL connectors for test fidelity."""
-        _EXT_NAME_KEY = b"ARROW:extension:name"
-        ext_fields: list[tuple[str, str]] = []
+        """Reject any Arrow field or schema metadata — mirrors real SQL connectors."""
+        problem_fields: list[str] = []
         for field in records.schema:
-            if isinstance(field.type, pa.ExtensionType):
-                ext_fields.append((field.name, field.type.extension_name))
-            elif field.metadata and _EXT_NAME_KEY in field.metadata:
-                ext_fields.append(
-                    (field.name, field.metadata[_EXT_NAME_KEY].decode("utf-8", errors="replace"))
-                )
-        if ext_fields:
-            ext_info = ", ".join(f"{name!r}: {ext_name!r}" for name, ext_name in ext_fields)
+            if isinstance(field.type, pa.ExtensionType) or field.metadata:
+                problem_fields.append(field.name)
+        has_schema_meta = bool(records.schema.metadata)
+        if problem_fields or has_schema_meta:
+            parts: list[str] = []
+            if problem_fields:
+                fields_str = ", ".join(repr(n) for n in problem_fields)
+                parts.append(f"fields with metadata: {fields_str}")
+            if has_schema_meta:
+                parts.append("schema-level metadata")
             raise ValueError(
-                f"MockDBConnector does not support Arrow extension-typed columns ({ext_info})."
+                f"MockDBConnector does not preserve Arrow metadata "
+                f"({', '.join(parts)})."
             )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -808,19 +810,21 @@ class TestAtMethod:
 # ---------------------------------------------------------------------------
 
 
-class TestExtensionTypeWriteGuard:
-    """add_records() rejects extension-typed columns.
+class TestMetadataWriteGuard:
+    """add_records() rejects tables carrying any Arrow field or schema metadata.
 
-    SQL connectors do not preserve ``ARROW:extension:*`` field metadata.
-    Writing extension-typed columns would cause silent type loss on read.
-    The guard fires at write time so the problem is surfaced immediately
-    rather than discovered when reading back corrupted data.
+    SQL connectors do not preserve Arrow field or schema metadata across
+    read/write cycles. Writing tables with metadata would cause silent data
+    loss on read. The guard fires at write time so the problem is surfaced
+    immediately rather than discovered when reading back corrupted data.
 
-    Two representations are tested:
-    - In-memory ``pa.ExtensionType`` (the type is registered in this process).
-    - Metadata-only columns (plain storage type + ``ARROW:extension:name``
-      field metadata, as produced when reading Parquet from a process that
-      had the type registered).
+    Cases covered:
+    - In-memory ``pa.ExtensionType`` (type registered in this process).
+    - Extension metadata-only columns (plain storage type + field metadata).
+    - Arbitrary non-extension field metadata (any key-value pair).
+    - Schema-level metadata on the table.
+    - Tables with no metadata at all (must be accepted).
+    - Permissive connector (must accept tables with metadata).
     """
 
     @pytest.fixture
@@ -850,7 +854,7 @@ class TestExtensionTypeWriteGuard:
             table = pa.table(
                 {"__record_id": rid_array, "payload": ext_array},
             )
-            with pytest.raises(ValueError, match="extension"):
+            with pytest.raises(ValueError, match="metadata"):
                 db.add_records(
                     ("results",),
                     table,
@@ -859,7 +863,7 @@ class TestExtensionTypeWriteGuard:
         finally:
             pa.unregister_extension_type("test.dummy")
 
-    def test_rejects_metadata_only_extension_column(self, db):
+    def test_rejects_extension_field_metadata_column(self, db):
         """add_records raises ValueError when a column has ARROW:extension:name field metadata.
 
         This is the "unregistered read" representation: the column type is a plain
@@ -886,15 +890,56 @@ class TestExtensionTypeWriteGuard:
             },
             schema=schema,
         )
-        with pytest.raises(ValueError, match="extension"):
+        with pytest.raises(ValueError, match="metadata"):
             db.add_records(
                 ("results",),
                 table,
                 record_id_column="__record_id",
             )
 
+    def test_rejects_arbitrary_field_metadata(self, db):
+        """add_records raises ValueError for any non-empty field metadata."""
+        import pyarrow as pa
+
+        field_with_meta = pa.field(
+            "value",
+            pa.int64(),
+            metadata={b"unit": b"meters"},
+        )
+        schema = pa.schema([pa.field("__record_id", pa.large_binary()), field_with_meta])
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "value": pa.array([42], type=pa.int64()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
+    def test_rejects_schema_level_metadata(self, db):
+        """add_records raises ValueError when the schema itself has metadata."""
+        import pyarrow as pa
+
+        schema = pa.schema(
+            [
+                pa.field("__record_id", pa.large_binary()),
+                pa.field("value", pa.int64()),
+            ],
+            metadata={b"origin": b"test"},
+        )
+        table = pa.table(
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "value": pa.array([42], type=pa.int64()),
+            },
+            schema=schema,
+        )
+        with pytest.raises(ValueError, match="metadata"):
+            db.add_records(("results",), table, record_id_column="__record_id")
+
     def test_plain_column_not_rejected(self, db):
-        """add_records accepts tables with no extension-typed columns."""
+        """add_records accepts tables with no field or schema metadata."""
         import pyarrow as pa
 
         table = pa.table(
@@ -906,8 +951,8 @@ class TestExtensionTypeWriteGuard:
         # Should not raise
         db.add_records(("results",), table, record_id_column="__record_id")
 
-    def test_permissive_connector_allows_extension_types(self):
-        """A connector with a permissive validate_records lets extension columns through."""
+    def test_permissive_connector_allows_metadata(self):
+        """A connector with a permissive validate_records lets metadata through."""
         class PermissiveConnector(MockDBConnector):
             def validate_records(self, records: pa.Table) -> None:
                 pass  # no-op — this connector supports metadata
