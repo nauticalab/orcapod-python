@@ -1227,7 +1227,6 @@ class FunctionJobNode(FunctionNodeBase):
                         data,
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
-                        skip_cache_lookup=True,
                         is_ephemeral=True,
                     )
         elif self._cached_function_pod is not None:
@@ -1245,7 +1244,6 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
-                    skip_cache_lookup=True,
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
@@ -1346,7 +1344,6 @@ class FunctionJobNode(FunctionNodeBase):
                         data,
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
-                        skip_cache_lookup=True,
                         is_ephemeral=True,
                     )
         elif self._cached_function_pod is not None:
@@ -1364,7 +1361,6 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
-                    skip_cache_lookup=True,
                 )
         else:
             tag_out, output_data = await self._function_pod.async_process_data(

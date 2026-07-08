@@ -271,7 +271,11 @@ class TestFunctionNodeExecuteData:
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_execute_data_second_call_same_input_deduplicates(self, node):
+    def test_execute_data_second_call_same_input_appends_recomputation_record(self, node):
+        """Under the ITL-508 recomputation-index design, each call for the same
+        logical input creates a new versioned pipeline record rather than
+        deduplicating. Two calls produce two records with sequential indices.
+        """
         tag = Tag({"id": 0})
         data = Data({"x": 3})
         node._process_data_internal(tag, data)
@@ -280,7 +284,7 @@ class TestFunctionNodeExecuteData:
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
-        assert all_records.num_rows == 1
+        assert all_records.num_rows == 2
 
     def test_process_and_store_two_data_add_two_entries(self, node):
         tag = Tag({"id": 0})
