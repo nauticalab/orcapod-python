@@ -421,7 +421,16 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 config — non-``None`` fields in ``node_config`` override the
                 node's current values, while ``None`` fields leave existing
                 values unchanged.
+
+        Raises:
+            RuntimeError: If the job has not been compiled yet (use ``with job:``
+                to record a DAG before applying node config).
         """
+        if not self._compiled:
+            raise RuntimeError(
+                "No compiled pipeline — use 'with job:' to record a DAG before "
+                "calling apply_node_config()."
+            )
         for node in self._iter_function_job_nodes():
             if replace_existing:
                 node.node_config = node.node_config.merge(node_config)

@@ -82,3 +82,10 @@ class TestApplyNodeConfig:
         job = _make_job()
         nodes = list(job._iter_function_job_nodes())
         assert all(isinstance(n, FunctionJobNode) for n in nodes)
+
+    def test_apply_before_compilation_raises(self):
+        """apply_node_config raises RuntimeError if the job is not compiled yet."""
+        db = InMemoryArrowDatabase()
+        job = PipelineJob(name="uncompiled_job", store=db)
+        with pytest.raises(RuntimeError, match="No compiled pipeline"):
+            job.apply_node_config(NodeConfig(is_result_ephemeral=True))

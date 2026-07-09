@@ -2086,7 +2086,7 @@ class FunctionJobNode(FunctionNodeBase):
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
         try:
-            # Resolve concurrency limit from node config (pipeline config is not
+            # Resolve concurrency limit from pod config (pipeline config is not
             # threaded through the orchestrator, so we fall back to defaults).
             pod_config = getattr(self._function_pod, "pod_config", PodConfig())
             max_concurrency = resolve_concurrency(pod_config, PipelineConfig())
