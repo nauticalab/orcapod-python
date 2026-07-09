@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         StreamProtocol,
         TagProtocol,
     )
+    from orcapod.types import NodeConfig
 
 
 @runtime_checkable
@@ -73,6 +74,12 @@ class FunctionNodeProtocol(Protocol):
         Returns ``()`` when no pipeline database is attached.
         """
         ...
+
+    @property
+    def node_config(self) -> "NodeConfig": ...
+
+    @node_config.setter
+    def node_config(self, value: "NodeConfig") -> None: ...
 
     def execute(
         self,
