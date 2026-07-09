@@ -34,6 +34,9 @@ from uuid import UUID
 from orcapod.extension_types.file_type import File
 from orcapod.extension_types.directory_type import Directory
 
+# Extension registration API (ITL-473)
+from .extensions import OrcapodExtension, register_extension
+
 __all__ = [
     "DEFAULT_CONFIG",
     "DisplayConfig",
@@ -57,6 +60,9 @@ __all__ = [
     "Path",
     "UPath",
     "UUID",
+    # Extension registration API (ITL-473)
+    "OrcapodExtension",
+    "register_extension",
 ]
 
 
