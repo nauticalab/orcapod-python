@@ -962,6 +962,9 @@ class FunctionJobNode(FunctionNodeBase):
         node._cached_output_table = None
         node._cached_content_hash_column = None
 
+        # FunctionJobNode — orchestrator config
+        node._node_config = NodeConfig()
+
         # FunctionJobNode — DB persistence state (wired by attach_databases)
         node._pipeline_database = None
         node._cached_function_pod = None
