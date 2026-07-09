@@ -11,7 +11,7 @@ Covers:
 - PythonDataFunction.direct_async_call via run_in_executor
 - End-to-end multi-stage async pipeline wiring
 - Error propagation through channels
-- NodeConfig / PipelineConfig integration with FunctionPod
+- PodConfig / PipelineConfig integration with FunctionPod
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from orcapod.core.operators import (
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.types import NodeConfig, PipelineConfig
+from orcapod.types import PodConfig, PipelineConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -574,7 +574,7 @@ class TestFunctionPodConcurrency:
             return x
 
         pf = PythonDataFunction(record_order, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=1))
 
         stream = make_stream(5)
         input_ch = Channel(buffer_size=16)
@@ -594,7 +594,7 @@ class TestFunctionPodConcurrency:
             return x * 2
 
         pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=None))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=None))
         pipeline_cfg = PipelineConfig(default_max_concurrency=None)
 
         stream = make_stream(10)
@@ -613,13 +613,13 @@ class TestFunctionPodConcurrency:
 
     @pytest.mark.asyncio
     async def test_pipeline_config_concurrency_fallback(self):
-        """NodeConfig inherits from PipelineConfig when not overridden."""
+        """PodConfig inherits from PipelineConfig when not overridden."""
 
         def double(x: int) -> int:
             return x * 2
 
         pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf)  # NodeConfig default (None)
+        pod = FunctionPod(pf)  # PodConfig default (None)
         pipeline_cfg = PipelineConfig(default_max_concurrency=2)
 
         stream = make_stream(4)
@@ -833,14 +833,14 @@ class TestSyncBehaviorUnchanged:
         results = list(output.iter_data())
         assert len(results) == 2
 
-    def test_function_pod_with_node_config_sync_still_works(self):
-        """NodeConfig should be ignored in sync mode."""
+    def test_function_pod_with_pod_config_sync_still_works(self):
+        """PodConfig should be ignored in sync mode."""
 
         def add(x: int, y: int) -> int:
             return x + y
 
         pf = PythonDataFunction(add, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=2))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=2))
 
         stream = make_two_col_stream(3)
         output = pod.process(stream)

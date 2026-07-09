@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.nodes import JobNode
@@ -13,7 +14,7 @@ from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.pipeline.dag import OrcaDAG
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import CacheMode
+from orcapod.types import CacheMode, NodeConfig
 
 if TYPE_CHECKING:
     from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode
@@ -388,6 +389,53 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     pipeline_database=pipeline_db,
                     cache_mode=op_cache_mode,
                 )
+
+    # ------------------------------------------------------------------
+    # _iter_function_job_nodes() / apply_node_config()
+    # ------------------------------------------------------------------
+
+    def _iter_function_job_nodes(self) -> Iterator[FunctionJobNode]:
+        """Iterate over all ``FunctionJobNode`` instances in the compiled pipeline.
+
+        Returns:
+            An iterator over every ``FunctionJobNode`` in the persistent node map.
+        """
+        return (
+            node
+            for node in (self._persistent_node_map or {}).values()
+            if isinstance(node, FunctionJobNode)
+        )
+
+    def apply_node_config(
+        self,
+        node_config: NodeConfig,
+        replace_existing: bool = False,
+    ) -> None:
+        """Apply a ``NodeConfig`` to all ``FunctionJobNode``s in this pipeline.
+
+        Args:
+            node_config: The config to apply.
+            replace_existing: If ``False``, directly sets ``node_config`` on
+                every node, replacing whatever config each node currently holds.
+                If ``True``, merges ``node_config`` into each node's existing
+                config — non-``None`` fields in ``node_config`` override the
+                node's current values, while ``None`` fields leave existing
+                values unchanged.
+
+        Raises:
+            RuntimeError: If the job has not been compiled yet (use ``with job:``
+                to record a DAG before applying node config).
+        """
+        if not self._compiled:
+            raise RuntimeError(
+                "No compiled pipeline — use 'with job:' to record a DAG before "
+                "calling apply_node_config()."
+            )
+        for node in self._iter_function_job_nodes():
+            if replace_existing:
+                node.node_config = node.node_config.merge(node_config)
+            else:
+                node.node_config = node_config
 
     # ------------------------------------------------------------------
     # as_pipeline()

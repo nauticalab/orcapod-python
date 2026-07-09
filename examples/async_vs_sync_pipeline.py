@@ -40,7 +40,7 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
-from orcapod.types import NodeConfig
+from orcapod.types import PodConfig
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -107,11 +107,11 @@ def build_job(use_async_fn: bool) -> PipelineJob:
         pf_b = PythonDataFunction(fn, output_keys="result", function_name="branch_b")
         FunctionPod(
             data_function=pf_a,
-            node_config=NodeConfig(max_concurrency=NUM_DATA),
+            pod_config=PodConfig(max_concurrency=NUM_DATA),
         )(source, label="branch_a")
         FunctionPod(
             data_function=pf_b,
-            node_config=NodeConfig(max_concurrency=NUM_DATA),
+            pod_config=PodConfig(max_concurrency=NUM_DATA),
         )(source, label="branch_b")
 
     return job

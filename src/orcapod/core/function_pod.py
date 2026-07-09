@@ -30,8 +30,8 @@ from orcapod.protocols.observability_protocols import DataExecutionLoggerProtoco
 from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
-    NodeConfig,
     PipelineConfig,
+    PodConfig,
     Schema,
     resolve_concurrency,
 )
@@ -242,15 +242,16 @@ class FunctionPod(_FunctionPodBase):
     def __init__(
         self,
         data_function: DataFunctionProtocol,
-        node_config: NodeConfig | None = None,
+        pod_config: PodConfig | None = None,
         **kwargs,
     ) -> None:
         super().__init__(data_function, **kwargs)
-        self._node_config = node_config or NodeConfig()
+        self._pod_config = pod_config or PodConfig()
 
     @property
-    def node_config(self) -> NodeConfig:
-        return self._node_config
+    def pod_config(self) -> PodConfig:
+        """Per-pod executor configuration."""
+        return self._pod_config
 
     def process(
         self, *streams: StreamProtocol, label: str | None = None
@@ -293,19 +294,16 @@ class FunctionPod(_FunctionPodBase):
 
         Returns:
             A JSON-serializable dict containing the URI, data function config,
-            and node config for this function pod.
+            and pod config for this function pod.
         """
         config: dict[str, Any] = {
             "uri": list(self.uri),
             "data_function": self.data_function.to_config(),
-            "node_config": None,
+            "pod_config": None,
         }
-        if (
-            self._node_config is not None
-            and self._node_config.max_concurrency is not None
-        ):
-            config["node_config"] = {
-                "max_concurrency": self._node_config.max_concurrency,
+        if self._pod_config.max_concurrency is not None:
+            config["pod_config"] = {
+                "max_concurrency": self._pod_config.max_concurrency,
             }
         return config
 
@@ -316,10 +314,10 @@ class FunctionPod(_FunctionPodBase):
         *,
         fallback_to_proxy: bool = False,
     ) -> "FunctionPod":
-        """Reconstruct a FunctionPod from a config dict.
+        """Reconstruct a ``FunctionPod`` from a config dict.
 
         Args:
-            config: A dict as produced by `to_config`.
+            config: A dict as produced by ``to_config``.
             fallback_to_proxy: If ``True`` and the data function cannot be
                 resolved, use a ``DataFunctionProxy`` instead of raising.
 
@@ -333,11 +331,11 @@ class FunctionPod(_FunctionPodBase):
             pf_config, fallback_to_proxy=fallback_to_proxy
         )
 
-        node_config = None
-        if config.get("node_config") is not None:
-            node_config = NodeConfig(**config["node_config"])
+        pod_config = None
+        if config.get("pod_config") is not None:
+            pod_config = PodConfig(**config["pod_config"])
 
-        return cls(data_function=data_function, node_config=node_config)
+        return cls(data_function=data_function, pod_config=pod_config)
 
     # ------------------------------------------------------------------
     # Async channel execution (streaming mode)
@@ -356,7 +354,7 @@ class FunctionPod(_FunctionPodBase):
         """
         try:
             pipeline_config = pipeline_config or PipelineConfig()
-            max_concurrency = resolve_concurrency(self._node_config, pipeline_config)
+            max_concurrency = resolve_concurrency(self._pod_config, pipeline_config)
 
             sem = (
                 asyncio.Semaphore(max_concurrency)

@@ -332,29 +332,65 @@ class PipelineConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class NodeConfig:
-    """Per-node execution configuration.
+class PodConfig:
+    """Per-pod executor configuration.
 
     Attributes:
-        max_concurrency: Override for this node's concurrency limit.
+        max_concurrency: Maximum concurrent function invocations for this pod.
             ``None`` inherits from ``PipelineConfig.default_max_concurrency``.
             ``1`` means sequential (rate-limited APIs, preserves ordering).
-        is_result_ephemeral: If ``True``, new computation results are written to
-            the pipeline-scoped ephemeral store (``ArrowDatabaseProtocol``)
-            instead of the persistent result database. Persistent cache hits
-            are still served when available. Raises ``RuntimeError`` at
-            execution time if ``is_result_ephemeral=True`` but no ephemeral
-            store has been injected via ``set_ephemeral_store()``.
     """
 
     max_concurrency: int | None = None
-    is_result_ephemeral: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class NodeConfig:
+    """Per-node pipeline execution configuration.
+
+    Attributes:
+        is_result_ephemeral: ``None`` inherits the default (``False``).
+            ``True`` writes new computation results to the pipeline-scoped
+            ephemeral store instead of the persistent result database.
+            Persistent cache hits are still served when available. Raises
+            ``RuntimeError`` at execution time if ``True`` but no ephemeral
+            store has been injected via ``set_ephemeral_store()``.
+    """
+
+    is_result_ephemeral: bool | None = None
+
+    def merge(self, other: "NodeConfig") -> "NodeConfig":
+        """Return a new ``NodeConfig`` with ``other``'s non-``None`` fields overriding self.
+
+        ``None`` fields in ``other`` are treated as "not set" and leave
+        self's value unchanged.
+
+        Args:
+            other: The ``NodeConfig`` whose non-``None`` fields take precedence.
+
+        Returns:
+            A new immutable ``NodeConfig``.
+
+        Example:
+            NodeConfig(is_result_ephemeral=True).merge(NodeConfig())
+            # → NodeConfig(is_result_ephemeral=True)
+
+            NodeConfig(is_result_ephemeral=True).merge(NodeConfig(is_result_ephemeral=False))
+            # → NodeConfig(is_result_ephemeral=False)
+        """
+        return NodeConfig(
+            is_result_ephemeral=(
+                other.is_result_ephemeral
+                if other.is_result_ephemeral is not None
+                else self.is_result_ephemeral
+            ),
+        )
 
 
 def resolve_concurrency(
-    node_config: NodeConfig, pipeline_config: PipelineConfig
+    pod_config: PodConfig, pipeline_config: PipelineConfig
 ) -> int | None:
-    """Resolve effective concurrency from node and pipeline configs.
+    """Resolve effective concurrency from pod and pipeline configs.
 
     Returns:
         The concurrency limit to use, or ``None`` for unlimited.
@@ -362,8 +398,8 @@ def resolve_concurrency(
     Raises:
         ValueError: If the resolved value is ``<= 0``.
     """
-    if node_config.max_concurrency is not None:
-        result = node_config.max_concurrency
+    if pod_config.max_concurrency is not None:
+        result = pod_config.max_concurrency
     else:
         result = pipeline_config.default_max_concurrency
     if result is not None and result <= 0:

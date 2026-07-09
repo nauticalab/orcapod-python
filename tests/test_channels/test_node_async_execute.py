@@ -32,7 +32,7 @@ from orcapod.core.operators.semijoin import SemiJoin
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.types import CacheMode, NodeConfig
+from orcapod.types import CacheMode, NodeConfig, PodConfig
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +334,7 @@ class TestFunctionNodeAsyncExecute:
             return x * 2
 
         pf = PythonDataFunction(tracked_double, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
         node = FunctionJobNode(pod, stream, pipeline_database=db)
@@ -371,7 +371,7 @@ class TestFunctionNodeAsyncExecute:
             return x * 2
 
         pf = PythonDataFunction(tracked_double, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=1))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
         node = FunctionJobNode(pod, stream, pipeline_database=db)
@@ -407,7 +407,7 @@ class TestFunctionNodeAsyncExecute:
             return x * 2
 
         pf = PythonDataFunction(tracked_double, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=5))
         stream = make_stream(5)
         # No pipeline_database — exercises the simple (non-DB) path
         node = FunctionJobNode(pod, stream)

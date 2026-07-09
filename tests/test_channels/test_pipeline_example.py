@@ -33,7 +33,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join, PolarsFilter
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.types import NodeConfig, PipelineConfig
+from orcapod.types import PipelineConfig, PodConfig
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ class TestAsynchronousPipeline:
         filter_op = PolarsFilter(predicates=(pl.col("score") >= 70,))
         grade_pod = FunctionPod(
             PythonDataFunction(compute_letter_grade, output_keys="letter_grade"),
-            node_config=NodeConfig(max_concurrency=1),
+            pod_config=PodConfig(max_concurrency=1),
         )
 
         ch_students = Channel(buffer_size=16)

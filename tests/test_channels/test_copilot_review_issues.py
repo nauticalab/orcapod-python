@@ -28,7 +28,7 @@ from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.types import NodeConfig, PipelineConfig, resolve_concurrency
+from orcapod.types import PipelineConfig, PodConfig, resolve_concurrency
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +83,7 @@ class TestDeterministicConcurrencyTracking:
             return x * 2
 
         pf = PythonDataFunction(tracked_double, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
         node = FunctionJobNode(pod, stream, pipeline_database=db)
@@ -241,31 +241,31 @@ class TestSemaphoreZeroDeadlock:
 
     def test_resolve_concurrency_rejects_zero(self):
         """resolve_concurrency should raise ValueError when result is 0."""
-        node_config = NodeConfig(max_concurrency=0)
+        pod_config = PodConfig(max_concurrency=0)
         pipeline_config = PipelineConfig()
 
         with pytest.raises(ValueError, match="max_concurrency"):
-            resolve_concurrency(node_config, pipeline_config)
+            resolve_concurrency(pod_config, pipeline_config)
 
     def test_resolve_concurrency_rejects_negative(self):
         """resolve_concurrency should raise ValueError when result is negative."""
-        node_config = NodeConfig(max_concurrency=-1)
+        pod_config = PodConfig(max_concurrency=-1)
         pipeline_config = PipelineConfig()
 
         with pytest.raises(ValueError, match="max_concurrency"):
-            resolve_concurrency(node_config, pipeline_config)
+            resolve_concurrency(pod_config, pipeline_config)
 
     def test_resolve_concurrency_accepts_one(self):
         """max_concurrency=1 is valid (sequential execution)."""
-        node_config = NodeConfig(max_concurrency=1)
+        pod_config = PodConfig(max_concurrency=1)
         pipeline_config = PipelineConfig()
-        assert resolve_concurrency(node_config, pipeline_config) == 1
+        assert resolve_concurrency(pod_config, pipeline_config) == 1
 
     def test_resolve_concurrency_accepts_none(self):
         """max_concurrency=None means unlimited (no semaphore)."""
-        node_config = NodeConfig()
+        pod_config = PodConfig()
         pipeline_config = PipelineConfig()
-        assert resolve_concurrency(node_config, pipeline_config) is None
+        assert resolve_concurrency(pod_config, pipeline_config) is None
 
     @pytest.mark.asyncio
     async def test_max_concurrency_zero_raises(self):
@@ -275,7 +275,7 @@ class TestSemaphoreZeroDeadlock:
             return x * 2
 
         pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=0))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=0))
         stream = make_stream(1)
         node = FunctionJobNode(pod, stream)
 

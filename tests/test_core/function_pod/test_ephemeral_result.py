@@ -27,9 +27,9 @@ def double(x: int) -> int:
     return x * 2
 
 
-def _make_pod(config: NodeConfig | None = None):
+def _make_pod():
     pf = PythonDataFunction(double, output_keys="result")
-    return FunctionPod(pf, node_config=config)
+    return FunctionPod(pf)
 
 
 def _make_stream(rows: list[dict], tag_columns: list[str] | None = None) -> ArrowTableStream:
@@ -56,16 +56,18 @@ def _make_source_stream(rows: list[dict], tag_columns: list[str] | None = None) 
 
 def _make_node(stream, pipeline_db=None, result_db=None, is_result_ephemeral: bool = False):
     """Create a FunctionJobNode with given DB configuration."""
-    cfg = NodeConfig(is_result_ephemeral=is_result_ephemeral)
-    pod = _make_pod(config=cfg)
+    pod = _make_pod()
     if pipeline_db is None:
         pipeline_db = InMemoryArrowDatabase()
-    return FunctionJobNode(
+    node = FunctionJobNode(
         function_pod=pod,
         input_stream=stream,
         pipeline_database=pipeline_db,
         result_database=result_db if result_db is not None else pipeline_db,
-    ), pipeline_db
+    )
+    if is_result_ephemeral:
+        node.node_config = NodeConfig(is_result_ephemeral=True)
+    return node, pipeline_db
 
 
 # ---------------------------------------------------------------------------
@@ -182,14 +184,14 @@ class TestBulkResolution:
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
         ephemeral_store = InMemoryArrowDatabase()
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = _make_pod(config=cfg)
+        pod = _make_pod()
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         node.set_ephemeral_store(ephemeral_store)
         results = node.execute(stream)
 
@@ -214,13 +216,13 @@ class TestBulkResolution:
         pipeline_db = InMemoryArrowDatabase()
         ephemeral_store = InMemoryArrowDatabase()
         pf = PythonDataFunction(counting_double, output_keys="result")
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         node.set_ephemeral_store(ephemeral_store)
 
         node.execute(stream)
@@ -244,25 +246,26 @@ class TestBulkResolution:
 
         # Session 1: execute with ephemeral store
         pf = PythonDataFunction(counting_double, output_keys="result")
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         node.set_ephemeral_store(InMemoryArrowDatabase())
         node.execute(stream)
         assert call_count["n"] == 1
 
         # Session 2: fresh in-memory node with a fresh ephemeral store
         pf2 = PythonDataFunction(counting_double, output_keys="result")
-        pod2 = FunctionPod(pf2, node_config=cfg)
+        pod2 = FunctionPod(pf2)
         node2 = FunctionJobNode(
             function_pod=pod2,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node2.node_config = NodeConfig(is_result_ephemeral=True)
         node2.set_ephemeral_store(InMemoryArrowDatabase())  # fresh store
         node2.execute(stream)
         assert call_count["n"] == 2  # recomputed
@@ -321,13 +324,13 @@ class TestBulkResolution:
 
         ephemeral_store = InMemoryArrowDatabase()
         pf = PythonDataFunction(counting_double, output_keys="result")
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node_e = FunctionJobNode(
             function_pod=pod,
             input_stream=stream_b,
             pipeline_database=pipeline_db,
         )
+        node_e.node_config = NodeConfig(is_result_ephemeral=True)
         node_e.set_ephemeral_store(ephemeral_store)
         node_e.execute(stream_b)
 
@@ -343,6 +346,7 @@ class TestBulkResolution:
             input_stream=stream_both,
             pipeline_database=pipeline_db,
         )
+        node_both.node_config = NodeConfig(is_result_ephemeral=True)
         node_both.set_ephemeral_store(ephemeral_store)
         node_both._cached_output_datas.clear()
 
@@ -469,14 +473,14 @@ class TestEphemeralWritePath:
     def test_store_not_assigned_raises(self):
         """is_result_ephemeral=True but ephemeral_result_store=None raises RuntimeError."""
         stream = _make_stream([{"id": 0, "x": 10}])
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = _make_pod(config=cfg)
+        pod = _make_pod()
         pipeline_db = InMemoryArrowDatabase()
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         # set_ephemeral_store never called → ephemeral_result_store is None
         with pytest.raises(RuntimeError, match="is_result_ephemeral=True"):
             node.execute(stream, error_policy="fail_fast")
@@ -486,14 +490,14 @@ class TestEphemeralWritePath:
         stream = _make_stream([{"id": 0, "x": 10}])
         pipeline_db = InMemoryArrowDatabase()
         ephemeral_store = InMemoryArrowDatabase()
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = _make_pod(config=cfg)
+        pod = _make_pod()
         # Pass pipeline_database but no result_database — ephemeral only
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         node.set_ephemeral_store(ephemeral_store)
         results = node.execute(stream)
         assert len(results) == 1
@@ -512,38 +516,40 @@ class TestEphemeralWritePath:
 
         # Session 1
         pf = PythonDataFunction(counting_double, output_keys="result")
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node1 = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node1.node_config = NodeConfig(is_result_ephemeral=True)
         node1.set_ephemeral_store(InMemoryArrowDatabase())
         node1.execute(stream)
         assert call_count["n"] == 1
 
         # Session 2: fresh store → miss → recompute
         pf2 = PythonDataFunction(counting_double, output_keys="result")
-        pod2 = FunctionPod(pf2, node_config=cfg)
+        pod2 = FunctionPod(pf2)
         ephemeral2 = InMemoryArrowDatabase()
         node2 = FunctionJobNode(
             function_pod=pod2,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node2.node_config = NodeConfig(is_result_ephemeral=True)
         node2.set_ephemeral_store(ephemeral2)
         node2.execute(stream)
         assert call_count["n"] == 2
 
         # Session 3: same ephemeral store as session 2 → hit → no recompute
         pf3 = PythonDataFunction(counting_double, output_keys="result")
-        pod3 = FunctionPod(pf3, node_config=cfg)
+        pod3 = FunctionPod(pf3)
         node3 = FunctionJobNode(
             function_pod=pod3,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node3.node_config = NodeConfig(is_result_ephemeral=True)
         node3.set_ephemeral_store(ephemeral2)  # reuse session 2's store
         node3._cached_output_datas.clear()
         node3.execute(stream)
@@ -569,26 +575,27 @@ class TestEphemeralWritePath:
 
         # Session 1: compute with ephemeral store 1 → pipeline DB gets index-0 record
         pf = PythonDataFunction(counting_double, output_keys="result")
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node1 = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node1.node_config = NodeConfig(is_result_ephemeral=True)
         node1.set_ephemeral_store(InMemoryArrowDatabase())
         node1.execute(stream)
         assert call_count["n"] == 1
 
         # Session 2: fresh ephemeral store → cross-session miss → recompute → index-1 record written
         pf2 = PythonDataFunction(counting_double, output_keys="result")
-        pod2 = FunctionPod(pf2, node_config=cfg)
+        pod2 = FunctionPod(pf2)
         ephemeral2 = InMemoryArrowDatabase()
         node2 = FunctionJobNode(
             function_pod=pod2,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node2.node_config = NodeConfig(is_result_ephemeral=True)
         node2.set_ephemeral_store(ephemeral2)
         node2.execute(stream)
         assert call_count["n"] == 2  # recomputed once due to cross-session miss
@@ -622,8 +629,7 @@ class TestPipelineInjectsStore:
         from orcapod.pipeline.job import PipelineJob
 
         stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = _make_pod(config=cfg)
+        pod = _make_pod()
 
         job = PipelineJob(name="test_pipeline")
         with job:
@@ -643,8 +649,7 @@ class TestPipelineInjectsStore:
         from orcapod.pipeline.job import PipelineJob
 
         stream = _make_stream([{"id": 0, "x": 10}])
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = _make_pod(config=cfg)
+        pod = _make_pod()
 
         job = PipelineJob(name="test_pipeline")
         with job:
@@ -750,9 +755,8 @@ class TestEphemeralOnlyNode:
         stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
         pipeline_db = InMemoryArrowDatabase()
         ephemeral_store = InMemoryArrowDatabase()
-        cfg = NodeConfig(is_result_ephemeral=True)
         pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
 
         # No result_database — pipeline_db doubles as both
         node = FunctionJobNode(
@@ -760,6 +764,7 @@ class TestEphemeralOnlyNode:
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         node.set_ephemeral_store(ephemeral_store)
         results = node.execute(stream)
 
@@ -781,14 +786,14 @@ class TestAsyncEphemeralExecution:
         pipeline_db = InMemoryArrowDatabase()
         ephemeral_store = InMemoryArrowDatabase()
 
-        cfg = NodeConfig(is_result_ephemeral=True)
         pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         node.set_ephemeral_store(ephemeral_store)
 
         input_ch = Channel(buffer_size=16)
@@ -818,14 +823,14 @@ class TestAsyncEphemeralExecution:
         stream = _make_stream([{"id": 0, "x": 5}])
         pipeline_db = InMemoryArrowDatabase()
 
-        cfg = NodeConfig(is_result_ephemeral=True)
         pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node.node_config = NodeConfig(is_result_ephemeral=True)
         # set_ephemeral_store never called → _ephemeral_cached_pod is None
 
         tag, data = next(iter(stream.iter_data()))

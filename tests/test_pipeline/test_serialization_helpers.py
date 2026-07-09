@@ -478,7 +478,7 @@ class TestFunctionPodFromConfigFallbackToProxy:
                     "output_keys": ["y"],
                 },
             },
-            "node_config": None,
+            "pod_config": None,
         }
 
         with pytest.raises((ImportError, ModuleNotFoundError)):

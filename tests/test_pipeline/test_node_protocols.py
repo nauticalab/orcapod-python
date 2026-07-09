@@ -49,6 +49,8 @@ class TestSourceNodeProtocol:
 
 class TestFunctionNodeProtocol:
     def test_requires_execute_and_async_execute(self):
+        from orcapod.types import NodeConfig
+
         class GoodFunction:
             node_type = "function"
 
@@ -59,6 +61,14 @@ class TestFunctionNodeProtocol:
             @property
             def pipeline_path(self):
                 return ()
+
+            @property
+            def node_config(self):
+                return NodeConfig()
+
+            @node_config.setter
+            def node_config(self, value):
+                pass
 
             def execute(self, input_stream, *, observer=None):
                 return []
