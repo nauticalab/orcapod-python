@@ -51,6 +51,7 @@ from orcapod.types import (
     ContentHash,
     NodeConfig,
     PipelineConfig,
+    PodConfig,
     Schema,
     resolve_concurrency,
 )
@@ -737,11 +738,28 @@ class FunctionJobNode(FunctionNodeBase):
         self.ephemeral_result_store: "ArrowDatabaseProtocol | None" = None
         self._ephemeral_cached_pod: CachedFunctionPod | None = None
 
+        # Node-level orchestrator config — applied post-construction via the
+        # .node_config setter or PipelineJob.apply_node_config().
+        self._node_config: NodeConfig = NodeConfig()
+
         self.attach_databases(
             pipeline_database=pipeline_database,
             result_database=result_database,
             ephemeral_database=ephemeral_database,
         )
+
+    # ------------------------------------------------------------------
+    # node_config property
+    # ------------------------------------------------------------------
+
+    @property
+    def node_config(self) -> NodeConfig:
+        """Per-node pipeline execution configuration."""
+        return self._node_config
+
+    @node_config.setter
+    def node_config(self, value: NodeConfig) -> None:
+        self._node_config = value
 
     # ------------------------------------------------------------------
     # attach_databases
@@ -1200,12 +1218,7 @@ class FunctionJobNode(FunctionNodeBase):
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
-        node_config = (
-            self._function_pod.node_config if self._function_pod is not None else None
-        )
-        ephemeral_result = (
-            node_config.is_result_ephemeral if node_config is not None else False
-        )
+        ephemeral_result = self._node_config.is_result_ephemeral or False
 
         if ephemeral_result:
             if self._ephemeral_cached_pod is None:
@@ -1317,12 +1330,7 @@ class FunctionJobNode(FunctionNodeBase):
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
-        node_config = (
-            self._function_pod.node_config if self._function_pod is not None else None
-        )
-        ephemeral_result = (
-            node_config.is_result_ephemeral if node_config is not None else False
-        )
+        ephemeral_result = self._node_config.is_result_ephemeral or False
 
         if ephemeral_result:
             if self._ephemeral_cached_pod is None:
@@ -2077,8 +2085,8 @@ class FunctionJobNode(FunctionNodeBase):
         try:
             # Resolve concurrency limit from node config (pipeline config is not
             # threaded through the orchestrator, so we fall back to defaults).
-            node_config = getattr(self._function_pod, "node_config", NodeConfig())
-            max_concurrency = resolve_concurrency(node_config, PipelineConfig())
+            pod_config = getattr(self._function_pod, "pod_config", PodConfig())
+            max_concurrency = resolve_concurrency(pod_config, PipelineConfig())
 
             sem = (
                 asyncio.Semaphore(max_concurrency)
