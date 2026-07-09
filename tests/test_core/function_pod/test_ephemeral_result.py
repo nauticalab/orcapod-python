@@ -575,26 +575,27 @@ class TestEphemeralWritePath:
 
         # Session 1: compute with ephemeral store 1 → pipeline DB gets index-0 record
         pf = PythonDataFunction(counting_double, output_keys="result")
-        cfg = NodeConfig(is_result_ephemeral=True)
-        pod = FunctionPod(pf, node_config=cfg)
+        pod = FunctionPod(pf)
         node1 = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node1.node_config = NodeConfig(is_result_ephemeral=True)
         node1.set_ephemeral_store(InMemoryArrowDatabase())
         node1.execute(stream)
         assert call_count["n"] == 1
 
         # Session 2: fresh ephemeral store → cross-session miss → recompute → index-1 record written
         pf2 = PythonDataFunction(counting_double, output_keys="result")
-        pod2 = FunctionPod(pf2, node_config=cfg)
+        pod2 = FunctionPod(pf2)
         ephemeral2 = InMemoryArrowDatabase()
         node2 = FunctionJobNode(
             function_pod=pod2,
             input_stream=stream,
             pipeline_database=pipeline_db,
         )
+        node2.node_config = NodeConfig(is_result_ephemeral=True)
         node2.set_ephemeral_store(ephemeral2)
         node2.execute(stream)
         assert call_count["n"] == 2  # recomputed once due to cross-session miss
