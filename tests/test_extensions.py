@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from orcapod.extensions import OrcapodExtension, register_extension
 
 

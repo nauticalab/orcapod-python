@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from orcapod.contexts import DataContext
 
+__all__ = ["OrcapodExtension", "register_extension"]
+
 
 @runtime_checkable
 class OrcapodExtension(Protocol):
@@ -71,6 +73,7 @@ def register_extension(
         >>> op.register_extension(spikeinterface_extension, context=my_context)
     """
     from orcapod.contexts import get_default_context
+
     if context is None:
         context = get_default_context()
     extension.register(context)
