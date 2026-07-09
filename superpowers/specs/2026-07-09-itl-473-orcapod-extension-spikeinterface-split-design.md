@@ -95,12 +95,15 @@ class OrcapodExtension(Protocol):
 
     name: str
 
-    def register(self, context: DataContext | None = None) -> None:
+    def register(self, context: DataContext) -> None:
         """Register this extension's types into ``context``.
 
+        ``context`` is always a concrete ``DataContext`` — never ``None``.
+        Context resolution (default vs. explicit) is handled by
+        ``register_extension`` before this method is called.
+
         Args:
-            context: Target ``DataContext``. Resolves to the default context
-                if ``None``.
+            context: Target ``DataContext`` to register types into.
         """
         ...
 
@@ -111,7 +114,9 @@ def register_extension(
 ) -> None:
     """Register an extension into a data context.
 
-    Delegates to ``extension.register(context)``.
+    Resolves ``context`` to the default context when ``None``, then delegates
+    to ``extension.register(context)`` with the concrete context. Extensions
+    never receive ``None`` for ``context``.
 
     Args:
         extension: An object implementing ``OrcapodExtension``.
@@ -125,6 +130,10 @@ def register_extension(
         >>> # or against a specific context:
         >>> op.register_extension(spikeinterface_extension, context=my_context)
     """
+    from orcapod.contexts import get_default_context
+
+    if context is None:
+        context = get_default_context()
     extension.register(context)
 ```
 
@@ -135,10 +144,10 @@ def register_extension(
 
 * `name` — a short, lowercase string identifying the extension (e.g. `"spikeinterface"`).
   Used in debug log messages only; not a unique key.
-* `register(context=None)` — performs all type registrations into the given context. If
-  `context` is `None`, the implementation resolves the default context internally (via
-  `orcapod.contexts.get_default_context()`). Must be idempotent (re-registering an already
-  registered type is a no-op with a debug log, matching the existing behaviour of
+* `register(context: DataContext)` — performs all type registrations into the given context.
+  Always receives a concrete `DataContext` — context resolution is the responsibility of
+  `register_extension`, not of the extension itself. Must be idempotent (re-registering an
+  already registered type is a no-op with a debug log, matching the existing behaviour of
   `register_spikeinterface_types()`).
 
 ---
@@ -233,12 +242,12 @@ class SpikeInterfaceExtension:
 
     name = "spikeinterface"
 
-    def register(self, context=None) -> None:
-        """Register all SpikeInterface types into ``context`` (default if ``None``).
+    def register(self, context: DataContext) -> None:
+        """Register all SpikeInterface types into ``context``.
 
         Args:
-            context: Target ``DataContext``. Resolves to the default context
-                if ``None``.
+            context: Target ``DataContext``. Always a concrete context —
+                resolution from ``None`` is handled by ``op.register_extension``.
         """
         _register_spikeinterface_types(context)
 
