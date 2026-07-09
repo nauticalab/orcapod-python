@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from orcapod.contexts import get_default_context
-
 if TYPE_CHECKING:
     from orcapod.contexts import DataContext
 
@@ -72,6 +70,7 @@ def register_extension(
         >>> # or against a specific context:
         >>> op.register_extension(spikeinterface_extension, context=my_context)
     """
+    from orcapod.contexts import get_default_context
     if context is None:
         context = get_default_context()
     extension.register(context)
