@@ -11,7 +11,7 @@ Covers:
 - PythonDataFunction.direct_async_call via run_in_executor
 - End-to-end multi-stage async pipeline wiring
 - Error propagation through channels
-- NodeConfig / PipelineConfig integration with FunctionPod
+- PodConfig / PipelineConfig integration with FunctionPod
 """
 
 from __future__ import annotations

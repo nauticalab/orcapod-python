@@ -30,7 +30,6 @@ from orcapod.protocols.observability_protocols import DataExecutionLoggerProtoco
 from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
-    NodeConfig,
     PipelineConfig,
     PodConfig,
     Schema,
