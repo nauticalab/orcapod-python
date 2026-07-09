@@ -37,7 +37,7 @@ from orcapod.protocols.core_protocols import (
     DataFunctionProtocol,
     DataProtocol,
 )
-from orcapod.types import NodeConfig
+from orcapod.types import PodConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -327,7 +327,7 @@ class TestAsyncExecuteBackpressure:
 
         pf.async_call = tracked_async_call  # type: ignore
 
-        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
+        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=1))
 
         stream = make_stream(5)
         input_ch = Channel(buffer_size=32)

@@ -44,7 +44,7 @@ from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
-from orcapod.types import NodeConfig
+from orcapod.types import PodConfig
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -75,7 +75,7 @@ def _build_pipeline(
 ) -> PipelineJob:
     """Construct an auto-compiled PipelineJob around *fn*."""
     pf = PythonDataFunction(fn, output_keys="result")
-    pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=max_concurrency))
+    pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=max_concurrency))
     db = InMemoryArrowDatabase()
     job = PipelineJob(name="matrix_test", store=db)
     with job:
