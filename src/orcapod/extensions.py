@@ -65,6 +65,10 @@ def register_extension(
         context: Target ``DataContext``. Resolves to the default context
             if ``None``.
 
+    Raises:
+        TypeError: If ``extension`` does not implement ``OrcapodExtension``
+            (i.e. is missing ``name`` or ``register``).
+
     Example:
         >>> import orcapod as op
         >>> from orcapod_extension_spikeinterface import spikeinterface_extension
@@ -72,6 +76,12 @@ def register_extension(
         >>> # or against a specific context:
         >>> op.register_extension(spikeinterface_extension, context=my_context)
     """
+    if not isinstance(extension, OrcapodExtension):
+        raise TypeError(
+            f"extension must implement OrcapodExtension "
+            f"(requires 'name: str' and 'register(context) -> None'); "
+            f"got {type(extension)!r}"
+        )
     from orcapod.contexts import get_default_context
 
     if context is None:

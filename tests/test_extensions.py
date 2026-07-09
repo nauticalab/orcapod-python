@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from orcapod.extensions import OrcapodExtension, register_extension
 
 
@@ -64,3 +66,9 @@ def test_register_extension_does_not_call_get_default_context_when_context_provi
         register_extension(ext, context=mock_context)
 
     mock_get.assert_not_called()
+
+
+def test_register_extension_raises_type_error_for_non_extension():
+    """register_extension raises TypeError for objects not implementing OrcapodExtension."""
+    with pytest.raises(TypeError, match="OrcapodExtension"):
+        register_extension(object())  # type: ignore[arg-type]
