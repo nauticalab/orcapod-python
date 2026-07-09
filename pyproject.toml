@@ -50,8 +50,7 @@ postgresql = ["psycopg[binary]>=3.0"]
 spiraldb = [
     "pyspiral>=0.14.0",
 ]
-spikeinterface = ["spikeinterface>=0.101"]
-all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]", "orcapod[spikeinterface]"]
+all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]"]
 
 [project.scripts]
 orcapod = "orcapod.cli:app"
@@ -93,7 +92,6 @@ dev = [
     "tqdm>=4.67.1",
     "mkdocs-material>=9.7.5",
     "mkdocstrings[python]>=1.0.3",
-    "spikeinterface>=0.101",
 ]
 
 
