@@ -42,7 +42,7 @@ class TestFunctionJobNodeNodeConfig:
         node.node_config = NodeConfig(is_result_ephemeral=False)
         assert node.node_config.is_result_ephemeral is False
 
-    def test_ephemeral_none_resolves_to_false(self):
+    def test_ephemeral_false_resolves_correctly(self):
         """is_result_ephemeral=None resolves to False at execution."""
         node = _make_node()
         assert (node.node_config.is_result_ephemeral or False) is False
