@@ -15,6 +15,10 @@ domain-specific dependency, the goal is to move all SI-related code into a stand
 package `orcapod-extension-spikeinterface` that declares `orcapod` as a base dependency, so
 that `pip install orcapod` installs no spikeinterface-related code at all.
 
+This split also introduces a normalized extension registration API: `orcapod` gains a thin
+`OrcapodExtension` protocol and an `op.register_extension()` function so that all future
+extension packages register themselves through a uniform interface.
+
 ---
 
 ## Goals & Success Criteria
@@ -23,8 +27,8 @@ that `pip install orcapod` installs no spikeinterface-related code at all.
   own `pyproject.toml`, `src/`, `tests/`, and CI.
 * `pip install orcapod` installs zero spikeinterface-related code or transitive deps.
 * `pip install orcapod-extension-spikeinterface` installs the extension and `orcapod` as a
-  base dependency; calling `register_spikeinterface_types()` once at startup wires the SI
-  types into the default context.
+  base dependency; registering with `op.register_extension(spikeinterface_extension)` wires
+  the SI types into the default (or any specified) context.
 * The core `orcapod` test suite (without spikeinterface installed) continues to pass with no
   SI-related skips or conditional imports.
 * The new repo's CI mirrors orcapod-python: matrix tests on Python 3.11 and 3.12, license
@@ -36,6 +40,7 @@ that `pip install orcapod` installs no spikeinterface-related code at all.
 
 In scope:
 
+* Add `OrcapodExtension` protocol and `register_extension()` function to `orcapod-python`.
 * Create new GitHub repository `nauticalab/orcapod-extension-spikeinterface`.
 * Move `src/orcapod/extension_types/spikeinterface_types.py` to
   `src/orcapod_extension_spikeinterface/_spikeinterface_types.py` in the new repo.
@@ -50,10 +55,91 @@ Out of scope:
 * `BaseSorting`, `SortingAnalyzer`, `Motion` extensions are already included in the current
   `spikeinterface_types.py` and move with it. Future SI types (ITL-468/469/470) will be added
   to the extension package directly.
-* Entry-point / plugin discovery infrastructure in core `orcapod` — the explicit call
-  registration model is retained.
+* Entry-point / plugin discovery infrastructure in core `orcapod`.
 * The `_optional` flag mechanism in `parse_objectspec` — evaluated separately once SI is
   removed; keep it for now in case other optional extensions use it in future.
+
+---
+
+## Normalized Extension API (new in `orcapod-python`)
+
+### Protocol
+
+A new file `src/orcapod/extensions.py` defines the minimal interface all orcapod extensions
+must implement:
+
+```python
+# src/orcapod/extensions.py
+from __future__ import annotations
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from orcapod.contexts.data_context import DataContext
+
+
+@runtime_checkable
+class OrcapodExtension(Protocol):
+    """Protocol that all orcapod extension objects must implement.
+
+    Extension packages expose a module-level singleton instance of a class
+    that implements this protocol and register it via ``op.register_extension()``.
+
+    Example:
+        >>> import orcapod as op
+        >>> from orcapod_extension_spikeinterface import spikeinterface_extension
+        >>> op.register_extension(spikeinterface_extension)
+
+    Attributes:
+        name: Short identifier used in log messages (e.g. ``"spikeinterface"``).
+    """
+
+    name: str
+
+    def register(self, context: DataContext | None = None) -> None:
+        """Register this extension's types into ``context``.
+
+        Args:
+            context: Target ``DataContext``. Resolves to the default context
+                if ``None``.
+        """
+        ...
+
+
+def register_extension(
+    extension: OrcapodExtension,
+    context: DataContext | None = None,
+) -> None:
+    """Register an extension into a data context.
+
+    Delegates to ``extension.register(context)``.
+
+    Args:
+        extension: An object implementing ``OrcapodExtension``.
+        context: Target ``DataContext``. Resolves to the default context
+            if ``None``.
+
+    Example:
+        >>> import orcapod as op
+        >>> from orcapod_extension_spikeinterface import spikeinterface_extension
+        >>> op.register_extension(spikeinterface_extension)
+        >>> # or against a specific context:
+        >>> op.register_extension(spikeinterface_extension, context=my_context)
+    """
+    extension.register(context)
+```
+
+`OrcapodExtension` and `register_extension` are exported from `orcapod.__init__` so that
+`import orcapod as op; op.register_extension(...)` works.
+
+### Extension object contract
+
+* `name` — a short, lowercase string identifying the extension (e.g. `"spikeinterface"`).
+  Used in debug log messages only; not a unique key.
+* `register(context=None)` — performs all type registrations into the given context. If
+  `context` is `None`, the implementation resolves the default context internally (via
+  `orcapod.contexts.get_default_context()`). Must be idempotent (re-registering an already
+  registered type is a no-op with a debug log, matching the existing behaviour of
+  `register_spikeinterface_types()`).
 
 ---
 
@@ -77,7 +163,7 @@ orcapod-extension-spikeinterface/
 │       └── release-sync.yml      # Linear release sync on push to main
 ├── src/
 │   └── orcapod_extension_spikeinterface/
-│       ├── __init__.py           # Public API re-exports
+│       ├── __init__.py           # Public API re-exports + SpikeInterfaceExtension singleton
 │       └── _spikeinterface_types.py  # Moved from orcapod-python
 ├── tests/
 │   ├── __init__.py
@@ -99,8 +185,9 @@ Python namespace-package complexity (which would require `orcapod` itself to be 
 package) and is unambiguous:
 
 ```python
-from orcapod_extension_spikeinterface import register_spikeinterface_types
-register_spikeinterface_types()
+from orcapod_extension_spikeinterface import spikeinterface_extension
+import orcapod as op
+op.register_extension(spikeinterface_extension)
 ```
 
 ### `pyproject.toml` (new package)
@@ -116,9 +203,11 @@ dependencies = [
 # No optional extras — spikeinterface is a required dep of this package
 ```
 
-### Public API (`__init__.py`)
+### `SpikeInterfaceExtension` class and singleton
 
 ```python
+# src/orcapod_extension_spikeinterface/__init__.py
+
 from ._spikeinterface_types import (
     LogicalSIRecording,
     LogicalSISorting,
@@ -128,10 +217,38 @@ from ._spikeinterface_types import (
     SISortingHandler,
     SIMotionHandler,
     SISortingAnalyzerHandler,
-    register_spikeinterface_types,
+    _register_spikeinterface_types,   # renamed to private
 )
 
+
+class SpikeInterfaceExtension:
+    """OrcaPod extension for SpikeInterface types.
+
+    Implements ``OrcapodExtension``. Register via::
+
+        import orcapod as op
+        from orcapod_extension_spikeinterface import spikeinterface_extension
+        op.register_extension(spikeinterface_extension)
+    """
+
+    name = "spikeinterface"
+
+    def register(self, context=None) -> None:
+        """Register all SpikeInterface types into ``context`` (default if ``None``).
+
+        Args:
+            context: Target ``DataContext``. Resolves to the default context
+                if ``None``.
+        """
+        _register_spikeinterface_types(context)
+
+
+#: Module-level singleton — the canonical extension object.
+spikeinterface_extension = SpikeInterfaceExtension()
+
 __all__ = [
+    "SpikeInterfaceExtension",
+    "spikeinterface_extension",
     "LogicalSIRecording",
     "LogicalSISorting",
     "LogicalSIMotion",
@@ -140,22 +257,12 @@ __all__ = [
     "SISortingHandler",
     "SIMotionHandler",
     "SISortingAnalyzerHandler",
-    "register_spikeinterface_types",
 ]
 ```
 
-### Registration mechanism
-
-The existing `register_spikeinterface_types()` function moves unchanged into the new package.
-Its docstring is updated to reference `pip install orcapod-extension-spikeinterface` instead of
-`pip install orcapod[spikeinterface]`. No auto-registration on import and no entry-point
-scanning — the explicit call pattern is kept.
-
-### Source file change
-
-`_spikeinterface_types.py` in the new package is identical to the original
-`spikeinterface_types.py` with one change: the error message in the `ImportError` guard is
-updated from `pip install orcapod[spikeinterface]` to
+The old `register_spikeinterface_types()` function is renamed to `_register_spikeinterface_types`
+(private) inside `_spikeinterface_types.py` — it remains the implementation workhorse but is
+no longer part of the public API. Its docstring is updated to reference
 `pip install orcapod-extension-spikeinterface`.
 
 ### CI: `run-tests.yml`
@@ -180,6 +287,14 @@ Identical structure to orcapod-python's `release.yml`:
 
 ## Changes to `orcapod-python`
 
+### 0. Add extension protocol and `register_extension()` function
+
+* Create `src/orcapod/extensions.py` with `OrcapodExtension` protocol and
+  `register_extension()` function (see Normalized Extension API section above).
+* Export `OrcapodExtension` and `register_extension` from `src/orcapod/__init__.py`.
+* Add a unit test `tests/test_extensions.py` verifying `register_extension` delegates
+  correctly to `extension.register(context)`.
+
 ### 1. Delete source file
 
 ```
@@ -194,8 +309,8 @@ tests/test_extension_types/test_spikeinterface_types.py  → deleted
 
 ### 3. Remove SI block from `extension_types/__init__.py`
 
-Remove the `try/except ImportError` block (currently lines ~35–44) and the conditional
-`__all__` entries for the seven SI symbols.
+Remove the `try/except ImportError` block and the conditional `__all__` entries for the
+seven SI symbols.
 
 ### 4. Remove SI entries from `v0.1.json`
 
