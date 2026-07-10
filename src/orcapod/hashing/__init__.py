@@ -51,6 +51,12 @@ from orcapod.hashing.cache_population import (
     populate_hash_cache,
 )
 from orcapod.hashing.hash_cachers import InMemoryHashCacher, SqliteHashCacher
+
+try:
+    from orcapod.hashing.postgres_hash_cacher import PostgresHashCacher
+except ImportError:
+    PostgresHashCacher = None  # type: ignore[assignment,misc]
+
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
@@ -134,6 +140,7 @@ __all__ = [
     "CachedFileHasher",
     "InMemoryHashCacher",
     "SqliteHashCacher",
+    "PostgresHashCacher",
     "CachePopulationStats",
     "FileOutcome",
     "ProgressCallback",
