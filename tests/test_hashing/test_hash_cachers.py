@@ -304,3 +304,15 @@ class TestEnableFileHashCaching:
 
         assert isinstance(cacher, SqliteHashCacher)
         assert cacher._min_cache_size_bytes == 1024
+
+
+class TestEnableFileHashCachingConninfo:
+    def test_conninfo_and_db_path_raises(self, restore_default_file_handler, tmp_path):
+        """Providing both conninfo and db_path raises ValueError."""
+        from orcapod.contexts import enable_file_hash_caching
+
+        with pytest.raises(ValueError, match="not both"):
+            enable_file_hash_caching(
+                db_path=tmp_path / "x.db",
+                conninfo="postgresql://unused",
+            )

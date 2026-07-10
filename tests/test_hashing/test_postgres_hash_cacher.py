@@ -312,3 +312,69 @@ class TestPostgresHashCacherValidation:
         assert "read_only=True" in r
         assert "min_cache_size_bytes=1024" in r
         cacher.close()
+
+
+# ---------------------------------------------------------------------------
+# enable_file_hash_caching(conninfo=...) integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def restore_default_file_handler():
+    """Restore the default FileHandler and DirectoryHandler after each test."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.directory_type import Directory
+    from orcapod.extension_types.file_type import File
+
+    context = get_default_context()
+    registry = context.semantic_hasher.type_handler_registry
+    original_file_handler = registry.get_handler_for_type(File)
+    original_dir_handler = registry.get_handler_for_type(Directory)
+    yield
+    registry.register(File, original_file_handler)
+    registry.register(Directory, original_dir_handler)
+
+
+@pytest.mark.postgres
+class TestEnableFileHashCachingPostgres:
+    def test_conninfo_activates_postgres_cacher(
+        self, restore_default_file_handler, pg_conninfo
+    ):
+        """enable_file_hash_caching(conninfo=...) wires up PostgresHashCacher."""
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.file_type import File
+
+        enable_file_hash_caching(conninfo=pg_conninfo)
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        handler = registry.get_handler_for_type(File)
+        assert isinstance(handler.file_hasher.cacher, PostgresHashCacher)
+
+    def test_conninfo_passes_read_only(
+        self, restore_default_file_handler, pg_conninfo
+    ):
+        """read_only=True is forwarded to PostgresHashCacher."""
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.file_type import File
+
+        enable_file_hash_caching(conninfo=pg_conninfo, read_only=True)
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        handler = registry.get_handler_for_type(File)
+        assert handler.file_hasher.cacher._read_only is True
+
+    def test_conninfo_passes_min_cache_size_bytes(
+        self, restore_default_file_handler, pg_conninfo
+    ):
+        """min_cache_size_bytes is forwarded to PostgresHashCacher."""
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.file_type import File
+
+        enable_file_hash_caching(conninfo=pg_conninfo, min_cache_size_bytes=2048)
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        handler = registry.get_handler_for_type(File)
+        assert handler.file_hasher.cacher._min_cache_size_bytes == 2048
