@@ -51,6 +51,64 @@ Calling the function more than once is safe. Orcapod logs a warning and
 replaces the active cacher with the new one, so the prior cache entries
 remain accessible at the same path if you use the same `db_path`.
 
+## Controlling when the cache is written
+
+By default, every file that passes through ``CachedFileHasher`` is inserted
+into the cache on a miss. Two optional knobs let you restrict this.
+
+### Read-only mode
+
+Use ``read_only=True`` when you want lookups from a shared or authoritative
+cache but must not add new entries to it — for example, when consuming a
+cache pre-populated by ``populate_hash_cache()`` without polluting it with
+ad-hoc entries.
+
+```python
+import orcapod as op
+
+op.enable_file_hash_caching(db_path="/shared/cache.db", read_only=True)
+```
+
+Cache hits still work normally. On a miss, the file is hashed directly and
+the result is returned to the caller — but it is never written to the cache.
+
+### Minimum file size threshold
+
+Use ``min_cache_size_bytes`` to skip the cache write overhead for small
+files. For small files, the disk I/O bottleneck does not apply, so the
+cache lookup and write add latency without meaningful savings.
+
+```python
+import orcapod as op
+
+# Skip caching for files smaller than 1 MB
+op.enable_file_hash_caching(min_cache_size_bytes=1_048_576)
+```
+
+Files smaller than the threshold are still hashed and the hash is returned
+to the caller — they are simply not inserted into the cache. Files at or
+above the threshold behave normally. Set to ``None`` or ``0`` to disable
+the threshold (the default).
+
+### Combining both
+
+The two knobs compose independently. ``read_only=True`` takes precedence:
+when enabled, no entry is ever written regardless of file size.
+``min_cache_size_bytes`` is an additional guard that applies only when the
+cacher is writable.
+
+```python
+import orcapod as op
+
+# Read-only + skip files below 512 KB (threshold is moot when read-only,
+# but harmless and documents intent)
+op.enable_file_hash_caching(
+    db_path="/shared/cache.db",
+    read_only=True,
+    min_cache_size_bytes=524_288,
+)
+```
+
 ## Directory hashing (op.Directory)
 
 When Orcapod hashes an `op.Directory`, it traverses the directory tree and
@@ -109,8 +167,9 @@ sqlite3 ~/.orcapod/file_hash_cache.db "DELETE FROM file_hash_cache;"
 
 **Caching does not help much when:**
 
-- Files are small. Disk I/O is not the bottleneck for small files, so the
-  cache lookup adds overhead without meaningful savings.
+- **Files are small.** Disk I/O is not the bottleneck for small files, so the
+  cache lookup adds overhead without meaningful savings. Use
+  ``min_cache_size_bytes`` to skip caching small files automatically.
 - Files change on every run. A different `mtime_ns` or `size` means a
   different key, so every access is a cache miss.
 - It is the first run on a new machine or a freshly cleared cache. Every file
