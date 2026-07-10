@@ -229,17 +229,22 @@ def create_registry(
 
 
 def enable_file_hash_caching(
-    db_path: "Path | None" = None,
     *,
+    db_path: "Path | None" = None,
     conninfo: str | None = None,
     read_only: bool = False,
     min_cache_size_bytes: int | None = None,
 ) -> None:
     """Enable file hash caching on the default Orcapod context.
 
-    When ``conninfo`` is provided, uses ``PostgresHashCacher`` for a shared,
-    network-accessible cache suitable for multi-machine pipelines. Otherwise
-    uses ``SqliteHashCacher`` for a local, per-machine cache (default).
+    Exactly one backend must be chosen:
+
+    * ``conninfo`` provided → ``PostgresHashCacher``, shared across machines.
+    * ``db_path`` provided (or neither) → ``SqliteHashCacher``, local to this
+      machine.
+
+    ``conninfo`` and ``db_path`` are mutually exclusive; providing both raises
+    ``ValueError``.
 
     Call once at application startup before any file hashing occurs.
 
@@ -260,13 +265,13 @@ def enable_file_hash_caching(
     file is encountered during directory traversal.
 
     Args:
-        db_path: Path to the SQLite cache database. Ignored when ``conninfo``
-            is provided. Defaults to ``~/.orcapod/file_hash_cache.db`` or
-            the ``ORCAPOD_HASH_CACHE_DB`` environment variable.
+        db_path: Path to the SQLite cache database. Mutually exclusive with
+            ``conninfo``; providing both raises ``ValueError``. Defaults to
+            ``~/.orcapod/file_hash_cache.db`` or the
+            ``ORCAPOD_HASH_CACHE_DB`` environment variable.
         conninfo: psycopg3 connection string for a PostgreSQL cache database,
-            e.g. ``"postgresql://user:pass@host:5432/db"``. When provided,
-            ``PostgresHashCacher`` is used instead of ``SqliteHashCacher``.
-            Mutually exclusive with ``db_path``.
+            e.g. ``"postgresql://user:pass@host:5432/db"``. Mutually exclusive
+            with ``db_path``; providing both raises ``ValueError``.
         read_only: When ``True``, the underlying cacher will not insert new
             entries. Lookups still work normally. Defaults to ``False``.
         min_cache_size_bytes: When set, files smaller than this byte count

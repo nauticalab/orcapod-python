@@ -7,14 +7,44 @@ the optional ``psycopg`` driver (``pip install 'orcapod[postgresql]'``).
 
 from __future__ import annotations
 
+import re
 import threading
-from typing import TYPE_CHECKING
 
 from orcapod.hashing.file_hashers import FileHashKey
 from orcapod.types import ContentHash
 
-if TYPE_CHECKING:
-    import psycopg as _psycopg
+try:
+    import psycopg
+except ImportError as _exc:  # pragma: no cover
+    raise ImportError(
+        "PostgresHashCacher requires psycopg. "
+        "Install it with: pip install 'orcapod[postgresql]'"
+    ) from _exc
+
+# Current schema version.  Increment when the DDL changes.
+_SCHEMA_VERSION = 1
+
+
+def _redact_conninfo(conninfo: str) -> str:
+    """Return ``conninfo`` with any password value replaced by ``***``.
+
+    Handles both URL form (``postgresql://user:pass@host/db``) and
+    keyword DSN form (``host=... password=secret ...``).
+
+    Args:
+        conninfo: Raw psycopg3 connection string.
+
+    Returns:
+        Connection string safe for logging, with the password redacted.
+    """
+    # URL form: postgresql://user:pass@host → postgresql://user:***@host
+    # Capture group 1: "://user:", group 2: "@" — replace the password between them.
+    redacted = re.sub(r"(://[^:@]*:)[^@]+(@)", r"\1***\2", conninfo)
+    # Keyword form: password=value or password='value with spaces'
+    redacted = re.sub(
+        r"(?i)\bpassword\s*=\s*(?:'[^']*'|\S+)", "password=***", redacted
+    )
+    return redacted
 
 
 class PostgresHashCacher:
@@ -27,19 +57,31 @@ class PostgresHashCacher:
     The hash is stored as a BYTEA in ``{method}:{raw_digest}`` format via
     ``ContentHash.to_prefixed_digest()``.
 
+    Schema versioning is tracked in a companion ``file_hash_cache_meta``
+    table. If an existing database is detected with an old schema (e.g.
+    missing the ``cached_at`` column), a ``ValueError`` is raised explaining
+    the required migration DDL.
+
     Requires ``psycopg[binary]>=3.0`` (install with
     ``pip install 'orcapod[postgresql]'``).
+    Minimum supported PostgreSQL version: **14**.
 
     Args:
         conninfo: psycopg3 connection string, e.g.
             ``"postgresql://user:pass@host:5432/dbname"`` or keyword DSN
             ``"host=myhost dbname=mydb user=myuser password=mypass"``.
+            Any password in the conninfo is redacted in ``__repr__``.
         read_only: When ``True``, all ``put()`` calls are silent no-ops.
             ``get()`` still works normally. Defaults to ``False``.
         min_cache_size_bytes: When set to a positive integer, files whose
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
             Negative values raise ``ValueError``. Defaults to ``None``.
+
+    Raises:
+        ValueError: If ``min_cache_size_bytes`` is negative, or if the
+            target database contains a ``file_hash_cache`` table with an
+            outdated schema (missing ``cached_at``).
     """
 
     def __init__(
@@ -49,13 +91,6 @@ class PostgresHashCacher:
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
     ) -> None:
-        try:
-            import psycopg  # noqa: F401
-        except ImportError:  # pragma: no cover
-            raise ImportError(
-                "PostgresHashCacher requires psycopg. "
-                "Install it with: pip install 'orcapod[postgresql]'"
-            ) from None
         if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
             raise ValueError(
                 f"min_cache_size_bytes must be None or a non-negative integer, "
@@ -68,14 +103,18 @@ class PostgresHashCacher:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        """Create the cache table if it does not exist.
+        """Create cache tables and verify the schema version.
 
-        Uses a dedicated one-shot connection so schema setup happens once
-        on construction, independent of the thread-local connection pool.
+        Uses a dedicated one-shot connection so schema setup happens once on
+        construction, independent of the thread-local connection pool.
+
+        The companion ``file_hash_cache_meta`` table stores a
+        ``('schema_version', N)`` row.  If the ``file_hash_cache`` table
+        already exists but is missing the ``cached_at`` column, a
+        ``ValueError`` is raised with the migration DDL to apply.
         """
-        import psycopg
-
         with psycopg.connect(self._conninfo) as conn:
+            # Main cache table (idempotent).
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS file_hash_cache (
@@ -89,11 +128,50 @@ class PostgresHashCacher:
                 )
                 """
             )
+            # Schema-version metadata table (idempotent).
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS file_hash_cache_meta (
+                    key   TEXT NOT NULL PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
 
-    def _connection(self) -> "_psycopg.Connection[tuple[object, ...]]":
+            # Detect old schema: file_hash_cache exists but lacks cached_at.
+            row = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'file_hash_cache'
+                  AND column_name = 'cached_at'
+                """
+            ).fetchone()
+            if row is None:
+                raise ValueError(
+                    "PostgreSQL hash cache table exists but uses an outdated schema "
+                    "(missing the 'cached_at' column, schema version 0). "
+                    "Apply the following migration and then retry:\n\n"
+                    "    ALTER TABLE file_hash_cache\n"
+                    "        ADD COLUMN cached_at BIGINT NOT NULL\n"
+                    "        DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT;\n"
+                    "    INSERT INTO file_hash_cache_meta (key, value)\n"
+                    "        VALUES ('schema_version', '1')\n"
+                    "        ON CONFLICT (key) DO UPDATE SET value = '1';\n"
+                )
+
+            # Record schema version (first-writer wins; idempotent on re-open).
+            conn.execute(
+                """
+                INSERT INTO file_hash_cache_meta (key, value)
+                VALUES ('schema_version', %s)
+                ON CONFLICT (key) DO NOTHING
+                """,
+                (str(_SCHEMA_VERSION),),
+            )
+
+    def _connection(self) -> "psycopg.Connection[tuple[object, ...]]":
         """Return this thread's connection, opening it on first use."""
-        import psycopg
-
         conn = getattr(self._local, "conn", None)
         if conn is None:
             conn = psycopg.connect(self._conninfo)
@@ -175,7 +253,7 @@ class PostgresHashCacher:
     def __repr__(self) -> str:
         return (
             f"PostgresHashCacher("
-            f"conninfo={self._conninfo!r}, "
+            f"conninfo={_redact_conninfo(self._conninfo)!r}, "
             f"read_only={self._read_only!r}, "
             f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
         )

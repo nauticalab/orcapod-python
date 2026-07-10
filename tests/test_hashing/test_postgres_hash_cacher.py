@@ -378,3 +378,75 @@ class TestEnableFileHashCachingPostgres:
         registry = context.semantic_hasher.type_handler_registry
         handler = registry.get_handler_for_type(File)
         assert handler.file_hasher.cacher._min_cache_size_bytes == 2048
+
+
+# ---------------------------------------------------------------------------
+# Schema version and repr
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+class TestPostgresSchemaVersion:
+    def test_meta_table_contains_schema_version(self, pg_conninfo):
+        """After construction, file_hash_cache_meta stores schema_version = 1."""
+        PostgresHashCacher(pg_conninfo).close()
+
+        with psycopg.connect(pg_conninfo) as conn:
+            row = conn.execute(
+                "SELECT value FROM file_hash_cache_meta WHERE key = 'schema_version'"
+            ).fetchone()
+        assert row is not None
+        assert row[0] == "1"
+
+    def test_old_schema_raises_with_migration_hint(self, pg_conninfo):
+        """A pre-existing table missing cached_at raises ValueError with DDL hint."""
+        # Drop and re-create without cached_at to simulate old schema.
+        with psycopg.connect(pg_conninfo) as conn:
+            conn.execute("DROP TABLE IF EXISTS file_hash_cache CASCADE")
+            conn.execute("DROP TABLE IF EXISTS file_hash_cache_meta CASCADE")
+            conn.execute(
+                """
+                CREATE TABLE file_hash_cache (
+                    path     TEXT   NOT NULL,
+                    mtime_ns BIGINT NOT NULL,
+                    size     BIGINT NOT NULL,
+                    hash     BYTEA  NOT NULL,
+                    PRIMARY KEY (path, mtime_ns, size)
+                )
+                """
+            )
+
+        with pytest.raises(ValueError, match="cached_at"):
+            PostgresHashCacher(pg_conninfo)
+
+        # Restore clean state for subsequent tests.
+        with psycopg.connect(pg_conninfo) as conn:
+            conn.execute("DROP TABLE IF EXISTS file_hash_cache CASCADE")
+
+
+class TestPostgresReprRedaction:
+    def test_repr_redacts_url_password(self):
+        """__repr__ replaces the password in a URL-form conninfo with ***."""
+        from orcapod.hashing.postgres_hash_cacher import _redact_conninfo
+
+        raw = "postgresql://alice:s3cr3t@db.example.com:5432/orcapod"
+        redacted = _redact_conninfo(raw)
+        assert "s3cr3t" not in redacted
+        assert "alice" in redacted
+        assert "***" in redacted
+
+    def test_repr_redacts_keyword_password(self):
+        """__repr__ replaces the password in a keyword-form conninfo with ***."""
+        from orcapod.hashing.postgres_hash_cacher import _redact_conninfo
+
+        raw = "host=db.example.com dbname=orcapod user=alice password=s3cr3t"
+        redacted = _redact_conninfo(raw)
+        assert "s3cr3t" not in redacted
+        assert "***" in redacted
+
+    def test_repr_no_password_unchanged(self):
+        """__repr__ does not alter a conninfo string that has no password."""
+        from orcapod.hashing.postgres_hash_cacher import _redact_conninfo
+
+        raw = "host=localhost dbname=orcapod user=alice"
+        assert _redact_conninfo(raw) == raw
