@@ -134,6 +134,16 @@ class TestInMemoryHashCacherCombined:
 # ---------------------------------------------------------------------------
 
 
+class TestInMemoryHashCacherValidation:
+    def test_negative_min_cache_size_bytes_raises(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            InMemoryHashCacher(min_cache_size_bytes=-1)
+
+    def test_zero_min_cache_size_bytes_is_allowed(self):
+        cacher = InMemoryHashCacher(min_cache_size_bytes=0)
+        assert cacher._min_cache_size_bytes == 0
+
+
 class TestInMemoryHashCacherRepr:
     def test_repr_shows_read_only_false(self):
         cacher = InMemoryHashCacher()
@@ -272,6 +282,16 @@ class TestSqliteHashCacherCombined:
 # ---------------------------------------------------------------------------
 # SqliteHashCacher — __repr__
 # ---------------------------------------------------------------------------
+
+
+class TestSqliteHashCacherValidation:
+    def test_negative_min_cache_size_bytes_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="non-negative"):
+            SqliteHashCacher(tmp_path / "cache.db", min_cache_size_bytes=-1)
+
+    def test_zero_min_cache_size_bytes_is_allowed(self, tmp_path):
+        cacher = SqliteHashCacher(tmp_path / "cache.db", min_cache_size_bytes=0)
+        assert cacher._min_cache_size_bytes == 0
 
 
 class TestSqliteHashCacherRepr:
