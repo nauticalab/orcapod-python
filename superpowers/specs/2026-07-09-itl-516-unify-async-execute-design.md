@@ -76,11 +76,24 @@ This is the correct pattern: the pod owns computation, the node owns DB concerns
 For function execution, the same separation applies: `FunctionPod.async_execute()` owns concurrent
 dispatch; `FunctionJobNode.async_execute()` owns routing, caching, and pipeline recording.
 
-### FunctionPod.async_execute() — add observer support
+### async_execute() moves to _FunctionPodBase
+
+Currently `async_execute()` is defined only on `FunctionPod`. `CachedFunctionPod` (used for
+both persistent and ephemeral execution) inherits from `WrappedFunctionPod → _FunctionPodBase`
+— not from `FunctionPod` — so it has no `async_execute()` today.
+
+`_FunctionPodBase` already defines `async_process_data()`, which each subclass overrides
+correctly (`FunctionPod` calls the data function, `CachedFunctionPod` checks the cache then
+stores). Moving `async_execute()` to `_FunctionPodBase` gives all pod types the dispatch loop
+for free via polymorphism: the loop calls `self.async_process_data()`, which resolves to the
+right implementation at runtime.
+
+`FunctionPod` retains no override — it inherits the loop from `_FunctionPodBase`.
 
 Add an optional `observer` parameter (same pattern as all node `async_execute` signatures):
 
 ```python
+# on _FunctionPodBase
 async def async_execute(
     self,
     inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
@@ -92,8 +105,9 @@ async def async_execute(
 ```
 
 When `observer` is provided, fire `on_data_start`, `on_data_end`, and `on_data_crash` per item.
-When `None`, behaviour is unchanged (no-op). This makes `FunctionPod.async_execute()` a
-first-class execution method suitable for delegation from `FunctionJobNode`.
+When `None`, behaviour is unchanged (no-op). All pod types — `FunctionPod`, `CachedFunctionPod`
+(persistent), `CachedFunctionPod` (ephemeral) — are now valid delegation targets from
+`FunctionJobNode`.
 
 ### FunctionJobNode.async_execute() — 3-stage concurrent pipeline
 
@@ -111,6 +125,23 @@ Mirrors OperatorNode's no-DB delegation.
 
 #### DB path (3-stage concurrent pipeline)
 
+Before entering the TaskGroup, select the execution pod and `is_ephemeral` flag based on
+`_node_config.is_result_ephemeral`:
+
+```python
+if self._node_config.is_result_ephemeral:
+    execution_pod = self._ephemeral_cached_pod   # CachedFunctionPod → ephemeral DB
+    is_ephemeral = True
+else:
+    execution_pod = self._cached_function_pod    # CachedFunctionPod → persistent DB
+    is_ephemeral = False
+```
+
+Both are `CachedFunctionPod` instances that now inherit `async_execute()` from `_FunctionPodBase`.
+Their `async_process_data()` overrides handle the correct store (ephemeral vs persistent) and
+set `RESULT_COMPUTED_FLAG` on the output data. The 3-stage pipeline is identical for both;
+only the pod and the flag differ.
+
 Three coroutines run inside a single `asyncio.TaskGroup`:
 
 ```
@@ -120,25 +151,26 @@ input_channel
       ├── cache hit → emit to output (observer: on_data_start + on_data_end cached=True)
       └── cache miss → stamp tag with correlation key → compute_channel
                                    │
-                                   ▼  _cached_function_pod.async_execute() — task 2
+                                   ▼  execution_pod.async_execute() — task 2
                                       (reads compute_channel, writes result_channel)
                               result_channel
                                    │
                                    ▼  record_and_forward() — task 3
                               read correlation key from output_tag
                               → look up (original_tag, input_data) in input_store
-                              → add_pipeline_record(original_tag, input_data, ...)
+                              → add_pipeline_record(original_tag, input_data,
+                                                    is_ephemeral=is_ephemeral, ...)
                               → strip correlation key from output_tag
                               → emit (clean_tag, output_data) to output
 ```
 
-**Backpressure:** `compute_channel` and `result_channel` are bounded channels. If FunctionPod is
-slower than the router, `route_inputs` blocks on `compute_channel.writer.send()`; if the recorder
-is slower than FunctionPod, FunctionPod blocks on `result_channel.writer.send()`.
+**Backpressure:** `compute_channel` and `result_channel` are bounded channels. If the execution
+pod is slower than the router, `route_inputs` blocks on `compute_channel.writer.send()`; if the
+recorder is slower than the pod, the pod blocks on `result_channel.writer.send()`.
 
 **TaskGroup lifecycle:** The TaskGroup exits only when all three tasks complete. `route_inputs`
-closes `compute_channel.writer` when the input is exhausted, signalling FunctionPod to finish.
-FunctionPod closes `result_channel.writer` in its `finally`, signalling the recorder to finish.
+closes `compute_channel.writer` when the input is exhausted, signalling the pod to finish. The
+pod closes `result_channel.writer` in its `finally`, signalling the recorder to finish.
 `FunctionJobNode.async_execute()`'s own `finally` closes the final `output`.
 
 ### Correlation key mechanism
@@ -217,5 +249,7 @@ call in `async_execute`, it becomes dead and should be removed. Verify during im
 1. Output tags carry no `_tag_node_input_ref` column — verified by test
 2. `add_pipeline_record` is called exactly once per cache miss
 3. Cache hits bypass computation entirely
-4. FunctionPod.async_execute() is unaware of pipeline DB, base_entry_id, or correlation keys
-5. The no-DB path delegates to `_function_pod`, not `_cached_function_pod`
+4. `_FunctionPodBase.async_execute()` is unaware of pipeline DB, base_entry_id, or correlation keys
+5. The no-DB path delegates to `_function_pod`, not `_cached_function_pod` or `_ephemeral_cached_pod`
+6. The ephemeral path uses `_ephemeral_cached_pod` as task 2 and passes `is_ephemeral=True` to `add_pipeline_record`
+7. The persistent path uses `_cached_function_pod` as task 2 and passes `is_ephemeral=False` to `add_pipeline_record`
