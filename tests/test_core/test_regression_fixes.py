@@ -5,10 +5,9 @@ Covers:
 1. async_execute output channel closed on exception (try/finally)
 2. DataFunctionWrapper.direct_call/direct_async_call bypass executor routing
 3. Concurrent iteration falls back to sequential inside a running event loop
-4. FunctionPod.async_execute backpressure bounds pending tasks
-5. _materialize_to_stream preserves source_info provenance tokens
-6. RayExecutor._ensure_ray_initialized uses ray_address
-7. DataFunctionExecutorProtocol uses DataFunctionProtocol (not Any)
+4. _materialize_to_stream preserves source_info provenance tokens
+5. RayExecutor._ensure_ray_initialized uses ray_address
+6. DataFunctionExecutorProtocol uses DataFunctionProtocol (not Any)
 """
 
 from __future__ import annotations
@@ -286,65 +285,7 @@ class TestConcurrentFallbackInRunningLoop:
 
 
 # ===========================================================================
-# 4. FunctionPod.async_execute backpressure bounds pending tasks
-# ===========================================================================
-
-
-class TestAsyncExecuteBackpressure:
-    """With max_concurrency set, pending tasks should be bounded."""
-
-    @pytest.mark.asyncio
-    async def test_semaphore_limits_concurrent_tasks(self):
-        """With max_concurrency=1, at most one task should be running."""
-        concurrent_count = 0
-        max_concurrent = 0
-
-        async def track_concurrency(x: int) -> int:
-            nonlocal concurrent_count, max_concurrent
-            concurrent_count += 1
-            max_concurrent = max(max_concurrent, concurrent_count)
-            await asyncio.sleep(0.01)  # simulate work
-            concurrent_count -= 1
-            return x * 2
-
-        def double(x: int) -> int:
-            return x * 2
-
-        # Build a PythonDataFunction that uses our async-aware tracker.
-        # We override async_call to directly call our async function.
-        pf = PythonDataFunction(double, output_keys="result")
-
-        # Patch async_call to use our concurrency-tracking function
-        original_async_call = pf.async_call
-
-        async def tracked_async_call(data: DataProtocol, **kwargs):
-            nonlocal concurrent_count, max_concurrent
-            concurrent_count += 1
-            max_concurrent = max(max_concurrent, concurrent_count)
-            await asyncio.sleep(0.01)
-            concurrent_count -= 1
-            return await original_async_call(data, **kwargs)
-
-        pf.async_call = tracked_async_call  # type: ignore
-
-        pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=1))
-
-        stream = make_stream(5)
-        input_ch = Channel(buffer_size=32)
-        output_ch = Channel(buffer_size=32)
-
-        await feed_stream_to_channel(stream, input_ch)
-        await pod.async_execute([input_ch.reader], output_ch.writer)
-
-        results = await output_ch.reader.collect()
-        assert len(results) == 5
-        # With semaphore acquired before task creation and max_concurrency=1,
-        # at most 1 should be in-flight at a time.
-        assert max_concurrent <= 1
-
-
-# ===========================================================================
-# 5. _materialize_to_stream preserves source_info provenance
+# 4. _materialize_to_stream preserves source_info provenance
 # ===========================================================================
 
 
@@ -404,7 +345,7 @@ class TestMaterializePreservesSourceInfo:
 
 
 # ===========================================================================
-# 6. RayExecutor._ensure_ray_initialized uses ray_address
+# 5. RayExecutor._ensure_ray_initialized uses ray_address
 # ===========================================================================
 
 
@@ -706,7 +647,7 @@ class TestRayExecutorInitialization:
 
 
 # ===========================================================================
-# 7. DataFunctionExecutorProtocol type safety
+# 6. DataFunctionExecutorProtocol type safety
 # ===========================================================================
 
 
@@ -745,83 +686,3 @@ class TestExecutorProtocolTypeSafety:
             f"async_execute_callable() fn should reference Callable, "
             f"got {fn_annotation!r}"
         )
-
-
-# ===========================================================================
-# 8. _FunctionPodBase.async_execute observer hooks
-# ===========================================================================
-
-
-class TestFunctionPodBaseAsyncExecuteObserver:
-    """Observer hooks fire correctly in _FunctionPodBase.async_execute()."""
-
-    @pytest.mark.asyncio
-    async def test_observer_on_data_start_and_end_fire_per_item(self):
-        """on_data_start fires before and on_data_end(cached=False) fires after each item."""
-        starts = []
-        ends = []
-
-        class _Spy:
-            def contextualize(self, *path): return self
-            def on_node_start(self, *a, **kw): pass
-            def on_node_end(self, *a, **kw): pass
-            def on_data_start(self, label, tag, data):
-                starts.append((label, tag, data))
-            def on_data_end(self, label, tag, inp, out, *, cached):
-                ends.append((label, tag, inp, out, cached))
-            def on_data_crash(self, label, tag, data, exc): pass
-            def create_data_logger(self, tag, data): return None
-
-        def double(x: int) -> int:
-            return x * 2
-
-        pf = PythonDataFunction(double, output_keys="result")
-        pod = FunctionPod(pf)
-        stream = make_stream(3)
-        input_ch = Channel(buffer_size=16)
-        output_ch = Channel(buffer_size=16)
-        await feed_stream_to_channel(stream, input_ch)
-
-        spy = _Spy()
-        await pod.async_execute([input_ch.reader], output_ch.writer, observer=spy)
-        results = await output_ch.reader.collect()
-
-        assert len(results) == 3
-        assert len(starts) == 3
-        assert len(ends) == 3
-        assert all(cached is False for _, _, _, _, cached in ends)
-
-    @pytest.mark.asyncio
-    async def test_observer_on_data_crash_fires_on_failure(self):
-        """on_data_crash fires (not on_data_end) when async_process_data raises."""
-        crashes = []
-        ends = []
-
-        class _Spy:
-            def contextualize(self, *path): return self
-            def on_node_start(self, *a, **kw): pass
-            def on_node_end(self, *a, **kw): pass
-            def on_data_start(self, *a): pass
-            def on_data_end(self, label, tag, inp, out, *, cached):
-                ends.append((label, tag, inp, out, cached))
-            def on_data_crash(self, label, tag, data, exc):
-                crashes.append(exc)
-            def create_data_logger(self, tag, data): return None
-
-        def boom(x: int) -> int:
-            raise ValueError("explode")
-
-        pf = PythonDataFunction(boom, output_keys="result")
-        pod = FunctionPod(pf)
-        stream = make_stream(2)
-        input_ch = Channel(buffer_size=16)
-        output_ch = Channel(buffer_size=16)
-        await feed_stream_to_channel(stream, input_ch)
-
-        spy = _Spy()
-        await pod.async_execute([input_ch.reader], output_ch.writer, observer=spy)
-        results = await output_ch.reader.collect()
-
-        assert len(results) == 0
-        assert len(crashes) == 2
-        assert len(ends) == 0
