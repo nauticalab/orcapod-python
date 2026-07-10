@@ -268,3 +268,39 @@ class TestEnableFileHashCaching:
         dir_file_hasher = registry.get_handler_for_type(Directory).directory_hasher.file_hasher
 
         assert file_hasher is dir_file_hasher
+
+    def test_read_only_kwarg_passes_through_to_cacher(
+        self, restore_default_file_handler, tmp_path
+    ):
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.file_type import File
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        enable_file_hash_caching(db_path=tmp_path / "cache.db", read_only=True)
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        handler = registry.get_handler_for_type(File)
+        cacher = handler.file_hasher.cacher
+
+        assert isinstance(cacher, SqliteHashCacher)
+        assert cacher._read_only is True
+
+    def test_min_cache_size_bytes_kwarg_passes_through_to_cacher(
+        self, restore_default_file_handler, tmp_path
+    ):
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.file_type import File
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        enable_file_hash_caching(
+            db_path=tmp_path / "cache.db", min_cache_size_bytes=1024
+        )
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        handler = registry.get_handler_for_type(File)
+        cacher = handler.file_hasher.cacher
+
+        assert isinstance(cacher, SqliteHashCacher)
+        assert cacher._min_cache_size_bytes == 1024
