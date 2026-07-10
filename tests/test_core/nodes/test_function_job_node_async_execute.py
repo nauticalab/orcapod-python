@@ -284,6 +284,40 @@ class TestFunctionJobNodeAsyncExecuteDB:
         assert all(cached is True for _, _, _, _, cached in spy.data_ends)
 
     @pytest.mark.asyncio
+    async def test_correlation_key_absent_from_observer_callbacks(self):
+        """Observer on_data_start/on_data_end must not see _tag_node_input_ref (first run = cache misses)."""
+        from orcapod.core.nodes.function_node import _TAG_NODE_INPUT_REF
+        from orcapod.system_constants import constants as _constants
+
+        node, _, _ = _make_db_node(3)
+        spy = _SpyObserver()
+
+        # First run — all are cache misses, pod path is used with stamped tags.
+        input_ch: Channel = Channel(buffer_size=8)
+        output_ch: Channel = Channel(buffer_size=8)
+
+        async def feed() -> None:
+            for tag, data in node._input_stream.iter_data():
+                await input_ch.writer.send((tag, data))
+            await input_ch.writer.close()
+
+        await asyncio.gather(
+            feed(),
+            node.async_execute(input_ch.reader, output_ch.writer, observer=spy),
+        )
+        await output_ch.reader.collect()
+
+        full_key = f"{_constants.META_PREFIX}{_TAG_NODE_INPUT_REF}"
+        for _, tag, _ in spy.data_starts:
+            assert full_key not in tag.get_meta_info(), (
+                f"on_data_start leaked correlation key {full_key!r}"
+            )
+        for _, tag, _, _, _ in spy.data_ends:
+            assert full_key not in tag.get_meta_info(), (
+                f"on_data_end leaked correlation key {full_key!r}"
+            )
+
+    @pytest.mark.asyncio
     async def test_semaphore_not_leaked_on_computation_crash(self):
         """When a data function raises, processing continues for remaining items."""
         call_count = 0

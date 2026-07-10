@@ -2182,6 +2182,12 @@ class FunctionJobNode(FunctionNodeBase):
                     def contextualize(self, *path: str) -> "_NodeLabelObserver":
                         return self
 
+                    def on_run_start(self, run_id: str, pipeline_uri: str = "") -> None:
+                        ctx_obs.on_run_start(run_id, pipeline_uri)
+
+                    def on_run_end(self, run_id: str) -> None:
+                        ctx_obs.on_run_end(run_id)
+
                     def on_node_start(self, lbl: str, h: str, **kw: Any) -> None:
                         ctx_obs.on_node_start(node_label, h, **kw)
 
@@ -2189,17 +2195,26 @@ class FunctionJobNode(FunctionNodeBase):
                         ctx_obs.on_node_end(node_label, h)
 
                     def on_data_start(self, lbl: str, tag: Any, data: Any) -> None:
-                        ctx_obs.on_data_start(node_label, tag, data)
+                        clean = tag.drop_meta_columns(
+                            _TAG_NODE_INPUT_REF, ignore_missing=True
+                        )
+                        ctx_obs.on_data_start(node_label, clean, data)
 
                     def on_data_end(
                         self, lbl: str, tag: Any, inp: Any, out: Any, *, cached: bool
                     ) -> None:
-                        ctx_obs.on_data_end(node_label, tag, inp, out, cached=cached)
+                        clean = tag.drop_meta_columns(
+                            _TAG_NODE_INPUT_REF, ignore_missing=True
+                        )
+                        ctx_obs.on_data_end(node_label, clean, inp, out, cached=cached)
 
                     def on_data_crash(
                         self, lbl: str, tag: Any, data: Any, error: Any
                     ) -> None:
-                        ctx_obs.on_data_crash(node_label, tag, data, error)
+                        clean = tag.drop_meta_columns(
+                            _TAG_NODE_INPUT_REF, ignore_missing=True
+                        )
+                        ctx_obs.on_data_crash(node_label, clean, data, error)
 
                     def create_data_logger(self, tag: Any, data: Any) -> Any:
                         # Strip the correlation key before creating the logger
