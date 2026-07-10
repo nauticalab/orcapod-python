@@ -131,17 +131,18 @@ def __repr__(self) -> str:
 
 ```python
 def enable_file_hash_caching(
-    db_path: "Path | None" = None,
     *,
+    db_path: "Path | None" = None,
     conninfo: str | None = None,
     read_only: bool = False,
     min_cache_size_bytes: int | None = None,
 ) -> None:
 ```
 
+All parameters are keyword-only (note the leading `*`).
+
 - `conninfo` provided, `db_path` absent → use `PostgresHashCacher`.
-- `db_path` provided (or both absent) and `conninfo` absent → use `SqliteHashCacher` as today
-  (zero behaviour change for existing callers).
+- `db_path` provided (or both absent) and `conninfo` absent → use `SqliteHashCacher` as today.
 - Both `conninfo` and `db_path` provided → raise `ValueError("Provide conninfo or db_path, not both")`.
 
 ---

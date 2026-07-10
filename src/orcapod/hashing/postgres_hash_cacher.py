@@ -139,12 +139,15 @@ class PostgresHashCacher:
             )
 
             # Detect old schema: file_hash_cache exists but lacks cached_at.
+            # Constrain table_schema to the current search_path schemas so that
+            # a same-named table in a different schema does not shadow the check.
             row = conn.execute(
                 """
                 SELECT column_name
                 FROM information_schema.columns
                 WHERE table_name = 'file_hash_cache'
                   AND column_name = 'cached_at'
+                  AND table_schema = ANY(current_schemas(false))
                 """
             ).fetchone()
             if row is None:

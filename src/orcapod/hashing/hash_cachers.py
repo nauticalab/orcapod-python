@@ -175,22 +175,29 @@ class SqliteHashCacher:
             )
 
             version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+            # Always validate the cached_at column is present, regardless of
+            # user_version.  A manually-bumped user_version without the matching
+            # schema change would otherwise cause a cryptic INSERT failure in
+            # put() rather than a clear diagnostic here.
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(file_hash_cache)")
+            }
+            if "cached_at" not in columns:
+                raise ValueError(
+                    f"SQLite hash cache at '{self.db_path}' uses an outdated "
+                    f"schema (version {version}, missing 'cached_at' column). "
+                    f"Run the migration script to upgrade:\n\n"
+                    f"    python -m orcapod.hashing.migrate_hash_cache "
+                    f"{self.db_path}\n"
+                )
+
             if version < _SQLITE_SCHEMA_VERSION:
-                # Inspect actual columns in case the table pre-dates versioning.
-                columns = {
-                    row[1]
-                    for row in conn.execute("PRAGMA table_info(file_hash_cache)")
-                }
-                if "cached_at" not in columns:
-                    raise ValueError(
-                        f"SQLite hash cache at '{self.db_path}' uses an outdated "
-                        f"schema (version {version}, missing 'cached_at' column). "
-                        f"Run the migration script to upgrade:\n\n"
-                        f"    python -m orcapod.hashing.migrate_hash_cache "
-                        f"{self.db_path}\n"
-                    )
-                # Table already has cached_at but version was never stamped
-                # (created by code before versioning was introduced).  Stamp now.
+                # Version stamp is missing or outdated — stamp it now.
+                # (Reaches here when the table was created by code before
+                # schema versioning was introduced, so cached_at exists
+                # but user_version is still 0.)
                 conn.execute(f"PRAGMA user_version = {_SQLITE_SCHEMA_VERSION}")
 
             conn.commit()

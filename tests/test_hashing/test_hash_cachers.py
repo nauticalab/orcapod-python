@@ -388,6 +388,36 @@ class TestSqliteSchemaVersion:
         # Should not raise.
         SqliteHashCacher(db).close()
 
+    def test_manually_bumped_version_with_missing_column_raises(self, tmp_path):
+        """A DB with user_version=1 but no cached_at column raises ValueError.
+
+        Guards against manually-corrupted databases where user_version was
+        bumped without actually adding the cached_at column.
+        """
+        import sqlite3
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        db = tmp_path / "corrupt.db"
+        with sqlite3.connect(db) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                """
+                CREATE TABLE file_hash_cache (
+                    path      TEXT    NOT NULL,
+                    mtime_ns  INTEGER NOT NULL,
+                    size      INTEGER NOT NULL,
+                    hash      BLOB    NOT NULL,
+                    PRIMARY KEY (path, mtime_ns, size)
+                ) WITHOUT ROWID
+                """
+            )
+            # Manually stamp user_version = 1 without adding cached_at.
+            conn.execute("PRAGMA user_version = 1")
+            conn.commit()
+
+        with pytest.raises(ValueError, match="cached_at"):
+            SqliteHashCacher(db)
+
 
 # ---------------------------------------------------------------------------
 # migrate_hash_cache script

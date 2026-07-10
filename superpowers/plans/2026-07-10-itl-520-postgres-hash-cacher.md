@@ -713,8 +713,8 @@ Open `src/orcapod/contexts/__init__.py`. Find the `enable_file_hash_caching` fun
 
 ```python
 def enable_file_hash_caching(
-    db_path: "Path | None" = None,
     *,
+    db_path: "Path | None" = None,
     conninfo: str | None = None,
     read_only: bool = False,
     min_cache_size_bytes: int | None = None,
