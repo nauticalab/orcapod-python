@@ -2086,21 +2086,20 @@ class FunctionJobNode(FunctionNodeBase):
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
         try:
-            # Resolve concurrency limit from pod config (pipeline config is not
-            # threaded through the orchestrator, so we fall back to defaults).
-            pod_config = getattr(self._function_pod, "pod_config", PodConfig())
-            max_concurrency = resolve_concurrency(pod_config, PipelineConfig())
-
-            sem = (
-                asyncio.Semaphore(max_concurrency)
-                if max_concurrency is not None
-                else None
-            )
-
             tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
             ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
+                # Resolve concurrency limit for DB path (pipeline config not
+                # threaded through the orchestrator, so fall back to defaults).
+                pod_config = getattr(self._function_pod, "pod_config", PodConfig())
+                max_concurrency = resolve_concurrency(pod_config, PipelineConfig())
+                sem = (
+                    asyncio.Semaphore(max_concurrency)
+                    if max_concurrency is not None
+                    else None
+                )
+
                 # Phase 1: build cache lookup from pipeline DB
                 loaded = self._load_cached_entries()
                 self._cached_output_datas.update(loaded)
@@ -2122,12 +2121,24 @@ class FunctionJobNode(FunctionNodeBase):
                         )
                         await output.send((tag_out, result_data))
                     else:
-                        await self._async_execute_one_data(
-                            tag, data, output,
-                            observer=ctx_obs,
-                            node_label=node_label,
-                            node_hash=node_hash,
-                        )
+                        ctx_obs.on_data_start(node_label, tag, data)
+                        pkt_logger = ctx_obs.create_data_logger(tag, data)
+                        try:
+                            tag_out, result_data = await self._async_process_data_internal(
+                                tag, data, logger=pkt_logger
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Data execution failed in %s: %s", node_label, exc,
+                                exc_info=True,
+                            )
+                            ctx_obs.on_data_crash(node_label, tag, data, exc)
+                        else:
+                            ctx_obs.on_data_end(
+                                node_label, tag, data, result_data, cached=False
+                            )
+                            if result_data is not None:
+                                await output.send((tag_out, result_data))
 
                 async with asyncio.TaskGroup() as tg:
                     async for tag, data in input_channel:
@@ -2144,58 +2155,13 @@ class FunctionJobNode(FunctionNodeBase):
                             await sem.acquire()
                         tg.create_task(_guarded_db())
             else:
-                # Simple async execution without DB
-                async with asyncio.TaskGroup() as tg:
-                    async for tag, data in input_channel:
-                        async def _guarded_simple(
-                            t: TagProtocol = tag, p: DataProtocol = data
-                        ) -> None:
-                            try:
-                                await self._async_execute_one_data(
-                                    t, p, output,
-                                    observer=ctx_obs,
-                                    node_label=node_label,
-                                    node_hash=node_hash,
-                                )
-                            finally:
-                                if sem is not None:
-                                    sem.release()
-
-                        if sem is not None:
-                            await sem.acquire()
-                        tg.create_task(_guarded_simple())
+                # No-DB path: delegate dispatch entirely to the pod.
+                # The pod's async_execute() closes `output` in its own finally.
+                await self._function_pod.async_execute(
+                    [input_channel], output, observer=ctx_obs
+                )
 
             ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
-    async def _async_execute_one_data(
-        self,
-        tag: TagProtocol,
-        data: DataProtocol,
-        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
-        *,
-        observer: ExecutionObserverProtocol,
-        node_label: str,
-        node_hash: str,
-    ) -> None:
-        """Process one non-cached data in the async execute path."""
-        observer.on_data_start(node_label, tag, data)
-        pkt_logger = observer.create_data_logger(tag, data)
-
-        try:
-            tag_out, result_data = await self._async_process_data_internal(
-                tag, data, logger=pkt_logger
-            )
-        except Exception as exc:
-            logger.warning(
-                "Data execution failed in %s: %s", node_label, exc,
-                exc_info=True,
-            )
-            observer.on_data_crash(node_label, tag, data, exc)
-        else:
-            observer.on_data_end(
-                node_label, tag, data, result_data, cached=False
-            )
-            if result_data is not None:
-                await output.send((tag_out, result_data))

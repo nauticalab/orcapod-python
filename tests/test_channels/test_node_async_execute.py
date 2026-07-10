@@ -695,21 +695,22 @@ class TestExecuteDataRouting:
         assert len(call_log) == 3
 
     @pytest.mark.asyncio
-    async def test_function_node_async_uses_async_process_data_internal(self):
-        """Verify FunctionJobNode.async_execute routes through _async_process_data_internal."""
+    async def test_function_node_async_delegates_to_pod(self):
+        """Verify FunctionJobNode.async_execute (no-DB path) delegates to pod.async_execute."""
         call_log = []
 
         _, pod = make_double_pod()
         stream = make_stream(3)
         node = FunctionJobNode(pod, stream)
 
-        original = node._async_process_data_internal
+        # No-DB path delegates to pod.async_execute(); verify pod.async_process_data is called.
+        original = pod.async_process_data
 
         async def patched(tag, data, **kwargs):
-            call_log.append("_async_process_data_internal")
+            call_log.append("async_process_data")
             return await original(tag, data, **kwargs)
 
-        node._async_process_data_internal = patched
+        pod.async_process_data = patched  # type: ignore[method-assign]
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
