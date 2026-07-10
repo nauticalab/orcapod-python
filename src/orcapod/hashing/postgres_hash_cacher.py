@@ -51,7 +51,7 @@ class PostgresHashCacher:
     ) -> None:
         try:
             import psycopg  # noqa: F401
-        except ImportError:
+        except ImportError:  # pragma: no cover
             raise ImportError(
                 "PostgresHashCacher requires psycopg. "
                 "Install it with: pip install 'orcapod[postgresql]'"

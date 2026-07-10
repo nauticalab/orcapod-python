@@ -54,7 +54,7 @@ from orcapod.hashing.hash_cachers import InMemoryHashCacher, SqliteHashCacher
 
 try:
     from orcapod.hashing.postgres_hash_cacher import PostgresHashCacher
-except ImportError:
+except ImportError:  # pragma: no cover
     PostgresHashCacher = None  # type: ignore[assignment,misc]
 
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
