@@ -236,8 +236,11 @@ class _FunctionPodBase(TraceableBase):
 
             async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
                 obs.on_data_start(pod_label, tag, data)
+                pkt_logger = obs.create_data_logger(tag, data)
                 try:
-                    out_tag, result_data = await self.async_process_data(tag, data)
+                    out_tag, result_data = await self.async_process_data(
+                        tag, data, logger=pkt_logger
+                    )
                 except Exception as exc:
                     logger.debug(
                         "Data processing failed, skipping: %s", exc, exc_info=True

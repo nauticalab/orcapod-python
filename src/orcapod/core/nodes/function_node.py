@@ -24,7 +24,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from orcapod import contexts
-from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod.channels import Channel, ReadableChannel, WritableChannel
 from orcapod.config import OrcapodConfig
 from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
@@ -50,10 +50,7 @@ from orcapod.types import (
     ColumnConfig,
     ContentHash,
     NodeConfig,
-    PipelineConfig,
-    PodConfig,
     Schema,
-    resolve_concurrency,
 )
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -81,6 +78,12 @@ _PIPELINE_BASE_ENTRY_ID_COL = "__pipeline_base_entry_id"
 # Column storing the recomputation chain index (pa.int32).
 # 0 for the first computation, N+1 for each miss-triggered recompute.
 _PIPELINE_RECOMPUTATION_INDEX_COL = "__pipeline_recomputation_index"
+
+# Private meta-column name stamped into tags routed to the compute channel.
+# Carries the correlation key (bytes) that links an execution result back to
+# its original (tag, input_data) pair. Stripped from output tags in
+# record_and_forward() before downstream emission.
+_TAG_NODE_INPUT_REF = "_tag_node_input_ref"
 
 
 def _executor_supports_concurrent(
@@ -2090,17 +2093,23 @@ class FunctionJobNode(FunctionNodeBase):
             ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
-                # Resolve concurrency limit for DB path (pipeline config not
-                # threaded through the orchestrator, so fall back to defaults).
-                pod_config = getattr(self._function_pod, "pod_config", PodConfig())
-                max_concurrency = resolve_concurrency(pod_config, PipelineConfig())
-                sem = (
-                    asyncio.Semaphore(max_concurrency)
-                    if max_concurrency is not None
-                    else None
-                )
+                # ----------------------------------------------------------
+                # DB path — 3-stage concurrent pipeline
+                # ----------------------------------------------------------
+                is_ephemeral = bool(self._node_config.is_result_ephemeral)
+                if is_ephemeral:
+                    if self._ephemeral_cached_pod is None:
+                        raise RuntimeError(
+                            f"FunctionJobNode '{self.label}' has is_result_ephemeral=True "
+                            "but no ephemeral store has been assigned. Call "
+                            "set_ephemeral_store() with an ArrowDatabaseProtocol before "
+                            "executing this node."
+                        )
+                    execution_pod = self._ephemeral_cached_pod
+                else:
+                    execution_pod = self._cached_function_pod
 
-                # Phase 1: build cache lookup from pipeline DB
+                # Load pipeline DB → in-memory cache keyed by base_entry_id.
                 loaded = self._load_cached_entries()
                 self._cached_output_datas.update(loaded)
                 if loaded:
@@ -2108,52 +2117,106 @@ class FunctionJobNode(FunctionNodeBase):
                     self._cached_content_hash_column = None
                 cached_by_base_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
 
-                # Phase 2: drive output from input channel — cached or compute
-                async def _process_one_db(
-                    tag: TagProtocol, data: DataProtocol
-                ) -> None:
-                    base_entry_id = self.compute_base_entry_id(tag, data)
-                    if base_entry_id in cached_by_base_entry_id:
-                        tag_out, result_data = cached_by_base_entry_id[base_entry_id]
-                        ctx_obs.on_data_start(node_label, tag, data)
-                        ctx_obs.on_data_end(
-                            node_label, tag, data, result_data, cached=True
+                # Intermediate channels (bounded for backpressure).
+                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
+                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
+
+                # Local dict: correlation_key → (original_tag, original_input_data)
+                input_store: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
+
+                async def route_inputs() -> None:
+                    """Stage 1: send cache hits to output; stamp misses for computation."""
+                    try:
+                        async for tag, data in input_channel:
+                            base_entry_id = self.compute_base_entry_id(tag, data)
+                            if base_entry_id in cached_by_base_entry_id:
+                                cached_tag, cached_data = cached_by_base_entry_id[base_entry_id]
+                                ctx_obs.on_data_start(node_label, tag, data)
+                                ctx_obs.on_data_end(
+                                    node_label, tag, data, cached_data, cached=True
+                                )
+                                await output.send((cached_tag, cached_data))
+                            else:
+                                correlation_key = uuid.uuid4().bytes
+                                input_store[correlation_key] = (tag, data)
+                                stamped_tag = tag.with_meta_columns(
+                                    **{_TAG_NODE_INPUT_REF: correlation_key}
+                                )
+                                await compute_channel.writer.send((stamped_tag, data))
+                    finally:
+                        await compute_channel.writer.close()
+
+                async def record_and_forward() -> None:
+                    """Stage 3: record pipeline entry, strip key, emit to output."""
+                    async for output_tag, output_data in result_channel.reader:
+                        correlation_key = output_tag.get_meta_value(_TAG_NODE_INPUT_REF)
+                        original_tag, input_data = input_store.pop(correlation_key)
+                        result_computed = bool(
+                            output_data.get_meta_value(
+                                execution_pod.RESULT_COMPUTED_FLAG, False
+                            )
                         )
-                        await output.send((tag_out, result_data))
-                    else:
+                        self.add_pipeline_record(
+                            original_tag,
+                            input_data,
+                            data_record_id=output_data.datagram_uuid,
+                            computed=result_computed,
+                            is_ephemeral=is_ephemeral,
+                        )
+                        # Update in-memory cache so iter_data() sees the result.
+                        base_entry_id = self.compute_base_entry_id(original_tag, input_data)
+                        clean_tag = output_tag.drop_meta_columns(_TAG_NODE_INPUT_REF)
+                        self._cached_output_datas[base_entry_id] = (clean_tag, output_data)
+                        self._cached_output_table = None
+                        self._cached_content_hash_column = None
+                        await output.send((clean_tag, output_data))
+
+                # Wrap ctx_obs so that data-level events emitted by the pod
+                # carry the node label, not the pod's own label — preserving
+                # the observable contract of the old DB path.
+                class _NodeLabelObserver:
+                    """Relay all observer calls, replacing any label with node_label."""
+
+                    def contextualize(self, *path: str) -> "_NodeLabelObserver":
+                        return self
+
+                    def on_node_start(self, lbl: str, h: str, **kw: Any) -> None:
+                        ctx_obs.on_node_start(node_label, h, **kw)
+
+                    def on_node_end(self, lbl: str, h: str) -> None:
+                        ctx_obs.on_node_end(node_label, h)
+
+                    def on_data_start(self, lbl: str, tag: Any, data: Any) -> None:
                         ctx_obs.on_data_start(node_label, tag, data)
-                        pkt_logger = ctx_obs.create_data_logger(tag, data)
-                        try:
-                            tag_out, result_data = await self._async_process_data_internal(
-                                tag, data, logger=pkt_logger
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Data execution failed in %s: %s", node_label, exc,
-                                exc_info=True,
-                            )
-                            ctx_obs.on_data_crash(node_label, tag, data, exc)
-                        else:
-                            ctx_obs.on_data_end(
-                                node_label, tag, data, result_data, cached=False
-                            )
-                            if result_data is not None:
-                                await output.send((tag_out, result_data))
+
+                    def on_data_end(
+                        self, lbl: str, tag: Any, inp: Any, out: Any, *, cached: bool
+                    ) -> None:
+                        ctx_obs.on_data_end(node_label, tag, inp, out, cached=cached)
+
+                    def on_data_crash(
+                        self, lbl: str, tag: Any, data: Any, error: Any
+                    ) -> None:
+                        ctx_obs.on_data_crash(node_label, tag, data, error)
+
+                    def create_data_logger(self, tag: Any, data: Any) -> Any:
+                        # Strip the correlation key before creating the logger
+                        # so that internal columns never leak into log records.
+                        clean = tag.drop_meta_columns(
+                            _TAG_NODE_INPUT_REF, ignore_missing=True
+                        )
+                        return ctx_obs.create_data_logger(clean, data)
 
                 async with asyncio.TaskGroup() as tg:
-                    async for tag, data in input_channel:
-                        async def _guarded_db(
-                            t: TagProtocol = tag, p: DataProtocol = data
-                        ) -> None:
-                            try:
-                                await _process_one_db(t, p)
-                            finally:
-                                if sem is not None:
-                                    sem.release()
-
-                        if sem is not None:
-                            await sem.acquire()
-                        tg.create_task(_guarded_db())
+                    tg.create_task(route_inputs())
+                    tg.create_task(
+                        execution_pod.async_execute(
+                            [compute_channel.reader],
+                            result_channel.writer,
+                            observer=_NodeLabelObserver(),
+                        )
+                    )
+                    tg.create_task(record_and_forward())
             else:
                 # No-DB path: delegate dispatch entirely to the pod.
                 # The pod's async_execute() closes `output` in its own finally.
