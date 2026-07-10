@@ -324,7 +324,7 @@ class TestEnableFileHashCachingConninfo:
 # ---------------------------------------------------------------------------
 
 
-def _make_v0_db(path: "Path") -> None:
+def _make_v0_db(path: Path) -> None:
     """Create a V0 SQLite cache database (no cached_at column)."""
     import sqlite3
 

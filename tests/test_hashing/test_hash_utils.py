@@ -329,7 +329,7 @@ class TestGetFunctionComponents:
     def test_include_comments_false(self):
         # We can't write inline comments without them being included in the test
         # source — use exec to create a function with a comment in its source.
-        import types, textwrap
+        import textwrap
         code = textwrap.dedent("""
             def has_comment(x):
                 # this is a comment
@@ -337,7 +337,7 @@ class TestGetFunctionComponents:
         """)
         ns = {}
         exec(compile(code, "<string>", "exec"), ns)
-        has_comment = ns["has_comment"]
+        _ = ns["has_comment"]
 
         # NOTE: For dynamically-defined functions, inspect.getsource raises IOError,
         # so include_comments only affects functions with real source.

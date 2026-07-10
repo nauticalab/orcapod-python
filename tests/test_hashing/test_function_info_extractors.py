@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 import pytest
@@ -135,8 +134,6 @@ class TestFunctionSignatureExtractor:
         """When eval_str=True fails, falls back to unresolved signature."""
         # Create a function with an annotation that cannot be resolved at eval time
         # by using exec with a forward reference that doesn't exist
-        import types, sys
-
         code = "def fn(x: 'NonExistentType123') -> None: pass"
         ns = {"__name__": "__test_module__"}
         exec(compile(code, "<string>", "exec"), ns)

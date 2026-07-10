@@ -1,4 +1,15 @@
-"""Tests for PostgresHashCacher using a real Postgres via testcontainers."""
+"""Tests for PostgresHashCacher using a real Postgres via testcontainers.
+
+These tests are marked ``@pytest.mark.postgres`` and are **skipped by default**.
+To run them, pass ``--postgres`` and ensure Docker is available::
+
+    uv run pytest tests/test_hashing/test_postgres_hash_cacher.py --postgres
+
+The ``pg_conninfo`` fixture uses ``testcontainers[postgres]`` to spin up a
+``postgres:16`` container automatically; no manual Postgres setup is needed.
+Tests in ``TestPostgresReprRedaction`` do **not** carry the postgres marker and
+run unconditionally because they test the pure ``_redact_conninfo()`` helper.
+"""
 
 from __future__ import annotations
 
