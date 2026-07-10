@@ -2173,6 +2173,10 @@ class FunctionJobNode(FunctionNodeBase):
                         self._cached_content_hash_column = None
                         await output.send((clean_tag, output_data))
 
+                # Capture outer self so _NodeLabelObserver methods can
+                # update FunctionJobNode state without shadowing with 'self'.
+                fn_node = self
+
                 # Wrap ctx_obs so that data-level events emitted by the pod
                 # carry the node label, not the pod's own label — preserving
                 # the observable contract of the old DB path.
@@ -2207,6 +2211,30 @@ class FunctionJobNode(FunctionNodeBase):
                             _TAG_NODE_INPUT_REF, ignore_missing=True
                         )
                         ctx_obs.on_data_end(node_label, clean, inp, out, cached=cached)
+                        if out is None:
+                            # The function filtered this item (returned None).
+                            # The pod does not emit to result_channel, so
+                            # record_and_forward() never sees it.  Pop the
+                            # input_store entry and update the in-memory cache
+                            # so this input is not recomputed on the next call
+                            # (restoring the old _async_process_data_internal
+                            # behaviour of always storing even None results).
+                            correlation_key = tag.get_meta_value(
+                                _TAG_NODE_INPUT_REF, None
+                            )
+                            if correlation_key is not None:
+                                original = input_store.pop(correlation_key, None)
+                                if original is not None:
+                                    orig_tag, orig_data = original
+                                    base_entry_id = fn_node.compute_base_entry_id(
+                                        orig_tag, orig_data
+                                    )
+                                    fn_node._cached_output_datas[base_entry_id] = (
+                                        clean,
+                                        None,
+                                    )
+                                    fn_node._cached_output_table = None
+                                    fn_node._cached_content_hash_column = None
 
                     def on_data_crash(
                         self, lbl: str, tag: Any, data: Any, error: Any
@@ -2215,6 +2243,11 @@ class FunctionJobNode(FunctionNodeBase):
                             _TAG_NODE_INPUT_REF, ignore_missing=True
                         )
                         ctx_obs.on_data_crash(node_label, clean, data, error)
+                        # Clean up the dangling input_store entry so it doesn't
+                        # accumulate memory during long-running calls with errors.
+                        correlation_key = tag.get_meta_value(_TAG_NODE_INPUT_REF, None)
+                        if correlation_key is not None:
+                            input_store.pop(correlation_key, None)
 
                     def create_data_logger(self, tag: Any, data: Any) -> Any:
                         # Strip the correlation key before creating the logger

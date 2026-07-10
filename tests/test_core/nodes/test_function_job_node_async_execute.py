@@ -346,6 +346,67 @@ class TestFunctionJobNodeAsyncExecuteDB:
         values = sorted(data.as_dict()["result"] for _, data in results)
         assert values == [0, 4]
 
+    @pytest.mark.asyncio
+    async def test_filtered_items_update_in_memory_cache(self):
+        """Items filtered by the pod (output_data=None) must be stored in
+        _cached_output_datas so the sync iter_data() path sees them.
+
+        Regression: before the fix, _NodeLabelObserver.on_data_end with
+        out=None never popped the input_store entry or updated
+        _cached_output_datas, so filtered inputs were always recomputed and
+        the input_store accumulated entries for the lifetime of the call.
+        """
+        node, _, _ = _make_db_node(3)
+
+        # Deactivate the data function so every input is filtered (call → None).
+        node._function_pod.data_function.set_active(False)
+
+        results = await _run_node(node)
+        # All items filtered — nothing emitted.
+        assert len(results) == 0
+
+        # _cached_output_datas must have one entry per input, with None data,
+        # confirming that on_data_end cleaned up input_store and updated the cache.
+        assert len(node._cached_output_datas) == 3
+        for _tag, data in node._cached_output_datas.values():
+            assert data is None
+
+    @pytest.mark.asyncio
+    async def test_crashed_items_cleaned_from_input_store(self):
+        """Crashed items must not leave dangling entries in input_store.
+
+        Regression: before the fix, _NodeLabelObserver.on_data_crash never
+        popped the input_store entry, so the dict accumulated one entry per
+        crash for the entire lifetime of the async_execute() call.
+
+        Verification is indirect: if input_store cleanup works, no KeyError or
+        deadlock occurs when the same inputs are re-run after a crash run.
+        """
+
+        def sometimes_fail(value: int) -> int:
+            if value == 1:
+                raise ValueError("deliberate failure")
+            return value * 2
+
+        src = _make_source(3)
+        pod = FunctionPod(PythonDataFunction(sometimes_fail, output_keys="result"))
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        node = FunctionJobNode(
+            pod, src, pipeline_database=pipeline_db, result_database=result_db
+        )
+
+        # First run — value=1 crashes.
+        first = await _run_node(node)
+        assert len(first) == 2
+
+        # Second run — value=1 still crashes, others are cache hits.
+        node.clear_cache()
+        second = await _run_node(node)
+        assert len(second) == 2
+        values = sorted(data.as_dict()["result"] for _, data in second)
+        assert values == [0, 4]
+
 
 # ---------------------------------------------------------------------------
 # DB path — ephemeral
