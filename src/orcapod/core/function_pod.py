@@ -796,7 +796,7 @@ class WrappedFunctionPod(_FunctionPodBase):
     @property
     def pod_config(self) -> PodConfig:
         """Delegate to the inner pod's config so CachedFunctionPod respects limits."""
-        return getattr(self._function_pod, "pod_config", PodConfig())
+        return self._function_pod.pod_config
 
     @property
     def uri(self) -> tuple[str, ...]:
