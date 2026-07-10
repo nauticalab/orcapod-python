@@ -228,7 +228,11 @@ def create_registry(
     return JSONDataContextRegistry(contexts_dir, schema_file, default_version)
 
 
-def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
+def enable_file_hash_caching(
+    db_path: "Path | None" = None,
+    read_only: bool = False,
+    min_cache_size_bytes: int | None = None,
+) -> None:
     """Enable SQLite-backed file hash caching on the default Orcapod context.
 
     Wraps the existing ``FileHandler``'s hasher in a ``CachedFileHasher``
@@ -257,6 +261,12 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
         db_path: Path to the SQLite cache database. Defaults to
             ``~/.orcapod/file_hash_cache.db`` or the
             ``ORCAPOD_HASH_CACHE_DB`` environment variable.
+        read_only: When ``True``, the underlying ``SqliteHashCacher`` will
+            not insert new entries. Lookups still work normally. Defaults
+            to ``False``.
+        min_cache_size_bytes: When set, files smaller than this byte count
+            are not inserted into the cache. ``None`` and ``0`` disable the
+            threshold. Defaults to ``None``.
     """
     from orcapod.extension_types.file_type import File
     from orcapod.hashing.file_hashers import CachedFileHasher
@@ -295,7 +305,11 @@ def enable_file_hash_caching(db_path: "Path | None" = None) -> None:
 
     cached_file_hasher = CachedFileHasher(
         file_hasher=base_hasher,
-        cacher=SqliteHashCacher(db_path),
+        cacher=SqliteHashCacher(
+            db_path,
+            read_only=read_only,
+            min_cache_size_bytes=min_cache_size_bytes,
+        ),
     )
 
     registry.register(File, FileHandler(cached_file_hasher))
