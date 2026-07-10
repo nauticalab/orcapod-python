@@ -288,7 +288,11 @@ class TestSqliteHashCacherRepr:
         cacher = SqliteHashCacher(tmp_path / "cache.db", read_only=True)
         assert "read_only=True" in repr(cacher)
 
-    def test_repr_shows_min_cache_size_bytes(self, tmp_path):
+    def test_repr_shows_min_cache_size_bytes_none(self, tmp_path):
+        cacher = SqliteHashCacher(tmp_path / "cache.db")
+        assert "min_cache_size_bytes=None" in repr(cacher)
+
+    def test_repr_shows_min_cache_size_bytes_value(self, tmp_path):
         cacher = SqliteHashCacher(tmp_path / "cache.db", min_cache_size_bytes=1024)
         assert "min_cache_size_bytes=1024" in repr(cacher)
 
