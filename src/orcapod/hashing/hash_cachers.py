@@ -26,7 +26,7 @@ class InMemoryHashCacher:
         min_cache_size_bytes: When set to a positive integer, files whose
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
-            Defaults to ``None``.
+            Negative values raise ``ValueError``. Defaults to ``None``.
     """
 
     def __init__(
@@ -67,7 +67,7 @@ class InMemoryHashCacher:
         """
         if self._read_only:
             return
-        if self._min_cache_size_bytes and key.size < self._min_cache_size_bytes:
+        if self._min_cache_size_bytes is not None and self._min_cache_size_bytes > 0 and key.size < self._min_cache_size_bytes:
             return
         self._cache[key] = value
 
@@ -199,7 +199,7 @@ class SqliteHashCacher:
         """
         if self._read_only:
             return
-        if self._min_cache_size_bytes and key.size < self._min_cache_size_bytes:
+        if self._min_cache_size_bytes is not None and self._min_cache_size_bytes > 0 and key.size < self._min_cache_size_bytes:
             return
         conn = self._connection()
         conn.execute(
