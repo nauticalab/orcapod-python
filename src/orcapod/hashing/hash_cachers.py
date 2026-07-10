@@ -35,6 +35,11 @@ class InMemoryHashCacher:
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
     ) -> None:
+        if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
+            raise ValueError(
+                f"min_cache_size_bytes must be None or a non-negative integer, "
+                f"got {min_cache_size_bytes!r}"
+            )
         self._cache: dict[FileHashKey, ContentHash] = {}
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
