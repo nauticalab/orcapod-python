@@ -19,10 +19,25 @@ class InMemoryHashCacher:
 
     No persistence, no thread-safety guarantees beyond the GIL, no eviction.
     Use ``SqliteHashCacher`` for production workloads.
+
+    Args:
+        read_only: When ``True``, all ``put()`` calls are silent no-ops.
+            ``get()`` still works normally. Defaults to ``False``.
+        min_cache_size_bytes: When set to a positive integer, files whose
+            ``key.size`` is strictly below this threshold are not inserted.
+            ``None`` and ``0`` disable the threshold (default behaviour).
+            Defaults to ``None``.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        read_only: bool = False,
+        min_cache_size_bytes: int | None = None,
+    ) -> None:
         self._cache: dict[FileHashKey, ContentHash] = {}
+        self._read_only = read_only
+        self._min_cache_size_bytes = min_cache_size_bytes
 
     def get(self, key: FileHashKey) -> ContentHash | None:
         """Return the cached ``ContentHash`` for ``key``, or ``None`` on miss.
@@ -38,15 +53,29 @@ class InMemoryHashCacher:
     def put(self, key: FileHashKey, value: ContentHash) -> None:
         """Store ``value`` under ``key``.
 
+        No-ops silently when ``read_only=True`` or when ``key.size`` is below
+        ``min_cache_size_bytes``.
+
         Args:
             key: File hash cache key.
             value: ``ContentHash`` to store.
         """
+        if self._read_only:
+            return
+        if self._min_cache_size_bytes and key.size < self._min_cache_size_bytes:
+            return
         self._cache[key] = value
 
     def clear(self) -> None:
         """Remove all entries from the cache."""
         self._cache.clear()
+
+    def __repr__(self) -> str:
+        return (
+            f"InMemoryHashCacher("
+            f"read_only={self._read_only!r}, "
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+        )
 
 
 class SqliteHashCacher:
