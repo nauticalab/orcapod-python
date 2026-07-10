@@ -745,3 +745,83 @@ class TestExecutorProtocolTypeSafety:
             f"async_execute_callable() fn should reference Callable, "
             f"got {fn_annotation!r}"
         )
+
+
+# ===========================================================================
+# 8. _FunctionPodBase.async_execute observer hooks
+# ===========================================================================
+
+
+class TestFunctionPodBaseAsyncExecuteObserver:
+    """Observer hooks fire correctly in _FunctionPodBase.async_execute()."""
+
+    @pytest.mark.asyncio
+    async def test_observer_on_data_start_and_end_fire_per_item(self):
+        """on_data_start fires before and on_data_end(cached=False) fires after each item."""
+        starts = []
+        ends = []
+
+        class _Spy:
+            def contextualize(self, *path): return self
+            def on_node_start(self, *a, **kw): pass
+            def on_node_end(self, *a, **kw): pass
+            def on_data_start(self, label, tag, data):
+                starts.append((label, tag, data))
+            def on_data_end(self, label, tag, inp, out, *, cached):
+                ends.append((label, tag, inp, out, cached))
+            def on_data_crash(self, label, tag, data, exc): pass
+            def create_data_logger(self, tag, data): return None
+
+        def double(x: int) -> int:
+            return x * 2
+
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf)
+        stream = make_stream(3)
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+        await feed_stream_to_channel(stream, input_ch)
+
+        spy = _Spy()
+        await pod.async_execute([input_ch.reader], output_ch.writer, observer=spy)
+        results = await output_ch.reader.collect()
+
+        assert len(results) == 3
+        assert len(starts) == 3
+        assert len(ends) == 3
+        assert all(cached is False for _, _, _, _, cached in ends)
+
+    @pytest.mark.asyncio
+    async def test_observer_on_data_crash_fires_on_failure(self):
+        """on_data_crash fires (not on_data_end) when async_process_data raises."""
+        crashes = []
+        ends = []
+
+        class _Spy:
+            def contextualize(self, *path): return self
+            def on_node_start(self, *a, **kw): pass
+            def on_node_end(self, *a, **kw): pass
+            def on_data_start(self, *a): pass
+            def on_data_end(self, label, tag, inp, out, *, cached):
+                ends.append((label, tag, inp, out, cached))
+            def on_data_crash(self, label, tag, data, exc):
+                crashes.append(exc)
+            def create_data_logger(self, tag, data): return None
+
+        def boom(x: int) -> int:
+            raise ValueError("explode")
+
+        pf = PythonDataFunction(boom, output_keys="result")
+        pod = FunctionPod(pf)
+        stream = make_stream(2)
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+        await feed_stream_to_channel(stream, input_ch)
+
+        spy = _Spy()
+        await pod.async_execute([input_ch.reader], output_ch.writer, observer=spy)
+        results = await output_ch.reader.collect()
+
+        assert len(results) == 0
+        assert len(crashes) == 2
+        assert len(ends) == 0
