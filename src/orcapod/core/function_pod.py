@@ -201,11 +201,11 @@ class _FunctionPodBase(TraceableBase):
 
     async def async_execute(
         self,
-        inputs: "Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]]",
-        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         pipeline_config: PipelineConfig | None = None,
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None:
         """Streaming async execution with per-data concurrency control.
 
