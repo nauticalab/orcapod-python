@@ -467,3 +467,53 @@ class TestMigrateHashCache:
         assert row is not None
         assert row[0] == "/a/b.txt"
         assert row[1] == 0  # default for migrated rows
+
+    def test_cached_at_column_present_but_unstamped(self, tmp_path, capsys):
+        """A DB that has cached_at but user_version=0 just gets stamped to V1."""
+        import sqlite3
+        from orcapod.hashing.migrate_hash_cache import migrate_sqlite_hash_cache
+
+        db = tmp_path / "unstamped.db"
+        # Build a DB that has the cached_at column but user_version still = 0
+        with sqlite3.connect(db) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(
+                """
+                CREATE TABLE file_hash_cache (
+                    path      TEXT    NOT NULL,
+                    mtime_ns  INTEGER NOT NULL,
+                    size      INTEGER NOT NULL,
+                    hash      BLOB    NOT NULL,
+                    cached_at INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (path, mtime_ns, size)
+                ) WITHOUT ROWID
+                """
+            )
+            # user_version stays at 0 (default)
+            conn.commit()
+
+        migrate_sqlite_hash_cache(db)
+
+        out = capsys.readouterr().out
+        assert "stamped schema version" in out
+
+        with sqlite3.connect(db) as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 1
+
+    def test_main_entry_point(self, tmp_path, capsys):
+        """main() parses argv, runs migration, exits cleanly."""
+        import sys
+        from unittest.mock import patch
+        from orcapod.hashing.migrate_hash_cache import main
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        db = tmp_path / "v1.db"
+        SqliteHashCacher(db).close()  # creates a V1 DB
+
+        # Patch sys.argv to supply the db_path argument
+        with patch.object(sys, "argv", ["migrate_hash_cache", str(db)]):
+            main()
+
+        out = capsys.readouterr().out
+        assert "nothing to migrate" in out
