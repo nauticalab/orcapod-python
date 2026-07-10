@@ -2165,7 +2165,9 @@ class FunctionJobNode(FunctionNodeBase):
                         )
                         # Update in-memory cache so iter_data() sees the result.
                         base_entry_id = self.compute_base_entry_id(original_tag, input_data)
-                        clean_tag = output_tag.drop_meta_columns(_TAG_NODE_INPUT_REF)
+                        clean_tag = output_tag.drop_meta_columns(
+                            _TAG_NODE_INPUT_REF, ignore_missing=True
+                        )
                         self._cached_output_datas[base_entry_id] = (clean_tag, output_data)
                         self._cached_output_table = None
                         self._cached_content_hash_column = None
