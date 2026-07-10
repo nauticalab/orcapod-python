@@ -97,6 +97,12 @@ class SqliteHashCacher:
         db_path: Path to the SQLite database file. Defaults to
             ``~/.orcapod/file_hash_cache.db`` or the
             ``ORCAPOD_HASH_CACHE_DB`` environment variable.
+        read_only: When ``True``, all ``put()`` calls are silent no-ops.
+            ``get()`` still works normally. Defaults to ``False``.
+        min_cache_size_bytes: When set to a positive integer, files whose
+            ``key.size`` is strictly below this threshold are not inserted.
+            ``None`` and ``0`` disable the threshold (default behaviour).
+            Negative values raise ``ValueError``. Defaults to ``None``.
 
     Note:
         Heavy multi-writer scenarios are a known SQLite limitation. A Turso
@@ -105,12 +111,25 @@ class SqliteHashCacher:
 
     DEFAULT_DB_PATH = Path.home() / ".orcapod" / "file_hash_cache.db"
 
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        *,
+        read_only: bool = False,
+        min_cache_size_bytes: int | None = None,
+    ) -> None:
+        if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
+            raise ValueError(
+                f"min_cache_size_bytes must be None or a non-negative integer, "
+                f"got {min_cache_size_bytes!r}"
+            )
         self.db_path = Path(
             db_path
             or os.environ.get("ORCAPOD_HASH_CACHE_DB")
             or self.DEFAULT_DB_PATH
         )
+        self._read_only = read_only
+        self._min_cache_size_bytes = min_cache_size_bytes
         self._local = threading.local()
         self._ensure_schema()
 
@@ -170,12 +189,18 @@ class SqliteHashCacher:
     def put(self, key: FileHashKey, value: ContentHash) -> None:
         """Store ``value`` under ``key``.
 
-        Uses ``INSERT OR REPLACE`` so writes are idempotent.
+        No-ops silently when ``read_only=True`` or when ``key.size`` is below
+        ``min_cache_size_bytes``. Uses ``INSERT OR REPLACE`` so writes are
+        idempotent when they do proceed.
 
         Args:
             key: File hash cache key.
             value: ``ContentHash`` to store.
         """
+        if self._read_only:
+            return
+        if self._min_cache_size_bytes and key.size < self._min_cache_size_bytes:
+            return
         conn = self._connection()
         conn.execute(
             """
@@ -198,6 +223,14 @@ class SqliteHashCacher:
         if conn is not None:
             conn.close()
             self._local.conn = None
+
+    def __repr__(self) -> str:
+        return (
+            f"SqliteHashCacher("
+            f"db_path={str(self.db_path)!r}, "
+            f"read_only={self._read_only!r}, "
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+        )
 
     def __enter__(self) -> "SqliteHashCacher":
         """Return self for use as a context manager."""
