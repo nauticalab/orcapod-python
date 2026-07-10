@@ -53,14 +53,14 @@ remain accessible at the same path if you use the same `db_path`.
 
 ## Controlling when the cache is written
 
-By default, every file that passes through ``CachedFileHasher`` is inserted
+By default, every file that passes through `CachedFileHasher` is inserted
 into the cache on a miss. Two optional knobs let you restrict this.
 
 ### Read-only mode
 
-Use ``read_only=True`` when you want lookups from a shared or authoritative
+Use `read_only=True` when you want lookups from a shared or authoritative
 cache but must not add new entries to it — for example, when consuming a
-cache pre-populated by ``populate_hash_cache()`` without polluting it with
+cache pre-populated by `populate_hash_cache()` without polluting it with
 ad-hoc entries.
 
 ```python
@@ -74,7 +74,7 @@ the result is returned to the caller — but it is never written to the cache.
 
 ### Minimum file size threshold
 
-Use ``min_cache_size_bytes`` to skip the cache write overhead for small
+Use `min_cache_size_bytes` to skip the cache write overhead for small
 files. For small files, the disk I/O bottleneck does not apply, so the
 cache lookup and write add latency without meaningful savings.
 
@@ -87,14 +87,14 @@ op.enable_file_hash_caching(min_cache_size_bytes=1_048_576)
 
 Files smaller than the threshold are still hashed and the hash is returned
 to the caller — they are simply not inserted into the cache. Files at or
-above the threshold behave normally. Set to ``None`` or ``0`` to disable
-the threshold (the default).
+above the threshold behave normally. Set to `None` (the default) or `0`
+to disable the threshold.
 
 ### Combining both
 
-The two knobs compose independently. ``read_only=True`` takes precedence:
+The two knobs compose independently. `read_only=True` takes precedence:
 when enabled, no entry is ever written regardless of file size.
-``min_cache_size_bytes`` is an additional guard that applies only when the
+`min_cache_size_bytes` is an additional guard that applies only when the
 cacher is writable.
 
 ```python
