@@ -160,12 +160,13 @@ class PostgresHashCacher:
                     "        ON CONFLICT (key) DO UPDATE SET value = '1';\n"
                 )
 
-            # Record schema version (first-writer wins; idempotent on re-open).
+            # Record (or update) schema version so the meta table always
+            # reflects what the running code has verified/initialized.
             conn.execute(
                 """
                 INSERT INTO file_hash_cache_meta (key, value)
                 VALUES ('schema_version', %s)
-                ON CONFLICT (key) DO NOTHING
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
                 """,
                 (str(_SCHEMA_VERSION),),
             )

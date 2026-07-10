@@ -501,6 +501,34 @@ class TestMigrateHashCache:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
         assert version == 1
 
+    def test_put_after_migration_sets_nonzero_cached_at(self, tmp_path):
+        """put() on a migrated DB writes the current epoch, not 0.
+
+        The migration adds cached_at with DEFAULT 0 (SQLite ALTER TABLE only
+        accepts literal defaults).  SqliteHashCacher.put() must explicitly
+        supply cached_at so migrated databases get real timestamps on new rows.
+        """
+        import sqlite3
+        import time
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+        from orcapod.hashing.migrate_hash_cache import migrate_sqlite_hash_cache
+
+        db = tmp_path / "migrated.db"
+        _make_v0_db(db)
+        migrate_sqlite_hash_cache(db)
+
+        before = int(time.time()) - 1
+        cacher = SqliteHashCacher(db)
+        cacher.put(make_key("/new.txt", mtime_ns=5000, size=300), make_hash(digest=b"\x99" * 32))
+        cacher.close()
+
+        with sqlite3.connect(db) as conn:
+            row = conn.execute(
+                "SELECT cached_at FROM file_hash_cache WHERE path='/new.txt'"
+            ).fetchone()
+        assert row is not None
+        assert row[0] > before, f"cached_at={row[0]} should be > {before}"
+
     def test_main_entry_point(self, tmp_path, capsys):
         """main() parses argv, runs migration, exits cleanly."""
         import sys

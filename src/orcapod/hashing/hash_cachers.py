@@ -243,8 +243,8 @@ class SqliteHashCacher:
         conn = self._connection()
         conn.execute(
             """
-            INSERT OR REPLACE INTO file_hash_cache (path, mtime_ns, size, hash)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO file_hash_cache (path, mtime_ns, size, hash, cached_at)
+            VALUES (?, ?, ?, ?, strftime('%s', 'now'))
             """,
             (str(key.path), key.mtime_ns, key.size, value.to_prefixed_digest()),
         )
