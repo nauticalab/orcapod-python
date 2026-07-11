@@ -67,6 +67,18 @@ class TestCanonicalAnnotationStr:
 
 
 class TestGetFunctionSignatureUnionCanonical:
+    def test_include_defaults_false_strips_defaults(self):
+        """include_defaults=False removes default values from parameter strings."""
+        def fn(x: int = 42, y: str = "hello") -> None:
+            pass
+
+        sig_with = get_function_signature(fn)
+        sig_without = get_function_signature(fn, include_defaults=False)
+        assert "42" in sig_with
+        assert "42" not in sig_without
+        assert "x" in sig_without
+        assert "y" in sig_without
+
     def test_param_union_order_independent(self):
         """get_function_signature returns the same string for str|Path and Path|str params."""
         def foo1(x: str | Path) -> str:
@@ -230,3 +242,130 @@ class TestIsInString:
     def test_empty_prefix_returns_false(self):
         from orcapod.hashing.hash_utils import _is_in_string
         assert _is_in_string("# comment", 0) is False
+
+
+class TestGetFunctionComponents:
+    """Tests for get_function_components() in hash_utils."""
+
+    def _get(self, *args, **kwargs):
+        from orcapod.hashing.hash_utils import get_function_components
+        return get_function_components(*args, **kwargs)
+
+    def test_default_includes_name_module_source_annotations_code(self):
+        def my_func(x: int, y: str = "hi") -> bool:
+            return True
+
+        components = self._get(my_func)
+        combined = " ".join(components)
+        assert any(c.startswith("name:") for c in components)
+        assert any(c.startswith("module:") for c in components)
+        assert any(c.startswith("source:") for c in components)
+        assert any(c.startswith("code_properties:") for c in components)
+
+    def test_name_override(self):
+        def original_name():
+            pass
+
+        components = self._get(original_name, name_override="custom")
+        assert any(c == "name:custom" for c in components)
+
+    def test_include_name_false(self):
+        def my_func():
+            pass
+
+        components = self._get(my_func, include_name=False)
+        assert not any(c.startswith("name:") for c in components)
+
+    def test_include_module_false(self):
+        def my_func():
+            pass
+
+        components = self._get(my_func, include_module=False)
+        assert not any(c.startswith("module:") for c in components)
+
+    def test_include_code_properties_false(self):
+        def my_func(x: int):
+            return x
+
+        components = self._get(my_func, include_code_properties=False)
+        assert not any(c.startswith("code_properties:") for c in components)
+
+    def test_include_annotations_false(self):
+        def my_func(x: int) -> str:
+            return str(x)
+
+        components = self._get(my_func, include_annotations=False)
+        assert not any(c.startswith("annotations:") for c in components)
+
+    def test_annotations_component_present_when_annotations_exist(self):
+        def my_func(x: int) -> str:
+            return str(x)
+
+        components = self._get(my_func)
+        assert any(c.startswith("annotations:") for c in components)
+
+    def test_preserve_whitespace_false(self):
+        def my_func():
+            """Docstring."""
+            pass
+
+        components_ws = self._get(my_func, preserve_whitespace=True)
+        components_no_ws = self._get(my_func, preserve_whitespace=False)
+        # Both should have source; no_ws version should be cleandoc'd
+        source_ws = next(c for c in components_ws if c.startswith("source:"))
+        source_no_ws = next(c for c in components_no_ws if c.startswith("source:"))
+        # cleandoc strips leading indentation
+        assert len(source_no_ws) <= len(source_ws)
+
+    def test_include_declaration_false(self):
+        def my_func(x: int) -> str:
+            return str(x)
+
+        components = self._get(my_func, include_declaration=False)
+        source = next(c for c in components if c.startswith("source:"))
+        # The 'def my_func' line should be removed
+        assert "def my_func" not in source
+
+    def test_include_comments_false(self):
+        # We can't write inline comments without them being included in the test
+        # source — use exec to create a function with a comment in its source.
+        import textwrap
+        code = textwrap.dedent("""
+            def has_comment(x):
+                # this is a comment
+                return x
+        """)
+        ns = {}
+        exec(compile(code, "<string>", "exec"), ns)
+        _ = ns["has_comment"]
+
+        # NOTE: For dynamically-defined functions, inspect.getsource raises IOError,
+        # so include_comments only affects functions with real source.
+        # We test it on a real function instead.
+        def real_func(x):  # inline comment
+            return x
+
+        components_with = self._get(real_func, include_comments=True)
+        components_without = self._get(real_func, include_comments=False)
+        source_with = next(c for c in components_with if c.startswith("source:"))
+        source_without = next(c for c in components_without if c.startswith("source:"))
+        # The inline comment should be stripped
+        assert "inline comment" not in source_without
+        assert "inline comment" in source_with
+
+    def test_no_source_falls_back_to_name_and_signature(self):
+        """For builtins (no source), falls back to name + signature components."""
+        # Builtins don't have __code__, so disable include_code_properties to
+        # avoid AttributeError; focus on verifying the IOError/TypeError fallback path.
+        components = self._get(len, include_code_properties=False, include_annotations=False)
+        combined = " ".join(components)
+        # Should not have a source: component for a builtin
+        # but should have a name: (either from include_name or fallback)
+        assert "name:" in combined
+
+    def test_return_is_a_list(self):
+        def my_func():
+            pass
+
+        result = self._get(my_func)
+        assert isinstance(result, list)
