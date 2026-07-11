@@ -229,15 +229,22 @@ def create_registry(
 
 
 def enable_file_hash_caching(
+    *,
     db_path: "Path | None" = None,
+    conninfo: str | None = None,
     read_only: bool = False,
     min_cache_size_bytes: int | None = None,
 ) -> None:
-    """Enable SQLite-backed file hash caching on the default Orcapod context.
+    """Enable file hash caching on the default Orcapod context.
 
-    Wraps the existing ``FileHandler``'s hasher in a ``CachedFileHasher``
-    backed by a ``SqliteHashCacher`` and re-registers it for ``orcapod.File``
-    in the default context's semantic hasher registry.
+    Exactly one backend must be chosen:
+
+    * ``conninfo`` provided → ``PostgresHashCacher``, shared across machines.
+    * ``db_path`` provided (or neither) → ``SqliteHashCacher``, local to this
+      machine.
+
+    ``conninfo`` and ``db_path`` are mutually exclusive; providing both raises
+    ``ValueError``.
 
     Call once at application startup before any file hashing occurs.
 
@@ -258,19 +265,29 @@ def enable_file_hash_caching(
     file is encountered during directory traversal.
 
     Args:
-        db_path: Path to the SQLite cache database. Defaults to
+        db_path: Path to the SQLite cache database. Mutually exclusive with
+            ``conninfo``; providing both raises ``ValueError``. Defaults to
             ``~/.orcapod/file_hash_cache.db`` or the
             ``ORCAPOD_HASH_CACHE_DB`` environment variable.
-        read_only: When ``True``, the underlying ``SqliteHashCacher`` will
-            not insert new entries. Lookups still work normally. Defaults
-            to ``False``.
+        conninfo: psycopg3 connection string for a PostgreSQL cache database,
+            e.g. ``"postgresql://user:pass@host:5432/db"``. Mutually exclusive
+            with ``db_path``; providing both raises ``ValueError``.
+        read_only: When ``True``, the underlying cacher will not insert new
+            entries. Lookups still work normally. Defaults to ``False``.
         min_cache_size_bytes: When set, files smaller than this byte count
             are not inserted into the cache. ``None`` and ``0`` disable the
             threshold. Defaults to ``None``.
+
+    Raises:
+        ValueError: If both ``conninfo`` and ``db_path`` are provided.
     """
+    if conninfo is not None and db_path is not None:
+        raise ValueError(
+            "enable_file_hash_caching(): provide conninfo or db_path, not both."
+        )
+
     from orcapod.extension_types.file_type import File
     from orcapod.hashing.file_hashers import CachedFileHasher
-    from orcapod.hashing.hash_cachers import SqliteHashCacher
     from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler
 
     context = get_default_context()
@@ -303,13 +320,28 @@ def enable_file_hash_caching(
     from orcapod.hashing.directory_hashers import BasicDirectoryHasher
     from orcapod.hashing.semantic_hashing.builtin_handlers import DirectoryHandler
 
-    cached_file_hasher = CachedFileHasher(
-        file_hasher=base_hasher,
-        cacher=SqliteHashCacher(
+    if conninfo is not None:
+        from orcapod.hashing.postgres_hash_cacher import PostgresHashCacher
+
+        cacher = PostgresHashCacher(
+            conninfo,
+            read_only=read_only,
+            min_cache_size_bytes=min_cache_size_bytes,
+        )
+    else:
+        # SqliteHashCacher import was previously at the top of the function body;
+        # it now lives inside this branch only.
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        cacher = SqliteHashCacher(
             db_path,
             read_only=read_only,
             min_cache_size_bytes=min_cache_size_bytes,
-        ),
+        )
+
+    cached_file_hasher = CachedFileHasher(
+        file_hasher=base_hasher,
+        cacher=cacher,
     )
 
     registry.register(File, FileHandler(cached_file_hasher))

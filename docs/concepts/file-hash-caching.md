@@ -174,3 +174,68 @@ sqlite3 ~/.orcapod/file_hash_cache.db "DELETE FROM file_hash_cache;"
   different key, so every access is a cache miss.
 - It is the first run on a new machine or a freshly cleared cache. Every file
   is a miss on a cold cache; you pay both the lookup cost and the file read.
+
+## Choosing a backend: SQLite vs Postgres
+
+Orcapod ships two hash cache backends. Pick based on your deployment:
+
+| | SQLite | Postgres |
+|---|---|---|
+| Setup | Zero — file on disk | Requires a running Postgres server |
+| Scope | Per-machine | Shared across machines and pipeline runs |
+| Concurrency | Single-writer | Multi-writer safe (`ON CONFLICT DO NOTHING`) |
+| Best for | Local development, single-machine pipelines | Distributed pipelines, shared caches |
+
+### Using the SQLite backend (default)
+
+```python
+import orcapod as op
+
+op.enable_file_hash_caching()  # uses ~/.orcapod/file_hash_cache.db
+# or specify a path:
+op.enable_file_hash_caching(db_path="/shared/nfs/cache.db")
+```
+
+### Using the Postgres backend
+
+Requires `psycopg` (install with `pip install 'orcapod[postgresql]'`):
+
+```python
+import orcapod as op
+
+op.enable_file_hash_caching(
+    conninfo="postgresql://user:pass@db-host:5432/orcapod_cache"
+)
+```
+
+You can also construct `PostgresHashCacher` directly and pass it to
+`CachedFileHasher` for advanced configurations:
+
+```python
+from orcapod.hashing import CachedFileHasher, FileHasher, PostgresHashCacher
+
+cacher = PostgresHashCacher(
+    conninfo="postgresql://user:pass@db-host:5432/orcapod_cache",
+    read_only=True,           # lookup only, no writes
+    min_cache_size_bytes=1_048_576,  # skip files < 1 MB
+)
+hasher = CachedFileHasher(file_hasher=FileHasher(), cacher=cacher)
+```
+
+### Schema
+
+`PostgresHashCacher` creates the following table on first use
+(`CREATE TABLE IF NOT EXISTS`):
+
+```sql
+CREATE TABLE IF NOT EXISTS file_hash_cache (
+    path      TEXT   NOT NULL,
+    mtime_ns  BIGINT NOT NULL,
+    size      BIGINT NOT NULL,
+    hash      BYTEA  NOT NULL,
+    cached_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+    PRIMARY KEY (path, mtime_ns, size)
+)
+```
+
+Minimum supported Postgres version: **14**.

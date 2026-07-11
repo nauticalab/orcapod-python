@@ -10,6 +10,11 @@ import sqlite3
 import threading
 from pathlib import Path
 
+# Current SQLite schema version.  Stored in PRAGMA user_version.
+# V0 (default) = legacy schema without the cached_at column.
+# V1            = current schema: added cached_at column.
+_SQLITE_SCHEMA_VERSION = 1
+
 from orcapod.hashing.file_hashers import FileHashKey
 from orcapod.types import ContentHash
 
@@ -134,14 +139,28 @@ class SqliteHashCacher:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        """Create the cache table and enable WAL mode.
+        """Create the cache table, enable WAL mode, and verify schema version.
 
-        Uses a dedicated one-shot connection so schema setup happens once
-        on construction, independent of the thread-local connection pool.
+        Uses a dedicated one-shot connection so schema setup happens once on
+        construction, independent of the thread-local connection pool.
+
+        Schema version is tracked via ``PRAGMA user_version``:
+
+        * **V0** (default SQLite value) — legacy schema without ``cached_at``.
+        * **V1** — current schema with ``cached_at``.
+
+        If the database already contains a ``file_hash_cache`` table that is
+        missing the ``cached_at`` column (V0), a ``ValueError`` is raised
+        with instructions to run the bundled migration script.
+
+        Raises:
+            ValueError: If an existing database uses an outdated schema.
         """
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
+
+            # Create table with current schema (no-op if already exists).
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS file_hash_cache (
@@ -154,6 +173,33 @@ class SqliteHashCacher:
                 ) WITHOUT ROWID
                 """
             )
+
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+            # Always validate the cached_at column is present, regardless of
+            # user_version.  A manually-bumped user_version without the matching
+            # schema change would otherwise cause a cryptic INSERT failure in
+            # put() rather than a clear diagnostic here.
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(file_hash_cache)")
+            }
+            if "cached_at" not in columns:
+                raise ValueError(
+                    f"SQLite hash cache at '{self.db_path}' uses an outdated "
+                    f"schema (version {version}, missing 'cached_at' column). "
+                    f"Run the migration script to upgrade:\n\n"
+                    f"    python -m orcapod.hashing.migrate_hash_cache "
+                    f"{self.db_path}\n"
+                )
+
+            if version < _SQLITE_SCHEMA_VERSION:
+                # Version stamp is missing or outdated — stamp it now.
+                # (Reaches here when the table was created by code before
+                # schema versioning was introduced, so cached_at exists
+                # but user_version is still 0.)
+                conn.execute(f"PRAGMA user_version = {_SQLITE_SCHEMA_VERSION}")
+
             conn.commit()
 
     def _connection(self) -> sqlite3.Connection:
@@ -204,8 +250,8 @@ class SqliteHashCacher:
         conn = self._connection()
         conn.execute(
             """
-            INSERT OR REPLACE INTO file_hash_cache (path, mtime_ns, size, hash)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO file_hash_cache (path, mtime_ns, size, hash, cached_at)
+            VALUES (?, ?, ?, ?, strftime('%s', 'now'))
             """,
             (str(key.path), key.mtime_ns, key.size, value.to_prefixed_digest()),
         )
