@@ -115,9 +115,11 @@ class TestFunctionJobNodeAsyncExecuteNoDB:
             nonlocal concurrent_count, max_observed
             concurrent_count += 1
             max_observed = max(max_observed, concurrent_count)
-            await asyncio.sleep(0.01)
-            concurrent_count -= 1
-            return await original_async_call(data, **kwargs)
+            try:
+                await asyncio.sleep(0.01)
+                return await original_async_call(data, **kwargs)
+            finally:
+                concurrent_count -= 1
 
         pf.async_call = patched_async_call  # type: ignore[method-assign]
 

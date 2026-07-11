@@ -143,9 +143,11 @@ class TestFunctionPodBaseAsyncExecuteBackpressure:
             nonlocal concurrent_count, max_observed
             concurrent_count += 1
             max_observed = max(max_observed, concurrent_count)
-            await asyncio.sleep(0.01)
-            concurrent_count -= 1
-            return await original_async_call(data, **kw)
+            try:
+                await asyncio.sleep(0.01)
+                return await original_async_call(data, **kw)
+            finally:
+                concurrent_count -= 1
 
         pf.async_call = patched  # type: ignore[method-assign]
 
