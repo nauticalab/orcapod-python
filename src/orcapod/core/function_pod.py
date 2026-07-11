@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -101,6 +102,11 @@ class _FunctionPodBase(TraceableBase):
     def executor(self, executor: DataFunctionExecutorProtocol | None) -> None:
         """Set or clear the executor on the underlying data function."""
         self._data_function.executor = executor
+
+    @property
+    def pod_config(self) -> PodConfig:
+        """Per-pod executor configuration. Defaults to no concurrency limits."""
+        return PodConfig()
 
     def identity_structure(self) -> Any:
         return self.data_function.identity_structure()
@@ -192,6 +198,69 @@ class _FunctionPodBase(TraceableBase):
             joined_stream = multi_stream_handler.process(*streams)
             return joined_stream
         return streams[0]
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        pipeline_config: PipelineConfig | None = None,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
+    ) -> None:
+        """Streaming async execution with per-data concurrency control.
+
+        Each input (tag, data) is dispatched as an independent async task.
+        A semaphore limits how many tasks are in-flight concurrently.
+        Observer hooks fire per item: ``on_data_start`` before processing,
+        ``on_data_end(cached=False)`` on success, ``on_data_crash`` on error.
+
+        Args:
+            inputs: Single-element sequence containing the input channel.
+            output: Writable channel for output (tag, data) pairs.
+            pipeline_config: Optional pipeline-level concurrency config.
+            observer: Optional observer for per-item lifecycle hooks.
+        """
+        from orcapod.pipeline.observer import NoOpObserver
+
+        try:
+            pipeline_config = pipeline_config or PipelineConfig()
+            max_concurrency = resolve_concurrency(self.pod_config, pipeline_config)
+            obs = observer if observer is not None else NoOpObserver()
+            pod_label = self.label
+
+            sem = (
+                asyncio.Semaphore(max_concurrency)
+                if max_concurrency is not None
+                else None
+            )
+
+            async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
+                obs.on_data_start(pod_label, tag, data)
+                pkt_logger = obs.create_data_logger(tag, data)
+                try:
+                    out_tag, result_data = await self.async_process_data(
+                        tag, data, logger=pkt_logger
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Data processing failed, skipping: %s", exc, exc_info=True
+                    )
+                    obs.on_data_crash(pod_label, tag, data, exc)
+                else:
+                    obs.on_data_end(pod_label, tag, data, result_data, cached=False)
+                    if result_data is not None:
+                        await output.send((out_tag, result_data))
+                finally:
+                    if sem is not None:
+                        sem.release()
+
+            async with asyncio.TaskGroup() as tg:
+                async for tag, data in inputs[0]:
+                    if sem is not None:
+                        await sem.acquire()
+                    tg.create_task(process_one(tag, data))
+        finally:
+            await output.close()
 
     @abstractmethod
     def process(
@@ -336,51 +405,6 @@ class FunctionPod(_FunctionPodBase):
             pod_config = PodConfig(**config["pod_config"])
 
         return cls(data_function=data_function, pod_config=pod_config)
-
-    # ------------------------------------------------------------------
-    # Async channel execution (streaming mode)
-    # ------------------------------------------------------------------
-
-    async def async_execute(
-        self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        pipeline_config: PipelineConfig | None = None,
-    ) -> None:
-        """Streaming async execution with per-data concurrency control.
-
-        Each input (tag, data) is processed independently. A semaphore
-        controls how many data are in-flight concurrently.
-        """
-        try:
-            pipeline_config = pipeline_config or PipelineConfig()
-            max_concurrency = resolve_concurrency(self._pod_config, pipeline_config)
-
-            sem = (
-                asyncio.Semaphore(max_concurrency)
-                if max_concurrency is not None
-                else None
-            )
-
-            async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
-                try:
-                    tag, result_data = await self.async_process_data(tag, data)
-                    if result_data is not None:
-                        await output.send((tag, result_data))
-                except Exception as e:
-                    # Swallow data-level errors so remaining data continue.
-                    logger.debug("Data processing failed, skipping: %s", e, exc_info=True)
-                finally:
-                    if sem is not None:
-                        sem.release()
-
-            async with asyncio.TaskGroup() as tg:
-                async for tag, data in inputs[0]:
-                    if sem is not None:
-                        await sem.acquire()
-                    tg.create_task(process_one(tag, data))
-        finally:
-            await output.close()
 
 
 class FunctionPodStream(StreamBase):
@@ -768,6 +792,11 @@ class WrappedFunctionPod(_FunctionPodBase):
 
     def computed_label(self) -> str | None:
         return self._function_pod.label
+
+    @property
+    def pod_config(self) -> PodConfig:
+        """Delegate to the inner pod's config so CachedFunctionPod respects limits."""
+        return self._function_pod.pod_config
 
     @property
     def uri(self) -> tuple[str, ...]:
