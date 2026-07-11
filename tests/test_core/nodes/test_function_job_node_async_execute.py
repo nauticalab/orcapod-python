@@ -241,14 +241,16 @@ class TestFunctionJobNodeAsyncExecuteDB:
         node.clear_cache()
 
         call_count = 0
-        original_call = node._function_pod.data_function.call
+        # async_execute() calls data_function.async_call() (not .call()), so patch
+        # async_call to reliably detect any recomputation via the async path.
+        original_async_call = node._function_pod.data_function.async_call
 
-        def counted_call(data, **kw):
+        async def counted_async_call(data, **kw):
             nonlocal call_count
             call_count += 1
-            return original_call(data, **kw)
+            return await original_async_call(data, **kw)
 
-        node._function_pod.data_function.call = counted_call  # type: ignore[method-assign]
+        node._function_pod.data_function.async_call = counted_async_call  # type: ignore[method-assign]
 
         second_results = await _run_node(node)
         assert len(second_results) == 3

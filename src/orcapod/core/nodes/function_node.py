@@ -2216,9 +2216,14 @@ class FunctionJobNode(FunctionNodeBase):
                             # The pod does not emit to result_channel, so
                             # record_and_forward() never sees it.  Pop the
                             # input_store entry and update the in-memory cache
-                            # so this input is not recomputed on the next call
-                            # (restoring the old _async_process_data_internal
-                            # behaviour of always storing even None results).
+                            # so iter_data() (the sync path) sees a cached None
+                            # result — restoring the old _async_process_data_internal
+                            # behaviour of always writing (tag, None) to
+                            # _cached_output_datas.
+                            # Note: route_inputs() checks cached_by_base_entry_id
+                            # (pipeline DB) and filtered items are never written
+                            # to the pipeline DB, so subsequent async_execute()
+                            # calls still re-send filtered inputs to the pod.
                             correlation_key = tag.get_meta_value(
                                 _TAG_NODE_INPUT_REF, None
                             )
