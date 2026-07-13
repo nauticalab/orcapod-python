@@ -52,7 +52,10 @@ class InMemoryHashCacher:
                 f"min_cache_size_bytes must be None or a non-negative integer, "
                 f"got {min_cache_size_bytes!r}"
             )
-        self._cache: dict[FileHashKey, ContentHash] = {}
+        # Nested dict: (path, size) → {mtime_ns: ContentHash}.
+        # Separating the mtime_ns level from (path, size) makes both lookup
+        # modes O(1)/O(k) instead of O(n) over all cached entries.
+        self._cache: dict[tuple, dict[int, ContentHash]] = {}
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
         self._match_mtime = match_mtime
@@ -71,16 +74,16 @@ class InMemoryHashCacher:
         Returns:
             Cached ``ContentHash``, or ``None`` if not found.
         """
+        inner = self._cache.get((key.path, key.size))
+        if inner is None:
+            return None
         if self._match_mtime:
-            return self._cache.get(key)
-        best_key: FileHashKey | None = None
-        best_value: ContentHash | None = None
-        for cached_key, value in self._cache.items():
-            if cached_key.path == key.path and cached_key.size == key.size:
-                if best_key is None or cached_key.mtime_ns > best_key.mtime_ns:
-                    best_key = cached_key
-                    best_value = value
-        return best_value
+            return inner.get(key.mtime_ns)
+        # match_mtime=False: return the hash from the entry with the
+        # highest mtime_ns.  max() over the inner dict's keys is O(k)
+        # where k is the number of distinct mtimes for this (path, size)
+        # pair — almost always 1 in practice.
+        return inner[max(inner)]
 
     def put(self, key: FileHashKey, value: ContentHash) -> None:
         """Store ``value`` under ``key``.
@@ -96,7 +99,7 @@ class InMemoryHashCacher:
             return
         if self._min_cache_size_bytes is not None and self._min_cache_size_bytes > 0 and key.size < self._min_cache_size_bytes:
             return
-        self._cache[key] = value
+        self._cache.setdefault((key.path, key.size), {})[key.mtime_ns] = value
 
     def clear(self) -> None:
         """Remove all entries from the cache."""
