@@ -234,6 +234,7 @@ def enable_file_hash_caching(
     conninfo: str | None = None,
     read_only: bool = False,
     min_cache_size_bytes: int | None = None,
+    match_mtime: bool = True,
 ) -> None:
     """Enable file hash caching on the default Orcapod context.
 
@@ -277,6 +278,15 @@ def enable_file_hash_caching(
         min_cache_size_bytes: When set, files smaller than this byte count
             are not inserted into the cache. ``None`` and ``0`` disable the
             threshold. Defaults to ``None``.
+        match_mtime: When ``True`` (default), cache lookups require an exact
+            match on ``path``, ``mtime_ns``, and ``size``. When ``False``,
+            only ``path`` and ``size`` are used for matching — an mtime
+            change alone will not cause a cache miss. Useful for environments
+            where file timestamps
+            are unreliable (e.g. network filesystems or build tools that
+            preserve content but reset mtimes). Note that with
+            ``match_mtime=False``, a file whose content changes while its
+            size stays the same will produce a stale cache hit.
 
     Raises:
         ValueError: If both ``conninfo`` and ``db_path`` are provided.
@@ -327,16 +337,16 @@ def enable_file_hash_caching(
             conninfo,
             read_only=read_only,
             min_cache_size_bytes=min_cache_size_bytes,
+            match_mtime=match_mtime,
         )
     else:
-        # SqliteHashCacher import was previously at the top of the function body;
-        # it now lives inside this branch only.
         from orcapod.hashing.hash_cachers import SqliteHashCacher
 
         cacher = SqliteHashCacher(
             db_path,
             read_only=read_only,
             min_cache_size_bytes=min_cache_size_bytes,
+            match_mtime=match_mtime,
         )
 
     cached_file_hasher = CachedFileHasher(

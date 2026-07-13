@@ -10,13 +10,13 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from orcapod.hashing.file_hashers import FileHashKey
+from orcapod.types import ContentHash
+
 # Current SQLite schema version.  Stored in PRAGMA user_version.
 # V0 (default) = legacy schema without the cached_at column.
 # V1            = current schema: added cached_at column.
 _SQLITE_SCHEMA_VERSION = 1
-
-from orcapod.hashing.file_hashers import FileHashKey
-from orcapod.types import ContentHash
 
 
 class InMemoryHashCacher:
@@ -32,6 +32,12 @@ class InMemoryHashCacher:
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
             Negative values raise ``ValueError``. Defaults to ``None``.
+        match_mtime: When ``True`` (default), cache hits require
+            ``path``, ``mtime_ns``, and ``size`` to all match. When
+            ``False``, only ``path`` and ``size`` are compared; among
+            multiple matching entries the one with the highest ``mtime_ns``
+            is returned. The write path is unaffected — ``mtime_ns`` is
+            always stored.
     """
 
     def __init__(
@@ -39,18 +45,28 @@ class InMemoryHashCacher:
         *,
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
+        match_mtime: bool = True,
     ) -> None:
         if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
             raise ValueError(
                 f"min_cache_size_bytes must be None or a non-negative integer, "
                 f"got {min_cache_size_bytes!r}"
             )
-        self._cache: dict[FileHashKey, ContentHash] = {}
+        # Nested dict: (path, size) → {mtime_ns: ContentHash}.
+        # Separating the mtime_ns level from (path, size) makes both lookup
+        # modes O(1)/O(k) instead of O(n) over all cached entries.
+        self._cache: dict[tuple, dict[int, ContentHash]] = {}
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
+        self._match_mtime = match_mtime
 
     def get(self, key: FileHashKey) -> ContentHash | None:
         """Return the cached ``ContentHash`` for ``key``, or ``None`` on miss.
+
+        When ``match_mtime=True`` (default), all three key fields must match.
+        When ``match_mtime=False``, only ``path`` and ``size`` are compared;
+        among all matching entries the one with the highest ``mtime_ns`` is
+        returned.
 
         Args:
             key: File hash cache key.
@@ -58,7 +74,16 @@ class InMemoryHashCacher:
         Returns:
             Cached ``ContentHash``, or ``None`` if not found.
         """
-        return self._cache.get(key)
+        inner = self._cache.get((key.path, key.size))
+        if inner is None:
+            return None
+        if self._match_mtime:
+            return inner.get(key.mtime_ns)
+        # match_mtime=False: return the hash from the entry with the
+        # highest mtime_ns.  max() over the inner dict's keys is O(k)
+        # where k is the number of distinct mtimes for this (path, size)
+        # pair — almost always 1 in practice.
+        return inner[max(inner)]
 
     def put(self, key: FileHashKey, value: ContentHash) -> None:
         """Store ``value`` under ``key``.
@@ -74,7 +99,7 @@ class InMemoryHashCacher:
             return
         if self._min_cache_size_bytes is not None and self._min_cache_size_bytes > 0 and key.size < self._min_cache_size_bytes:
             return
-        self._cache[key] = value
+        self._cache.setdefault((key.path, key.size), {})[key.mtime_ns] = value
 
     def clear(self) -> None:
         """Remove all entries from the cache."""
@@ -84,7 +109,8 @@ class InMemoryHashCacher:
         return (
             f"InMemoryHashCacher("
             f"read_only={self._read_only!r}, "
-            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r}, "
+            f"match_mtime={self._match_mtime!r})"
         )
 
 
@@ -108,6 +134,12 @@ class SqliteHashCacher:
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
             Negative values raise ``ValueError``. Defaults to ``None``.
+        match_mtime: When ``True`` (default), cache hits require
+            ``path``, ``mtime_ns``, and ``size`` to all match. When
+            ``False``, only ``path`` and ``size`` are compared; among
+            multiple matching entries the one with the highest ``mtime_ns``
+            is returned. The write path is unaffected — ``mtime_ns`` is
+            always stored.
 
     Note:
         Heavy multi-writer scenarios are a known SQLite limitation. A Turso
@@ -122,6 +154,7 @@ class SqliteHashCacher:
         *,
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
+        match_mtime: bool = True,
     ) -> None:
         if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
             raise ValueError(
@@ -135,6 +168,7 @@ class SqliteHashCacher:
         )
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
+        self._match_mtime = match_mtime
         self._local = threading.local()
         self._ensure_schema()
 
@@ -171,6 +205,16 @@ class SqliteHashCacher:
                     cached_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                     PRIMARY KEY (path, mtime_ns, size)
                 ) WITHOUT ROWID
+                """
+            )
+
+            # Supporting index for match_mtime=False lookups: WHERE path=? AND size=?
+            # ORDER BY mtime_ns DESC.  The PK (path, mtime_ns, size) cannot serve this
+            # efficiently because size is not a leftmost prefix.
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_hash_cache_path_size_mtime
+                ON file_hash_cache (path, size, mtime_ns DESC)
                 """
             )
 
@@ -214,6 +258,11 @@ class SqliteHashCacher:
     def get(self, key: FileHashKey) -> ContentHash | None:
         """Return the cached ``ContentHash`` for ``key``, or ``None`` on miss.
 
+        When ``match_mtime=True`` (default), the query filters on
+        ``path``, ``mtime_ns``, and ``size``. When ``match_mtime=False``,
+        only ``path`` and ``size`` are filtered and results are ordered
+        by ``mtime_ns DESC`` so the most recent entry is returned.
+
         Args:
             key: File hash cache key.
 
@@ -221,10 +270,17 @@ class SqliteHashCacher:
             Cached ``ContentHash``, or ``None`` if not found.
         """
         conn = self._connection()
-        cursor = conn.execute(
-            "SELECT hash FROM file_hash_cache WHERE path=? AND mtime_ns=? AND size=?",
-            (str(key.path), key.mtime_ns, key.size),
-        )
+        if self._match_mtime:
+            cursor = conn.execute(
+                "SELECT hash FROM file_hash_cache WHERE path=? AND mtime_ns=? AND size=?",
+                (str(key.path), key.mtime_ns, key.size),
+            )
+        else:
+            cursor = conn.execute(
+                "SELECT hash FROM file_hash_cache "
+                "WHERE path=? AND size=? ORDER BY mtime_ns DESC LIMIT 1",
+                (str(key.path), key.size),
+            )
         row = cursor.fetchone()
         if row is None:
             return None
@@ -275,7 +331,8 @@ class SqliteHashCacher:
             f"SqliteHashCacher("
             f"db_path={str(self.db_path)!r}, "
             f"read_only={self._read_only!r}, "
-            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r}, "
+            f"match_mtime={self._match_mtime!r})"
         )
 
     def __enter__(self) -> "SqliteHashCacher":
