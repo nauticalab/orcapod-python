@@ -10,13 +10,13 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from orcapod.hashing.file_hashers import FileHashKey
+from orcapod.types import ContentHash
+
 # Current SQLite schema version.  Stored in PRAGMA user_version.
 # V0 (default) = legacy schema without the cached_at column.
 # V1            = current schema: added cached_at column.
 _SQLITE_SCHEMA_VERSION = 1
-
-from orcapod.hashing.file_hashers import FileHashKey
-from orcapod.types import ContentHash
 
 
 class InMemoryHashCacher:
@@ -131,6 +131,12 @@ class SqliteHashCacher:
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
             Negative values raise ``ValueError``. Defaults to ``None``.
+        match_mtime: When ``True`` (default), cache hits require
+            ``path``, ``mtime_ns``, and ``size`` to all match. When
+            ``False``, only ``path`` and ``size`` are compared; among
+            multiple matching entries the one with the highest ``mtime_ns``
+            is returned. The write path is unaffected — ``mtime_ns`` is
+            always stored.
 
     Note:
         Heavy multi-writer scenarios are a known SQLite limitation. A Turso
@@ -145,6 +151,7 @@ class SqliteHashCacher:
         *,
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
+        match_mtime: bool = True,
     ) -> None:
         if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
             raise ValueError(
@@ -158,6 +165,7 @@ class SqliteHashCacher:
         )
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
+        self._match_mtime = match_mtime
         self._local = threading.local()
         self._ensure_schema()
 
@@ -237,6 +245,11 @@ class SqliteHashCacher:
     def get(self, key: FileHashKey) -> ContentHash | None:
         """Return the cached ``ContentHash`` for ``key``, or ``None`` on miss.
 
+        When ``match_mtime=True`` (default), the query filters on
+        ``path``, ``mtime_ns``, and ``size``. When ``match_mtime=False``,
+        only ``path`` and ``size`` are filtered and results are ordered
+        by ``mtime_ns DESC`` so the most recent entry is returned.
+
         Args:
             key: File hash cache key.
 
@@ -244,10 +257,17 @@ class SqliteHashCacher:
             Cached ``ContentHash``, or ``None`` if not found.
         """
         conn = self._connection()
-        cursor = conn.execute(
-            "SELECT hash FROM file_hash_cache WHERE path=? AND mtime_ns=? AND size=?",
-            (str(key.path), key.mtime_ns, key.size),
-        )
+        if self._match_mtime:
+            cursor = conn.execute(
+                "SELECT hash FROM file_hash_cache WHERE path=? AND mtime_ns=? AND size=?",
+                (str(key.path), key.mtime_ns, key.size),
+            )
+        else:
+            cursor = conn.execute(
+                "SELECT hash FROM file_hash_cache "
+                "WHERE path=? AND size=? ORDER BY mtime_ns DESC LIMIT 1",
+                (str(key.path), key.size),
+            )
         row = cursor.fetchone()
         if row is None:
             return None
@@ -298,7 +318,8 @@ class SqliteHashCacher:
             f"SqliteHashCacher("
             f"db_path={str(self.db_path)!r}, "
             f"read_only={self._read_only!r}, "
-            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r}, "
+            f"match_mtime={self._match_mtime!r})"
         )
 
     def __enter__(self) -> "SqliteHashCacher":
