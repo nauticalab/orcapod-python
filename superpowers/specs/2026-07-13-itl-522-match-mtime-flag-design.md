@@ -246,9 +246,24 @@ Add a new section **"Ignoring mtime in cache lookups"** after the existing
 ### Ignoring mtime in cache lookups
 
 By default, a cache hit requires **path, mtime_ns, and size** to all match the stored
-entry. In environments where mtime is churned by benign operations — rsync,
-restore-from-backup, container mount remounts, `touch` in CI — these changes cause
-spurious misses and unnecessary re-hashing even when the file content has not changed.
+entry. In several common deployment scenarios, mtime is unreliable — it changes even
+when file content has not — causing spurious cache misses and unnecessary re-hashing:
+
+- **rsync / file transfer tools** — rsync and similar tools do not preserve mtime by
+  default. Even with `--times`, sub-second precision is often lost on destination
+  filesystems, producing a different `mtime_ns` for otherwise identical files.
+- **Restore from backup** — backup and restore pipelines (tar, restic, Borg, cloud
+  storage sync) frequently reset mtime to the restore timestamp rather than the
+  original file timestamp.
+- **Container bind mounts and volume remounts** — remounting a volume or restarting a
+  container can reset or truncate mtime precision depending on the host filesystem and
+  container runtime (Docker, Podman, Kubernetes).
+- **CI `touch` / build system side-effects** — build scripts, test harnesses, and CI
+  pipelines sometimes call `touch` on input files to force rebuilds, or copy files in
+  ways that update mtime without changing content.
+- **Network filesystems (NFS, CIFS/SMB)** — clock skew between the client and server,
+  or coarse mtime granularity on older NFS versions, can produce stale or shifted
+  timestamps that differ from the values recorded in the cache.
 
 Set `match_mtime=False` to drop mtime from the lookup criterion. A cache hit then
 requires only **path and size** to match:
