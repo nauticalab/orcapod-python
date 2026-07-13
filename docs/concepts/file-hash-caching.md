@@ -109,6 +109,55 @@ op.enable_file_hash_caching(
 )
 ```
 
+## Ignoring mtime in cache lookups
+
+By default, a cache hit requires **path, mtime_ns, and size** to all match the stored
+entry. In several common deployment scenarios, mtime is unreliable — it changes even
+when file content has not — causing spurious cache misses and unnecessary re-hashing:
+
+- **rsync / file transfer tools** — rsync and similar tools do not preserve mtime by
+  default. Even with `--times`, sub-second precision is often lost on destination
+  filesystems, producing a different `mtime_ns` for otherwise identical files.
+- **Restore from backup** — backup and restore pipelines (tar, restic, Borg, cloud
+  storage sync) frequently reset mtime to the restore timestamp rather than the
+  original file timestamp.
+- **Container bind mounts and volume remounts** — remounting a volume or restarting a
+  container can reset or truncate mtime precision depending on the host filesystem and
+  container runtime (Docker, Podman, Kubernetes).
+- **CI `touch` / build system side-effects** — build scripts, test harnesses, and CI
+  pipelines sometimes call `touch` on input files to force rebuilds, or copy files in
+  ways that update mtime without changing content.
+- **Network filesystems (NFS, CIFS/SMB)** — clock skew between the client and server,
+  or coarse mtime granularity on older NFS versions, can produce stale or shifted
+  timestamps that differ from the values recorded in the cache.
+
+Set `match_mtime=False` to drop mtime from the lookup criterion. A cache hit then
+requires only **path and size** to match:
+
+```python
+import orcapod as op
+
+op.enable_file_hash_caching(match_mtime=False)
+```
+
+When multiple cache entries share the same path and size (recorded at different
+mtimes), Orcapod returns the hash from the entry with the most recent `mtime_ns`.
+
+**The write path is unchanged.** mtime is always recorded when a new entry is
+inserted. Switching `match_mtime=False` on a cache that was already populated under
+the default `match_mtime=True` still produces hits — no cache rebuild is needed.
+
+### Known trade-off
+
+With `match_mtime=False`, a file modification that preserves the file's byte count
+will **not** be detected by the cache. The stored hash from the previous version will
+be returned silently. This is rare in practice (most writes change file size), but
+you should be aware of the trade-off before enabling this mode.
+
+Use `match_mtime=False` only in environments where mtime changes are known to be
+unreliable. For most local-disk or NFS deployments the default (`match_mtime=True`)
+is the right choice.
+
 ## Directory hashing (op.Directory)
 
 When Orcapod hashes an `op.Directory`, it traverses the directory tree and
