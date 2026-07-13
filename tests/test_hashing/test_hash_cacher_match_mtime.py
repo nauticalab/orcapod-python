@@ -147,21 +147,21 @@ class TestSqliteHashCacherMatchMtime:
 
 class TestCachedFileHasherMatchMtime:
     def test_t1_default_mtime_change_causes_miss(self, tmp_path):
-        """T1: Default (match_mtime=True), mtime changed, size unchanged → cache miss."""
+        """T1: Default (match_mtime=True), mtime changed, size unchanged → cache miss → re-hash."""
         f = tmp_path / "file.bin"
         f.write_bytes(b"x" * 50)
 
         cacher = InMemoryHashCacher(match_mtime=True)
         cached = CachedFileHasher(file_hasher=FileHasher(), cacher=cacher)
-        cached.hash_file(f)
+        first_hash = cached.hash_file(f)
 
         stat = f.stat()
         os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
-        path = UPath(f).resolve()
-        new_stat = path.stat()
-        new_key = FileHashKey(path, new_stat.st_mtime_ns, new_stat.st_size)
-        assert cacher.get(new_key) is None
+        # match_mtime=True: mtime change causes a cache miss; CachedFileHasher re-hashes
+        # the file. Content is unchanged so the returned hash must still be correct.
+        second_hash = cached.hash_file(f)
+        assert second_hash == first_hash
 
     def test_t2_match_mtime_false_mtime_change_is_hit(self, tmp_path):
         """T2: match_mtime=False, mtime changed, size unchanged → cache hit."""

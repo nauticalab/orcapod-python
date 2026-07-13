@@ -339,8 +339,6 @@ def enable_file_hash_caching(
             match_mtime=match_mtime,
         )
     else:
-        # SqliteHashCacher import was previously at the top of the function body;
-        # it now lives inside this branch only.
         from orcapod.hashing.hash_cachers import SqliteHashCacher
 
         cacher = SqliteHashCacher(
