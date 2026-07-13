@@ -6,6 +6,7 @@ plus CachedFileHasher integration with real files.
 from __future__ import annotations
 
 import os
+from unittest.mock import patch
 
 from upath import UPath
 
@@ -151,32 +152,45 @@ class TestCachedFileHasherMatchMtime:
         f = tmp_path / "file.bin"
         f.write_bytes(b"x" * 50)
 
+        inner = FileHasher()
         cacher = InMemoryHashCacher(match_mtime=True)
-        cached = CachedFileHasher(file_hasher=FileHasher(), cacher=cacher)
-        first_hash = cached.hash_file(f)
+        cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
 
-        stat = f.stat()
-        os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        with patch.object(inner, "hash_file", wraps=inner.hash_file) as spy:
+            first_hash = cached.hash_file(f)
+            assert spy.call_count == 1
 
-        # match_mtime=True: mtime change causes a cache miss; CachedFileHasher re-hashes
-        # the file. Content is unchanged so the returned hash must still be correct.
-        second_hash = cached.hash_file(f)
-        assert second_hash == first_hash
+            stat = f.stat()
+            os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+            # match_mtime=True: mtime change causes a cache miss; CachedFileHasher
+            # re-hashes the file. Content is unchanged so the hash value is equal,
+            # but spy.call_count == 2 proves the inner hasher was called again.
+            second_hash = cached.hash_file(f)
+            assert second_hash == first_hash
+            assert spy.call_count == 2
 
     def test_t2_match_mtime_false_mtime_change_is_hit(self, tmp_path):
         """T2: match_mtime=False, mtime changed, size unchanged → cache hit."""
         f = tmp_path / "file.bin"
         f.write_bytes(b"x" * 50)
 
+        inner = FileHasher()
         cacher = InMemoryHashCacher(match_mtime=False)
-        cached = CachedFileHasher(file_hasher=FileHasher(), cacher=cacher)
-        first_hash = cached.hash_file(f)
+        cached = CachedFileHasher(file_hasher=inner, cacher=cacher)
 
-        stat = f.stat()
-        os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        with patch.object(inner, "hash_file", wraps=inner.hash_file) as spy:
+            first_hash = cached.hash_file(f)
+            assert spy.call_count == 1
 
-        second_hash = cached.hash_file(f)
-        assert second_hash == first_hash
+            stat = f.stat()
+            os.utime(f, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+            # match_mtime=False: mtime change is ignored; CachedFileHasher returns the
+            # cached hash without calling the inner hasher again.
+            second_hash = cached.hash_file(f)
+            assert second_hash == first_hash
+            assert spy.call_count == 1  # inner hasher NOT called again — confirms the cache hit
 
     def test_t3_match_mtime_false_size_change_is_miss(self, tmp_path):
         """T3: match_mtime=False, content and size changed → cache miss."""

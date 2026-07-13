@@ -205,6 +205,16 @@ class SqliteHashCacher:
                 """
             )
 
+            # Supporting index for match_mtime=False lookups: WHERE path=? AND size=?
+            # ORDER BY mtime_ns DESC.  The PK (path, mtime_ns, size) cannot serve this
+            # efficiently because size is not a leftmost prefix.
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_hash_cache_path_size_mtime
+                ON file_hash_cache (path, size, mtime_ns DESC)
+                """
+            )
+
             version = conn.execute("PRAGMA user_version").fetchone()[0]
 
             # Always validate the cached_at column is present, regardless of

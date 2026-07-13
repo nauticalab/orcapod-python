@@ -136,6 +136,15 @@ class PostgresHashCacher:
                 )
                 """
             )
+            # Supporting index for match_mtime=False lookups: WHERE path=%s AND size=%s
+            # ORDER BY mtime_ns DESC.  The PK (path, mtime_ns, size) cannot serve this
+            # efficiently because size is not a leftmost prefix.
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_file_hash_cache_path_size_mtime
+                ON file_hash_cache (path, size, mtime_ns DESC)
+                """
+            )
             # Schema-version metadata table (idempotent).
             conn.execute(
                 """
