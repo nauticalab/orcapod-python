@@ -32,6 +32,12 @@ class InMemoryHashCacher:
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
             Negative values raise ``ValueError``. Defaults to ``None``.
+        match_mtime: When ``True`` (default), cache hits require
+            ``path``, ``mtime_ns``, and ``size`` to all match. When
+            ``False``, only ``path`` and ``size`` are compared; among
+            multiple matching entries the one with the highest ``mtime_ns``
+            is returned. The write path is unaffected — ``mtime_ns`` is
+            always stored.
     """
 
     def __init__(
@@ -39,6 +45,7 @@ class InMemoryHashCacher:
         *,
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
+        match_mtime: bool = True,
     ) -> None:
         if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
             raise ValueError(
@@ -48,9 +55,15 @@ class InMemoryHashCacher:
         self._cache: dict[FileHashKey, ContentHash] = {}
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
+        self._match_mtime = match_mtime
 
     def get(self, key: FileHashKey) -> ContentHash | None:
         """Return the cached ``ContentHash`` for ``key``, or ``None`` on miss.
+
+        When ``match_mtime=True`` (default), all three key fields must match.
+        When ``match_mtime=False``, only ``path`` and ``size`` are compared;
+        among all matching entries the one with the highest ``mtime_ns`` is
+        returned.
 
         Args:
             key: File hash cache key.
@@ -58,7 +71,16 @@ class InMemoryHashCacher:
         Returns:
             Cached ``ContentHash``, or ``None`` if not found.
         """
-        return self._cache.get(key)
+        if self._match_mtime:
+            return self._cache.get(key)
+        best_key: FileHashKey | None = None
+        best_value: ContentHash | None = None
+        for cached_key, value in self._cache.items():
+            if cached_key.path == key.path and cached_key.size == key.size:
+                if best_key is None or cached_key.mtime_ns > best_key.mtime_ns:
+                    best_key = cached_key
+                    best_value = value
+        return best_value
 
     def put(self, key: FileHashKey, value: ContentHash) -> None:
         """Store ``value`` under ``key``.
@@ -84,7 +106,8 @@ class InMemoryHashCacher:
         return (
             f"InMemoryHashCacher("
             f"read_only={self._read_only!r}, "
-            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r}, "
+            f"match_mtime={self._match_mtime!r})"
         )
 
 
