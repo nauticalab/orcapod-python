@@ -306,6 +306,23 @@ class TestEnableFileHashCaching:
         assert isinstance(cacher, SqliteHashCacher)
         assert cacher._min_cache_size_bytes == 1024
 
+    def test_match_mtime_kwarg_passes_through_to_cacher(
+        self, restore_default_file_handler, tmp_path
+    ):
+        from orcapod.contexts import enable_file_hash_caching, get_default_context
+        from orcapod.extension_types.file_type import File
+        from orcapod.hashing.hash_cachers import SqliteHashCacher
+
+        enable_file_hash_caching(db_path=tmp_path / "cache.db", match_mtime=False)
+
+        context = get_default_context()
+        registry = context.semantic_hasher.type_handler_registry
+        handler = registry.get_handler_for_type(File)
+        cacher = handler.file_hasher.cacher
+
+        assert isinstance(cacher, SqliteHashCacher)
+        assert cacher._match_mtime is False
+
 
 class TestEnableFileHashCachingConninfo:
     def test_conninfo_and_db_path_raises(self, restore_default_file_handler, tmp_path):
