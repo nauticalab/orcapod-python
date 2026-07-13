@@ -77,6 +77,12 @@ class PostgresHashCacher:
             ``key.size`` is strictly below this threshold are not inserted.
             ``None`` and ``0`` disable the threshold (default behaviour).
             Negative values raise ``ValueError``. Defaults to ``None``.
+        match_mtime: When ``True`` (default), cache hits require
+            ``path``, ``mtime_ns``, and ``size`` to all match. When
+            ``False``, only ``path`` and ``size`` are compared; among
+            multiple matching entries the one with the highest ``mtime_ns``
+            is returned. The write path is unaffected — ``mtime_ns`` is
+            always stored.
 
     Raises:
         ValueError: If ``min_cache_size_bytes`` is negative, or if the
@@ -90,6 +96,7 @@ class PostgresHashCacher:
         *,
         read_only: bool = False,
         min_cache_size_bytes: int | None = None,
+        match_mtime: bool = True,
     ) -> None:
         if min_cache_size_bytes is not None and min_cache_size_bytes < 0:
             raise ValueError(
@@ -99,6 +106,7 @@ class PostgresHashCacher:
         self._conninfo = conninfo
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
+        self._match_mtime = match_mtime
         self._local = threading.local()
         self._ensure_schema()
 
@@ -185,6 +193,11 @@ class PostgresHashCacher:
     def get(self, key: FileHashKey) -> ContentHash | None:
         """Return the cached ``ContentHash`` for ``key``, or ``None`` on miss.
 
+        When ``match_mtime=True`` (default), the query filters on
+        ``path``, ``mtime_ns``, and ``size``. When ``match_mtime=False``,
+        only ``path`` and ``size`` are filtered and results are ordered
+        by ``mtime_ns DESC`` so the most recent entry is returned.
+
         Args:
             key: File hash cache key.
 
@@ -192,11 +205,18 @@ class PostgresHashCacher:
             Cached ``ContentHash``, or ``None`` if not found.
         """
         conn = self._connection()
-        row = conn.execute(
-            "SELECT hash FROM file_hash_cache "
-            "WHERE path=%s AND mtime_ns=%s AND size=%s",
-            (str(key.path), key.mtime_ns, key.size),
-        ).fetchone()
+        if self._match_mtime:
+            row = conn.execute(
+                "SELECT hash FROM file_hash_cache "
+                "WHERE path=%s AND mtime_ns=%s AND size=%s",
+                (str(key.path), key.mtime_ns, key.size),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT hash FROM file_hash_cache "
+                "WHERE path=%s AND size=%s ORDER BY mtime_ns DESC LIMIT 1",
+                (str(key.path), key.size),
+            ).fetchone()
         if row is None:
             return None
         blob: bytes = bytes(row[0])
@@ -259,5 +279,6 @@ class PostgresHashCacher:
             f"PostgresHashCacher("
             f"conninfo={_redact_conninfo(self._conninfo)!r}, "
             f"read_only={self._read_only!r}, "
-            f"min_cache_size_bytes={self._min_cache_size_bytes!r})"
+            f"min_cache_size_bytes={self._min_cache_size_bytes!r}, "
+            f"match_mtime={self._match_mtime!r})"
         )

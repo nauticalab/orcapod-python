@@ -435,6 +435,66 @@ class TestPostgresSchemaVersion:
             conn.execute("DROP TABLE IF EXISTS file_hash_cache CASCADE")
 
 
+# ---------------------------------------------------------------------------
+# match_mtime flag
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+class TestPostgresHashCacherMatchMtime:
+    def test_default_true_mtime_change_causes_miss(self, pg_conninfo):
+        """Default (match_mtime=True): different mtime → cache miss."""
+        cacher = PostgresHashCacher(pg_conninfo)
+        cacher.clear()
+        cacher.put(make_key(mtime_ns=1000, size=100), make_hash(b"\xaa" * 32))
+        assert cacher.get(make_key(mtime_ns=2000, size=100)) is None
+        cacher.close()
+
+    def test_false_mtime_change_is_hit(self, pg_conninfo):
+        """match_mtime=False: different mtime, same path+size → cache hit."""
+        cacher = PostgresHashCacher(pg_conninfo, match_mtime=False)
+        cacher.clear()
+        value = make_hash(b"\xbb" * 32)
+        cacher.put(make_key(mtime_ns=1000, size=100), value)
+        result = cacher.get(make_key(mtime_ns=2000, size=100))
+        assert result is not None
+        assert result.digest == value.digest
+        cacher.close()
+
+    def test_false_size_change_is_miss(self, pg_conninfo):
+        """match_mtime=False: different size → cache miss."""
+        cacher = PostgresHashCacher(pg_conninfo, match_mtime=False)
+        cacher.clear()
+        cacher.put(make_key(mtime_ns=1000, size=100), make_hash())
+        assert cacher.get(make_key(mtime_ns=2000, size=200)) is None
+        cacher.close()
+
+    def test_false_returns_latest_mtime_entry(self, pg_conninfo):
+        """match_mtime=False: multiple entries for same path+size → returns highest mtime_ns."""
+        cacher = PostgresHashCacher(pg_conninfo, match_mtime=False)
+        cacher.clear()
+        hash_old = make_hash(b"\xaa" * 32)
+        hash_new = make_hash(b"\xbb" * 32)
+        cacher.put(make_key(mtime_ns=1000, size=100), hash_old)
+        cacher.put(make_key(mtime_ns=2000, size=100), hash_new)
+        result = cacher.get(make_key(mtime_ns=3000, size=100))
+        assert result is not None
+        assert result.digest == hash_new.digest
+        cacher.close()
+
+    def test_repr_shows_match_mtime_true(self, pg_conninfo):
+        """__repr__ includes match_mtime=True by default."""
+        cacher = PostgresHashCacher(pg_conninfo)
+        assert "match_mtime=True" in repr(cacher)
+        cacher.close()
+
+    def test_repr_shows_match_mtime_false(self, pg_conninfo):
+        """__repr__ includes match_mtime=False."""
+        cacher = PostgresHashCacher(pg_conninfo, match_mtime=False)
+        assert "match_mtime=False" in repr(cacher)
+        cacher.close()
+
+
 class TestPostgresReprRedaction:
     def test_repr_redacts_url_password(self):
         """__repr__ replaces the password in a URL-form conninfo with ***."""
