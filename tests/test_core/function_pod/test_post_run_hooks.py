@@ -351,3 +351,44 @@ class TestAsyncExecuteHooks:
         assert len(results) == 3
         assert len(payloads) == 3
         assert all(p.stats.status == InvocationStatus.COMPUTED for p in payloads)
+
+
+# ---------------------------------------------------------------------------
+# 5. Cache hit status
+# ---------------------------------------------------------------------------
+
+
+class TestCacheHitStatus:
+    def test_second_call_fires_hook_with_hit_status(self):
+        inner = _make_double_pod()
+        db = InMemoryArrowDatabase()
+        pod = CachedFunctionPod(function_pod=inner, result_database=db)
+
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream1 = pod.process(_make_stream(n=1))
+        list(stream1.iter_data())
+
+        stream2 = pod.process(_make_stream(n=1))
+        list(stream2.iter_data())
+
+        assert len(payloads) == 2
+        assert payloads[0].stats.status == InvocationStatus.COMPUTED
+        assert payloads[1].stats.status == InvocationStatus.HIT
+
+    def test_cache_hit_payload_has_record_id(self):
+        inner = _make_double_pod()
+        db = InMemoryArrowDatabase()
+        pod = CachedFunctionPod(function_pod=inner, result_database=db)
+
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream1 = pod.process(_make_stream(n=1))
+        list(stream1.iter_data())
+        stream2 = pod.process(_make_stream(n=1))
+        list(stream2.iter_data())
+
+        assert payloads[1].record_id_hash is not None
+        assert payloads[1].output is not None

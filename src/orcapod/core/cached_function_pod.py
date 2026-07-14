@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import WrappedFunctionPod
 from orcapod.core.result_cache import ResultCache
+from orcapod.hooks import (
+    InvocationStatus,
+    PodContext,
+    PostRunPayload,
+    RunStats,
+)
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataProtocol,
@@ -16,6 +23,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
+from orcapod.types import ColumnConfig
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -147,6 +155,136 @@ class CachedFunctionPod(WrappedFunctionPod):
             self._cache.store(data, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
+
+    def _invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Override to detect cache hit status from ``RESULT_COMPUTED_FLAG`` meta.
+
+        Calls ``self.process_data()`` (which owns all cache lookup and store
+        logic), then reads ``RESULT_COMPUTED_FLAG`` from the output data meta to
+        determine ``InvocationStatus.HIT`` vs ``InvocationStatus.COMPUTED``.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        started_at = datetime.now(timezone.utc)
+        exc: Exception | None = None
+        out_tag = tag
+        output_data: DataProtocol | None = None
+        status = InvocationStatus.COMPUTED
+
+        try:
+            out_tag, output_data = self.process_data(tag, data, logger=logger)
+            if output_data is not None:
+                meta = output_data.as_dict(columns=ColumnConfig(meta=True))
+                if meta.get(self.RESULT_COMPUTED_FLAG) is False:
+                    status = InvocationStatus.HIT
+        except Exception as e:
+            exc = e
+            status = InvocationStatus.ERROR
+
+        finished_at = datetime.now(timezone.utc)
+
+        if self._post_run_hooks:
+            record_id = (
+                str(output_data.datagram_uuid) if output_data is not None else None
+            )
+            payload = PostRunPayload(
+                record_id_hash=record_id,
+                tag=tag,
+                input=data,
+                output=output_data,
+                stats=RunStats(
+                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
+                    status=status,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    error=exc,
+                ),
+                pod=PodContext(
+                    label=self.label,
+                    pod_hash=self.content_hash().to_string(),
+                ),
+            )
+            self._fire_post_run_hooks(payload)
+
+        if exc is not None:
+            raise exc
+        return out_tag, output_data
+
+    async def _async_invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Async counterpart of ``_invoke_with_hooks`` for ``CachedFunctionPod``.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        started_at = datetime.now(timezone.utc)
+        exc: Exception | None = None
+        out_tag = tag
+        output_data: DataProtocol | None = None
+        status = InvocationStatus.COMPUTED
+
+        try:
+            out_tag, output_data = await self.async_process_data(
+                tag, data, logger=logger
+            )
+            if output_data is not None:
+                meta = output_data.as_dict(columns=ColumnConfig(meta=True))
+                if meta.get(self.RESULT_COMPUTED_FLAG) is False:
+                    status = InvocationStatus.HIT
+        except Exception as e:
+            exc = e
+            status = InvocationStatus.ERROR
+
+        finished_at = datetime.now(timezone.utc)
+
+        if self._post_run_hooks:
+            record_id = (
+                str(output_data.datagram_uuid) if output_data is not None else None
+            )
+            payload = PostRunPayload(
+                record_id_hash=record_id,
+                tag=tag,
+                input=data,
+                output=output_data,
+                stats=RunStats(
+                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
+                    status=status,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    error=exc,
+                ),
+                pod=PodContext(
+                    label=self.label,
+                    pod_hash=self.content_hash().to_string(),
+                ),
+            )
+            self._fire_post_run_hooks(payload)
+
+        if exc is not None:
+            raise exc
+        return out_tag, output_data
 
     def get_all_cached_outputs(
         self, include_system_columns: bool = False
