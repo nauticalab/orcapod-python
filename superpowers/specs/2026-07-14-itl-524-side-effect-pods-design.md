@@ -113,8 +113,8 @@ core/
     └── SideEffectPod         (implements SideEffectPodProtocol)
 
 Convenience decorators (both wrap SideEffectPod with preset config):
-├── @sink_pod   — track_completion=True,  pass_on_success=True
-└── @tap_pod    — track_completion=False, pass_on_success=False
+├── @sink_pod   — track_completion=True,  drop_on_failure=True
+└── @tap_pod    — track_completion=False, drop_on_failure=False
 ```
 
 ### 2. Pod Configuration Axes and Output Contract
@@ -128,14 +128,14 @@ only convenience decorators that preset those axes.
   succeeded are skipped on re-run; failed inputs are re-attempted.
 - `False`: no completion tracking. The pod fires unconditionally on every pipeline run.
 
-**Axis B — Pass-through filtering** (`pass_on_success: bool = True`):
-- `True`: only rows where the delivery succeeded are emitted downstream. Failed rows
-  are dropped.
-- `False`: all rows are emitted downstream regardless of delivery outcome.
+**Axis B — Drop-on-failure control** (`drop_on_failure: bool = True`):
+- `True`: rows where delivery failed are dropped; only successfully-delivered rows flow
+  downstream.
+- `False`: all rows flow downstream regardless of delivery outcome.
 
 The four combinations and their canonical use cases:
 
-| `track_completion` | `pass_on_success` | Canonical use case |
+| `track_completion` | `drop_on_failure` | Canonical use case |
 |---|---|---|
 | `True` | `True` | Audit DB write, exactly-once delivery that gates downstream |
 | `True` | `False` | Deliver once; don't gate downstream on delivery success |
@@ -143,13 +143,14 @@ The four combinations and their canonical use cases:
 | `False` | `False` | Structured logging, metrics, trace everything |
 
 **Output contract: pass-through** (all configurations). `SideEffectPod` always returns
-a stream. When `pass_on_success=False`, all rows are emitted; when `pass_on_success=True`,
-only successfully-delivered rows appear downstream.
+a stream. When `drop_on_failure=True`, failed rows are dropped and only
+successfully-delivered rows appear downstream. When `drop_on_failure=False`, all rows
+flow through regardless of delivery outcome.
 
 **Convenience decorators:**
-`@sink_pod` presets `track_completion=True, pass_on_success=True` — the most common
+`@sink_pod` presets `track_completion=True, drop_on_failure=True` — the most common
 "deliver and gate" pattern.
-`@tap_pod` presets `track_completion=False, pass_on_success=False` — the most common
+`@tap_pod` presets `track_completion=False, drop_on_failure=False` — the most common
 "observe everything" pattern.
 Both decorators wrap the same underlying `SideEffectPod` class. All four combinations
 remain expressible via `SideEffectPodConfig` directly.
@@ -354,7 +355,7 @@ declared type is exactly `InvocationContext`.
 @dataclasses.dataclass(frozen=True)
 class SideEffectPodConfig:
     track_completion: bool = True
-    pass_on_success: bool = True
+    drop_on_failure: bool = True
     on_error: Literal["raise", "log"] = "raise"
     hash_config: InvocationHashConfig = field(default_factory=InvocationHashConfig)
 ```
@@ -366,16 +367,16 @@ that relationship is enforced at construction or with documentation.
 **`on_error` vocabulary** (consistent with ITL-523's `HookConfig`):
 - `"raise"` (default): exception propagates; the pipeline row is aborted.
 - `"log"`: exception logged at `WARNING` level; delivery outcome determines whether
-  the row passes downstream (see interaction with `pass_on_success` below).
+  the row passes downstream (see interaction with `drop_on_failure` below).
 
 No `"ignore"` option in v1.
 
-**Interaction between `on_error` and `pass_on_success`:**
+**Interaction between `on_error` and `drop_on_failure`:**
 
-| `on_error` | `pass_on_success` | Delivery fails → |
+| `on_error` | `drop_on_failure` | Delivery fails → |
 |---|---|---|
 | `"raise"` | either | Exception propagates; row aborted |
-| `"log"` | `True` | Exception logged; row **dropped** (only successes pass) |
+| `"log"` | `True` | Exception logged; failed row **dropped** |
 | `"log"` | `False` | Exception logged; row **emitted** downstream regardless |
 
 **Completion state on failure (when `track_completion=True`):**
@@ -391,23 +392,34 @@ vocabulary is deferred; see DESIGN_ISSUES.md F15 and ITL-527.
 
 ### 7. Ordering & DAG Placement
 
-Side-effect pods are **synchronous barriers** in the DAG:
+`SideEffectPod` is a per-data-packet operation — structurally identical to `FunctionPod`
+in its relationship to the DAG. It can appear anywhere in the pipeline (beginning, middle,
+or end), chains naturally with other pods, and follows the same concurrency model.
 
-1. Consume input row.
-2. Execute side effect (call user function with `(data, ctx)` or `(data,)` as applicable).
-3. On success: emit the same row as output. Record `status="success"` in invocation log.
-4. On error with `on_error="raise"`: propagate exception; do not emit output.
-5. On error with `on_error="log"`: log + record; emit input row as output anyway.
+**Row-by-row execution flow:**
 
-For the **async channel execution path**, `async_execute()` must process each input
-row, complete the side effect, and write to the output channel before returning.
-Concurrent per-row execution within a single side-effect pod is permitted when
-`PodConfig.max_concurrency > 1` and the pod is so configured — subject to the same
-concurrency model as `FunctionPod`.
+1. Receive `(tag, data)` from upstream.
+2. If `track_completion=True`: check invocation log — skip delivery for previously-succeeded inputs (emit without re-delivery); re-attempt for previously-failed inputs.
+3. Call user function (with `InvocationContext` injection if declared).
+4. On success: write `status="success"` to invocation log; emit row downstream.
+5. On error with `on_error="raise"`: propagate exception; row aborted.
+6. On error with `on_error="log"` + `drop_on_failure=True`: log + write `status="failed"`; drop row.
+7. On error with `on_error="log"` + `drop_on_failure=False`: log + write `status="failed"`; emit row downstream.
 
-**No fire-and-forget in v1.** All side effects complete (or fail) synchronously with
-respect to the pipeline's progress on that row. Downstream pods cannot begin processing
-a row until the side effect for that row has finished.
+**No fire-and-forget in v1.** Delivery completes (or fails) before the row is emitted
+or dropped. This applies to all configurations including `drop_on_failure=False`.
+`drop_on_failure=False` is the natural candidate for fire-and-forget in the future
+(since downstream is not gated on delivery outcome), but that optimisation is deferred
+to ITL-528. See also ITL-526 for retry policy.
+
+**Concurrency across rows:** `SideEffectPod` respects `max_concurrency` exactly as
+`FunctionPod` does — multiple rows can be processed concurrently when `max_concurrency > 1`.
+Invocation log writes are per-row and atomic; `track_completion=True` completion checks
+use the same row-level idempotency guarantees as `FunctionNode`.
+
+**No global barrier.** `SideEffectPod` does not wait for all rows to complete before
+emitting any. It processes and emits row-by-row (or in concurrent batches), consistent
+with the streaming model.
 
 ### 8. Observability — `_orcapod_side_effect_invocations` Table
 
