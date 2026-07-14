@@ -877,6 +877,7 @@ def function_pod(
     result_database: ArrowDatabaseProtocol | None = None,
     pod_cache_database: ArrowDatabaseProtocol | None = None,
     executor: DataFunctionExecutorProtocol | None = None,
+    post_run_hooks: Sequence[PostRunHook] | None = None,
     **kwargs,
 ) -> Callable[..., CallableWithPodProtocol]:
     """Decorator that attaches a ``FunctionPod`` as a ``pod`` attribute.
@@ -892,6 +893,9 @@ def function_pod(
             (wraps the pod in ``CachedFunctionPod``, which caches at the
             ``process_data`` level using input data content hash).
         executor: Optional executor for running the data function.
+        post_run_hooks: Optional list of post-run hooks to register on the
+            pod after construction. Each entry is either a plain callable
+            ``(PostRunPayload) -> None`` or a ``HookConfig``.
         **kwargs: Forwarded to ``PythonDataFunction``.
 
     Returns:
@@ -932,6 +936,10 @@ def function_pod(
                 function_pod=pod,
                 result_database=pod_cache_database,
             )
+
+        if post_run_hooks:
+            for hook in post_run_hooks:
+                pod.add_post_run_hook(hook)
 
         @wraps(func)
         def wrapper(*args, **kwargs):

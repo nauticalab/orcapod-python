@@ -37,6 +37,17 @@ from orcapod.extension_types.directory_type import Directory
 # Extension registration API (ITL-473)
 from .extensions import OrcapodExtension, register_extension
 
+# Post-run hook types (ITL-523)
+from .hooks import (
+    HookConfig,
+    InvocationStatus,
+    PodContext,
+    PostRunHook,
+    PostRunHookFn,
+    PostRunPayload,
+    RunStats,
+)
+
 __all__ = [
     "DEFAULT_CONFIG",
     "DisplayConfig",
@@ -63,6 +74,14 @@ __all__ = [
     # Extension registration API (ITL-473)
     "OrcapodExtension",
     "register_extension",
+    # Post-run hook types (ITL-523)
+    "HookConfig",
+    "InvocationStatus",
+    "PodContext",
+    "PostRunHook",
+    "PostRunHookFn",
+    "PostRunPayload",
+    "RunStats",
 ]
 
 

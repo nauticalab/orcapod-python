@@ -392,3 +392,46 @@ class TestCacheHitStatus:
 
         assert payloads[1].record_id_hash is not None
         assert payloads[1].output is not None
+
+
+# ---------------------------------------------------------------------------
+# 9. Decorator convenience
+# ---------------------------------------------------------------------------
+
+
+class TestDecoratorConvenience:
+    def test_decorator_post_run_hooks_fires_hook(self):
+        payloads: list[PostRunPayload] = []
+
+        @function_pod(output_keys="result", post_run_hooks=[payloads.append])
+        def compute(x: int) -> int:
+            return x * 3
+
+        stream = compute.pod.process(_make_stream(n=2))
+        list(stream.iter_data())
+
+        assert len(payloads) == 2
+        assert all(p.stats.status == InvocationStatus.COMPUTED for p in payloads)
+
+    def test_decorator_hookconfig_works(self):
+        payloads: list[PostRunPayload] = []
+
+        @function_pod(
+            output_keys="result",
+            post_run_hooks=[HookConfig(fn=payloads.append, on_error="log")],
+        )
+        def compute2(x: int) -> int:
+            return x + 1
+
+        stream = compute2.pod.process(_make_stream(n=1))
+        list(stream.iter_data())
+
+        assert len(payloads) == 1
+
+    def test_public_api_imports(self):
+        import orcapod
+        assert hasattr(orcapod, "PostRunPayload")
+        assert hasattr(orcapod, "HookConfig")
+        assert hasattr(orcapod, "InvocationStatus")
+        assert hasattr(orcapod, "RunStats")
+        assert hasattr(orcapod, "PodContext")
