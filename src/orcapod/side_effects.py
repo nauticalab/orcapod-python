@@ -247,17 +247,19 @@ class SideEffectPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table:
+        from orcapod.types import ColumnConfig as _ColumnConfig
         from orcapod.utils import arrow_utils
 
+        column_config = _ColumnConfig.handle_config(columns, all_info=all_info)
         tag_tables = []
         data_tables = []
         for tag, data in self.iter_data():
-            tag_tables.append(tag.as_table(columns={"system_tags": True}))
-            data_tables.append(data.as_table(columns={"source": True}))
+            tag_tables.append(tag.as_table(columns=column_config))
+            data_tables.append(data.as_table(columns=column_config))
         if not tag_tables:
             # Return an empty table with the correct schema
             tag_schema, data_schema = self.output_schema(
-                columns={"system_tags": True, "source": True}
+                columns=column_config
             )
             tc = self._pod.data_context.type_converter
             fields = {}
