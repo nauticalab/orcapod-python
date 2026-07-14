@@ -420,13 +420,17 @@ Schema:
 
 | Column | Arrow type | Notes |
 |---|---|---|
-| `full_input_packet_hash` | `large_string` | Primary lookup key (component 2) |
-| `invocation_hash` | `large_string` | Full serialized compound per `InvocationHashConfig` |
+| `full_input_packet_hash` | `large_string` | Primary lookup key — raw `ContentHash.to_string()` |
 | `pod_content_hash` | `large_string` | `pod.content_hash().to_string()` |
 | `pipeline_run_id` | `large_string` (nullable) | `None` for lazy pipelines |
 | `executed_at` | `timestamp(unit="us", tz="UTC")` | Wall-clock UTC time |
 | `status` | `large_string` | `"success"` / `"failed"` / `"skipped"` |
 | `error_message` | `large_string` (nullable) | Set when `status="failed"` |
+
+`InvocationHashConfig` is purely a user-facing concern with zero footprint in persistent
+storage. All columns store raw, stable values only. The `invocation_hash` compound string
+is derived from table path + `full_input_packet_hash` + `pipeline_run_id` and is never
+stored redundantly.
 
 `"skipped"` rows are written when `track_completion=True` and the input was previously
 succeeded — delivery is not re-attempted, but a log row is always written.
@@ -616,7 +620,7 @@ File: `tests/test_core/side_effect_pod/test_side_effect_pod.py`
 | T2 | `drop_on_failure=True` (default), all succeed | All rows emitted |
 | T3 | `InvocationContext` auto-injection | `ctx.invocation_hash` non-empty string; `ctx.format_id()` returns `"orcapod-{hash}"` |
 | T4 | No-`ctx` function | Pod executes without error; `InvocationContext` not constructed |
-| T5 | Invocation log written — DB-backed pipeline | Row at `<pipeline_hash>/side_effect_invocations`; `status="success"` |
+| T5 | Invocation log written — DB-backed pipeline | Row at `<pipeline_hash>/side_effect_invocations`; `status="success"`; no `invocation_hash` column |
 | T6 | `track_completion=True` — same inputs re-run | Second run: function called once total; `status="skipped"` row added; row still emitted |
 | T7 | `track_completion=False` — same inputs re-run | Both runs: function called; two `status="success"` log rows |
 | T8 | `on_error="raise"` — function raises | Exception propagates to caller; `status="failed"` in log |
