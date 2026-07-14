@@ -357,21 +357,54 @@ object) must not be intercepted. Relying on name alone would make the mechanism 
 and surprising. Type annotation detection is unambiguous — it fires if and only if the
 declared type is exactly `InvocationContext`.
 
-### 6. Failure Semantics — Author-Declared, Default Fail-Loud
+### 6. Failure Semantics
 
-**Decision:** Controlled by `SideEffectConfig.on_error`:
-- `"raise"` (default): exception propagates and the pipeline run fails. Consistent with
-  ITL-523's `HookConfig.on_error="raise"` default.
-- `"log"`: exception is logged at `WARNING` level and swallowed; the input row is
-  passed through to downstream pods. Correct for non-critical side effects (metrics
-  emission) where a network hiccup should not abort the pipeline.
+**Decision:** Each pod type has its own config class carrying `on_error`:
 
-No retries in v1. Retry logic (with backoff, max attempts) is deferred.
+```python
+@dataclasses.dataclass(frozen=True)
+class SinkPodConfig:
+    on_error: Literal["raise", "log"] = "raise"
+    hash_config: InvocationHashConfig = field(default_factory=InvocationHashConfig)
 
-When `on_error="log"` and an exception is raised:
-- A log row with `status="error"` and `error_message=str(exc)` is recorded in the
-  invocation log (so the failure is visible in the near-side provenance record).
-- The input row is still emitted as output (pass-through continues).
+@dataclasses.dataclass(frozen=True)
+class TapPodConfig:
+    on_error: Literal["raise", "log"] = "raise"
+    hash_config: InvocationHashConfig = field(default_factory=InvocationHashConfig)
+```
+
+Separate config classes rather than a shared `SideEffectConfig`: `SinkPodConfig` will
+gain `max_attempts` and `retry_on` from ITL-526 that are meaningless for `TapPod`.
+Starting separate prevents a future config class with inapplicable fields.
+
+**`on_error` vocabulary** (consistent with ITL-523's `HookConfig`):
+- `"raise"` (default): exception propagates; the pipeline row is aborted.
+- `"log"`: exception logged at `WARNING` level; the input row continues downstream.
+
+No `"ignore"` option in v1.
+
+**`SinkPod` completion state on failure:**
+Regardless of `on_error`, a failed delivery always records `status="failed"` in the
+invocation log. `on_error` controls whether the exception propagates to the caller —
+it does not affect completion tracking. A `"failed"` row remains eligible for
+re-attempt on the next explicit pipeline re-run (Axis 3).
+
+| `on_error` | Pipeline behaviour | Completion state |
+|---|---|---|
+| `"raise"` (default) | Exception propagates; row aborted | `"failed"` |
+| `"log"` | Exception logged; row continues downstream | `"failed"` |
+
+**`TapPod` on failure:**
+No completion tracking. `on_error` controls pipeline propagation only:
+- `"raise"`: exception propagates; row aborted; downstream sees nothing.
+- `"log"`: exception logged at `WARNING`; input row emitted unchanged downstream.
+An optional invocation log row with `status="error"` may be written for observability.
+
+**Relationship to `FunctionPod`:**
+`FunctionPod` has no pod-level `on_error` config today. The sync path propagates
+exceptions unconditionally; the async path silently drops failed items with no
+configuration — an inconsistency. Aligning `FunctionPod` to adopt the same `on_error`
+vocabulary is deferred; see DESIGN_ISSUES.md F15 and the corresponding Linear issue.
 
 ### 7. Ordering & DAG Placement
 
