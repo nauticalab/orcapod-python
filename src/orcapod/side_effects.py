@@ -808,14 +808,23 @@ class SideEffectJobNode(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table:
-        """Collect all rows from ``iter_data()`` into an Arrow table."""
+        """Collect all rows from ``iter_data()`` into an Arrow table.
+
+        Warning:
+            Calling ``as_table()`` on a ``SideEffectJobNode`` iterates via
+            ``iter_data()``, which re-invokes the side-effect function for each
+            row with no DB logging and no ``run_id``. Use ``execute()`` for
+            orchestrated execution.
+        """
+        from orcapod.types import ColumnConfig as _ColumnConfig
         from orcapod.utils import arrow_utils
 
+        column_config = _ColumnConfig.handle_config(columns, all_info=all_info)
         tag_tables = []
         data_tables = []
         for tag, data in self.iter_data():
-            tag_tables.append(tag.as_table(columns={"system_tags": True}))
-            data_tables.append(data.as_table(columns={"source": True}))
+            tag_tables.append(tag.as_table(columns=column_config))
+            data_tables.append(data.as_table(columns=column_config))
         if not tag_tables:
             return pa.table({})
         return arrow_utils.hstack_tables(
