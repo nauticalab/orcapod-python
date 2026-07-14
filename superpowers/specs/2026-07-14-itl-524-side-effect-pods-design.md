@@ -602,12 +602,13 @@ independently if desired.
 |-----------|------------------------|--------------------------|
 | DAG presence | No — passive observer | Yes — first-class node |
 | Triggers on | After a function pod runs | IS the pipeline step |
-| Gates downstream | No | Yes |
+| Gates downstream | No | Yes (when `drop_on_failure=True`) |
 | Composable | No | Yes |
-| Hash name | `record_id_hash` | `invocation_signature` |
-| Hash formula | `str(output_data.datagram_uuid)` (UUIDv7 per execution) | `content_hash(pod ∥ inputs).to_hex()` (deterministic) |
-| Hash stability | Stable for cache hits; unique for fresh computations | Always deterministic |
+| Hash name | `record_id_hash` | `invocation_hash` |
+| Hash formula | `str(output_data.datagram_uuid)` (UUIDv7 per execution) | `pipeline_hash :: full_input_packet_hash [:: run_id]` (deterministic) |
+| Hash stability | Stable for cache hits; unique for fresh computations | Always deterministic (when `track_completion=True`) |
 | `on_error` vocabulary | `"raise"` / `"log"` | Same: `"raise"` / `"log"` |
+| Context type | `PodContext` in `PostRunPayload` | `InvocationContext` |
 
 **Hash formula divergence — justified:**
 
@@ -617,61 +618,15 @@ This is appropriate for function pods because the "result record ID" IS the outp
 datagram identity.
 
 Side-effect pods have no output datagram, so the equivalent must be derived from
-inputs. Using `content_hash(pod ∥ inputs)` is more fundamental: it is deterministic
-regardless of caching, enabling idempotency checks across re-runs. For a deterministic
-function pod, the two formulas converge: `content_hash(pod ∥ inputs)` ≡
-`output_data.datagram_uuid` whenever the output is content-addressed from the same
-inputs.
+inputs. Using `pipeline_hash :: full_input_packet_hash` is deterministic regardless of
+caching, enabling completion-tracking across re-runs. For a deterministic function pod,
+the two formulas converge whenever the output is content-addressed from the same inputs.
 
-**Shared `InvocationIdentity` base type:**
-
-To avoid duplicating the canonical `format_id()` logic and enable shared tooling
-(e.g., a logging helper that works for both hook payloads and side-effect contexts),
-extract a common type from `src/orcapod/hooks.py`:
-
-```python
-@dataclasses.dataclass(frozen=True)
-class InvocationIdentity:
-    """Shared identity carrier for post-run hooks and side-effect pods.
-
-    Attributes:
-        record_id: The invocation identifier. For post-run hooks this is
-            ``str(output_data.datagram_uuid)``; for side-effect pods this is
-            ``content_hash(pod || inputs).to_hex()``. Both are embeddable
-            plain-text strings.
-        pod_name: Human-readable pod label.
-        pipeline_run_id: Run context; ``None`` for lazy pipelines.
-    """
-    record_id: str
-    pod_name: str
-    pipeline_run_id: str | None
-
-    def format_id(self) -> str:
-        """Canonical artifact tag: 'orcapod-{record_id}'."""
-        return f"orcapod-{self.record_id}"
-```
-
-`SideEffectContext` may directly embed the `InvocationIdentity` fields or inherit from it
-(implementation decision); it adds `execution_id` and `pod_content_hash`:
-
-```python
-@dataclasses.dataclass(frozen=True)
-class SideEffectContext:
-    # InvocationIdentity fields:
-    invocation_signature: str   # = record_id for side-effect pods
-    pod_name: str
-    pipeline_run_id: str | None
-
-    # SideEffectPod-specific fields:
-    execution_id: str           # UUIDv7 unique per execution
-    pod_content_hash: str       # pod.content_hash().to_string()
-
-    def format_id(self) -> str: ...
-```
-
-Post-run hook `PodContext` gains `InvocationIdentity` fields or a reference in the
-updated `PostRunPayload` (minor ITL-523 extension, not in scope for this ticket but
-called out for the implementer).
+**No shared base type:**
+An earlier draft proposed extracting a shared `InvocationIdentity` base type from
+`hooks.py`. `format_id(config=None)` lives directly on `InvocationContext` (Axis 10),
+so no shared base is needed. Post-run hooks (ITL-523) may adopt the `orcapod-` prefix
+convention independently if desired — no coordinated change to `hooks.py` is required.
 
 ---
 
@@ -685,21 +640,22 @@ back to the exact pipeline run and input data.
 
 ```python
 import orcapod as op
-from orcapod import SideEffectContext, SideEffectConfig
+from orcapod import InvocationContext, SideEffectPodConfig
 from datetime import datetime, timezone
 
-@op.side_effect_pod(config=SideEffectConfig(idempotent=True, on_error="log"))
+# @sink_pod presets track_completion=True, drop_on_failure=True.
+# on_error="log" so a failed DB write logs and drops the row rather than aborting.
+@op.sink_pod(config=SideEffectPodConfig(on_error="log"))
 def audit_patient_processing(
     data: PatientRecord,
-    ctx: SideEffectContext,
+    ctx: InvocationContext,
 ) -> None:
     """Write a compliance audit row to the external database.
 
-    Uses ctx.invocation_signature as the stable provenance key so that
-    re-running the same pipeline with the same inputs does NOT produce a
-    duplicate audit row (idempotent=True skips execution if the signature
-    is already in the invocation log, and ON CONFLICT DO NOTHING handles
-    any race between instances).
+    ctx.invocation_hash is deterministic per (pod topology, input packet):
+    re-running the pipeline with the same inputs produces the same hash, so
+    ON CONFLICT DO NOTHING provides a DB-level idempotency guard even if
+    the pipeline retries a row that was previously delivered.
     """
     audit_db.execute(
         """
@@ -709,7 +665,7 @@ def audit_patient_processing(
         ON CONFLICT (orcapod_record_id) DO NOTHING
         """,
         (
-            ctx.invocation_signature,
+            ctx.invocation_hash,
             data.patient_id,
             datetime.now(timezone.utc),
             ctx.pipeline_run_id,
@@ -723,7 +679,7 @@ def audit_patient_processing(
 patient_stream    = op.csv_source("patients_2026.csv")
 validated_stream  = validate_patient_pod(patient_stream)
 enriched_stream   = enrich_patient_pod(validated_stream)
-# Side-effect node inserted mid-pipeline; downstream sees the same data.
+# Audit pod: only successfully-audited rows reach aggregate_results_pod.
 audited_stream    = audit_patient_processing(enriched_stream)
 results_stream    = aggregate_results_pod(audited_stream)
 ```
@@ -734,63 +690,62 @@ Row in the external `patient_audit` table:
 
 | orcapod_record_id | patient_id | processed_at | pipeline_run |
 |---|---|---|---|
-| `d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f` | P-12345 | 2026-07-14 02:30:45 UTC | run-2026-07-14-001 |
+| `blake3_v1:a3f8c2d1::blake3_v1:b7e491f0` | P-12345 | 2026-07-14 02:30:45 UTC | run-2026-07-14-001 |
 
 ### Reverse-lookup walk-through
 
 **Problem:** Six months later, an auditor finds the row for `P-12345` and asks: "What
 input data produced this audit record, and what pipeline logic ran?"
 
-**Step 1 — Signature → invocation record:**
+**Step 1 — Parse the invocation hash:**
+`blake3_v1:a3f8c2d1::blake3_v1:b7e491f0` → split on `::`:
+- Component 1 (pipeline hash): `blake3_v1:a3f8c2d1`
+- Component 2 (input packet hash): `blake3_v1:b7e491f0`
+
+**Step 2 — Locate the invocation table and look up the record:**
+```
+table: <db_root>/blake3_v1:a3f8c2d1.../side_effect_invocations
+```
 ```sql
-SELECT pod_name, pod_content_hash, input_hash, pipeline_run_id, executed_at, status
-FROM _orcapod_side_effect_invocations
-WHERE invocation_signature = 'd4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f'
+SELECT * FROM side_effect_invocations
+WHERE full_input_packet_hash = 'blake3_v1:b7e491f0...'
 ```
 ```
-pod_name:           "audit_patient_processing"
-pod_content_hash:   "object_v0.1:c9f1a3b2..."
-input_hash:         "object_v0.1:8f3a4b2c..."
+invocation_hash:    "blake3_v1:a3f8c2d1...::blake3_v1:b7e491f0..."
+pod_content_hash:   "blake3_v1:c9f1a3b2..."
 pipeline_run_id:    "run-2026-07-14-001"
 executed_at:        2026-07-14T02:30:45Z
 status:             "success"
 ```
 
-**Step 2 — Input hash → input data:**
+**Step 3 — Input packet hash → input data:**
 ```sql
--- Query enrich_patient_pod result table (shared pipeline hash table).
--- _input_data_hash is system_constants.INPUT_DATA_HASH_COL = "_input_data_hash"
+-- Query enrich_patient_pod result table using the full_input_packet_hash.
 SELECT * FROM enrich_patient_pod_results
-WHERE _input_data_hash = 'object_v0.1:8f3a4b2c...'
+WHERE _input_data_hash = 'blake3_v1:b7e491f0...'
 ```
 ```
 patient_id:   "P-12345"
 birth_year:   1985
 diagnosis:    "T2D"
 risk_score:   0.73
-_tag_source_id::...::abc...   "patients_2026_csv::row47"
+_tag_source_id::...   "patients_2026_csv::row47"
 ```
 
-**Step 3 — System tags → upstream lineage:**
-The `_tag_source_id` column resolves to the original source:
+**Step 4 — System tags → upstream lineage:**
 ```
 Source:  patients_2026.csv
 Row:     47
-Column:  patient_id → "P-12345"
 ```
 
 **Full lineage:**
 ```
-patient_audit[orcapod_record_id=d4a8f3b2...]
-  ← audit_patient_processing (invocation_signature=d4a8f3b2..., pod_content_hash=c9f1a3b2...)
+patient_audit[orcapod_record_id=blake3_v1:a3f8c2d1::blake3_v1:b7e491f0]
+  ← audit_patient_processing (invocation_hash, pod_content_hash=blake3_v1:c9f1a3b2...)
     ← enrich_patient_pod(PatientRecord{patient_id=P-12345})
       ← validate_patient_pod(PatientRecord{patient_id=P-12345})
         ← patients_2026.csv : row 47
 ```
-
-**Pod code version:** `pod_content_hash = "object_v0.1:c9f1a3b2..."` can be resolved
-to the exact Python function definition (git commit, code hash) via Orcapod's pod
-registry or by running `content_hash()` against the current function definition.
 
 ---
 
@@ -800,30 +755,44 @@ registry or by running `content_hash()` against the current function definition.
 # src/orcapod/side_effects.py
 
 @dataclasses.dataclass(frozen=True)
-class SideEffectConfig:
-    idempotent: bool = False
-    on_error: Literal["raise", "log"] = "raise"
+class InvocationHashConfig:
+    encoding: Literal["hex", "base64", "binary"] = "hex"
+    component_length: int | None = None  # bytes of raw digest per component; None = full
 
 
 @dataclasses.dataclass(frozen=True)
-class SideEffectContext:
-    invocation_signature: str    # 32-char hex; deterministic per (pod, inputs)
-    execution_id: str            # UUID string; unique per actual execution
-    pod_name: str                # human-readable pod label
-    pod_content_hash: str        # pod.content_hash().to_string()
-    pipeline_run_id: str | None  # None for lazy/non-compiled pipelines
+class SideEffectPodConfig:
+    track_completion: bool = True   # True = fire-once with completion tracking
+    drop_on_failure: bool = True    # True = drop failed rows; False = always pass through
+    on_error: Literal["raise", "log"] = "raise"
+    hash_config: InvocationHashConfig = field(default_factory=InvocationHashConfig)
 
-    def format_id(self) -> str:
-        """Return 'orcapod-{invocation_signature}'."""
-        return f"orcapod-{self.invocation_signature}"
+
+@dataclasses.dataclass(frozen=True)
+class InvocationContext:
+    invocation_hash: str        # serialized per pod's InvocationHashConfig
+    pod_name: str               # human-readable pod label (pod.label)
+    pod_content_hash: str       # pod.content_hash().to_string() — exact code version
+    pipeline_run_id: str | None # None for lazy/non-compiled pipelines
+
+    def format_id(self, config: InvocationHashConfig | None = None) -> str:
+        """Return 'orcapod-{hash}' with optional format override.
+
+        Args:
+            config: Optional ``InvocationHashConfig`` overriding encoding and
+                component_length for this specific call. When ``None``, uses
+                the pod's own ``InvocationHashConfig``.
+        """
+        ...
 
 
 class SideEffectPod(_FunctionPodBase):
     """A pipeline node whose primary purpose is a side effect.
 
-    The wrapped function returns None. The input stream is passed through
-    unchanged as output. Every invocation is recorded in the pipeline
-    database's _orcapod_side_effect_invocations table.
+    Takes an input stream and returns a filtered output stream. When
+    ``drop_on_failure=True``, only rows where delivery succeeded are emitted
+    downstream. Every invocation is recorded in a per-pipeline-hash invocation
+    table at ``<db_root>/<pipeline_hash>/side_effect_invocations``.
     """
     ...
 
@@ -831,27 +800,60 @@ class SideEffectPod(_FunctionPodBase):
 def side_effect_pod(
     fn: SideEffectFn | None = None,
     *,
-    config: SideEffectConfig | None = None,
+    config: SideEffectPodConfig | None = None,
 ) -> SideEffectPod | Callable[[SideEffectFn], SideEffectPod]:
-    """Decorator that wraps a function as a SideEffectPod.
+    """Wrap a function as a SideEffectPod with explicit config.
 
     Examples:
         @side_effect_pod
-        def emit_metric(data: MyData, ctx: SideEffectContext) -> None:
+        def emit_metric(data: MyData, ctx: InvocationContext) -> None:
             metrics.emit("my.metric", data.value, tags={"id": ctx.format_id()})
 
-        @side_effect_pod(config=SideEffectConfig(idempotent=True))
-        def write_audit_row(data: MyData, ctx: SideEffectContext) -> None:
-            audit_db.execute("INSERT ...", (ctx.invocation_signature, ...))
+        @side_effect_pod(config=SideEffectPodConfig(track_completion=False, drop_on_failure=False))
+        def trace_row(data: MyData, ctx: InvocationContext) -> None:
+            logger.debug("[%s] row seen", ctx.invocation_hash)
+    """
+    ...
+
+
+def sink_pod(
+    fn: SideEffectFn | None = None,
+    *,
+    config: SideEffectPodConfig | None = None,
+) -> SideEffectPod | Callable[[SideEffectFn], SideEffectPod]:
+    """Shortcut: track_completion=True, drop_on_failure=True.
+
+    Examples:
+        @sink_pod(config=SideEffectPodConfig(on_error="log"))
+        def write_audit_row(data: MyData, ctx: InvocationContext) -> None:
+            audit_db.execute("INSERT ...", (ctx.invocation_hash, ...))
+    """
+    ...
+
+
+def tap_pod(
+    fn: SideEffectFn | None = None,
+    *,
+    config: SideEffectPodConfig | None = None,
+) -> SideEffectPod | Callable[[SideEffectFn], SideEffectPod]:
+    """Shortcut: track_completion=False, drop_on_failure=False.
+
+    Examples:
+        @tap_pod
+        def log_row(data: MyData, ctx: InvocationContext) -> None:
+            logger.info("[%s] Processing %s", ctx.invocation_hash, data.id)
     """
     ...
 ```
 
 Re-exported from `orcapod.__init__`:
 - `SideEffectPod`
-- `SideEffectConfig`
-- `SideEffectContext`
+- `SideEffectPodConfig`
+- `InvocationHashConfig`
+- `InvocationContext`
 - `side_effect_pod`
+- `sink_pod`
+- `tap_pod`
 
 ---
 
@@ -861,90 +863,116 @@ New test file: `tests/test_core/side_effect_pod/test_side_effect_pod.py`
 
 | # | Scenario | Assertion |
 |---|---|---|
-| T1 | Basic execution — pod runs, output equals input | Pass-through: input (Tag, Data) emitted unchanged |
-| T2 | `ctx` auto-injection — function with `ctx: SideEffectContext` | `ctx.invocation_signature` is 32 hex chars; `ctx.format_id()` returns `"orcapod-{sig}"` |
-| T3 | No-ctx function — function without `ctx` param | Pod runs without error; `SideEffectContext` not constructed |
-| T4 | Invocation log written — DB-backed pipeline | `_orcapod_side_effect_invocations` has one row; `status="success"` |
-| T5 | `idempotent=True` — same inputs re-run | Second invocation skipped; `status="skipped"` row added; side-effect function called once only |
-| T6 | `idempotent=False` (default) — same inputs re-run | Side-effect function called both times; two rows in invocation log (different `execution_id`) |
-| T7 | `on_error="raise"` — function raises | Exception propagates; no output row; `status="error"` in log |
-| T8 | `on_error="log"` — function raises | Exception logged; input row emitted unchanged; `status="error"` in log |
-| T9 | Multiple inputs — N input rows | N log rows; pass-through of all N rows |
-| T10 | `invocation_signature` determinism | Re-running pod with identical inputs + identical code → identical `invocation_signature` |
-| T11 | `execution_id` uniqueness | Two runs with identical inputs → same `invocation_signature`, different `execution_id` |
-| T12 | Async channel execution | Pod runs correctly through `async_execute()` path; log rows written |
-| T13 | Parallel execution — `max_concurrency > 1` | All invocations complete; all log rows written; no data loss |
-| T14 | Pipeline composition — side-effect pod mid-pipeline | Downstream pod receives same data as upstream; side effect runs |
-| T15 | `@side_effect_pod` decorator — functional form | `@side_effect_pod` without args and `@side_effect_pod(config=...)` both produce `SideEffectPod` |
+| T1 | Basic pass-through — `drop_on_failure=False`, success | Output stream contains all input rows unchanged |
+| T2 | `drop_on_failure=True` (default), success | Successfully-delivered rows emitted; no rows dropped |
+| T3 | `ctx: InvocationContext` auto-injection | `ctx.invocation_hash` is a non-empty string; `ctx.format_id()` returns `"orcapod-{hash}"` |
+| T4 | No-`ctx` function | Pod runs without error; `InvocationContext` not constructed |
+| T5 | Invocation log written — DB-backed pipeline | Row written to `<pipeline_hash>/side_effect_invocations`; `status="success"` |
+| T6 | `track_completion=True` — same inputs re-run | Second run: delivery skipped, `status="skipped"` row added; function called once only; row still emitted downstream |
+| T7 | `track_completion=False` — same inputs re-run | Both runs: function called; two `status="success"` log rows |
+| T8 | `on_error="raise"` — function raises | Exception propagates; row aborted; `status="failed"` in log |
+| T9 | `on_error="log"` + `drop_on_failure=True` — function raises | Exception logged; row **dropped** from output; `status="failed"` in log |
+| T10 | `on_error="log"` + `drop_on_failure=False` — function raises | Exception logged; row **emitted** downstream; `status="failed"` in log |
+| T11 | `invocation_hash` determinism | Re-running pod with identical inputs + code → identical `invocation_hash` |
+| T12 | `invocation_hash` format override | `ctx.format_id(InvocationHashConfig(encoding="base64", component_length=8))` produces valid base64 compound |
+| T13 | Async channel execution | Pod runs correctly through `async_execute()` path; log rows written |
+| T14 | Parallel execution — `max_concurrency > 1` | All invocations complete; all log rows written; no data loss |
+| T15 | Pipeline composition mid-pipeline | Downstream pod receives correct filtered output; side effect runs |
+| T16 | `@sink_pod` shortcut | Produces `SideEffectPod` with `track_completion=True, drop_on_failure=True` |
+| T17 | `@tap_pod` shortcut | Produces `SideEffectPod` with `track_completion=False, drop_on_failure=False` |
+| T18 | `@side_effect_pod(config=...)` with all four combinations | Each combination behaves per spec |
 
 ---
 
 ## Scope & Boundaries
 
 **In scope:**
-- `SideEffectPod` class, `SideEffectConfig`, `SideEffectContext`, `side_effect_pod`
-  decorator.
-- `_orcapod_side_effect_invocations` table: creation, insertion, idempotency check.
-- `SideEffectContext` auto-injection by type annotation.
-- Pass-through output stream.
+- `SideEffectPod` class, `SideEffectPodConfig`, `InvocationHashConfig`,
+  `InvocationContext`, `side_effect_pod` / `sink_pod` / `tap_pod` decorators.
+- Per-pipeline-hash invocation tables: creation, insertion, completion-state lookup.
+- `InvocationContext` auto-injection by type annotation.
+- Filtered pass-through output stream (`drop_on_failure` axis).
+- Completion tracking and skip-on-success logic (`track_completion` axis).
 - Sync and async execution paths.
-- `InvocationIdentity` shared base type extracted into `hooks.py`.
 - All re-exports from `orcapod.__init__`.
-- Tests covering T1–T15.
-- Documentation update: new `docs/concepts/side-effect-pods.md`.
+- Tests covering T1–T18.
+- Documentation: new `docs/concepts/side-effect-pods.md`.
 
 **Out of scope:**
 - Actual implementation (this is a design spike).
-- Retry logic.
+- Retry policy (ITL-526).
+- Fire-and-forget delivery mode (ITL-528).
+- `FunctionPod` error handling alignment (ITL-527).
 - External adapter helpers (Slack notifier, structured-logging wrapper).
-- Run history UI or searchable index service (downstream of this primitive; see PLT-1950).
-- Pre-run or on-error hooks for side-effect pods.
+- Run history UI or searchable index service (PLT-1950).
 - Remote/cross-process side-effect execution.
-- `idempotency_key` customization (v1 uses `invocation_signature` only).
 
 ---
 
 ## Dependencies & Risks
 
 **Dependencies:**
-- ITL-523 (post-run hook, In Progress) — `hooks.py` is the insertion point for the
-  shared `InvocationIdentity` base type. Coordinate to avoid conflicting changes to
-  `_FunctionPodBase`.
-- PLT-1950 (EDI provenance) — the `_orcapod_side_effect_invocations` table is a
-  natural data source for provenance stamping. Schema should be coordinated.
+- ITL-523 (post-run hook, In Progress) — coordinate to avoid conflicting changes to
+  `_FunctionPodBase`. No shared base type needed; `InvocationContext` is independent.
+- ITL-526 (retry policy) — deferred; will add fields to `SideEffectPodConfig`.
+- ITL-527 (`FunctionPod` error handling alignment) — deferred; will reuse the same
+  `on_error` vocabulary defined here.
+- ITL-528 (fire-and-forget mode) — deferred; will add `async_delivery` to
+  `SideEffectPodConfig`.
+- PLT-1950 (EDI provenance) — the per-pipeline-hash invocation tables are a natural
+  data source for provenance stamping. Schema should be coordinated when that work begins.
 
 **Risks:**
-- **Framework creep:** Side-effect pods that "almost" produce output. Enforced by
-  the type signature (`-> None` required) and the pass-through contract.
-- **Overly long hash:** 32 hex chars (128 bits) is short enough for all common embedding
-  contexts. Test with real log pipelines before finalizing.
-- **Invocation log growth:** A high-volume pipeline calling a side-effect pod per row
-  will produce large invocation logs. Add a note in docs about pruning / archiving.
-- **Idempotency false-positive:** If pod code changes between runs, the same inputs
-  produce the same `invocation_signature` (code change is not reflected). This is
-  correct behavior (the signature is input + code hash, so code changes produce
-  different signatures), but implementers should verify the `pod_content_hash` column
-  includes code identity, not just name.
+- **Invocation log growth:** A high-volume pipeline with `track_completion=False` will
+  write one log row per row per run. Document pruning / archiving guidance.
+- **Hash truncation collision:** Shorter `component_length` values (via `InvocationHashConfig`)
+  increase prefix-match ambiguity in reverse lookup. Document the trade-off; 8 bytes
+  (64 bits) per component is negligible collision probability for realistic volumes.
+- **`track_completion=True` + code change:** `pipeline_hash(pod)` captures the full
+  upstream topology and function identity, so a code change does produce a different
+  pipeline hash and a different invocation table — previously-succeeded rows in the old
+  table are not seen, and delivery re-runs. This is correct but should be documented
+  clearly so pod authors are not surprised.
 
 ---
 
 ## Follow-Up Implementation Issue
 
-See ITL-525: *Implement `SideEffectPod` with invocation hash and invocation log
-(ITL-524 follow-up).*
+See ITL-525: *Implement `SideEffectPod` (ITL-524 follow-up).*
 
 Task breakdown for ITL-525:
 
-1. **`InvocationIdentity` base type** — add to `src/orcapod/hooks.py`; update
-   `PostRunPayload` to embed it (minor ITL-523 coordination).
-2. **`src/orcapod/side_effects.py`** — new module: `SideEffectConfig`,
-   `SideEffectContext`, `SideEffectPod`, `side_effect_pod` decorator.
-3. **`SideEffectPod` core execution** — `process_data()` / `async_process_data()`
-   pass-through implementation; `SideEffectContext` injection; invocation log writes.
-4. **Invocation log** — `_orcapod_side_effect_invocations` table creation and insertion
-   in the pipeline DB; idempotency check for `idempotent=True`.
-5. **`orcapod.__init__` re-exports** — `SideEffectPod`, `SideEffectConfig`,
-   `SideEffectContext`, `side_effect_pod`.
-6. **Tests** — `tests/test_core/side_effect_pod/test_side_effect_pod.py` covering T1–T15.
-7. **Documentation** — `docs/concepts/side-effect-pods.md` with overview, usage
-   examples, reverse-lookup walk-through, and idempotency guidance.
+1. **`src/orcapod/side_effects.py`** — new module:
+   - `InvocationHashConfig` dataclass
+   - `SideEffectPodConfig` dataclass (`track_completion`, `drop_on_failure`, `on_error`,
+     `hash_config`)
+   - `InvocationContext` dataclass with `format_id(config=None)` method
+   - `SideEffectPod` class (extends `_FunctionPodBase`)
+   - `side_effect_pod`, `sink_pod`, `tap_pod` decorators
+
+2. **`SideEffectPod` core execution** — `process_data()` / `async_process_data()`:
+   - `InvocationContext` injection (detect by type annotation, construct from raw
+     hash components)
+   - Row filtering per `drop_on_failure`
+   - `on_error` handling: `"raise"` propagates; `"log"` logs + drops-or-emits per
+     `drop_on_failure`
+
+3. **Invocation table** — per-pipeline-hash table at
+   `<db_root>/<pipeline_hash>/side_effect_invocations`:
+   - Table creation on first invocation
+   - Row insertion with all schema columns
+   - Completion-state lookup for `track_completion=True` (skip / re-attempt logic)
+   - `"skipped"` row for re-emitted previously-succeeded inputs
+
+4. **Hash computation** — `full_input_packet_hash` covering tag + data + source +
+   system tag columns; invocation hash compound construction and serialization per
+   `InvocationHashConfig`
+
+5. **`orcapod.__init__` re-exports** — `SideEffectPod`, `SideEffectPodConfig`,
+   `InvocationHashConfig`, `InvocationContext`, `side_effect_pod`, `sink_pod`, `tap_pod`
+
+6. **Tests** — `tests/test_core/side_effect_pod/test_side_effect_pod.py` covering T1–T18
+
+7. **Documentation** — `docs/concepts/side-effect-pods.md` with overview, config axes,
+   usage examples (all four `track_completion` × `drop_on_failure` combinations),
+   reverse-lookup walk-through, and log growth guidance
