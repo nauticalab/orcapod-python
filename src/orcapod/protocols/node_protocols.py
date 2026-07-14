@@ -142,6 +142,35 @@ class OperatorNodeProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class SideEffectNodeProtocol(Protocol):
+    """Protocol for side-effect nodes in orchestrated execution."""
+
+    node_type: str
+
+    def execute(
+        self,
+        input_stream: "StreamProtocol",
+        *,
+        observer: "ExecutionObserverProtocol | None" = None,
+        run_id: str | None = None,
+    ) -> "list[tuple[TagProtocol, DataProtocol]]": ...
+
+    async def async_execute(
+        self,
+        inputs: "Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]]",
+        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
+        *,
+        observer: "ExecutionObserverProtocol | None" = None,
+        run_id: str | None = None,
+    ) -> None: ...
+
+    def attach_databases(
+        self,
+        pipeline_database: "ArrowDatabaseProtocol | None" = None,
+    ) -> None: ...
+
+
 def is_source_node(node: GraphNode) -> TypeGuard[SourceNodeProtocol]:
     """Check if a node is a source node."""
     return node.node_type == "source"
@@ -155,3 +184,8 @@ def is_function_node(node: GraphNode) -> TypeGuard[FunctionNodeProtocol]:
 def is_operator_node(node: GraphNode) -> TypeGuard[OperatorNodeProtocol]:
     """Check if a node is an operator node."""
     return node.node_type == "operator"
+
+
+def is_side_effect_node(node: GraphNode) -> TypeGuard[SideEffectNodeProtocol]:
+    """Check if a node is a side-effect node."""
+    return node.node_type == "side_effect"
