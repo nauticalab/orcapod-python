@@ -177,92 +177,137 @@ difference between "always fire" and "fire once and track completion" is substan
 enough that a flag would obscure rather than clarify intent. A pod author should not
 need to reason about idempotency to write a logger.
 
-### 3. Caching / Re-Execution Semantics — Author-Declared Idempotency
+### 3. Re-Execution and Completion Semantics
 
-**Decision:** Controlled by `SideEffectConfig.idempotent: bool = False`.
+**`TapPod`:** No caching or completion tracking. Every pipeline run, every input packet
+triggers the effect unconditionally. There is no state to consult and no state to record
+beyond optional observability logging.
+
+**`SinkPod`:** Completion-tracked per (pod topology, input packet). The framework
+maintains a per-pod invocation table (see Axis 8) and consults it at the start of each
+execution:
+
+| Prior state | Action |
+|---|---|
+| Not yet seen | Execute the delivery |
+| Previously succeeded | Skip silently |
+| Previously failed | Re-attempt |
+
+Re-attempt occurs when the pipeline is **explicitly re-run by the user**. There is no
+automatic background retry in v1. Full retry policy (max attempts, backoff, retryable
+exception types) is deferred to ITL-526, which will design a shared mechanism for both
+`FunctionPod` and `SinkPod`.
+
+`SinkPod` does **not** participate in the `ResultCache` / `FunctionNode` result table
+system. Its execution state is tracked exclusively in its own invocation table.
+
+### 4. Invocation Hash
+
+#### Raw identity components
+
+The raw identity of any invocation is a **three-part compound** (two parts for
+`SinkPod`, three for `TapPod`):
+
+1. **`pipeline_hash(pod)`** — the pipeline hash of the pod, encoding both the pod's own
+   function identity and the full upstream topology. This is the same `pipeline_hash()`
+   mechanism used by `FunctionNode` for DB path scoping: different pipeline topologies
+   using the same function produce different hashes, so completion records are namespaced
+   per topology.
+
+2. **`full_input_packet_hash`** — a hash of the entire input packet: tag columns, data
+   columns, source columns (`_source_*`), and system tag columns (`_tag_*`). This is
+   more inclusive than the `input_data.content_hash()` used by `ResultCache`, which
+   covers data columns only. Including tags and source/system columns means two packets
+   with identical payload but different originating provenance — different sources,
+   different upstream routes — produce different invocation hashes. This is correct: a
+   sink that writes an audit row needs to distinguish rows by their full provenance, not
+   just their data values.
+
+3. **`pipeline_run_id`** (`TapPod` only, when available) — a verbatim string
+   identifying the specific pipeline execution (e.g. `"run-2026-07-14-001"`). This is
+   user-controlled and included as-is without further hashing. When no run ID is
+   available (lazy/in-memory pipeline), the third component is omitted.
+
+**Why `pipeline_hash` rather than `content_hash` for component 1:**
+`content_hash(pod)` captures only the pod's function identity. `pipeline_hash(pod)`
+captures function identity *plus* the full upstream topology, forming a Merkle chain.
+Using `pipeline_hash` ensures that the same sink function used in two pipelines with
+different upstream structures never shares a completion namespace — a delivery confirmed
+in pipeline A does not suppress delivery in pipeline B.
+
+**Why `TapPod` includes the run ID:**
+`SinkPod`'s hash must be run-agnostic so the framework can detect "already delivered"
+across re-runs. `TapPod` fires every run intentionally and has no deduplication to
+preserve — including the run ID makes every firing distinguishable, which is exactly
+right for traceable observation.
+
+#### Internal record format
+
+Internally, the full compound is stored with `::` as the component separator (using
+`::` avoids ambiguity with the `:` in `method:digest` form of `ContentHash.to_string()`):
+
+```
+SinkPod:  {pipeline_hash.to_string()}::{full_input_packet_hash.to_string()}
+TapPod:   {pipeline_hash.to_string()}::{full_input_packet_hash.to_string()}::{run_id}
+```
+
+Example (SinkPod):
+```
+blake3_v1:a3f8c2d1e5b7f0c9...::blake3_v1:b7e491f0a2c3d8e1...
+```
+
+The internal record always stores the full-fidelity compound. No output format
+configuration is stored alongside it.
+
+#### User-facing output and `InvocationHashConfig`
+
+When a pod author accesses `ctx.invocation_hash`, the compound is serialized according
+to the pod's `InvocationHashConfig`. This serialized form is what gets embedded in
+external artifacts (log fields, DB columns, message bodies) **and** what is used as
+the lookup key in the invocation table — the same string, in both places.
 
 ```python
 @dataclasses.dataclass(frozen=True)
-class SideEffectConfig:
-    idempotent: bool = False
-    on_error: Literal["raise", "log"] = "raise"
+class InvocationHashConfig:
+    encoding: Literal["hex", "base64", "binary"] = "hex"
+    component_length: int | None = None  # bytes of raw digest to use; None = full length
 ```
 
-- `idempotent=False` (default): always execute the side effect, even if the same
-  `invocation_signature` was seen before. Correct for append-only operations (log
-  writes, metric points). A new `execution_id` is generated each time.
-- `idempotent=True`: skip execution if `invocation_signature` already present in the
-  invocation log. Correct for upsert-style operations where re-running with the same
-  inputs should not produce a duplicate artifact. A `status="skipped"` row is recorded.
+`component_length` is specified in **bytes of raw digest** (encoding-independent): 8 bytes
+produces 16 hex characters or 11 base64 characters depending on `encoding`. The `::` separator
+is fixed.
 
-Regardless of `idempotent`, Orcapod **always persists an invocation log row** (with
-appropriate status). This is required for the reverse-lookup guarantee — a hash found
-in an artifact must be resolvable even if the pipeline has since been re-run.
+The format is self-describing: hex strings contain only `[0-9a-f]`, base64 contains
+`[A-Za-z0-9+/=]`, binary is raw bytes. No configuration metadata needs to be stored
+alongside the hash — the format is recoverable by inspection.
 
-**Interaction with `FileHasher` / result records:** Side-effect pods do not participate
-in the `ResultCache` / `FunctionNode` result table system. Their execution state is
-tracked exclusively through the `_orcapod_side_effect_invocations` table.
+Example outputs for `component_length=8`:
 
-### 4. Pipeline Execution Hash — Two Complementary Identifiers
+| `encoding` | Example |
+|---|---|
+| `"hex"` (default) | `a3f8c2d1e5b7f0c9::b7e491f0a2c3d8e1` |
+| `"base64"` | `o/jC0eW3::t+SR8KLD` |
+| `"binary"` | `<8 raw bytes>::<8 raw bytes>` |
 
-**Decision:** Expose two hashes via `SideEffectContext`.
+`InvocationHashConfig` lives inside `SinkPodConfig` and `TapPodConfig` respectively,
+so each pod can independently configure its output format.
 
-#### `invocation_signature` (stable, deterministic)
+#### Lookup table organisation (mirrors `FunctionNode`)
 
-```python
-import hashlib
+`SinkPod` records are stored in a table scoped by `pipeline_hash(pod)` — exactly the
+same pattern `FunctionNode` uses for its result tables. Within that table, the row
+lookup key is the `full_input_packet_hash`. The full compound is also stored as a column
+for completeness.
 
-invocation_signature = hashlib.sha256(
-    pod.content_hash().digest + input_data.content_hash().digest
-).digest()[:16].hex()   # first 16 bytes → 32 lowercase hex chars, 128 bits
-```
+Reverse lookup from a user-provided hash:
+1. Decode both components (format is self-describing).
+2. Find tables whose scoping pipeline hash starts with component 1 (prefix match).
+3. Within the matching table, find rows whose input packet hash starts with component 2.
 
-This is computed from the pod's code identity and the content hash of the input data
-packet — the same components that determine `record_id_hash` for function pods in
-ITL-523 (which uses the output datagram UUID; for deterministic functions, these
-converge to the same value). For side-effect pods there is no output datagram, so the
-input-based formula is the canonical choice.
-
-`pod.content_hash()` and `input_data.content_hash()` return `ContentHash` objects from
-the existing Orcapod infrastructure. Only the `digest: bytes` field is used — the
-method identifier is excluded so the formula is stable across hasher-version changes
-(as long as the digest bytes are stable, which is guaranteed by each `ContentHash`'s
-own versioning).
-
-Properties:
-- **Deterministic:** same pod code + same inputs → same signature, always.
-- **Stable across re-runs:** re-running the same pipeline with the same data produces
-  the same signature, even months later.
-- **32 lowercase hex characters** (128 bits) — compact, embeddable, and practically
-  collision-free for any real-world invocation volume.
-
-`invocation_signature` is the primary key for idempotency checks and the primary
-identifier embedded in external artifacts.
-
-#### `execution_id` (unique per invocation)
-
-```
-execution_id = str(uuid7())   # UUIDv7 — time-ordered, unique per actual execution
-```
-
-Properties:
-- **Globally unique:** no two invocations share an `execution_id`, even with identical
-  inputs.
-- **Ordered:** UUIDv7 embeds a timestamp, enabling chronological sorting of invocations
-  in the log.
-- **36-character UUID string:** familiar format, works in every DB as a TEXT column.
-
-Consistent with ITL-523's `record_id_hash`, which is `str(output_data.datagram_uuid)`,
-a per-execution UUID. The two hashes serve different purposes: `invocation_signature`
-for deterministic provenance, `execution_id` for per-run tracing.
-
-**Format when embedded in artifacts:**
-
-```
-orcapod-{invocation_signature}   →   orcapod-d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f
-```
-
-`ctx.format_id()` returns this canonical string.
+Shorter `component_length` values increase the chance of a prefix collision but the
+lookup path remains valid — the user resolves any ambiguity by inspecting multiple
+candidate rows. Collision probability at 8 bytes (64 bits) per component is negligible
+for any realistic invocation volume.
 
 ### 5. Hash Surface — `SideEffectContext` Parameter Auto-Injection
 
