@@ -410,7 +410,7 @@ class _FunctionPodBase(TraceableBase):
                 obs.on_data_start(pod_label, tag, data)
                 pkt_logger = obs.create_data_logger(tag, data)
                 try:
-                    out_tag, result_data = await self.async_process_data(
+                    out_tag, result_data = await self._async_invoke_with_hooks(
                         tag, data, logger=pkt_logger
                     )
                 except Exception as exc:

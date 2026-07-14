@@ -315,3 +315,39 @@ class TestParallelExecution:
         assert all(
             p.stats.status == InvocationStatus.COMPUTED for p in payloads
         )
+
+
+# ---------------------------------------------------------------------------
+# async_execute path
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncExecuteHooks:
+    @pytest.mark.asyncio
+    async def test_hooks_fire_through_async_execute(self):
+        from orcapod.channels import Channel
+
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = _make_stream(n=3)
+        input_ch: Channel = Channel(buffer_size=16)
+        output_ch: Channel = Channel(buffer_size=16)
+
+        async def feed() -> None:
+            for tag, data in stream.iter_data():
+                await input_ch.writer.send((tag, data))
+            await input_ch.writer.close()
+
+        import asyncio
+        await asyncio.gather(
+            feed(),
+            pod.async_execute([input_ch.reader], output_ch.writer),
+        )
+
+        results = await output_ch.reader.collect()
+
+        assert len(results) == 3
+        assert len(payloads) == 3
+        assert all(p.stats.status == InvocationStatus.COMPUTED for p in payloads)
