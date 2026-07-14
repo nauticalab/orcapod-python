@@ -232,6 +232,51 @@ class _FunctionPodBase(TraceableBase):
                     exc_info=True,
                 )
 
+    def _build_post_run_payload(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        output_data: DataProtocol | None,
+        started_at: datetime,
+        finished_at: datetime,
+        status: InvocationStatus,
+        exc: Exception | None,
+    ) -> PostRunPayload:
+        """Build a ``PostRunPayload`` from invocation results.
+
+        Args:
+            tag: The input tag.
+            data: The input data.
+            output_data: The output data, or ``None`` if filtered or errored.
+            started_at: UTC timestamp when the invocation started.
+            finished_at: UTC timestamp when compute-or-lookup completed.
+            status: Invocation status (``COMPUTED``, ``HIT``, or ``ERROR``).
+            exc: The exception raised, if ``status == ERROR``; ``None`` otherwise.
+
+        Returns:
+            A ``PostRunPayload`` ready to pass to registered hooks.
+        """
+        record_id = (
+            str(output_data.datagram_uuid) if output_data is not None else None
+        )
+        return PostRunPayload(
+            record_id_hash=record_id,
+            tag=tag,
+            input=data,
+            output=output_data,
+            stats=RunStats(
+                duration_ms=(finished_at - started_at).total_seconds() * 1000,
+                status=status,
+                started_at=started_at,
+                finished_at=finished_at,
+                error=exc,
+            ),
+            pod=PodContext(
+                label=self.label,
+                pod_hash=self.content_hash().to_string(),
+            ),
+        )
+
     def _invoke_with_hooks(
         self,
         tag: TagProtocol,
@@ -241,10 +286,9 @@ class _FunctionPodBase(TraceableBase):
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Call ``process_data``, time it, and fire post-run hooks.
 
-        This is the call site used by ``FunctionPodStream`` and
-        ``async_execute``; ``process_data`` itself is unchanged. Override in
-        subclasses (e.g. ``CachedFunctionPod``) to supply a different
-        ``InvocationStatus``.
+        When ``_post_run_hooks`` is empty, delegates directly to
+        ``process_data`` with zero overhead. Override in subclasses (e.g.
+        ``CachedFunctionPod``) to supply a different ``InvocationStatus``.
 
         Args:
             tag: The tag associated with the data.
@@ -254,45 +298,32 @@ class _FunctionPodBase(TraceableBase):
         Returns:
             A ``(tag, output_data)`` tuple.
         """
+        if not self._post_run_hooks:
+            return self.process_data(tag, data, logger=logger)
+
         started_at = datetime.now(timezone.utc)
-        exc: Exception | None = None
         out_tag = tag
         output_data: DataProtocol | None = None
 
         try:
             out_tag, output_data = self.process_data(tag, data, logger=logger)
-            status = InvocationStatus.COMPUTED
-        except Exception as e:
-            exc = e
-            status = InvocationStatus.ERROR
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            self._fire_post_run_hooks(
+                self._build_post_run_payload(
+                    tag, data, None, started_at, finished_at,
+                    InvocationStatus.ERROR, exc,
+                )
+            )
+            raise  # bare raise — preserves the original traceback exactly
 
         finished_at = datetime.now(timezone.utc)
-
-        if self._post_run_hooks:
-            record_id = (
-                str(output_data.datagram_uuid) if output_data is not None else None
+        self._fire_post_run_hooks(
+            self._build_post_run_payload(
+                tag, data, output_data, started_at, finished_at,
+                InvocationStatus.COMPUTED, None,
             )
-            payload = PostRunPayload(
-                record_id_hash=record_id,
-                tag=tag,
-                input=data,
-                output=output_data,
-                stats=RunStats(
-                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
-                    status=status,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    error=exc,
-                ),
-                pod=PodContext(
-                    label=self.label,
-                    pod_hash=self.content_hash().to_string(),
-                ),
-            )
-            self._fire_post_run_hooks(payload)
-
-        if exc is not None:
-            raise exc
+        )
         return out_tag, output_data
 
     async def _async_invoke_with_hooks(
@@ -304,16 +335,22 @@ class _FunctionPodBase(TraceableBase):
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``_invoke_with_hooks``.
 
+        When ``_post_run_hooks`` is empty, delegates directly to
+        ``async_process_data`` with zero overhead.
+
         Args:
             tag: The tag associated with the data.
             data: The input data to process.
-            logger: Optional data execution logger forwarded to ``async_process_data``.
+            logger: Optional data execution logger forwarded to
+                ``async_process_data``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
         """
+        if not self._post_run_hooks:
+            return await self.async_process_data(tag, data, logger=logger)
+
         started_at = datetime.now(timezone.utc)
-        exc: Exception | None = None
         out_tag = tag
         output_data: DataProtocol | None = None
 
@@ -321,38 +358,23 @@ class _FunctionPodBase(TraceableBase):
             out_tag, output_data = await self.async_process_data(
                 tag, data, logger=logger
             )
-            status = InvocationStatus.COMPUTED
-        except Exception as e:
-            exc = e
-            status = InvocationStatus.ERROR
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            self._fire_post_run_hooks(
+                self._build_post_run_payload(
+                    tag, data, None, started_at, finished_at,
+                    InvocationStatus.ERROR, exc,
+                )
+            )
+            raise  # bare raise — preserves the original traceback exactly
 
         finished_at = datetime.now(timezone.utc)
-
-        if self._post_run_hooks:
-            record_id = (
-                str(output_data.datagram_uuid) if output_data is not None else None
+        self._fire_post_run_hooks(
+            self._build_post_run_payload(
+                tag, data, output_data, started_at, finished_at,
+                InvocationStatus.COMPUTED, None,
             )
-            payload = PostRunPayload(
-                record_id_hash=record_id,
-                tag=tag,
-                input=data,
-                output=output_data,
-                stats=RunStats(
-                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
-                    status=status,
-                    started_at=started_at,
-                    finished_at=finished_at,
-                    error=exc,
-                ),
-                pod=PodContext(
-                    label=self.label,
-                    pod_hash=self.content_hash().to_string(),
-                ),
-            )
-            self._fire_post_run_hooks(payload)
-
-        if exc is not None:
-            raise exc
+        )
         return out_tag, output_data
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:

@@ -38,10 +38,13 @@ class RunStats:
     """Timing and status information for a single pod invocation.
 
     Attributes:
-        duration_ms: Wall-clock time in milliseconds.
+        duration_ms: Wall-clock milliseconds elapsed during the compute-or-lookup
+            step only. Hook execution time is not included.
         status: Whether the result was freshly computed, a cache hit, or an error.
         started_at: UTC timestamp when the invocation started.
-        finished_at: UTC timestamp when the invocation finished (after hooks fire).
+        finished_at: UTC timestamp when the compute-or-lookup step completed,
+            before hooks fire. Together with ``started_at`` it gives the raw
+            compute time, independent of hook overhead.
         error: The exception raised, if ``status == ERROR``; ``None`` otherwise.
     """
 
