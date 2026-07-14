@@ -76,32 +76,41 @@ This is the reverse-lookup chain. The signature must be:
 
 ## Design Axes
 
-### 1. Pod Taxonomy — New `SideEffectPod` class
+### 1. Pod Taxonomy
 
-**Decision:** Introduce a new `SideEffectPod` class alongside `FunctionPod`.
+**Decision:** Introduce `SideEffectPodProtocol` as a proper protocol and `SideEffectPod`
+as its concrete implementation.
 
-`SideEffectPod` shares the `_FunctionPodBase` execution infrastructure (executor
-routing, async channel execution, observer integration), but has distinct semantics:
-the wrapped function returns `None`, the output stream is the input stream passed
-through, and invocations are always recorded in the side-effect invocation log.
+**Protocol layer — `SideEffectPodProtocol`** (in `src/orcapod/protocols/`):
+Defines the contract of a side-effect pod purely in terms of its methods and type
+signatures, independent of any implementation detail. This is the type that user code,
+type checkers, and the framework itself reason about. It follows the same pattern as
+`StreamProtocol`, `DataProtocol`, `PodProtocol`, and other protocol definitions
+throughout Orcapod.
 
-**Why not a flag (`side_effect=True`) on `FunctionPod`?**
-A flag adds dead branches to every `FunctionPod` code path and spreads side-effect
-semantics across a class whose core contract is `input → output`. It also makes type
-signatures ambiguous — `FunctionPod.process()` always promises an output stream.
+**Implementation layer — `SideEffectPod`** (in `src/orcapod/core/`):
+Implements `SideEffectPodProtocol` by extending `_FunctionPodBase`. This inheritance
+is purely an implementation choice — it gives `SideEffectPod` hashing, executor
+routing, async channel execution, and observer wiring for free, without those
+mechanisms needing to be duplicated. The public contract is determined by the protocol,
+not by what `_FunctionPodBase` exposes.
 
-**Why not a subclass of `FunctionPod`?**
-Subclassing inherits the output-oriented contract (return type, caching logic,
-`record_id_hash` on the output datagram). Overriding those creates a leaky abstraction.
-A sibling class with shared base infrastructure is cleaner.
+**Rejected alternatives:**
+- **Flag on `FunctionPod`** (`side_effect=True`): creates a dead branch in every
+  `FunctionPod` code path and makes the type contract ambiguous at the call site.
+- **Subclass of `FunctionPod`**: inherits the output-oriented contract and then must
+  override it, producing a leaky abstraction. `_FunctionPodBase` is the right
+  inheritance target — not `FunctionPod` itself.
 
-**Class hierarchy:**
+**Class structure:**
 ```
-TraceableBase
-├── _FunctionPodBase          (shared: executor routing, hooks, async, observer)
-│   ├── FunctionPod           (input → output; cached by default)
-│   └── SideEffectPod         (input → pass-through; invocation always logged)
-└── StaticOutputOperatorPod   (operator pod base)
+protocols/
+└── SideEffectPodProtocol     (contract: methods + type signatures)
+
+core/
+└── _FunctionPodBase          (shared execution infrastructure)
+    ├── FunctionPod           (implements FunctionPodProtocol)
+    └── SideEffectPod         (implements SideEffectPodProtocol)
 ```
 
 ### 2. Output Contract — Pass-Through
