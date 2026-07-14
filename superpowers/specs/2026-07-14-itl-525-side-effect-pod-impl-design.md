@@ -180,7 +180,9 @@ should be treated as immutable by callers (no public setters).
 class SideEffectPod(_FunctionPodBase):
     """A pipeline node whose primary purpose is a side effect.
 
-    Wraps a ``(data: T, [ctx: InvocationContext]) -> None`` callable.
+    Wraps a ``(data: T, ctx: InvocationContext) -> None`` callable.
+    ``InvocationContext`` is always constructed and passed — it is part of
+    the function contract. Callers that do not need it may ignore it.
     Returns a pass-through stream. When ``drop_on_failure=True``, only
     successfully-delivered rows flow downstream.
 
@@ -210,9 +212,8 @@ with `tracker_manager` (if inside a `with PipelineJob():` block).
 A `StreamBase` subclass returned by `SideEffectPod.process()` in standalone mode.
 
 `iter_data()` iterates the upstream stream and, per row:
-1. Builds `InvocationContext` if the user function declares one (detected by type
-   annotation — same detection logic as injection in `SideEffectJobNode`).
-2. Calls the user function.
+1. Builds `InvocationContext` (always — it is always constructed and passed).
+2. Calls `user_fn(data, ctx)`.
 3. On success: yields `(tag, data)` downstream.
 4. On exception with `on_error="raise"`: re-raises; row aborted.
 5. On exception with `on_error="log"` + `drop_on_failure=True`: logs; row dropped.
@@ -372,7 +373,7 @@ Full row-level logic:
            return (tag, data)   # re-emit without re-delivery
        # status == "failed" or None → fall through to delivery
 
-4. Build InvocationContext if user function needs it:
+4. Build InvocationContext (always):
        ctx = InvocationContext(
            invocation_hash=invocation_hash,
            pod_name=self._pod.label,
@@ -381,9 +382,9 @@ Full row-level logic:
            _pipeline_hash_ch=self.pipeline_hash(),
            _full_input_packet_hash_ch=fip_hash,
            _hash_config=hash_config,
-       ) if _needs_ctx(user_fn) else None
+       )
 
-5. Try: call user_fn(data[, ctx])
+5. Try: call user_fn(data, ctx)
        write_invocation_row(status="success", ...)
        return (tag, data)
 
@@ -398,19 +399,17 @@ Full row-level logic:
        return (tag, data)  # pass through regardless
 ```
 
-### `InvocationContext` injection detection
+### Function contract
 
-Detection is by **type annotation only**, not parameter name:
+Every side-effect function must accept `InvocationContext` as its second positional
+argument:
 
 ```python
-def _needs_ctx(fn: Callable) -> bool:
-    """Return True iff fn has a parameter annotated exactly as InvocationContext."""
-    hints = get_type_hints(fn)
-    return InvocationContext in hints.values()
+def my_fn(data: MyData, ctx: InvocationContext) -> None: ...
 ```
 
-If no `InvocationContext` parameter is declared, the function is called with data only
-and no `InvocationContext` is constructed (zero overhead).
+`InvocationContext` is always constructed and passed — there is no optional detection.
+Callers that do not need the context may ignore the value (`_ctx` by convention).
 
 ### Invocation table DDL
 
@@ -618,8 +617,8 @@ File: `tests/test_core/side_effect_pod/test_side_effect_pod.py`
 |---|---|---|
 | T1 | Basic pass-through — `drop_on_failure=False`, success | All input rows in output |
 | T2 | `drop_on_failure=True` (default), all succeed | All rows emitted |
-| T3 | `InvocationContext` auto-injection | `ctx.invocation_hash` non-empty string; `ctx.format_id()` returns `"orcapod-{hash}"` |
-| T4 | No-`ctx` function | Pod executes without error; `InvocationContext` not constructed |
+| T3 | `InvocationContext` always passed | `ctx.invocation_hash` non-empty string; `ctx.format_id()` returns `"orcapod-{hash}"` |
+| T4 | `InvocationContext` ignored by callee | Pod executes without error; `_ctx` parameter present but unused |
 | T5 | Invocation log written — DB-backed pipeline | Row at `<pipeline_hash>/side_effect_invocations`; `status="success"`; no `invocation_hash` column |
 | T6 | `track_completion=True` — same inputs re-run | Second run: function called once total; `status="skipped"` row added; row still emitted |
 | T7 | `track_completion=False` — same inputs re-run | Both runs: function called; two `status="success"` log rows |
