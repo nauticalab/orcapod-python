@@ -521,3 +521,57 @@ class TestSideEffectJobNodeAsync:
         out = asyncio.run(_run())
         assert len(out) == 10
         assert len(results_store) == 10
+
+
+# ---------------------------------------------------------------------------
+# Task 9 tests — full pipeline integration
+# ---------------------------------------------------------------------------
+
+
+class TestSideEffectPodPipelineIntegration:
+    """T15: Side-effect pod inside a PipelineJob."""
+
+    def test_t15_pipeline_composition_mid_pipeline(self):
+        """T15: Pod runs mid-pipeline; delivery log written to DB."""
+        import polars as pl
+        from orcapod.pipeline.job import PipelineJob
+        from orcapod.side_effects import SideEffectPod
+        from orcapod.core.sources.dict_source import DictSource
+
+        delivery_log = []
+
+        def log_delivery(data, ctx):
+            delivery_log.append(dict(data))
+
+        log_pod = SideEffectPod(log_delivery)
+
+        db = _make_in_memory_db()
+
+        with PipelineJob(name="test_pipeline", store=db) as job:
+            source = DictSource(
+                [{"id": 0, "value": 10}, {"id": 1, "value": 20}],
+                tag_columns=["id"],
+            )
+            log_pod.process(source)
+
+        job.run()
+
+        # Delivery log was populated
+        assert len(delivery_log) == 2
+
+        # Find the side_effect node in the compiled graph
+        side_effect_nodes = [
+            n for n in job.dag.nodes()
+            if getattr(n, "node_type", None) == "side_effect"
+        ]
+        assert len(side_effect_nodes) == 1
+        node = side_effect_nodes[0]
+
+        # Invocation log written to DB (pipeline_db is scoped to the pipeline name)
+        pipeline_db = db.at("test_pipeline")
+        table_path = (node.pipeline_hash().to_string(), "side_effect_invocations")
+        records = pipeline_db.get_all_records(table_path)
+        assert records is not None
+        df = pl.from_arrow(records)
+        assert len(df) == 2
+        assert all(df["status"] == "success")

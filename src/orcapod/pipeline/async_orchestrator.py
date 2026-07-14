@@ -18,6 +18,7 @@ from orcapod.pipeline.result import OrchestratorResult
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
+    is_side_effect_node,
     is_source_node,
 )
 
@@ -216,6 +217,21 @@ class AsyncPipelineOrchestrator:
                         tg.create_task(
                             node.async_execute(
                                 input_readers, writer, observer=effective_observer
+                            )
+                        )
+                    elif is_side_effect_node(node):
+                        predecessors = in_edges.get(node, [])
+                        if not predecessors:
+                            raise ValueError(
+                                f"SideEffectNode expects exactly 1 upstream, got 0"
+                            )
+                        input_reader = edge_readers[(predecessors[0], node)]
+                        tg.create_task(
+                            node.async_execute(
+                                [input_reader],
+                                writer,
+                                observer=effective_observer,
+                                run_id=run_id,
                             )
                         )
                     else:

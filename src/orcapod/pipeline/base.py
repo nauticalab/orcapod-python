@@ -197,6 +197,12 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """Node class to use for operator-pod invocations — e.g. ``OperatorNode``."""
         ...
 
+    @property
+    @abstractmethod
+    def side_effect_node_class(self) -> type:
+        """Node class to use for side-effect pod invocations — e.g. ``SideEffectJobNode``."""
+        ...
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
@@ -402,6 +408,12 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
             if isinstance(inv, FunctionInvocation):
                 node_map[key] = self.function_node_class(
                     function_pod=inv.pod,
+                    input_stream=upstream_nodes[0],
+                    label=inv.label,
+                )
+            elif isinstance(inv, SideEffectInvocation):
+                node_map[key] = self.side_effect_node_class(
+                    side_effect_pod=inv.pod,
                     input_stream=upstream_nodes[0],
                     label=inv.label,
                 )
