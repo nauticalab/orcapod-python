@@ -113,21 +113,69 @@ core/
     └── SideEffectPod         (implements SideEffectPodProtocol)
 ```
 
-### 2. Output Contract — Pass-Through
+### 2. Pod Kinds and Output Contract
 
-**Decision:** Side-effect pods emit their input stream unchanged as output. The user
-function returns `None`.
+**Decision:** There are two categorically distinct kinds of side-effect pod. They differ
+enough in semantics, infrastructure requirements, and output contract to warrant
+separate types rather than a single class with a flag. Whether they share a common
+`SideEffectPod` umbrella type is deferred — it is not necessary to decide for the
+initial implementation.
 
-**Rejected alternatives:**
-- **No output (terminates branch):** Cuts the DAG at the side-effect node, preventing
-  downstream steps from seeing the same data. Not composable.
-- **Structured record `{status, artifact_ref, timestamp}`:** Forces pod authors to define
-  an output schema for a conceptually void operation. Adds schema prediction complexity.
-  Deferred to a future `StatusEmittingPod` variant if downstream aggregation proves
-  necessary.
+#### `SinkPod` — completion-tracked, terminal delivery
 
-Pass-through is the most composable choice: a side-effect pod can be inserted anywhere
-in a pipeline without disrupting the data flow.
+A `SinkPod` writes to an external source with a meaningful notion of success or failure
+*per input*. The intent is exactly-once delivery: each (pod, input) pair should result
+in exactly one successful write.
+
+**Output contract: terminal.** The pod ends the DAG branch. Delivering data outward is
+the purpose; what happens next in the pipeline is a separate concern expressed as a
+separate branch before this node.
+
+**Completion tracking.** The framework records completion state per (pod, input) in an
+internal log:
+
+- **Not yet seen** → execute the delivery.
+- **Previously succeeded** → skip silently on re-run.
+- **Previously failed** → re-attempt on the next explicit pipeline re-run.
+
+Retry policy (automatic retries, max attempts, backoff) is **deferred to ITL-526**,
+which will design a shared retry mechanism for both `FunctionPod` and `SinkPod`. For
+now, re-attempt occurs only when the pipeline is explicitly re-run by the user.
+
+Completion state is internalized — tracked in the pod's invocation log, visible to
+observers, not emitted as pipeline data.
+
+**Canonical examples:** writing an audit row to a database, archiving a file to object
+storage, posting a one-time notification.
+
+#### `TapPod` — always-fire, pass-through observation
+
+A `TapPod` reacts to every data packet passing through it, unconditionally. There is no
+notion of completion, no memory of past encounters, no skip or retry logic.
+
+**Output contract: pass-through.** The input tag and data flow through unchanged. The
+pod is a transparent interceptor — a tap on the stream.
+
+**No completion tracking.** Every pipeline run, every input triggers the effect. This
+is correct and expected: a logger should log every packet every time, not once.
+
+**Canonical examples:** structured logging, metrics emission, real-time monitoring
+feeds, debug tracing.
+
+#### Comparison
+
+| | `SinkPod` | `TapPod` |
+|---|---|---|
+| Output contract | Terminal | Pass-through |
+| Completion tracking | Yes — success / failed / not-seen | No |
+| Re-run behavior | Skip on success; retry on re-run if failed | Always fires |
+| Invocation log | Required (completion state) | Optional (observability only) |
+| Retry policy | Deferred to ITL-526 | N/A |
+
+**Rejected alternative — single class with `idempotent: bool`:** The semantic
+difference between "always fire" and "fire once and track completion" is substantial
+enough that a flag would obscure rather than clarify intent. A pod author should not
+need to reason about idempotency to write a logger.
 
 ### 3. Caching / Re-Execution Semantics — Author-Declared Idempotency
 
