@@ -24,25 +24,26 @@ serialization conventions) and specifies the follow-up implementation work.
 
 ## Goals & Success Criteria
 
-- A `SideEffectPod` class and `@side_effect_pod` decorator that:
-  - Accept a user function `(data: T, [ctx: SideEffectContext]) -> None`.
-  - Pass the input stream through unchanged as output.
-  - Inject a `SideEffectContext` carrying `invocation_signature`, `execution_id`,
-    `pod_name`, and `pipeline_run_id` when the user function declares a `ctx`
-    parameter typed `SideEffectContext`.
-  - Accept a `SideEffectConfig` controlling idempotency and error handling.
-- A `SideEffectContext` dataclass with a `format_id()` helper that returns the
-  canonical `orcapod-{invocation_signature}` string for embedding in artifacts.
-- An `_orcapod_side_effect_invocations` table in the pipeline database that records
-  every invocation (hash, timing, status, input hash, pod identity) as the
-  **near-side** of the reverse-lookup chain.
-- Idempotency support: when `SideEffectConfig(idempotent=True)`, skip re-execution
-  if the same `invocation_signature` is already in the invocation log.
-- Sync and async execution paths both supported.
-- A worked end-to-end example demonstrating the full reverse-lookup walk-through.
-- Explicit reconciliation with the ITL-523 post-run hook: shared hash formula, shared
-  `on_error` vocabulary, shared `InvocationIdentity` base type.
-- A follow-up implementation issue (ITL-525) filed with concrete task breakdown.
+This is an **interactive design spike**. Every design axis listed in this document must
+be explicitly discussed with Edgar Walker before a decision is recorded. The agent's
+role is to surface options, trade-offs, and codebase constraints; the final call on each
+axis belongs to Edgar. The spec is a summary of those concluded discussions — not a
+set of decisions made independently.
+
+The spike is complete when:
+
+- Every design axis below has been discussed and a final decision recorded, with the
+  chosen option and the rationale for rejecting alternatives.
+- The pipeline execution hash is fully specified: its formula, format, stability
+  properties, and how a pod author accesses it from inside a pod body.
+- At least one worked example is included: a side-effect pod definition, the external
+  artifact it produces, and a concrete walk-through of the reverse-lookup path from
+  that artifact back to the originating pipeline run and inputs.
+- The design is explicitly reconciled with ITL-523 (post-run hook): where the two
+  concepts share primitives, that is called out; where they diverge, the reason is
+  stated.
+- A follow-up implementation issue is filed in Linear with a concrete task breakdown,
+  ready to pick up.
 
 ---
 
