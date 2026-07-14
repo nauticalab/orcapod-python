@@ -18,7 +18,6 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
-from orcapod.types import ColumnConfig
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -185,10 +184,9 @@ class CachedFunctionPod(WrappedFunctionPod):
         try:
             out_tag, output_data = self.process_data(tag, data, logger=logger)
             if output_data is not None:
-                meta = output_data.as_dict(columns=ColumnConfig(meta=True))
                 status = (
                     InvocationStatus.HIT
-                    if meta.get(self.RESULT_COMPUTED_FLAG) is False
+                    if output_data.get_meta_value(self.RESULT_COMPUTED_FLAG) is False
                     else InvocationStatus.COMPUTED
                 )
             else:
@@ -243,10 +241,9 @@ class CachedFunctionPod(WrappedFunctionPod):
                 tag, data, logger=logger
             )
             if output_data is not None:
-                meta = output_data.as_dict(columns=ColumnConfig(meta=True))
                 status = (
                     InvocationStatus.HIT
-                    if meta.get(self.RESULT_COMPUTED_FLAG) is False
+                    if output_data.get_meta_value(self.RESULT_COMPUTED_FLAG) is False
                     else InvocationStatus.COMPUTED
                 )
             else:
