@@ -38,6 +38,17 @@ from orcapod.types import (
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
+from datetime import datetime, timezone
+
+from orcapod.hooks import (
+    HookConfig,
+    InvocationStatus,
+    PodContext,
+    PostRunHook,
+    PostRunPayload,
+    RunStats,
+)
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -76,6 +87,7 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
+        self._post_run_hooks: list[PostRunHook] = []
         # Union-typed input args (e.g. x: str | Path) are deliberately accepted
         # at construction time. ensure_types_registered_for_schemas registers
         # each non-None branch individually; the union is only resolved to a
@@ -182,6 +194,166 @@ class _FunctionPodBase(TraceableBase):
         """Async counterpart of ``process_data``."""
         result = await self.data_function.async_call(data, logger=logger)
         return tag, result
+
+    def add_post_run_hook(self, hook: PostRunHook) -> None:
+        """Register a post-run hook on this pod.
+
+        Hooks fire after every invocation (computed, cache hit, or error), in
+        registration order, before the result is emitted downstream.
+
+        A plain callable defaults to fail-loud (exceptions propagate, stopping
+        the pod run). Wrap in ``HookConfig(fn=..., on_error="log")`` to log and
+        continue on hook failure.
+
+        Args:
+            hook: A callable ``(PostRunPayload) -> None``, or a ``HookConfig``
+                wrapping such a callable with explicit error handling.
+        """
+        self._post_run_hooks.append(hook)
+
+    def _fire_post_run_hooks(self, payload: PostRunPayload) -> None:
+        """Fire all registered hooks with payload in registration order.
+
+        Args:
+            payload: The post-run payload to pass to each hook.
+        """
+        for hook in self._post_run_hooks:
+            fn = hook.fn if isinstance(hook, HookConfig) else hook
+            on_error = hook.on_error if isinstance(hook, HookConfig) else "raise"
+            try:
+                fn(payload)
+            except Exception as exc:
+                if on_error == "raise":
+                    raise
+                logger.warning(
+                    "Post-run hook %r raised and was suppressed: %s",
+                    fn,
+                    exc,
+                    exc_info=True,
+                )
+
+    def _invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Call ``process_data``, time it, and fire post-run hooks.
+
+        This is the call site used by ``FunctionPodStream`` and
+        ``async_execute``; ``process_data`` itself is unchanged. Override in
+        subclasses (e.g. ``CachedFunctionPod``) to supply a different
+        ``InvocationStatus``.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger forwarded to ``process_data``.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        started_at = datetime.now(timezone.utc)
+        exc: Exception | None = None
+        out_tag = tag
+        output_data: DataProtocol | None = None
+
+        try:
+            out_tag, output_data = self.process_data(tag, data, logger=logger)
+            status = InvocationStatus.COMPUTED
+        except Exception as e:
+            exc = e
+            status = InvocationStatus.ERROR
+
+        finished_at = datetime.now(timezone.utc)
+
+        if self._post_run_hooks:
+            record_id = (
+                str(output_data.datagram_uuid) if output_data is not None else None
+            )
+            payload = PostRunPayload(
+                record_id_hash=record_id,
+                tag=tag,
+                input=data,
+                output=output_data,
+                stats=RunStats(
+                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
+                    status=status,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    error=exc,
+                ),
+                pod=PodContext(
+                    label=self.label,
+                    pod_hash=self.content_hash().to_string(),
+                ),
+            )
+            self._fire_post_run_hooks(payload)
+
+        if exc is not None:
+            raise exc
+        return out_tag, output_data
+
+    async def _async_invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Async counterpart of ``_invoke_with_hooks``.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger forwarded to ``async_process_data``.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        started_at = datetime.now(timezone.utc)
+        exc: Exception | None = None
+        out_tag = tag
+        output_data: DataProtocol | None = None
+
+        try:
+            out_tag, output_data = await self.async_process_data(
+                tag, data, logger=logger
+            )
+            status = InvocationStatus.COMPUTED
+        except Exception as e:
+            exc = e
+            status = InvocationStatus.ERROR
+
+        finished_at = datetime.now(timezone.utc)
+
+        if self._post_run_hooks:
+            record_id = (
+                str(output_data.datagram_uuid) if output_data is not None else None
+            )
+            payload = PostRunPayload(
+                record_id_hash=record_id,
+                tag=tag,
+                input=data,
+                output=output_data,
+                stats=RunStats(
+                    duration_ms=(finished_at - started_at).total_seconds() * 1000,
+                    status=status,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    error=exc,
+                ),
+                pod=PodContext(
+                    label=self.label,
+                    pod_hash=self.content_hash().to_string(),
+                ),
+            )
+            self._fire_post_run_hooks(payload)
+
+        if exc is not None:
+            raise exc
+        return out_tag, output_data
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
         """Handle multiple input streams by joining them if necessary.
@@ -528,7 +700,7 @@ class FunctionPodStream(StreamBase):
                     yield tag, data
             else:
                 # Process data
-                tag, output_data = self._function_pod.process_data(tag, data)
+                tag, output_data = self._function_pod._invoke_with_hooks(tag, data)
                 self._cached_output_datas[i] = (tag, output_data)
                 if output_data is not None:
                     yield tag, output_data
