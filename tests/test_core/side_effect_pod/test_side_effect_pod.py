@@ -58,3 +58,37 @@ class TestSideEffectPodConfig:
         cfg = SideEffectPodConfig(track_completion=False, drop_on_failure=False)
         assert cfg.track_completion is False
         assert cfg.drop_on_failure is False
+
+
+# ---------------------------------------------------------------------------
+# Task 3 tests
+# ---------------------------------------------------------------------------
+
+class TestSideEffectInvocation:
+    def test_construction(self):
+        from orcapod.pipeline.pod_invocation import SideEffectInvocation
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(data)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream()
+        inv = SideEffectInvocation(pod=pod, input_streams=(stream,))
+        assert inv.pod is pod
+        assert inv.input_streams == (stream,)
+
+    def test_requires_exactly_one_stream(self):
+        from orcapod.pipeline.pod_invocation import SideEffectInvocation
+        from orcapod.side_effects import SideEffectPod
+
+        def fn(data, ctx): pass
+        pod = SideEffectPod(fn)
+        stream = _make_stream()
+
+        with pytest.raises(ValueError):
+            SideEffectInvocation(pod=pod, input_streams=())
+
+        with pytest.raises(ValueError):
+            SideEffectInvocation(pod=pod, input_streams=(stream, stream))
