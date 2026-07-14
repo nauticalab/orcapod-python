@@ -15,6 +15,7 @@ from orcapod.pipeline.pod_invocation import (
     PodInvocation,
     SideEffectInvocation,
 )
+from orcapod.side_effects import SideEffectNode
 from orcapod.protocols import core_protocols as cp
 from orcapod.utils.lazy_module import LazyModule
 
@@ -533,6 +534,12 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                     )
                 inv_by_node_hash[node_hash] = FunctionInvocation(
                     pod=node._function_pod,
+                    input_streams=(node.upstreams[0],),
+                    label=node._label,
+                )
+            elif isinstance(node, SideEffectNode):
+                inv_by_node_hash[node_hash] = SideEffectInvocation(
+                    pod=node._pod,
                     input_streams=(node.upstreams[0],),
                     label=node._label,
                 )

@@ -12,7 +12,7 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
-from orcapod.side_effects import SideEffectJobNode
+from orcapod.side_effects import SideEffectNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.pipeline.dag import OrcaDAG
@@ -65,7 +65,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
     source_node_class = SourceNode
     function_node_class = FunctionNode
     operator_node_class = OperatorNode
-    side_effect_node_class = SideEffectJobNode
+    side_effect_node_class = SideEffectNode
 
     def __init__(
         self,

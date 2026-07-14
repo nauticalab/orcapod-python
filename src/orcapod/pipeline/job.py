@@ -468,6 +468,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         from orcapod.core.nodes.function_node import FunctionNode
         from orcapod.core.nodes.operator_node import OperatorNode
         from orcapod.pipeline.graph import Pipeline
+        from orcapod.side_effects import SideEffectNode
 
         if not self._compiled:
             raise RuntimeError(
@@ -517,6 +518,14 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     label=job_node._label,
                     table_scope=job_node._table_scope,
                     tracker_manager=job_node.tracker_manager,
+                )
+
+            elif isinstance(job_node, SideEffectJobNode):
+                upstream_bp_hash = job_id_to_bp_hash[id(job_node._input_stream)]
+                node_map[node_hash] = SideEffectNode(
+                    side_effect_pod=job_node._pod,
+                    input_stream=node_map[upstream_bp_hash],
+                    label=job_node._label,
                 )
 
             else:

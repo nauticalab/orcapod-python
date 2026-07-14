@@ -13,6 +13,7 @@ import dataclasses
 import datetime
 import hashlib
 import logging
+import uuid
 from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -418,7 +419,7 @@ def _write_invocation_row(
     executed_at = datetime.datetime.now(datetime.timezone.utc)
     executed_at_str = executed_at.isoformat()
     record_id_src = (
-        f"{fip_hash_str}::{pod_content_hash_str}::{run_id}::{status}::{executed_at_str}"
+        f"{fip_hash_str}::{pod_content_hash_str}::{run_id}::{status}::{executed_at_str}::{uuid.uuid4()}"
     ).encode("utf-8")
     record_id = hashlib.sha256(record_id_src).digest()
 
@@ -711,20 +712,16 @@ def _merge_config(
 
 
 # ---------------------------------------------------------------------------
-# SideEffectJobNode
+# SideEffectNode — lightweight blueprint node (no DB)
 # ---------------------------------------------------------------------------
 
 
-class SideEffectJobNode(StreamBase):
-    """DB-backed execution node for side-effect pods.
+class SideEffectNode(StreamBase):
+    """Lightweight blueprint node for side-effect pods.
 
-    Created at pipeline compile time by ``PipelineJob``. Receives a
-    ``pipeline_database`` via ``attach_databases()``. ``run_id`` is passed
-    as a call-time keyword argument from the orchestrator.
-
-    Inherits from ``StreamBase`` for identity infrastructure and to satisfy
-    the ``producer`` / ``upstreams`` / ``output_schema`` contract required
-    by ``SyncPipelineOrchestrator._materialize_as_stream``.
+    Used by ``Pipeline`` (the blueprint) to represent a side-effect pod
+    invocation without any DB attachment or execution logic. Analogous to
+    ``FunctionNode`` in the function pod hierarchy.
 
     Args:
         side_effect_pod: The ``SideEffectPod`` this node wraps.
@@ -743,8 +740,6 @@ class SideEffectJobNode(StreamBase):
         self._pod = side_effect_pod
         self._input_stream = input_stream
         super().__init__(label=label)
-        self._pipeline_database: ArrowDatabaseProtocol | None = None
-        self._table_path: tuple[str, ...] | None = None
 
     # ------------------------------------------------------------------
     # StreamBase interface
@@ -808,14 +803,7 @@ class SideEffectJobNode(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table:
-        """Collect all rows from ``iter_data()`` into an Arrow table.
-
-        Warning:
-            Calling ``as_table()`` on a ``SideEffectJobNode`` iterates via
-            ``iter_data()``, which re-invokes the side-effect function for each
-            row with no DB logging and no ``run_id``. Use ``execute()`` for
-            orchestrated execution.
-        """
+        """Collect all rows from ``iter_data()`` into an Arrow table."""
         from orcapod.types import ColumnConfig as _ColumnConfig
         from orcapod.utils import arrow_utils
 
@@ -831,6 +819,47 @@ class SideEffectJobNode(StreamBase):
             pa.concat_tables(tag_tables),
             pa.concat_tables(data_tables),
         )
+
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this side-effect node.
+
+        Returns:
+            A tuple of the form ``("side_effect", label, content_hash_string)``.
+        """
+        return ("side_effect", self._pod.label, self._pod.content_hash().to_string())
+
+
+# ---------------------------------------------------------------------------
+# SideEffectJobNode — DB-backed execution node
+# ---------------------------------------------------------------------------
+
+
+class SideEffectJobNode(SideEffectNode):
+    """DB-backed execution node for side-effect pods.
+
+    Created at pipeline compile time by ``PipelineJob``. Receives a
+    ``pipeline_database`` via ``attach_databases()``. ``run_id`` is passed
+    as a call-time keyword argument from the orchestrator.
+
+    Extends ``SideEffectNode`` with DB attachment and orchestrated execution
+    methods. Analogous to ``FunctionJobNode`` in the function pod hierarchy.
+
+    Args:
+        side_effect_pod: The ``SideEffectPod`` this node wraps.
+        input_stream: The upstream stream at compile time.
+        label: Optional display label.
+    """
+
+    def __init__(
+        self,
+        side_effect_pod: SideEffectPod,
+        input_stream: StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        super().__init__(side_effect_pod=side_effect_pod, input_stream=input_stream, label=label)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._table_path: tuple[str, ...] | None = None
 
     # ------------------------------------------------------------------
     # DB attachment
