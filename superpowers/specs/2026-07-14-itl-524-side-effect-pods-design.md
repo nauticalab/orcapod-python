@@ -309,38 +309,53 @@ lookup path remains valid — the user resolves any ambiguity by inspecting mult
 candidate rows. Collision probability at 8 bytes (64 bits) per component is negligible
 for any realistic invocation volume.
 
-### 5. Hash Surface — `SideEffectContext` Parameter Auto-Injection
+### 5. Hash Surface — `InvocationContext` Parameter Injection
 
-**Decision:** The framework auto-injects a `SideEffectContext` instance when the user
-function declares a parameter typed `SideEffectContext`.
+**Decision:** The framework injects an `InvocationContext` instance when the user
+function declares a parameter typed `InvocationContext`. Detection is by type
+annotation only — not by parameter name. No magic.
 
 ```python
 @dataclasses.dataclass(frozen=True)
-class SideEffectContext:
-    invocation_signature: str      # 32-char hex; stable across identical re-runs
-    execution_id: str              # UUID string; unique per actual execution
-    pod_name: str                  # human-readable pod label
-    pod_content_hash: str          # pod.content_hash().to_string()
-    pipeline_run_id: str | None    # run-level context; None for lazy pipelines
-
-    def format_id(self) -> str:
-        """Canonical artifact tag: 'orcapod-{invocation_signature}'."""
-        return f"orcapod-{self.invocation_signature}"
+class InvocationContext:
+    invocation_hash: str        # serialized per pod's InvocationHashConfig
+    pod_name: str               # human-readable pod label (pod.label)
+    pod_content_hash: str       # pod.content_hash().to_string() — exact code version
+    pipeline_run_id: str | None # None for lazy/non-compiled pipelines
 ```
 
-Detection is by **type annotation** (`SideEffectContext`), not by parameter name.
-If no `SideEffectContext` parameter is declared, the framework calls the function
-without it (zero overhead for pods that don't need the hash).
+`InvocationContext` is shared by both `SinkPod` and `TapPod`. The `invocation_hash`
+field contains the serialized compound described in Axis 4 — two-part for `SinkPod`,
+three-part (with verbatim `pipeline_run_id`) for `TapPod` when a run ID is available.
+`pipeline_run_id` is also exposed as a first-class field so pod authors can store or
+log it directly without parsing it back out of `invocation_hash`.
 
-**Why a context object, not a special parameter name?**
-Type-based detection is explicit, IDE-discoverable, and carries no magic naming
-convention. It mirrors how Python frameworks inject dependencies (FastAPI, pytest
-fixtures with type resolution). It avoids the risk of a user accidentally declaring a
-parameter named `ctx` for unrelated purposes.
+If no `InvocationContext` parameter is present in the user function, the framework
+calls the function without one. There is zero overhead — no context object is
+constructed — for pods that don't need the hash.
 
-**Relationship to `InvocationIdentity` shared base:**
-See Section 11 (Reconciliation with ITL-523). `SideEffectContext` embeds an
-`InvocationIdentity` base — or is equivalent to one — enabling shared utilities.
+**Usage:**
+
+```python
+@sink_pod
+def audit_write(data: PatientRecord, ctx: InvocationContext) -> None:
+    db.insert(ctx.invocation_hash, data.patient_id, ctx.pod_content_hash)
+
+@tap_pod
+def log_row(data: PatientRecord, ctx: InvocationContext) -> None:
+    logger.info("[%s] Processing patient %s", ctx.invocation_hash, data.patient_id)
+
+@sink_pod
+def simple_sink(data: PatientRecord) -> None:
+    # No ctx needed — valid, no overhead
+    external_api.push(data.patient_id)
+```
+
+**Why typed injection, not a magic parameter name:**
+A parameter named `ctx` with any other type annotation (e.g. a user-defined context
+object) must not be intercepted. Relying on name alone would make the mechanism fragile
+and surprising. Type annotation detection is unambiguous — it fires if and only if the
+declared type is exactly `InvocationContext`.
 
 ### 6. Failure Semantics — Author-Declared, Default Fail-Loud
 
