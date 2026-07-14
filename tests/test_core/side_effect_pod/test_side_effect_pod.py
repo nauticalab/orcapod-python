@@ -92,3 +92,178 @@ class TestSideEffectInvocation:
 
         with pytest.raises(ValueError):
             SideEffectInvocation(pod=pod, input_streams=(stream, stream))
+
+
+# ---------------------------------------------------------------------------
+# Task 5 tests — standalone / lazy mode (no DB)
+# ---------------------------------------------------------------------------
+
+
+class TestSideEffectPodStandalone:
+    """T1–T4, T8–T10: standalone execution via SideEffectPodStream."""
+
+    def test_t1_passthrough_drop_on_failure_false(self):
+        """T1: All rows emitted when drop_on_failure=False and no errors."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(dict(data))
+
+        pod = SideEffectPod(fn, config=SideEffectPodConfig(drop_on_failure=False))
+        stream = _make_stream(3)
+        out = list(pod.process(stream).iter_data())
+
+        assert len(out) == 3
+        assert len(calls) == 3
+
+    def test_t2_passthrough_drop_on_failure_true_no_errors(self):
+        """T2: All rows emitted when drop_on_failure=True and no errors."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(dict(data))
+
+        pod = SideEffectPod(fn)  # default: drop_on_failure=True
+        stream = _make_stream(3)
+        out = list(pod.process(stream).iter_data())
+
+        assert len(out) == 3
+        assert len(calls) == 3
+
+    def test_t3_invocation_context_always_passed(self):
+        """T3: InvocationContext always constructed and passed."""
+        from orcapod.side_effects import SideEffectPod, InvocationContext
+
+        received = []
+        def fn(data, ctx):
+            received.append(ctx)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(1)
+        list(pod.process(stream).iter_data())
+
+        assert len(received) == 1
+        ctx = received[0]
+        assert isinstance(ctx, InvocationContext)
+        assert isinstance(ctx.invocation_hash, str)
+        assert len(ctx.invocation_hash) > 0
+        assert ctx.format_id().startswith("orcapod-")
+
+    def test_t4_invocation_context_ignored_by_callee(self):
+        """T4: Pod works fine when callee ignores ctx."""
+        from orcapod.side_effects import SideEffectPod
+
+        calls = []
+        def fn(data, _ctx):
+            calls.append(True)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(2)
+        out = list(pod.process(stream).iter_data())
+
+        assert len(out) == 2
+        assert len(calls) == 2
+
+    def test_t8_on_error_raise(self):
+        """T8: on_error='raise' propagates the exception."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+        def fn(data, ctx):
+            raise RuntimeError("boom")
+
+        pod = SideEffectPod(fn, config=SideEffectPodConfig(on_error="raise"))
+        stream = _make_stream(1)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            list(pod.process(stream).iter_data())
+
+    def test_t9_on_error_log_drop_on_failure_true(self):
+        """T9: on_error='log' + drop_on_failure=True drops failed rows."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+        def fn(data, ctx):
+            raise RuntimeError("oops")
+
+        pod = SideEffectPod(
+            fn,
+            config=SideEffectPodConfig(on_error="log", drop_on_failure=True),
+        )
+        stream = _make_stream(3)
+        out = list(pod.process(stream).iter_data())
+
+        assert len(out) == 0  # all rows dropped
+
+    def test_t10_on_error_log_drop_on_failure_false(self):
+        """T10: on_error='log' + drop_on_failure=False passes through despite failure."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+        def fn(data, ctx):
+            raise RuntimeError("oops")
+
+        pod = SideEffectPod(
+            fn,
+            config=SideEffectPodConfig(on_error="log", drop_on_failure=False),
+        )
+        stream = _make_stream(3)
+        out = list(pod.process(stream).iter_data())
+
+        assert len(out) == 3  # all rows still emitted
+
+
+class TestDecorators:
+    """T16–T18: @sink_pod, @tap_pod, @side_effect_pod."""
+
+    def test_t16_sink_pod(self):
+        """T16: @sink_pod sets track_completion=True, drop_on_failure=True."""
+        from orcapod.side_effects import sink_pod, SideEffectPod
+
+        @sink_pod
+        def my_sink(data, ctx):
+            pass
+
+        assert isinstance(my_sink, SideEffectPod)
+        assert my_sink.pod_config.track_completion is True
+        assert my_sink.pod_config.drop_on_failure is True
+
+    def test_t17_tap_pod(self):
+        """T17: @tap_pod sets track_completion=False, drop_on_failure=False."""
+        from orcapod.side_effects import tap_pod, SideEffectPod
+
+        @tap_pod
+        def my_tap(data, ctx):
+            pass
+
+        assert isinstance(my_tap, SideEffectPod)
+        assert my_tap.pod_config.track_completion is False
+        assert my_tap.pod_config.drop_on_failure is False
+
+    def test_t18_side_effect_pod_config_combinations(self):
+        """T18: @side_effect_pod(config=...) all four combinations."""
+        from orcapod.side_effects import side_effect_pod, SideEffectPodConfig
+
+        for tc in [True, False]:
+            for dof in [True, False]:
+                cfg = SideEffectPodConfig(track_completion=tc, drop_on_failure=dof)
+
+                @side_effect_pod(config=cfg)
+                def fn(data, ctx):
+                    pass
+
+                assert fn.pod_config.track_completion is tc
+                assert fn.pod_config.drop_on_failure is dof
+
+    def test_sink_pod_parameterised(self):
+        """@sink_pod(config=...) with explicit config override."""
+        from orcapod.side_effects import sink_pod, SideEffectPodConfig
+
+        cfg = SideEffectPodConfig(on_error="log")
+
+        @sink_pod(config=cfg)
+        def my_sink(data, ctx):
+            pass
+
+        assert my_sink.pod_config.on_error == "log"
+        assert my_sink.pod_config.track_completion is True
+        assert my_sink.pod_config.drop_on_failure is True

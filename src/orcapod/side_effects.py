@@ -171,3 +171,522 @@ class InvocationContext:
         else:
             parts = f"{c1}::{c2}"
         return f"orcapod-{parts}"
+
+
+# ---------------------------------------------------------------------------
+# SideEffectPodStream
+# ---------------------------------------------------------------------------
+
+
+class SideEffectPodStream(StreamBase):
+    """Pass-through stream returned by ``SideEffectPod.process()`` in standalone mode.
+
+    Iterates the upstream stream and calls the side-effect function per row.
+    No invocation log is written in standalone mode (``pipeline_run_id=None``).
+    """
+
+    def __init__(
+        self,
+        side_effect_pod: SideEffectPod,
+        input_stream: StreamProtocol,
+        **kwargs: Any,
+    ) -> None:
+        self._pod = side_effect_pod
+        self._input_stream = input_stream
+        super().__init__(**kwargs)
+
+    @property
+    def producer(self):  # type: ignore[override]
+        return self._pod
+
+    @property
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
+        return (self._input_stream,)
+
+    def identity_structure(self) -> Any:
+        return (self._pod, self._pod.argument_symmetry((self._input_stream,)))
+
+    def pipeline_identity_structure(self) -> Any:
+        return self.identity_structure()
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        return self._input_stream.output_schema(columns=columns, all_info=all_info)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return self._input_stream.keys(columns=columns, all_info=all_info)
+
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        for tag, data in self._input_stream.iter_data():
+            result = _execute_side_effect_row(
+                fn=self._pod._fn,
+                tag=tag,
+                data=data,
+                pod_config=self._pod.pod_config,
+                pipeline_hash_ch=self._pod.pipeline_hash(),
+                pod_content_hash_str=self._pod.content_hash().to_string(),
+                pod_name=self._pod.label,
+                run_id=None,
+                arrow_hasher=self._pod.data_context.arrow_hasher,
+            )
+            if result is not None:
+                yield result
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> pa.Table:
+        from orcapod.utils import arrow_utils
+
+        tag_tables = []
+        data_tables = []
+        for tag, data in self.iter_data():
+            tag_tables.append(tag.as_table(columns={"system_tags": True}))
+            data_tables.append(data.as_table(columns={"source": True}))
+        if not tag_tables:
+            # Return an empty table with the correct schema
+            tag_schema, data_schema = self.output_schema(
+                columns={"system_tags": True, "source": True}
+            )
+            tc = self._pod.data_context.type_converter
+            fields = {}
+            for name, py_type in {**tag_schema, **data_schema}.items():
+                fields[name] = pa.array(
+                    [], type=tc.python_type_to_arrow_type(py_type)
+                )
+            return pa.table(fields)
+        combined_tags = pa.concat_tables(tag_tables)
+        combined_data = pa.concat_tables(data_tables)
+        return arrow_utils.hstack_tables(combined_tags, combined_data)
+
+
+# ---------------------------------------------------------------------------
+# Shared row execution helper
+# ---------------------------------------------------------------------------
+
+
+def _execute_side_effect_row(
+    *,
+    fn: Callable,
+    tag: TagProtocol,
+    data: DataProtocol,
+    pod_config: SideEffectPodConfig,
+    pipeline_hash_ch: ContentHash,
+    pod_content_hash_str: str,
+    pod_name: str,
+    run_id: str | None,
+    arrow_hasher: Any,
+    pipeline_database: ArrowDatabaseProtocol | None = None,
+    table_path: tuple[str, ...] | None = None,
+) -> tuple[TagProtocol, DataProtocol] | None:
+    """Execute delivery for one (tag, data) row.
+
+    Args:
+        fn: The side-effect callable ``(data, ctx) -> None``.
+        tag: Tag for this row.
+        data: Data for this row.
+        pod_config: Pod-level configuration.
+        pipeline_hash_ch: Pipeline hash of the node (for invocation_hash c1).
+        pod_content_hash_str: String form of the pod's content hash.
+        pod_name: Label of the pod.
+        run_id: Pipeline run identifier (or ``None`` in standalone mode).
+        arrow_hasher: The ``arrow_hasher`` from the pod's data context.
+        pipeline_database: Attached DB (or ``None`` for standalone mode).
+        table_path: Path tuple for the invocation log table.
+
+    Returns:
+        ``(tag, data)`` to emit downstream, or ``None`` to drop the row.
+    """
+    from orcapod.utils import arrow_utils
+
+    # 1. Compute full_input_packet_hash over all four column groups.
+    tag_table = tag.as_table(columns={"system_tags": True})
+    data_table = data.as_table(columns={"source": True})
+    full_table = arrow_utils.hstack_tables(tag_table, data_table)
+    fip_hash: ContentHash = arrow_hasher.hash_table(full_table)
+    fip_hash_str = fip_hash.to_string()
+
+    # 2. Serialize invocation_hash.
+    cfg = pod_config.hash_config
+    c1 = _serialize_component(pipeline_hash_ch, cfg)
+    c2 = _serialize_component(fip_hash, cfg)
+    if not pod_config.track_completion and run_id is not None:
+        inv_hash = f"{c1}::{c2}::{run_id}"
+    else:
+        inv_hash = f"{c1}::{c2}"
+
+    # 3. Completion check (only in pipeline mode with DB).
+    if pod_config.track_completion and pipeline_database is not None and table_path is not None:
+        prior = pipeline_database.get_records_with_column_value(
+            table_path,
+            {"full_input_packet_hash": fip_hash_str},
+        )
+        if prior is not None and len(prior) > 0:
+            # Check most recent status
+            import polars as pl
+            df = pl.from_arrow(prior).sort("executed_at", descending=True)
+            most_recent_status = df["status"][0]
+            if most_recent_status == "success":
+                _write_invocation_row(
+                    pipeline_database=pipeline_database,
+                    table_path=table_path,
+                    fip_hash_str=fip_hash_str,
+                    pod_content_hash_str=pod_content_hash_str,
+                    run_id=run_id,
+                    status="skipped",
+                    error_message=None,
+                )
+                return (tag, data)  # re-emit without re-delivery
+
+    # 4. Build InvocationContext (always).
+    ctx = InvocationContext(
+        invocation_hash=inv_hash,
+        pod_name=pod_name,
+        pod_content_hash=pod_content_hash_str,
+        pipeline_run_id=run_id,
+        _pipeline_hash_ch=pipeline_hash_ch,
+        _full_input_packet_hash_ch=fip_hash,
+        _hash_config=cfg,
+        _track_completion=pod_config.track_completion,
+    )
+
+    # 5. Call user function.
+    try:
+        fn(data, ctx)
+        if pipeline_database is not None and table_path is not None:
+            _write_invocation_row(
+                pipeline_database=pipeline_database,
+                table_path=table_path,
+                fip_hash_str=fip_hash_str,
+                pod_content_hash_str=pod_content_hash_str,
+                run_id=run_id,
+                status="success",
+                error_message=None,
+            )
+        return (tag, data)
+    except Exception as exc:
+        if pipeline_database is not None and table_path is not None:
+            _write_invocation_row(
+                pipeline_database=pipeline_database,
+                table_path=table_path,
+                fip_hash_str=fip_hash_str,
+                pod_content_hash_str=pod_content_hash_str,
+                run_id=run_id,
+                status="failed",
+                error_message=str(exc),
+            )
+        if pod_config.on_error == "raise":
+            raise
+        logger.warning(
+            "SideEffectPod %r delivery failed: %s", pod_name, exc, exc_info=True
+        )
+        if pod_config.drop_on_failure:
+            return None
+        return (tag, data)
+
+
+def _write_invocation_row(
+    *,
+    pipeline_database: ArrowDatabaseProtocol,
+    table_path: tuple[str, ...],
+    fip_hash_str: str,
+    pod_content_hash_str: str,
+    run_id: str | None,
+    status: str,
+    error_message: str | None,
+) -> None:
+    """Write one row to the side-effect invocation log table."""
+    record = pa.table(
+        {
+            "full_input_packet_hash": pa.array(
+                [fip_hash_str], type=pa.large_string()
+            ),
+            "pod_content_hash": pa.array(
+                [pod_content_hash_str], type=pa.large_string()
+            ),
+            "pipeline_run_id": pa.array(
+                [run_id], type=pa.large_string()
+            ),
+            "executed_at": pa.array(
+                [datetime.datetime.now(datetime.timezone.utc)],
+                type=pa.timestamp("us", tz="UTC"),
+            ),
+            "status": pa.array([status], type=pa.large_string()),
+            "error_message": pa.array(
+                [error_message], type=pa.large_string()
+            ),
+        }
+    )
+    pipeline_database.add_records(
+        table_path,
+        record,
+        record_id_column=None,
+        skip_duplicates=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SideEffectPod
+# ---------------------------------------------------------------------------
+
+
+class SideEffectPod(TraceableBase):
+    """A pipeline node whose primary purpose is a side effect.
+
+    Wraps a ``(data: T, ctx: InvocationContext) -> None`` callable.
+    ``InvocationContext`` is always constructed and passed — it is part of
+    the function contract. Callees that do not need it may ignore it (name
+    the parameter ``_ctx`` by convention).
+
+    Returns a pass-through stream. When ``drop_on_failure=True``, only
+    successfully-delivered rows flow downstream.
+
+    In standalone mode (no ``PipelineJob``), executes row-by-row via
+    ``SideEffectPodStream`` with no invocation logging.
+
+    In pipeline mode, promoted to ``SideEffectJobNode`` at compile time,
+    which adds DB-backed invocation logging and completion tracking.
+
+    Args:
+        fn: A callable ``(data, ctx: InvocationContext) -> None``.
+        config: Pod-level configuration. Defaults to ``SideEffectPodConfig()``.
+        tracker_manager: Optional tracker manager override.
+        label: Optional display label.
+        data_context: Optional data context override.
+    """
+
+    def __init__(
+        self,
+        fn: Callable,
+        config: SideEffectPodConfig | None = None,
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        data_context: Any = None,
+    ) -> None:
+        super().__init__(label=label, data_context=data_context)
+        self._fn = fn
+        self._pod_config = config or SideEffectPodConfig()
+        self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
+
+    @property
+    def pod_config(self) -> SideEffectPodConfig:
+        """Pod-level configuration."""
+        return self._pod_config
+
+    def computed_label(self) -> str | None:
+        """Use the callable's ``__name__`` as the default label."""
+        return getattr(self._fn, "__name__", None)
+
+    def identity_structure(self) -> Any:
+        return ("SideEffectPod", self._fn, dataclasses.asdict(self._pod_config))
+
+    def pipeline_identity_structure(self) -> Any:
+        return self.identity_structure()
+
+    @property
+    def uri(self) -> tuple[str, ...]:
+        """Canonical URI for this pod."""
+        module = getattr(self._fn, "__module__", "unknown")
+        name = getattr(self._fn, "__qualname__", getattr(self._fn, "__name__", "unknown"))
+        return (module, name)
+
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> Any:
+        """Single ordered input — return as an ordered tuple."""
+        return tuple(streams)
+
+    def output_schema(
+        self,
+        *streams: StreamProtocol,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Return the input stream's schema unchanged (pass-through).
+
+        Args:
+            *streams: Exactly one input stream.
+            columns: Optional column config.
+            all_info: Include all metadata columns.
+
+        Returns:
+            The input stream's ``(tag_schema, data_schema)`` unchanged.
+        """
+        if len(streams) != 1:
+            raise ValueError(
+                f"SideEffectPod expects exactly 1 input stream; got {len(streams)}."
+            )
+        return streams[0].output_schema(columns=columns, all_info=all_info)
+
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> SideEffectPodStream:
+        """Invoke the side-effect pod on the input stream.
+
+        Registers a ``SideEffectInvocation`` with the tracker manager (if
+        inside a ``with PipelineJob():`` block), then returns a
+        ``SideEffectPodStream`` for standalone / lazy execution.
+
+        Args:
+            *streams: Exactly one input stream.
+            label: Optional label for the compiled node.
+
+        Returns:
+            A ``SideEffectPodStream``.
+        """
+        if len(streams) != 1:
+            raise ValueError(
+                f"SideEffectPod.process() expects exactly 1 stream; got {len(streams)}."
+            )
+        input_stream = streams[0]
+        self.tracker_manager.record_side_effect_pod_invocation(
+            self, input_stream, label=label
+        )
+        return SideEffectPodStream(
+            side_effect_pod=self,
+            input_stream=input_stream,
+            label=label,
+        )
+
+    def __call__(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> SideEffectPodStream:
+        """Convenience alias for ``process``."""
+        return self.process(*streams, label=label)
+
+
+# ---------------------------------------------------------------------------
+# Decorators
+# ---------------------------------------------------------------------------
+
+
+def side_effect_pod(
+    fn: Callable | None = None,
+    *,
+    config: SideEffectPodConfig | None = None,
+) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
+    """Decorator that wraps a callable as a ``SideEffectPod``.
+
+    Supports both bare (``@side_effect_pod``) and parameterised
+    (``@side_effect_pod(config=...)``) usage.
+
+    Args:
+        fn: The callable to wrap (when used as a bare decorator).
+        config: Optional ``SideEffectPodConfig`` to apply.
+
+    Returns:
+        A ``SideEffectPod`` (bare usage) or a decorator (parameterised usage).
+    """
+    def _wrap(f: Callable) -> SideEffectPod:
+        return SideEffectPod(f, config=config)
+
+    if fn is not None:
+        return _wrap(fn)
+    return _wrap
+
+
+def sink_pod(
+    fn: Callable | None = None,
+    *,
+    config: SideEffectPodConfig | None = None,
+) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
+    """Decorator preset: ``track_completion=True``, ``drop_on_failure=True``.
+
+    Caller-supplied ``config`` fields override the presets. Supports both
+    bare (``@sink_pod``) and parameterised (``@sink_pod(config=...)``) usage.
+
+    Args:
+        fn: The callable to wrap (bare usage).
+        config: Optional config override.
+
+    Returns:
+        A ``SideEffectPod`` or decorator.
+    """
+    preset = SideEffectPodConfig(track_completion=True, drop_on_failure=True)
+    effective_config = _merge_config(preset, config)
+
+    def _wrap(f: Callable) -> SideEffectPod:
+        return SideEffectPod(f, config=effective_config)
+
+    if fn is not None:
+        return _wrap(fn)
+    return _wrap
+
+
+def tap_pod(
+    fn: Callable | None = None,
+    *,
+    config: SideEffectPodConfig | None = None,
+) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
+    """Decorator preset: ``track_completion=False``, ``drop_on_failure=False``.
+
+    Caller-supplied ``config`` fields override the presets. Supports both
+    bare (``@tap_pod``) and parameterised (``@tap_pod(config=...)``) usage.
+
+    Args:
+        fn: The callable to wrap (bare usage).
+        config: Optional config override.
+
+    Returns:
+        A ``SideEffectPod`` or decorator.
+    """
+    preset = SideEffectPodConfig(track_completion=False, drop_on_failure=False)
+    effective_config = _merge_config(preset, config)
+
+    def _wrap(f: Callable) -> SideEffectPod:
+        return SideEffectPod(f, config=effective_config)
+
+    if fn is not None:
+        return _wrap(fn)
+    return _wrap
+
+
+def _merge_config(
+    preset: SideEffectPodConfig,
+    override: SideEffectPodConfig | None,
+) -> SideEffectPodConfig:
+    """Merge *preset* with caller-supplied *override*.
+
+    Non-default fields in *override* win over the preset.
+
+    Args:
+        preset: The decorator's pre-configured defaults.
+        override: Optional caller-supplied config.
+
+    Returns:
+        A merged ``SideEffectPodConfig``.
+    """
+    if override is None:
+        return preset
+    default = SideEffectPodConfig()
+    return SideEffectPodConfig(
+        track_completion=(
+            override.track_completion
+            if override.track_completion != default.track_completion
+            else preset.track_completion
+        ),
+        drop_on_failure=(
+            override.drop_on_failure
+            if override.drop_on_failure != default.drop_on_failure
+            else preset.drop_on_failure
+        ),
+        on_error=(
+            override.on_error
+            if override.on_error != default.on_error
+            else preset.on_error
+        ),
+        hash_config=(
+            override.hash_config
+            if override.hash_config != default.hash_config
+            else preset.hash_config
+        ),
+    )
