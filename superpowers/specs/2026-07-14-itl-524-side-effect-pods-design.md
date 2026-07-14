@@ -421,82 +421,109 @@ use the same row-level idempotency guarantees as `FunctionNode`.
 emitting any. It processes and emits row-by-row (or in concurrent batches), consistent
 with the streaming model.
 
-### 8. Observability — `_orcapod_side_effect_invocations` Table
+### 8. Observability — Per-Pipeline-Hash Invocation Tables
 
-**Decision:** Orcapod persists every side-effect invocation to a dedicated table in the
-pipeline database.
+**Decision:** Each `SideEffectPod`'s invocation log is stored in a table scoped by
+`pipeline_hash(pod)`, mirroring how `FunctionNode` organises its result tables.
+
+**Table path:**
+```
+<db_root>/<pipeline_hash(pod)>/side_effect_invocations
+```
+
+Created on first invocation if it does not exist.
+
+**Schema:**
 
 | Column | Type | Notes |
-|--------|------|-------|
-| `execution_id` | TEXT | Primary key — unique per actual execution |
-| `invocation_signature` | TEXT | Indexed — stable per (pod, inputs) pair |
-| `pod_name` | TEXT | Human-readable pod label |
+|---|---|---|
+| `full_input_packet_hash` | TEXT | Primary lookup key — second component of the invocation hash |
+| `invocation_hash` | TEXT | Full serialized hash per pod's `InvocationHashConfig` |
 | `pod_content_hash` | TEXT | `pod.content_hash().to_string()` — exact code version |
-| `input_hash` | TEXT | `input_data.content_hash().to_string()` |
-| `pipeline_run_id` | TEXT NULLABLE | `None` for lazy/non-compiled pipelines |
-| `executed_at` | TIMESTAMP | UTC wall-clock time of execution |
-| `status` | TEXT | `"success"` / `"error"` / `"skipped"` |
-| `error_message` | TEXT NULLABLE | Set when `status = "error"` |
+| `pipeline_run_id` | TEXT NULL | User-supplied run ID; `None` for lazy pipelines |
+| `executed_at` | TIMESTAMP | UTC wall-clock time |
+| `status` | TEXT | `"success"` / `"failed"` / `"skipped"` |
+| `error_message` | TEXT NULL | Set when `status="failed"` |
 
-**Schema location:** A shared table in the pipeline database (not scoped per-node),
-allowing cross-pipeline lookup by `invocation_signature` alone. Table is created on
-first invocation if it does not exist.
+**`status` values:**
+- `"success"`: delivery completed without exception.
+- `"failed"`: delivery raised an exception (regardless of `on_error` setting).
+- `"skipped"`: `track_completion=True` and this input was previously succeeded; delivery skipped, row re-emitted without re-delivery.
 
-This table is the **near side of the reverse-lookup chain**. Without it, a signature
-extracted from an external artifact has nothing to resolve against.
+**When the log is written:**
+- `track_completion=True`: always written. The framework reads this table at the start of each execution to determine skip/retry behaviour.
+- `track_completion=False`: written by default. No completion state is required, but the log enables observability (what fired, when, with what outcome). A future opt-out may be added if log volume becomes a concern.
 
-**For lazy/ephemeral pipelines** (no `PipelineJob`, no DB-backed nodes): the invocation
-log still records the invocation, but `pipeline_run_id` is `None` and `input_hash` can
-be used only to identify the data structure — the actual data rows are not persisted
-and cannot be retrieved from the framework.
+**This table is the near side of the reverse-lookup chain.** Without it, an invocation hash extracted from an external artifact has nothing to resolve against inside Orcapod.
+
+**For lazy/ephemeral pipelines** (no DB-backed nodes): the invocation log is still written if a DB is configured, but `pipeline_run_id` is `None` and the upstream data rows themselves are not persisted — only the hash identifies the data structure.
 
 ### 9. Reverse Lookup Path
 
-**Given:** `invocation_signature = "d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f"` found in an
-external artifact (e.g., a Postgres audit row or a log line).
+**Given:** an invocation hash embedded in an external artifact — e.g.,
+`blake3_v1:a3f8c2d1e5b7f0c9::blake3_v1:b7e491f0a2c3d8e1` found in a Postgres audit row,
+a log line, or a Slack message body.
 
-**Step 1 — Signature → invocation record:**
+The hash is self-routing: the `::` separator partitions it into its components, and the
+first component is always the `pipeline_hash(pod)` value identifying which invocation
+table to open.
+
+**Step 1 — Parse the invocation hash:**
+Split on `::` to extract components:
+- Component 1: `pipeline_hash` value (routes to the invocation table).
+- Component 2: `full_input_packet_hash` (row lookup key within the table).
+- Component 3 (if present): `pipeline_run_id` (for `track_completion=False` pods only).
+
+**Step 2 — Locate the invocation table:**
+```
+<db_root>/{pipeline_hash_component}/side_effect_invocations
+```
+If `component_length` truncation was used, prefix-match on the pipeline hash component
+to find the matching table path.
+
+**Step 3 — Look up the invocation record:**
 ```sql
 SELECT *
-FROM _orcapod_side_effect_invocations
-WHERE invocation_signature = 'd4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f'
+FROM side_effect_invocations
+WHERE full_input_packet_hash = '{input_packet_hash_component}'
 ORDER BY executed_at
 ```
-Returns: `{pod_name, pod_content_hash, input_hash, pipeline_run_id, executed_at, status}`.
+Returns: `{invocation_hash, pod_content_hash, pipeline_run_id, executed_at, status, error_message}`.
 
-Multiple rows may exist if `idempotent=False` and the pod ran multiple times with the
-same inputs (each run has a distinct `execution_id`).
+Multiple rows exist for `track_completion=False` pods (the pod fired on multiple runs
+with the same input; each firing has a distinct `executed_at`).
 
-**Step 2 — Input hash → input data:**
-Query the pipeline's function node result tables for rows where
-`_input_data_hash = input_hash`. This locates the exact `(Tag, Data)` packet that
+**Step 4 — Input packet hash → upstream data:**
+`full_input_packet_hash` covers the full input packet (tag, data, source columns,
+system tag columns). Query the upstream `FunctionNode` result tables to find the
+`(Tag, Data)` row whose content hash matches. This locates the exact input packet that
 triggered the side effect.
 
-*(Requires a DB-backed pipeline — `FunctionJobNode` or `OperatorJobNode`. For lazy
-pipelines, the input hash identifies the data structure but rows cannot be retrieved.)*
+*(Requires a DB-backed pipeline. For lazy pipelines, the hash identifies the data
+structure but the rows are not persisted and cannot be retrieved.)*
 
-**Step 3 — Input data → upstream lineage:**
-Follow `_tag_source_id` and `_tag_record_id` system tag columns on the retrieved input
-row. These columns encode the full upstream provenance chain, back to the original
-source and row number.
+**Step 5 — Input data → upstream lineage:**
+Follow system tag columns on the retrieved input row back through upstream nodes to
+the original source rows.
 
-**Step 4 — Pod code version:**
-`pod_content_hash` identifies the exact pod function that ran. If the codebase is
-version-controlled, this hash can be resolved to a specific commit and function definition.
+**Step 6 — Pod code version:**
+`pod_content_hash` identifies the exact function that ran. Resolve against the
+codebase's version history to recover the exact function definition at that version.
 
 **Full reverse-lookup chain:**
 ```
-external artifact (orcapod-d4a8f3b2...)
-  → _orcapod_side_effect_invocations[invocation_signature]
-    → input_hash → function node result table → (Tag, Data) packet
-      → _tag_source_id / _tag_record_id → upstream nodes → root source rows
-        + pod_content_hash → exact pod code version
+external artifact (contains invocation_hash)
+  → parse → pipeline_hash component
+    → <db_root>/{pipeline_hash}/side_effect_invocations[full_input_packet_hash]
+      → upstream FunctionNode result tables → (Tag, Data) packet
+        → system tag columns → upstream nodes → root source rows
+          + pod_content_hash → exact pod code version
 ```
 
 **Minimum persistence requirements:**
-- `_orcapod_side_effect_invocations` table must be durable (not ephemeral).
-- Input data rows must be persisted in DB-backed nodes for step 2 to work.
-- For full lineage, all intermediate nodes must use DB-backed execution.
+- The pod's per-pipeline-hash invocation table must be durable.
+- Input data rows must be persisted in DB-backed upstream nodes for step 4 to work.
+- For full lineage to source rows, all intermediate nodes must use DB-backed execution.
 
 ### 10. Serialization — Prescribe Canonical Format, Provide Helpers
 
