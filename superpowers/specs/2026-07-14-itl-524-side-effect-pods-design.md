@@ -525,41 +525,74 @@ external artifact (contains invocation_hash)
 - Input data rows must be persisted in DB-backed upstream nodes for step 4 to work.
 - For full lineage to source rows, all intermediate nodes must use DB-backed execution.
 
-### 10. Serialization — Prescribe Canonical Format, Provide Helpers
+### 10. Serialization Conventions
 
-**Decision:** Define a canonical artifact tag format and expose a `format_id()` helper.
-Deviation is allowed but not recommended.
+**Decision:** Prescribe a canonical `orcapod-{hash}` artifact tag format. Expose
+`ctx.format_id()` on `InvocationContext` to produce it, accepting an optional
+`InvocationHashConfig` override so each call site can independently control encoding
+and component length.
 
-**Canonical format:** `orcapod-{invocation_signature}` where `invocation_signature` is
-32 lowercase hex characters (128 bits).
+**`InvocationContext.format_id()`:**
 
-**Examples:**
+```python
+def format_id(self, config: InvocationHashConfig | None = None) -> str:
+    """Return 'orcapod-{hash}' with optional format override.
 
-Log line (structured logging):
-```
-{"level": "info", "msg": "Patient processed", "orcapod_id": "orcapod-d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f", "patient_id": "P-12345"}
-```
+    Args:
+        config: Optional ``InvocationHashConfig`` controlling ``encoding``
+            (``"hex"``, ``"base64"``, ``"binary"``) and ``component_length``
+            (bytes of raw digest per component; ``None`` = full length).
+            When ``None``, the pod's own ``InvocationHashConfig`` is used,
+            producing the same serialization as ``ctx.invocation_hash``.
 
-Database column:
-```sql
-INSERT INTO audit_log (orcapod_record_id, patient_id, processed_at)
-VALUES ('d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f', 'P-12345', NOW())
-```
-*(DB column stores the raw signature; the `orcapod-` prefix is for human-facing contexts.)*
-
-Slack notification body:
-```
-Pipeline run complete for patient P-12345.
-Trace: orcapod-d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f
+    Returns:
+        ``'orcapod-{serialized_hash}'`` ready for embedding in log fields,
+        DB columns, message bodies, or any plain-text artifact.
+    """
 ```
 
-`SideEffectContext` provides:
-- `ctx.format_id()` → `"orcapod-d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f"` (full canonical tag)
-- `ctx.invocation_signature` → `"d4a8f3b2c1e90a7b5f3e8c2a9b6d4a1f"` (raw hex for DB columns)
+`InvocationContext` stores the raw hash components internally and re-serializes on
+demand, so `format_id(config=...)` works without the user needing to re-construct
+anything.
 
-Pod authors who deviate from the canonical format do so at their own risk. The reverse
-lookup machinery works as long as `invocation_signature` appears in the invocation log —
-but human discoverability and tooling support will be reduced for non-canonical embeddings.
+**Usage examples:**
+
+```python
+@side_effect_pod
+def audit_write(data: PatientRecord, ctx: InvocationContext) -> None:
+    # Pod's own InvocationHashConfig (full hex by default):
+    db.insert(ctx.format_id(), data.patient_id)
+    # → "orcapod-blake3_v1:a3f8c2d1e5b7f0c9...::blake3_v1:b7e491f0a2c3d8e1..."
+
+    # 8-byte truncated hex — compact enough for a Slack message:
+    short = ctx.format_id(InvocationHashConfig(encoding="hex", component_length=8))
+    slack.send(f"Patient {data.patient_id} processed. Trace: {short}")
+    # → "orcapod-a3f8c2d1e5b7f0c9::b7e491f0a2c3d8e1"
+
+    # base64 — more compact for the same bit count:
+    b64 = ctx.format_id(InvocationHashConfig(encoding="base64", component_length=16))
+    logger.info("invocation_id=%s", b64)
+    # → "orcapod-o/jC0eW38fCp::t+SR8KLDOOE="
+
+    # Raw hash without prefix — for a DB column where the field name implies origin:
+    db.insert_raw_hash(ctx.invocation_hash, data.patient_id)
+```
+
+**Canonical format:** `orcapod-{invocation_hash}` using the pod's configured
+`InvocationHashConfig`. The `orcapod-` prefix makes artifacts machine-discoverable with
+a single grep pattern across all log files, DB dumps, and message bodies — the prefix
+unambiguously identifies the origin as an Orcapod pipeline provenance token.
+
+**Using `ctx.invocation_hash` directly (no prefix):**
+Valid for DB columns where the field name already implies the origin (e.g.,
+`orcapod_record_id`). The reverse-lookup machinery (Axis 9) requires only the raw
+hash string — the `orcapod-` prefix is for human discoverability, not lookup routing.
+
+**No shared `InvocationIdentity` base type:**
+An earlier design draft proposed a shared base type for post-run hooks and side-effect
+pods. With `format_id()` living directly on `InvocationContext`, no shared base is
+needed. Post-run hooks (ITL-523) may adopt the `orcapod-` prefix convention
+independently if desired.
 
 ---
 
