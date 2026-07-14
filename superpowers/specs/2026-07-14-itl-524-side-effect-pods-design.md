@@ -111,102 +111,88 @@ core/
 └── _FunctionPodBase          (shared execution infrastructure)
     ├── FunctionPod           (implements FunctionPodProtocol)
     └── SideEffectPod         (implements SideEffectPodProtocol)
+
+Convenience decorators (both wrap SideEffectPod with preset config):
+├── @sink_pod   — track_completion=True,  pass_on_success=True
+└── @tap_pod    — track_completion=False, pass_on_success=False
 ```
 
-### 2. Pod Kinds and Output Contract
+### 2. Pod Configuration Axes and Output Contract
 
-**Decision:** There are two categorically distinct kinds of side-effect pod. They differ
-enough in semantics, infrastructure requirements, and output contract to warrant
-separate types rather than a single class with a flag. Whether they share a common
-`SideEffectPod` umbrella type is deferred — it is not necessary to decide for the
-initial implementation.
+**Decision:** A single `SideEffectPod` type governed by two independent configuration
+axes in `SideEffectPodConfig`. There are no separate `SinkPod` and `TapPod` types —
+only convenience decorators that preset those axes.
 
-#### `SinkPod` — completion-tracked, terminal delivery
+**Axis A — Execution frequency** (`track_completion: bool = True`):
+- `True`: the framework tracks per-(pod, input) completion state. Inputs that already
+  succeeded are skipped on re-run; failed inputs are re-attempted.
+- `False`: no completion tracking. The pod fires unconditionally on every pipeline run.
 
-A `SinkPod` writes to an external source with a meaningful notion of success or failure
-*per input*. The intent is exactly-once delivery: each (pod, input) pair should result
-in exactly one successful write.
+**Axis B — Pass-through filtering** (`pass_on_success: bool = True`):
+- `True`: only rows where the delivery succeeded are emitted downstream. Failed rows
+  are dropped.
+- `False`: all rows are emitted downstream regardless of delivery outcome.
 
-**Output contract: terminal.** The pod ends the DAG branch. Delivering data outward is
-the purpose; what happens next in the pipeline is a separate concern expressed as a
-separate branch before this node.
+The four combinations and their canonical use cases:
 
-**Completion tracking.** The framework records completion state per (pod, input) in an
-internal log:
-
-- **Not yet seen** → execute the delivery.
-- **Previously succeeded** → skip silently on re-run.
-- **Previously failed** → re-attempt on the next explicit pipeline re-run.
-
-Retry policy (automatic retries, max attempts, backoff) is **deferred to ITL-526**,
-which will design a shared retry mechanism for both `FunctionPod` and `SinkPod`. For
-now, re-attempt occurs only when the pipeline is explicitly re-run by the user.
-
-Completion state is internalized — tracked in the pod's invocation log, visible to
-observers, not emitted as pipeline data.
-
-**Canonical examples:** writing an audit row to a database, archiving a file to object
-storage, posting a one-time notification.
-
-#### `TapPod` — always-fire, pass-through observation
-
-A `TapPod` reacts to every data packet passing through it, unconditionally. There is no
-notion of completion, no memory of past encounters, no skip or retry logic.
-
-**Output contract: pass-through.** The input tag and data flow through unchanged. The
-pod is a transparent interceptor — a tap on the stream.
-
-**No completion tracking.** Every pipeline run, every input triggers the effect. This
-is correct and expected: a logger should log every packet every time, not once.
-
-**Canonical examples:** structured logging, metrics emission, real-time monitoring
-feeds, debug tracing.
-
-#### Comparison
-
-| | `SinkPod` | `TapPod` |
+| `track_completion` | `pass_on_success` | Canonical use case |
 |---|---|---|
-| Output contract | Terminal | Pass-through |
-| Completion tracking | Yes — success / failed / not-seen | No |
-| Re-run behavior | Skip on success; retry on re-run if failed | Always fires |
-| Invocation log | Required (completion state) | Optional (observability only) |
-| Retry policy | Deferred to ITL-526 | N/A |
+| `True` | `True` | Audit DB write, exactly-once delivery that gates downstream |
+| `True` | `False` | Deliver once; don't gate downstream on delivery success |
+| `False` | `True` | Re-notify every run; downstream only sees acknowledged rows |
+| `False` | `False` | Structured logging, metrics, trace everything |
 
-**Rejected alternative — single class with `idempotent: bool`:** The semantic
-difference between "always fire" and "fire once and track completion" is substantial
-enough that a flag would obscure rather than clarify intent. A pod author should not
-need to reason about idempotency to write a logger.
+**Output contract: pass-through** (all configurations). `SideEffectPod` always returns
+a stream. When `pass_on_success=False`, all rows are emitted; when `pass_on_success=True`,
+only successfully-delivered rows appear downstream.
+
+**Convenience decorators:**
+`@sink_pod` presets `track_completion=True, pass_on_success=True` — the most common
+"deliver and gate" pattern.
+`@tap_pod` presets `track_completion=False, pass_on_success=False` — the most common
+"observe everything" pattern.
+Both decorators wrap the same underlying `SideEffectPod` class. All four combinations
+remain expressible via `SideEffectPodConfig` directly.
+
+**Rejected alternative — two distinct types (`SinkPod` / `TapPod`):**
+The two axes are genuinely orthogonal; all four combinations have legitimate use cases.
+Encoding just two of them as named types leaves the other two without a natural
+expression and forces users to reason about type identity rather than their actual intent.
+A single configurable type with convenience shortcuts is cleaner and more extensible.
 
 ### 3. Re-Execution and Completion Semantics
 
-**`TapPod`:** No caching or completion tracking. Every pipeline run, every input packet
-triggers the effect unconditionally. There is no state to consult and no state to record
-beyond optional observability logging.
+**When `track_completion=False`:** No completion state is maintained. Every pipeline
+run, every input packet triggers the delivery unconditionally.
 
-**`SinkPod`:** Completion-tracked per (pod topology, input packet). The framework
-maintains a per-pod invocation table (see Axis 8) and consults it at the start of each
-execution:
+**When `track_completion=True`:** The framework maintains a per-pod invocation table
+(see Axis 8) and consults it at the start of each execution:
 
 | Prior state | Action |
 |---|---|
 | Not yet seen | Execute the delivery |
-| Previously succeeded | Skip silently |
+| Previously succeeded | Skip delivery; emit row downstream without re-delivery |
 | Previously failed | Re-attempt |
 
-Re-attempt occurs when the pipeline is **explicitly re-run by the user**. There is no
+Emitting previously-succeeded rows on re-run (without re-delivery) ensures downstream
+pods receive the full dataset when the pipeline is re-run to catch up on failed rows —
+not just the newly-caught rows.
+
+Re-attempt occurs only when the pipeline is **explicitly re-run by the user**. No
 automatic background retry in v1. Full retry policy (max attempts, backoff, retryable
 exception types) is deferred to ITL-526, which will design a shared mechanism for both
-`FunctionPod` and `SinkPod`.
+`FunctionPod` and `SideEffectPod`.
 
-`SinkPod` does **not** participate in the `ResultCache` / `FunctionNode` result table
-system. Its execution state is tracked exclusively in its own invocation table.
+`SideEffectPod` with `track_completion=True` does **not** participate in the
+`ResultCache` / `FunctionNode` result table system. Completion state is tracked
+exclusively in its own invocation table.
 
 ### 4. Invocation Hash
 
 #### Raw identity components
 
-The raw identity of any invocation is a **three-part compound** (two parts for
-`SinkPod`, three for `TapPod`):
+The raw identity of any invocation is a **compound hash** whose number of components
+depends on `track_completion`:
 
 1. **`pipeline_hash(pod)`** — the pipeline hash of the pod, encoding both the pod's own
    function identity and the full upstream topology. This is the same `pipeline_hash()`
@@ -220,26 +206,28 @@ The raw identity of any invocation is a **three-part compound** (two parts for
    covers data columns only. Including tags and source/system columns means two packets
    with identical payload but different originating provenance — different sources,
    different upstream routes — produce different invocation hashes. This is correct: a
-   sink that writes an audit row needs to distinguish rows by their full provenance, not
+   pod that writes an audit row needs to distinguish rows by their full provenance, not
    just their data values.
 
-3. **`pipeline_run_id`** (`TapPod` only, when available) — a verbatim string
-   identifying the specific pipeline execution (e.g. `"run-2026-07-14-001"`). This is
-   user-controlled and included as-is without further hashing. When no run ID is
-   available (lazy/in-memory pipeline), the third component is omitted.
+3. **`pipeline_run_id`** (only when `track_completion=False`, when available) — a
+   verbatim string identifying the specific pipeline execution (e.g.
+   `"run-2026-07-14-001"`). This is user-controlled and included as-is without further
+   hashing. When no run ID is available (lazy/in-memory pipeline), the third component
+   is omitted.
 
 **Why `pipeline_hash` rather than `content_hash` for component 1:**
 `content_hash(pod)` captures only the pod's function identity. `pipeline_hash(pod)`
 captures function identity *plus* the full upstream topology, forming a Merkle chain.
-Using `pipeline_hash` ensures that the same sink function used in two pipelines with
+Using `pipeline_hash` ensures that the same pod function used in two pipelines with
 different upstream structures never shares a completion namespace — a delivery confirmed
 in pipeline A does not suppress delivery in pipeline B.
 
-**Why `TapPod` includes the run ID:**
-`SinkPod`'s hash must be run-agnostic so the framework can detect "already delivered"
-across re-runs. `TapPod` fires every run intentionally and has no deduplication to
-preserve — including the run ID makes every firing distinguishable, which is exactly
-right for traceable observation.
+**Why `track_completion=False` includes the run ID:**
+When `track_completion=True`, the hash must be run-agnostic so the framework can
+detect "already delivered" across re-runs — including the run ID would make the hash
+unique per run and break deduplication. When `track_completion=False`, the pod fires
+every run intentionally and has no deduplication to preserve — including the run ID
+makes every firing distinguishable, which is exactly right for traceable observation.
 
 #### Internal record format
 
@@ -247,11 +235,11 @@ Internally, the full compound is stored with `::` as the component separator (us
 `::` avoids ambiguity with the `:` in `method:digest` form of `ContentHash.to_string()`):
 
 ```
-SinkPod:  {pipeline_hash.to_string()}::{full_input_packet_hash.to_string()}
-TapPod:   {pipeline_hash.to_string()}::{full_input_packet_hash.to_string()}::{run_id}
+track_completion=True:  {pipeline_hash.to_string()}::{full_input_packet_hash.to_string()}
+track_completion=False: {pipeline_hash.to_string()}::{full_input_packet_hash.to_string()}::{run_id}
 ```
 
-Example (SinkPod):
+Example (track_completion=True):
 ```
 blake3_v1:a3f8c2d1e5b7f0c9...::blake3_v1:b7e491f0a2c3d8e1...
 ```
@@ -324,11 +312,12 @@ class InvocationContext:
     pipeline_run_id: str | None # None for lazy/non-compiled pipelines
 ```
 
-`InvocationContext` is shared by both `SinkPod` and `TapPod`. The `invocation_hash`
-field contains the serialized compound described in Axis 4 — two-part for `SinkPod`,
-three-part (with verbatim `pipeline_run_id`) for `TapPod` when a run ID is available.
-`pipeline_run_id` is also exposed as a first-class field so pod authors can store or
-log it directly without parsing it back out of `invocation_hash`.
+`InvocationContext` is shared across all `SideEffectPod` configurations. The
+`invocation_hash` field contains the serialized compound described in Axis 4 —
+two-part when `track_completion=True`, three-part (with verbatim `pipeline_run_id`)
+when `track_completion=False` and a run ID is available. `pipeline_run_id` is also
+exposed as a first-class field so pod authors can store or log it directly without
+parsing it back out of `invocation_hash`.
 
 If no `InvocationContext` parameter is present in the user function, the framework
 calls the function without one. There is zero overhead — no context object is
@@ -359,52 +348,46 @@ declared type is exactly `InvocationContext`.
 
 ### 6. Failure Semantics
 
-**Decision:** Each pod type has its own config class carrying `on_error`:
+**Decision:** A single unified `SideEffectPodConfig` carries all configuration axes:
 
 ```python
 @dataclasses.dataclass(frozen=True)
-class SinkPodConfig:
-    on_error: Literal["raise", "log"] = "raise"
-    hash_config: InvocationHashConfig = field(default_factory=InvocationHashConfig)
-
-@dataclasses.dataclass(frozen=True)
-class TapPodConfig:
+class SideEffectPodConfig:
+    track_completion: bool = True
+    pass_on_success: bool = True
     on_error: Literal["raise", "log"] = "raise"
     hash_config: InvocationHashConfig = field(default_factory=InvocationHashConfig)
 ```
 
-Separate config classes rather than a shared `SideEffectConfig`: `SinkPodConfig` will
-gain `max_attempts` and `retry_on` from ITL-526 that are meaningless for `TapPod`.
-Starting separate prevents a future config class with inapplicable fields.
+When ITL-526 adds retry fields (`max_attempts`, `retry_on`), they are added to
+`SideEffectPodConfig` — they are only meaningful when `track_completion=True`, and
+that relationship is enforced at construction or with documentation.
 
 **`on_error` vocabulary** (consistent with ITL-523's `HookConfig`):
 - `"raise"` (default): exception propagates; the pipeline row is aborted.
-- `"log"`: exception logged at `WARNING` level; the input row continues downstream.
+- `"log"`: exception logged at `WARNING` level; delivery outcome determines whether
+  the row passes downstream (see interaction with `pass_on_success` below).
 
 No `"ignore"` option in v1.
 
-**`SinkPod` completion state on failure:**
-Regardless of `on_error`, a failed delivery always records `status="failed"` in the
-invocation log. `on_error` controls whether the exception propagates to the caller —
-it does not affect completion tracking. A `"failed"` row remains eligible for
-re-attempt on the next explicit pipeline re-run (Axis 3).
+**Interaction between `on_error` and `pass_on_success`:**
 
-| `on_error` | Pipeline behaviour | Completion state |
+| `on_error` | `pass_on_success` | Delivery fails → |
 |---|---|---|
-| `"raise"` (default) | Exception propagates; row aborted | `"failed"` |
-| `"log"` | Exception logged; row continues downstream | `"failed"` |
+| `"raise"` | either | Exception propagates; row aborted |
+| `"log"` | `True` | Exception logged; row **dropped** (only successes pass) |
+| `"log"` | `False` | Exception logged; row **emitted** downstream regardless |
 
-**`TapPod` on failure:**
-No completion tracking. `on_error` controls pipeline propagation only:
-- `"raise"`: exception propagates; row aborted; downstream sees nothing.
-- `"log"`: exception logged at `WARNING`; input row emitted unchanged downstream.
-An optional invocation log row with `status="error"` may be written for observability.
+**Completion state on failure (when `track_completion=True`):**
+Regardless of `on_error`, a failed delivery always records `status="failed"` in the
+invocation log. `on_error` controls pipeline propagation, not the completion record.
+A `"failed"` row remains eligible for re-attempt on the next explicit re-run (Axis 3).
 
 **Relationship to `FunctionPod`:**
 `FunctionPod` has no pod-level `on_error` config today. The sync path propagates
 exceptions unconditionally; the async path silently drops failed items with no
 configuration — an inconsistency. Aligning `FunctionPod` to adopt the same `on_error`
-vocabulary is deferred; see DESIGN_ISSUES.md F15 and the corresponding Linear issue.
+vocabulary is deferred; see DESIGN_ISSUES.md F15 and ITL-527.
 
 ### 7. Ordering & DAG Placement
 
