@@ -9,6 +9,15 @@ from .core.function_pod import (
     FunctionPod,
     function_pod,
 )
+from .side_effects import (
+    InvocationContext,
+    InvocationHashConfig,
+    SideEffectPod,
+    SideEffectPodConfig,
+    side_effect_pod,
+    sink_pod,
+    tap_pod,
+)
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
 # Subpackage re-exports for clean public API
@@ -45,6 +54,13 @@ __all__ = [
     "load_config",
     "FunctionPod",
     "function_pod",
+    "InvocationContext",
+    "InvocationHashConfig",
+    "SideEffectPod",
+    "SideEffectPodConfig",
+    "side_effect_pod",
+    "sink_pod",
+    "tap_pod",
     "Pipeline",
     "PipelineJob",
     "SourceNode",
