@@ -1,5 +1,5 @@
 from contextlib import AbstractContextManager
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.function_pod import FunctionPodProtocol
 from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
@@ -90,6 +90,21 @@ class TrackerProtocol(Protocol):
         Args:
             pod: The function pod that was invoked
             input_stream: The input stream used for this invocation
+        """
+        ...
+
+    def record_side_effect_pod_invocation(
+        self,
+        pod: Any,
+        input_stream: StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        """Record a side-effect pod invocation in the computational graph.
+
+        Args:
+            pod: The side-effect pod being invoked.
+            input_stream: The upstream stream.
+            label: Optional display label.
         """
         ...
 
@@ -189,6 +204,21 @@ class TrackerManagerProtocol(Protocol):
             pod: The function pod to record in all active trackers
             input_stream: The input stream to record in all active trackers
             label: The label to associate with the recording
+        """
+        ...
+
+    def record_side_effect_pod_invocation(
+        self,
+        pod: Any,
+        input_stream: StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        """Record a side-effect pod invocation in all active trackers.
+
+        Args:
+            pod: The side-effect pod to record.
+            input_stream: The upstream stream.
+            label: Optional display label.
         """
         ...
 

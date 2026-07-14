@@ -13,6 +13,7 @@ from orcapod.pipeline.pod_invocation import (
     FunctionInvocation,
     OperatorInvocation,
     PodInvocation,
+    SideEffectInvocation,
 )
 from orcapod.protocols import core_protocols as cp
 from orcapod.utils.lazy_module import LazyModule
@@ -232,6 +233,23 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """
         self._record_invocation(
             OperatorInvocation(pod=pod, input_streams=tuple(upstreams), label=label)
+        )
+
+    def record_side_effect_pod_invocation(
+        self,
+        pod: Any,
+        input_stream: "cp.StreamProtocol",
+        label: str | None = None,
+    ) -> None:
+        """Record a side-effect pod invocation into the graph.
+
+        Args:
+            pod: The side-effect pod being invoked.
+            input_stream: The upstream stream.
+            label: Optional display label for the resulting compiled node.
+        """
+        self._record_invocation(
+            SideEffectInvocation(pod=pod, input_streams=(input_stream,), label=label)
         )
 
     def _record_invocation(self, invocation: PodInvocation) -> None:
