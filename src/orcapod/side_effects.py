@@ -11,6 +11,7 @@ import asyncio
 import base64
 import dataclasses
 import datetime
+import hashlib
 import logging
 from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
@@ -408,9 +409,24 @@ def _write_invocation_row(
     status: str,
     error_message: str | None,
 ) -> None:
-    """Write one row to the side-effect invocation log table."""
+    """Write one row to the side-effect invocation log table.
+
+    The record_id is a SHA-256 digest of ``(fip_hash_str, pod_content_hash_str,
+    run_id, status, executed_at)`` so that every invocation row is unique even
+    when the same row is re-attempted.
+    """
+    executed_at = datetime.datetime.now(datetime.timezone.utc)
+    executed_at_str = executed_at.isoformat()
+    record_id_src = (
+        f"{fip_hash_str}::{pod_content_hash_str}::{run_id}::{status}::{executed_at_str}"
+    ).encode("utf-8")
+    record_id = hashlib.sha256(record_id_src).digest()
+
     record = pa.table(
         {
+            "__invocation_record_id": pa.array(
+                [record_id], type=pa.large_binary()
+            ),
             "full_input_packet_hash": pa.array(
                 [fip_hash_str], type=pa.large_string()
             ),
@@ -421,7 +437,7 @@ def _write_invocation_row(
                 [run_id], type=pa.large_string()
             ),
             "executed_at": pa.array(
-                [datetime.datetime.now(datetime.timezone.utc)],
+                [executed_at],
                 type=pa.timestamp("us", tz="UTC"),
             ),
             "status": pa.array([status], type=pa.large_string()),
@@ -433,7 +449,7 @@ def _write_invocation_row(
     pipeline_database.add_records(
         table_path,
         record,
-        record_id_column=None,
+        record_id_column="__invocation_record_id",
         skip_duplicates=False,
     )
 
@@ -692,3 +708,183 @@ def _merge_config(
             else preset.hash_config
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# SideEffectJobNode
+# ---------------------------------------------------------------------------
+
+
+class SideEffectJobNode(StreamBase):
+    """DB-backed execution node for side-effect pods.
+
+    Created at pipeline compile time by ``PipelineJob``. Receives a
+    ``pipeline_database`` via ``attach_databases()``. ``run_id`` is passed
+    as a call-time keyword argument from the orchestrator.
+
+    Inherits from ``StreamBase`` for identity infrastructure and to satisfy
+    the ``producer`` / ``upstreams`` / ``output_schema`` contract required
+    by ``SyncPipelineOrchestrator._materialize_as_stream``.
+
+    Args:
+        side_effect_pod: The ``SideEffectPod`` this node wraps.
+        input_stream: The upstream stream at compile time.
+        label: Optional display label.
+    """
+
+    node_type = "side_effect"
+
+    def __init__(
+        self,
+        side_effect_pod: SideEffectPod,
+        input_stream: StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        self._pod = side_effect_pod
+        self._input_stream = input_stream
+        super().__init__(label=label)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._table_path: tuple[str, ...] | None = None
+
+    # ------------------------------------------------------------------
+    # StreamBase interface
+    # ------------------------------------------------------------------
+
+    @property
+    def producer(self):  # type: ignore[override]
+        return self._pod
+
+    @property
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
+        return (self._input_stream,)
+
+    def identity_structure(self) -> Any:
+        return (self._pod, self._pod.argument_symmetry((self._input_stream,)))
+
+    def pipeline_identity_structure(self) -> Any:
+        return self.identity_structure()
+
+    def computed_label(self) -> str | None:
+        return self._pod.label
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        return self._input_stream.output_schema(columns=columns, all_info=all_info)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return self._input_stream.keys(columns=columns, all_info=all_info)
+
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        """Standalone iteration — executes delivery with no DB logging."""
+        for tag, data in self._input_stream.iter_data():
+            result = _execute_side_effect_row(
+                fn=self._pod._fn,
+                tag=tag,
+                data=data,
+                pod_config=self._pod.pod_config,
+                pipeline_hash_ch=self.pipeline_hash(),
+                pod_content_hash_str=self._pod.content_hash().to_string(),
+                pod_name=self._pod.label,
+                run_id=None,
+                arrow_hasher=self._pod.data_context.arrow_hasher,
+                pipeline_database=None,
+                table_path=None,
+            )
+            if result is not None:
+                yield result
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> pa.Table:
+        """Collect all rows from ``iter_data()`` into an Arrow table."""
+        from orcapod.utils import arrow_utils
+
+        tag_tables = []
+        data_tables = []
+        for tag, data in self.iter_data():
+            tag_tables.append(tag.as_table(columns={"system_tags": True}))
+            data_tables.append(data.as_table(columns={"source": True}))
+        if not tag_tables:
+            return pa.table({})
+        return arrow_utils.hstack_tables(
+            pa.concat_tables(tag_tables),
+            pa.concat_tables(data_tables),
+        )
+
+    # ------------------------------------------------------------------
+    # DB attachment
+    # ------------------------------------------------------------------
+
+    def attach_databases(
+        self,
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+    ) -> None:
+        """Attach or detach the pipeline database.
+
+        Called by ``PipelineJob._distribute_databases()``. The table path is
+        scoped to ``(self.pipeline_hash().to_string(), "side_effect_invocations")``.
+
+        Args:
+            pipeline_database: Pre-scoped pipeline DB (at pipeline root),
+                or ``None`` to detach.
+        """
+        self._pipeline_database = pipeline_database
+        if pipeline_database is not None:
+            self._table_path = (
+                self.pipeline_hash().to_string(),
+                "side_effect_invocations",
+            )
+        else:
+            self._table_path = None
+
+    # ------------------------------------------------------------------
+    # Sync execution
+    # ------------------------------------------------------------------
+
+    def execute(
+        self,
+        input_stream: StreamProtocol,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
+        run_id: str | None = None,
+    ) -> list[tuple[TagProtocol, DataProtocol]]:
+        """Execute side-effect delivery for all rows in ``input_stream``.
+
+        Args:
+            input_stream: Stream of ``(tag, data)`` pairs to process.
+            observer: Optional execution observer (currently unused).
+            run_id: Pipeline run identifier forwarded from the orchestrator.
+
+        Returns:
+            List of ``(tag, data)`` tuples — the pass-through rows.
+        """
+        results = []
+        for tag, data in input_stream.iter_data():
+            result = _execute_side_effect_row(
+                fn=self._pod._fn,
+                tag=tag,
+                data=data,
+                pod_config=self._pod.pod_config,
+                pipeline_hash_ch=self.pipeline_hash(),
+                pod_content_hash_str=self._pod.content_hash().to_string(),
+                pod_name=self._pod.label,
+                run_id=run_id,
+                arrow_hasher=self._pod.data_context.arrow_hasher,
+                pipeline_database=self._pipeline_database,
+                table_path=self._table_path,
+            )
+            if result is not None:
+                results.append(result)
+        return results

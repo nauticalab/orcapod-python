@@ -267,3 +267,169 @@ class TestDecorators:
         assert my_sink.pod_config.on_error == "log"
         assert my_sink.pod_config.track_completion is True
         assert my_sink.pod_config.drop_on_failure is True
+
+
+# ---------------------------------------------------------------------------
+# Task 7 tests — DB-backed execution via SideEffectJobNode
+# ---------------------------------------------------------------------------
+
+
+def _make_in_memory_db():
+    """Return a fresh in-memory ArrowDatabase."""
+    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+    return InMemoryArrowDatabase()
+
+
+class TestSideEffectJobNodeSync:
+    """T5–T7, T11–T12: DB-backed sync execution."""
+
+    def _make_node_with_db(self, fn, config=None):
+        """Helper: build a SideEffectJobNode with an in-memory DB attached."""
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode
+
+        pod = SideEffectPod(fn, config=config)
+        stream = _make_stream(3)
+        node = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        db = _make_in_memory_db()
+        node.attach_databases(pipeline_database=db)
+        return node, stream, db
+
+    def test_t5_invocation_log_written_on_success(self):
+        """T5: DB row written with status='success'."""
+        import polars as pl
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(True)
+
+        node, stream, db = self._make_node_with_db(fn)
+        results = node.execute(stream)
+        assert len(results) == 3
+        assert len(calls) == 3
+
+        # Read log table
+        table_path = (node.pipeline_hash().to_string(), "side_effect_invocations")
+        records = db.get_all_records(table_path)
+        assert records is not None
+        df = pl.from_arrow(records)
+        assert len(df) == 3
+        assert all(df["status"] == "success")
+        assert "full_input_packet_hash" in df.columns
+        assert "invocation_hash" not in df.columns  # never stored
+
+    def test_t6_track_completion_skips_on_rerun(self):
+        """T6: Second run skips re-delivery; skipped row still emitted."""
+        import polars as pl
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(True)
+
+        cfg = SideEffectPodConfig(track_completion=True)
+        pod = SideEffectPod(fn, config=cfg)
+        stream = _make_stream(2)
+        db = _make_in_memory_db()
+
+        node1 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node1.attach_databases(pipeline_database=db)
+        results1 = node1.execute(stream)
+        assert len(results1) == 2
+        assert len(calls) == 2
+
+        # Second run with same DB
+        node2 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node2.attach_databases(pipeline_database=db)
+        results2 = node2.execute(stream)
+        assert len(results2) == 2  # rows still emitted (pass-through)
+        assert len(calls) == 2  # fn NOT called again
+
+        # Check log has skipped rows
+        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        records = db.get_all_records(table_path)
+        df = pl.from_arrow(records)
+        assert "skipped" in df["status"].to_list()
+
+    def test_t7_no_track_completion_reruns_delivery(self):
+        """T7: track_completion=False always re-delivers."""
+        import polars as pl
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(True)
+
+        cfg = SideEffectPodConfig(track_completion=False)
+        pod = SideEffectPod(fn, config=cfg)
+        stream = _make_stream(2)
+        db = _make_in_memory_db()
+
+        node1 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node1.attach_databases(pipeline_database=db)
+        node1.execute(stream)
+
+        node2 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node2.attach_databases(pipeline_database=db)
+        node2.execute(stream)
+
+        assert len(calls) == 4  # called twice per run
+
+        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        records = db.get_all_records(table_path)
+        df = pl.from_arrow(records)
+        assert len(df) == 4  # two rows × two runs
+        assert all(df["status"] == "success")
+
+    def test_t11_invocation_hash_determinism(self):
+        """T11: Identical inputs produce identical invocation_hash."""
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, InvocationContext
+
+        ctx_list: list[InvocationContext] = []
+        def fn(data, ctx):
+            ctx_list.append(ctx)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(1)
+
+        node1 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node1.attach_databases(pipeline_database=_make_in_memory_db())
+        node1.execute(stream)
+        hash1 = ctx_list[0].invocation_hash
+        ctx_list.clear()
+
+        node2 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node2.attach_databases(pipeline_database=_make_in_memory_db())
+        node2.execute(stream)
+        hash2 = ctx_list[0].invocation_hash
+
+        assert hash1 == hash2
+
+    def test_t12_format_id_base64_override(self):
+        """T12: format_id with base64 encoding returns valid compound."""
+        from orcapod.side_effects import (
+            SideEffectPod, SideEffectJobNode, InvocationHashConfig, InvocationContext
+        )
+
+        ctx_list: list[InvocationContext] = []
+        def fn(data, ctx):
+            ctx_list.append(ctx)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(1)
+        node = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node.attach_databases(pipeline_database=_make_in_memory_db())
+        node.execute(stream)
+
+        ctx = ctx_list[0]
+        override = InvocationHashConfig(encoding="base64", component_length=8)
+        fid = ctx.format_id(override)
+
+        assert fid.startswith("orcapod-")
+        # Two base64-encoded components of 8 bytes each (11 chars each in base64)
+        parts = fid[len("orcapod-"):].split("::")
+        assert len(parts) == 2
+        import base64
+        for part in parts:
+            decoded = base64.b64decode(part)
+            assert len(decoded) == 8
