@@ -13,6 +13,7 @@ import pytest
 
 from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.data_function import PythonDataFunction
+from orcapod.core.executors.base import PythonFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod, function_pod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -269,3 +270,48 @@ class TestEmptyHooks:
         stream = pod.process(_make_stream(n=2))
         results = list(stream.iter_data())
         assert len(results) == 2
+
+
+# ---------------------------------------------------------------------------
+# 8. Parallel execution (concurrent path via _iter_data_concurrent)
+# ---------------------------------------------------------------------------
+
+
+class _ConcurrentExecutor(PythonFunctionExecutorBase):
+    """Minimal executor that marks supports_concurrent_execution=True."""
+
+    @property
+    def executor_type_id(self) -> str:
+        return "test-concurrent"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset()
+
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        return True
+
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        return fn(**kwargs)
+
+    async def async_execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        return fn(**kwargs)
+
+
+class TestParallelExecution:
+    def test_hooks_fire_for_all_inputs_under_concurrent_executor(self):
+        executor = _ConcurrentExecutor()
+        pf = PythonDataFunction(double, output_keys="result", executor=executor)
+        pod = FunctionPod(pf)
+
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = pod.process(_make_stream(n=4))
+        results = list(stream.iter_data())
+
+        assert len(results) == 4
+        assert len(payloads) == 4
+        assert all(
+            p.stats.status == InvocationStatus.COMPUTED for p in payloads
+        )

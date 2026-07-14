@@ -734,7 +734,7 @@ class FunctionPodStream(StreamBase):
             if loop is not None:
                 # Already in event loop — fall back to sequential sync
                 results = [
-                    self._function_pod.process_data(tag, pkt)
+                    self._function_pod._invoke_with_hooks(tag, pkt)
                     for _, tag, pkt in to_compute
                 ]
             else:
@@ -743,7 +743,7 @@ class FunctionPodStream(StreamBase):
                     return list(
                         await asyncio.gather(
                             *[
-                                self._function_pod.async_process_data(tag, pkt)
+                                self._function_pod._async_invoke_with_hooks(tag, pkt)
                                 for _, tag, pkt in to_compute
                             ]
                         )
