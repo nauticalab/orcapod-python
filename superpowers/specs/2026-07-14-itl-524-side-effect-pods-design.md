@@ -6,15 +6,19 @@ Orcapod pipelines are built around **function pods** — nodes that transform an
 packet into an output packet. Many real pipelines also need steps whose primary purpose
 is a side effect: writing a structured log line, appending a row to an external database,
 emitting a metric, or sending a notification. Today those steps must be shoehorned into
-function pods with fake outputs or `None` returns.
+function pods with fake outputs or breadcrumb return values.
 
-This design introduces **side-effect pods** as a first-class pipeline concept. A side-effect
-pod wraps a user function that returns `None`, passes its input stream through unchanged,
-and embeds a deterministic **invocation signature** into every external artifact it
-produces. That signature bridges the provenance boundary: anyone holding an artifact can
-look it up in Orcapod's invocation log and trace it back to the originating pipeline run,
-pod version, and input data — following the same provenance chains as any other Orcapod
-node.
+This design introduces **side-effect pods** as a first-class pipeline concept, with a
+crucial property: any external artifact the side effect produces can be **linked back to
+the specific pipeline execution** that produced it — via a deterministic **invocation
+signature** embedded into the artifact. That signature bridges the provenance boundary:
+anyone holding an artifact can look it up in Orcapod's invocation log and trace it back
+to the originating pipeline run, pod version, and input data — following the same
+provenance chains as any other Orcapod node.
+
+This document resolves the open design axes (taxonomy, output contract, caching
+semantics, hash formula, API surface, failure handling, DAG ordering, observability, and
+serialization conventions) and specifies the follow-up implementation work.
 
 ---
 
