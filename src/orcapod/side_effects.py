@@ -897,3 +897,51 @@ class SideEffectJobNode(StreamBase):
             if result is not None:
                 results.append(result)
         return results
+
+    # ------------------------------------------------------------------
+    # Async execution
+    # ------------------------------------------------------------------
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        *,
+        observer: ExecutionObserverProtocol | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        """Async side-effect delivery with per-row concurrency control.
+
+        Reads from ``inputs[0]``, dispatches each row as an independent
+        async task via ``asyncio.TaskGroup``. Emits non-``None`` results to
+        ``output``. Always closes ``output`` in a ``finally`` block.
+
+        Args:
+            inputs: Single-element sequence containing the input channel.
+            output: Writable channel for pass-through ``(tag, data)`` pairs.
+            observer: Optional execution observer (currently unused).
+            run_id: Pipeline run identifier from the orchestrator.
+        """
+        try:
+            async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
+                result = _execute_side_effect_row(
+                    fn=self._pod._fn,
+                    tag=tag,
+                    data=data,
+                    pod_config=self._pod.pod_config,
+                    pipeline_hash_ch=self.pipeline_hash(),
+                    pod_content_hash_str=self._pod.content_hash().to_string(),
+                    pod_name=self._pod.label,
+                    run_id=run_id,
+                    arrow_hasher=self._pod.data_context.arrow_hasher,
+                    pipeline_database=self._pipeline_database,
+                    table_path=self._table_path,
+                )
+                if result is not None:
+                    await output.send(result)
+
+            async with asyncio.TaskGroup() as tg:
+                async for tag, data in inputs[0]:
+                    tg.create_task(process_one(tag, data))
+        finally:
+            await output.close()

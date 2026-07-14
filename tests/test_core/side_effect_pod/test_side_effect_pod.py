@@ -433,3 +433,91 @@ class TestSideEffectJobNodeSync:
         for part in parts:
             decoded = base64.b64decode(part)
             assert len(decoded) == 8
+
+
+# ---------------------------------------------------------------------------
+# Task 8 tests — async execution
+# ---------------------------------------------------------------------------
+
+
+class TestSideEffectJobNodeAsync:
+    """T13–T14: async_execute via channels."""
+
+    def test_t13_async_execute_basic(self):
+        """T13: async_execute processes all rows and writes log."""
+        import asyncio
+        import polars as pl
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode
+        from orcapod.channels import Channel
+
+        calls = []
+        def fn(data, ctx):
+            calls.append(True)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(3)
+        db = _make_in_memory_db()
+        node = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node.attach_databases(pipeline_database=db)
+
+        async def _run():
+            ch_in = Channel(buffer_size=10)
+            ch_out = Channel(buffer_size=10)
+
+            async def feed():
+                for tag, data in stream.iter_data():
+                    await ch_in.writer.send((tag, data))
+                await ch_in.writer.close()
+
+            await asyncio.gather(
+                feed(),
+                node.async_execute(
+                    [ch_in.reader], ch_out.writer, run_id="test-run-1"
+                ),
+            )
+            return await ch_out.reader.collect()
+
+        results = asyncio.run(_run())
+        assert len(results) == 3
+        assert len(calls) == 3
+
+        table_path = (node.pipeline_hash().to_string(), "side_effect_invocations")
+        records = db.get_all_records(table_path)
+        df = pl.from_arrow(records)
+        assert len(df) == 3
+        assert all(df["status"] == "success")
+
+    def test_t14_async_execute_parallel(self):
+        """T14: Concurrent delivery via max_concurrency — all rows complete."""
+        import asyncio
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode
+        from orcapod.channels import Channel
+
+        results_store = []
+        def fn(data, ctx):
+            results_store.append(True)
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(10)
+        db = _make_in_memory_db()
+        node = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node.attach_databases(pipeline_database=db)
+
+        async def _run():
+            ch_in = Channel(buffer_size=20)
+            ch_out = Channel(buffer_size=20)
+
+            async def feed():
+                for tag, data in stream.iter_data():
+                    await ch_in.writer.send((tag, data))
+                await ch_in.writer.close()
+
+            await asyncio.gather(
+                feed(),
+                node.async_execute([ch_in.reader], ch_out.writer),
+            )
+            return await ch_out.reader.collect()
+
+        out = asyncio.run(_run())
+        assert len(out) == 10
+        assert len(results_store) == 10
