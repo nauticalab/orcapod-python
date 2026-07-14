@@ -1,6 +1,6 @@
 """Node protocols for orchestrator interaction.
 
-Defines the three node protocols (Source, Function, Operator) that
+Defines the four node protocols (Source, Function, Operator, SideEffect) that
 formalize the interface between orchestrators and graph nodes, plus
 TypeGuard dispatch functions for runtime type narrowing.
 
