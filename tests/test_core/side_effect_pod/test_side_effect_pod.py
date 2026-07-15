@@ -386,6 +386,106 @@ class TestSideEffectJobNodeSync:
         assert "full_input_packet_hash" in df.columns
         assert "status" not in df.columns
 
+    def test_failure_does_not_write_log_so_next_run_retries(self):
+        """Delivery failure writes nothing to the log; the next run retries the row.
+
+        With ``track_completion=True``, the completion check uses ``get_record_by_id``.
+        A failed delivery never writes a success record, so the record_id is absent
+        from the DB and the next run sees no prior completion — it calls fn again.
+        """
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+
+        call_count = 0
+
+        def fn(data, ctx):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("always fails")
+
+        cfg = SideEffectPodConfig(
+            track_completion=True, on_error="log", drop_on_failure=False
+        )
+        pod = SideEffectPod(fn, config=cfg)
+        stream = _make_stream(1)
+        db = _make_in_memory_db()
+
+        # Run 1: fn raises → nothing written to DB.
+        node1 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node1.attach_databases(pipeline_database=db)
+        results1 = node1.execute(stream)
+        assert len(results1) == 1  # row still emitted (drop_on_failure=False)
+        assert call_count == 1     # fn was invoked
+
+        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        assert db.get_all_records(table_path) is None  # no success record in DB
+
+        # Run 2: no record found → fn is called again, still fails.
+        node2 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node2.attach_databases(pipeline_database=db)
+        results2 = node2.execute(stream)
+        assert len(results2) == 1
+        assert call_count == 2  # retried — fn called a second time
+
+        assert db.get_all_records(table_path) is None  # still nothing in DB
+
+    def test_fail_then_succeed_then_skip(self):
+        """Fail → success → skip: the full idempotency lifecycle.
+
+        Run 1: fn fails → no DB record → row emitted (drop_on_failure=False).
+        Run 2: no record found → fn retried → succeeds → DB record written.
+        Run 3: record found → fn NOT called → row re-emitted from cache.
+        """
+        import polars as pl
+        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+
+        call_count = 0
+
+        def fn(data, ctx):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient failure on first call")
+            # call 2+: succeed
+
+        cfg = SideEffectPodConfig(
+            track_completion=True, on_error="log", drop_on_failure=False
+        )
+        pod = SideEffectPod(fn, config=cfg)
+        stream = _make_stream(1)
+        db = _make_in_memory_db()
+
+        # Run 1: fn raises → no DB record.
+        node1 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node1.attach_databases(pipeline_database=db)
+        results1 = node1.execute(stream)
+        assert len(results1) == 1  # emitted despite failure
+        assert call_count == 1
+
+        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        assert db.get_all_records(table_path) is None  # failure ≠ completion
+
+        # Run 2: no record → fn retried → succeeds → record written.
+        node2 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node2.attach_databases(pipeline_database=db)
+        results2 = node2.execute(stream)
+        assert len(results2) == 1
+        assert call_count == 2  # fn called exactly once more
+
+        records = db.get_all_records(table_path)
+        assert records is not None
+        df = pl.from_arrow(records)
+        assert len(df) == 1  # one success record now in DB
+
+        # Run 3: record found → fn NOT called → row re-emitted from cache.
+        node3 = SideEffectJobNode(side_effect_pod=pod, input_stream=stream)
+        node3.attach_databases(pipeline_database=db)
+        results3 = node3.execute(stream)
+        assert len(results3) == 1
+        assert call_count == 2  # still 2 — fn was skipped entirely
+
+        # DB still has exactly one record (no duplicate writes).
+        assert len(pl.from_arrow(db.get_all_records(table_path))) == 1
+
     def test_t11_invocation_hash_determinism(self):
         """T11: Identical inputs produce identical invocation_hash."""
         from orcapod.side_effects import SideEffectPod, SideEffectJobNode, InvocationContext
