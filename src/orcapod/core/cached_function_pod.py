@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import WrappedFunctionPod
 from orcapod.core.result_cache import ResultCache
+from orcapod.hooks import InvocationStatus
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataProtocol,
@@ -147,6 +149,122 @@ class CachedFunctionPod(WrappedFunctionPod):
             self._cache.store(data, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
+
+    def _invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Override to detect cache hit status from ``RESULT_COMPUTED_FLAG`` meta.
+
+        When ``_post_run_hooks`` is empty, delegates directly to
+        ``process_data`` with zero overhead. Otherwise calls
+        ``self.process_data()`` (which owns all cache lookup and store logic),
+        reads ``RESULT_COMPUTED_FLAG`` from the output data meta to determine
+        ``InvocationStatus.HIT`` vs ``InvocationStatus.COMPUTED``, and fires
+        registered hooks.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        if not self._post_run_hooks:
+            return self.process_data(tag, data, logger=logger)
+
+        started_at = datetime.now(timezone.utc)
+        out_tag = tag
+        output_data: DataProtocol | None = None
+
+        try:
+            out_tag, output_data = self.process_data(tag, data, logger=logger)
+            if output_data is not None:
+                status = (
+                    InvocationStatus.HIT
+                    if output_data.get_meta_value(self.RESULT_COMPUTED_FLAG) is False
+                    else InvocationStatus.COMPUTED
+                )
+            else:
+                status = InvocationStatus.COMPUTED
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            self._fire_post_run_hooks(
+                self._build_post_run_payload(
+                    tag, data, None, started_at, finished_at,
+                    InvocationStatus.ERROR, exc,
+                )
+            )
+            raise  # bare raise — preserves the original traceback exactly
+
+        finished_at = datetime.now(timezone.utc)
+        self._fire_post_run_hooks(
+            self._build_post_run_payload(
+                tag, data, output_data, started_at, finished_at, status, None,
+            )
+        )
+        return out_tag, output_data
+
+    async def _async_invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Async counterpart of ``_invoke_with_hooks`` for ``CachedFunctionPod``.
+
+        When ``_post_run_hooks`` is empty, delegates directly to
+        ``async_process_data`` with zero overhead.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        if not self._post_run_hooks:
+            return await self.async_process_data(tag, data, logger=logger)
+
+        started_at = datetime.now(timezone.utc)
+        out_tag = tag
+        output_data: DataProtocol | None = None
+
+        try:
+            out_tag, output_data = await self.async_process_data(
+                tag, data, logger=logger
+            )
+            if output_data is not None:
+                status = (
+                    InvocationStatus.HIT
+                    if output_data.get_meta_value(self.RESULT_COMPUTED_FLAG) is False
+                    else InvocationStatus.COMPUTED
+                )
+            else:
+                status = InvocationStatus.COMPUTED
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            self._fire_post_run_hooks(
+                self._build_post_run_payload(
+                    tag, data, None, started_at, finished_at,
+                    InvocationStatus.ERROR, exc,
+                )
+            )
+            raise  # bare raise — preserves the original traceback exactly
+
+        finished_at = datetime.now(timezone.utc)
+        self._fire_post_run_hooks(
+            self._build_post_run_payload(
+                tag, data, output_data, started_at, finished_at, status, None,
+            )
+        )
+        return out_tag, output_data
 
     def get_all_cached_outputs(
         self, include_system_columns: bool = False
