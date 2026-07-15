@@ -1,5 +1,16 @@
 # SideEffectPod Implementation Plan
 
+> **⚠ As-built notice (post-merge):** The invocation log design was updated during the PR
+> review cycle. The code samples below in Tasks 7 and 8 still reference the original
+> `status`/`error_message`-based schema and `get_records_with_column_value` completion check.
+> The **actual implementation** differs:
+> - Only **success** rows are written; failure writes nothing (so the next run retries).
+> - **`record_id`** = `fip_hash.digest + b"::" + pod_content_hash.digest` (bytes, deterministic).
+> - Completion check uses `get_record_by_id(table_path, record_id)` — no column scan.
+> - Schema has no `status` or `error_message` columns.
+>
+> See `src/orcapod/side_effects.py` and `superpowers/specs/2026-07-14-itl-525-side-effect-pod-impl-design.md` for the authoritative as-built design.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use sensei:subagent-driven-development (recommended) or sensei:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `SideEffectPod` as a first-class pipeline node for side effects (DB writes, logging, notifications) with pass-through output, deterministic invocation identity via `InvocationContext`, and optional idempotent completion tracking.
@@ -962,34 +973,25 @@ def _execute_side_effect_row(
     else:
         inv_hash = f"{c1}::{c2}"
 
-    # 3. Completion check (only in pipeline mode with DB).
-    if pod_config.track_completion and pipeline_database is not None and table_path is not None:
-        prior = pipeline_database.get_records_with_column_value(
-            table_path,
-            {"full_input_packet_hash": fip_hash_str},
-        )
-        if prior is not None and len(prior) > 0:
-            # Check most recent status
-            import polars as pl
-            df = pl.from_arrow(prior).sort("executed_at", descending=True)
-            most_recent_status = df["status"][0]
-            if most_recent_status == "success":
-                _write_invocation_row(
-                    pipeline_database=pipeline_database,
-                    table_path=table_path,
-                    fip_hash_str=fip_hash_str,
-                    pod_content_hash_str=pod_content_hash_str,
-                    run_id=run_id,
-                    status="skipped",
-                    error_message=None,
-                )
-                return (tag, data)  # re-emit without re-delivery
+    # ⚠ As-built: the completion check and write logic below was redesigned post-merge.
+    # Actual implementation uses a deterministic record_id + get_record_by_id lookup.
+    # Only success rows are written; failure writes nothing so the next run retries.
+    # See src/orcapod/side_effects.py and the spec for the authoritative design.
 
-    # 4. Build InvocationContext (always).
+    # 3. Deterministic record_id for completion lookup and write.
+    record_id = fip_hash.digest + b"::" + pod_content_hash.digest
+
+    # 4. Completion check — O(1) lookup by record_id; no column scan.
+    if pod_config.track_completion and pipeline_database is not None and table_path is not None:
+        prior = pipeline_database.get_record_by_id(table_path, record_id)
+        if prior is not None:
+            return (tag, data)  # already completed — re-emit without re-delivery
+
+    # 5. Build InvocationContext (always).
     ctx = InvocationContext(
         invocation_hash=inv_hash,
         pod_name=pod_name,
-        pod_content_hash=pod_content_hash_str,
+        pod_content_hash=pod_content_hash.to_string(),
         pipeline_run_id=run_id,
         _pipeline_hash_ch=pipeline_hash_ch,
         _full_input_packet_hash_ch=fip_hash,
@@ -997,31 +999,21 @@ def _execute_side_effect_row(
         _track_completion=pod_config.track_completion,
     )
 
-    # 5. Call user function.
+    # 6. Call user function.
     try:
         fn(data, ctx)
         if pipeline_database is not None and table_path is not None:
             _write_invocation_row(
                 pipeline_database=pipeline_database,
                 table_path=table_path,
-                fip_hash_str=fip_hash_str,
-                pod_content_hash_str=pod_content_hash_str,
+                record_id=record_id,
+                fip_hash_str=fip_hash.to_string(),
+                pod_content_hash_str=pod_content_hash.to_string(),
                 run_id=run_id,
-                status="success",
-                error_message=None,
             )
         return (tag, data)
     except Exception as exc:
-        if pipeline_database is not None and table_path is not None:
-            _write_invocation_row(
-                pipeline_database=pipeline_database,
-                table_path=table_path,
-                fip_hash_str=fip_hash_str,
-                pod_content_hash_str=pod_content_hash_str,
-                run_id=run_id,
-                status="failed",
-                error_message=str(exc),
-            )
+        # No DB write on failure — absence of record means the next run retries.
         if pod_config.on_error == "raise":
             raise
         logger.warning(

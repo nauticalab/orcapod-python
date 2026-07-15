@@ -366,14 +366,16 @@ Full row-level logic:
        else:
            invocation_hash = f"{component_1}::{component_2}"
 
-3. If track_completion=True and pipeline_database is not None:
-       status = lookup_completion_status(fip_hash.to_string())
-       if status == "success":
-           write_invocation_row(status="skipped", ...)
-           return (tag, data)   # re-emit without re-delivery
-       # status == "failed" or None → fall through to delivery
+3. Compute deterministic record_id (bytes):
+       record_id = fip_hash.digest + b"::" + pod_content_hash.digest
 
-4. Build InvocationContext (always):
+4. If track_completion=True and pipeline_database is not None:
+       prior = pipeline_database.get_record_by_id(table_path, record_id)
+       if prior is not None:
+           return (tag, data)   # already completed — re-emit without re-delivery
+       # no record → fall through to delivery; failure also has no record so it retries
+
+5. Build InvocationContext (always):
        ctx = InvocationContext(
            invocation_hash=invocation_hash,
            pod_name=self._pod.label,
@@ -384,12 +386,12 @@ Full row-level logic:
            _hash_config=hash_config,
        )
 
-5. Try: call user_fn(data, ctx)
-       write_invocation_row(status="success", ...)
+6. Try: call user_fn(data, ctx)
+       write_invocation_row(record_id, ...)   # success-only; uses add_record(skip_duplicates=True)
        return (tag, data)
 
-6. Except Exception as exc:
-       write_invocation_row(status="failed", error_message=str(exc), ...)
+7. Except Exception as exc:
+       # No DB write on failure — absence of record_id means the next run will retry.
        if on_error == "raise":
            raise
        # on_error == "log":
@@ -413,29 +415,34 @@ Callers that do not need the context may ignore the value (`_ctx` by convention)
 
 ### Invocation table DDL
 
-Created on first invocation via `pipeline_database.create_table_if_not_exists(...)`.
+Only **successful** deliveries are written to the invocation log. Failed deliveries write
+nothing — their absence from the table is what causes the next run to retry them.
+
+The **record_id** (passed directly to `add_record()`, not stored as a column) is:
+
+```
+record_id = fip_hash.digest + b"::" + pod_content_hash.digest
+```
+
+This is a deterministic bytes key that scopes completion to the exact `(input, pod version)`
+pair. `add_record(skip_duplicates=True)` ensures idempotent writes.
 
 Schema:
 
 | Column | Arrow type | Notes |
 |---|---|---|
-| `full_input_packet_hash` | `large_string` | Primary lookup key — raw `ContentHash.to_string()` |
-| `pod_content_hash` | `large_string` | `pod.content_hash().to_string()` |
-| `pipeline_run_id` | `large_string` (nullable) | `None` for lazy pipelines |
-| `executed_at` | `timestamp(unit="us", tz="UTC")` | Wall-clock UTC time |
-| `status` | `large_string` | `"success"` / `"failed"` / `"skipped"` |
-| `error_message` | `large_string` (nullable) | Set when `status="failed"` |
+| `full_input_packet_hash` | `large_string` | `fip_hash.to_string()` — auditing |
+| `pod_content_hash` | `large_string` | `pod.content_hash().to_string()` — auditing |
+| `pipeline_run_id` | `large_string` (nullable) | `None` for lazy pipelines — auditing |
+| `executed_at` | `timestamp(unit="us", tz="UTC")` | Wall-clock UTC time — auditing |
 
 `InvocationHashConfig` is purely a user-facing concern with zero footprint in persistent
 storage. All columns store raw, stable values only. The `invocation_hash` compound string
-is derived from table path + `full_input_packet_hash` + `pipeline_run_id` and is never
-stored redundantly.
+is derived on-the-fly and is never stored.
 
-`"skipped"` rows are written when `track_completion=True` and the input was previously
-succeeded — delivery is not re-attempted, but a log row is always written.
-
-Completion-state lookup queries on `full_input_packet_hash` (exact match), ordering by
-`executed_at` descending, returning the most recent `status`.
+Completion-state lookup: `get_record_by_id(table_path, record_id)`. Returns `None` when
+the row has never succeeded (including after failures), `pa.Table` when it has. No column
+scan, no status check, no ordering required.
 
 ### Sync path — `execute()`
 
