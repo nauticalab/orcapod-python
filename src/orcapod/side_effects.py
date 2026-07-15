@@ -97,6 +97,10 @@ class SideEffectPodConfig:
         on_error: ``"raise"`` (default) re-raises delivery exceptions;
             ``"log"`` logs at WARNING and continues.
         hash_config: Controls encoding of ``InvocationContext.invocation_hash``.
+        max_concurrency: Maximum number of in-flight async delivery tasks when
+            running under the async orchestrator. ``None`` means unlimited.
+            Defaults to ``16`` to prevent unbounded task accumulation on large
+            streams.
     """
 
     track_completion: bool = True
@@ -105,6 +109,7 @@ class SideEffectPodConfig:
     hash_config: InvocationHashConfig = dataclasses.field(
         default_factory=InvocationHashConfig
     )
+    max_concurrency: int | None = 16
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +341,7 @@ def _execute_side_effect_row(
             table_path,
             {"full_input_packet_hash": fip_hash_str},
         )
-        if prior is not None and len(prior) > 0:
+        if prior is not None:
             # Check most recent status
             import polars as pl
             df = pl.from_arrow(prior).sort("executed_at", descending=True)
@@ -708,6 +713,11 @@ def _merge_config(
             if override.hash_config != default.hash_config
             else preset.hash_config
         ),
+        max_concurrency=(
+            override.max_concurrency
+            if override.max_concurrency != default.max_concurrency
+            else preset.max_concurrency
+        ),
     )
 
 
@@ -814,7 +824,14 @@ class SideEffectNode(StreamBase):
             tag_tables.append(tag.as_table(columns=column_config))
             data_tables.append(data.as_table(columns=column_config))
         if not tag_tables:
-            return pa.table({})
+            tag_schema, data_schema = self.output_schema(columns=column_config)
+            tc = self._pod.data_context.type_converter
+            fields = {}
+            for name, py_type in {**tag_schema, **data_schema}.items():
+                fields[name] = pa.array(
+                    [], type=tc.python_type_to_arrow_type(py_type)
+                )
+            return pa.table(fields)
         return arrow_utils.hstack_tables(
             pa.concat_tables(tag_tables),
             pa.concat_tables(data_tables),
@@ -824,10 +841,10 @@ class SideEffectNode(StreamBase):
     def node_uri(self) -> tuple[str, ...]:
         """Canonical URI tuple identifying this side-effect node.
 
-        Returns:
-            A tuple of the form ``("side_effect", label, content_hash_string)``.
+        Identical to ``side_effect_pod.uri`` at runtime, following the same
+        convention as ``FunctionNode.node_uri`` and ``OperatorNode.node_uri``.
         """
-        return ("side_effect", self._pod.label, self._pod.content_hash().to_string())
+        return self._pod.uri
 
 
 # ---------------------------------------------------------------------------
@@ -939,38 +956,59 @@ class SideEffectJobNode(SideEffectNode):
         observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
     ) -> None:
-        """Async side-effect delivery with per-row concurrency control.
+        """Async side-effect delivery with semaphore-bounded concurrency.
 
         Reads from ``inputs[0]``, dispatches each row as an independent
-        async task via ``asyncio.TaskGroup``. Emits non-``None`` results to
-        ``output``. Always closes ``output`` in a ``finally`` block.
+        async task via ``asyncio.TaskGroup``. A semaphore caps in-flight
+        tasks at ``pod_config.max_concurrency`` (default 16) to prevent
+        unbounded task accumulation on large streams. Pass
+        ``max_concurrency=None`` in the pod config for unlimited concurrency.
+        Emits non-``None`` results to ``output``. Always closes ``output``
+        in a ``finally`` block.
 
         Args:
             inputs: Single-element sequence containing the input channel.
             output: Writable channel for pass-through ``(tag, data)`` pairs.
             observer: Optional execution observer (currently unused).
             run_id: Pipeline run identifier from the orchestrator.
+
+        Raises:
+            ValueError: If ``inputs`` does not contain exactly one channel.
         """
+        if len(inputs) != 1:
+            raise ValueError(
+                f"SideEffectJobNode.async_execute expects exactly 1 input channel; "
+                f"got {len(inputs)}."
+            )
+        max_concurrency = self._pod.pod_config.max_concurrency
+        sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+
         try:
             async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
-                result = _execute_side_effect_row(
-                    fn=self._pod._fn,
-                    tag=tag,
-                    data=data,
-                    pod_config=self._pod.pod_config,
-                    pipeline_hash_ch=self.pipeline_hash(),
-                    pod_content_hash_str=self._pod.content_hash().to_string(),
-                    pod_name=self._pod.label,
-                    run_id=run_id,
-                    arrow_hasher=self._pod.data_context.arrow_hasher,
-                    pipeline_database=self._pipeline_database,
-                    table_path=self._table_path,
-                )
-                if result is not None:
-                    await output.send(result)
+                try:
+                    result = _execute_side_effect_row(
+                        fn=self._pod._fn,
+                        tag=tag,
+                        data=data,
+                        pod_config=self._pod.pod_config,
+                        pipeline_hash_ch=self.pipeline_hash(),
+                        pod_content_hash_str=self._pod.content_hash().to_string(),
+                        pod_name=self._pod.label,
+                        run_id=run_id,
+                        arrow_hasher=self._pod.data_context.arrow_hasher,
+                        pipeline_database=self._pipeline_database,
+                        table_path=self._table_path,
+                    )
+                    if result is not None:
+                        await output.send(result)
+                finally:
+                    if sem is not None:
+                        sem.release()
 
             async with asyncio.TaskGroup() as tg:
                 async for tag, data in inputs[0]:
+                    if sem is not None:
+                        await sem.acquire()
                     tg.create_task(process_one(tag, data))
         finally:
             await output.close()
