@@ -575,3 +575,73 @@ class TestSideEffectPodPipelineIntegration:
         df = pl.from_arrow(records)
         assert len(df) == 2
         assert all(df["status"] == "success")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline hash transparency tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineHashTransparency:
+    """Tests that drop_on_failure=False nodes are transparent to downstream
+    pipeline hashes, while drop_on_failure=True nodes are opaque."""
+
+    def test_tap_pod_is_transparent_to_pipeline_hash(self):
+        """drop_on_failure=False: node pipeline_hash equals upstream pipeline_hash."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
+
+        pod = SideEffectPod(lambda data, ctx: None,
+                            config=SideEffectPodConfig(drop_on_failure=False))
+        upstream = _make_stream(3)
+        node = SideEffectNode(side_effect_pod=pod, input_stream=upstream)
+
+        assert node.pipeline_hash() == upstream.pipeline_hash()
+
+    def test_sink_pod_is_opaque_to_pipeline_hash(self):
+        """drop_on_failure=True: node pipeline_hash differs from upstream pipeline_hash."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
+
+        pod = SideEffectPod(lambda data, ctx: None,
+                            config=SideEffectPodConfig(drop_on_failure=True))
+        upstream = _make_stream(3)
+        node = SideEffectNode(side_effect_pod=pod, input_stream=upstream)
+
+        assert node.pipeline_hash() != upstream.pipeline_hash()
+
+    def test_inserting_tap_pod_does_not_change_downstream_hash(self):
+        """Inserting a drop_on_failure=False node leaves downstream hashes unchanged."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
+
+        upstream = _make_stream(3)
+
+        # Opaque downstream node wired directly to upstream
+        sink_pod = SideEffectPod(lambda data, ctx: None,
+                                 config=SideEffectPodConfig(drop_on_failure=True))
+        direct_downstream = SideEffectNode(side_effect_pod=sink_pod, input_stream=upstream)
+
+        # Transparent tap inserted between upstream and the same downstream
+        tap_pod = SideEffectPod(lambda data, ctx: None,
+                                config=SideEffectPodConfig(drop_on_failure=False))
+        tap_node = SideEffectNode(side_effect_pod=tap_pod, input_stream=upstream)
+        downstream_via_tap = SideEffectNode(side_effect_pod=sink_pod, input_stream=tap_node)
+
+        assert direct_downstream.pipeline_hash() == downstream_via_tap.pipeline_hash()
+
+    def test_inserting_sink_pod_changes_downstream_hash(self):
+        """Inserting a drop_on_failure=True node changes downstream hashes."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
+
+        upstream = _make_stream(3)
+
+        # Opaque downstream node wired directly to upstream
+        sink_pod = SideEffectPod(lambda data, ctx: None,
+                                 config=SideEffectPodConfig(drop_on_failure=True))
+        direct_downstream = SideEffectNode(side_effect_pod=sink_pod, input_stream=upstream)
+
+        # Another opaque node inserted between upstream and downstream
+        filter_pod = SideEffectPod(lambda data, ctx: None,
+                                   config=SideEffectPodConfig(drop_on_failure=True))
+        filter_node = SideEffectNode(side_effect_pod=filter_pod, input_stream=upstream)
+        downstream_via_sink = SideEffectNode(side_effect_pod=sink_pod, input_stream=filter_node)
+
+        assert direct_downstream.pipeline_hash() != downstream_via_sink.pipeline_hash()

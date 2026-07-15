@@ -214,6 +214,19 @@ class SideEffectPodStream(StreamBase):
         return (self._pod, self._pod.argument_symmetry((self._input_stream,)))
 
     def pipeline_identity_structure(self) -> Any:
+        """Return the pipeline identity structure for Merkle-chain inclusion.
+
+        When ``drop_on_failure=False`` the node cannot filter rows — every
+        upstream row passes through unconditionally — so it is transparent to
+        downstream pipeline hashes. Returning ``self._input_stream`` directly
+        causes ``hash_object`` to resolve it via ``pipeline_hash()``, making
+        ``self.pipeline_hash()`` equal to ``self._input_stream.pipeline_hash()``.
+
+        When ``drop_on_failure=True`` failed rows are dropped, so the node
+        acts as a filter and must be included in the Merkle chain.
+        """
+        if not self._pod.pod_config.drop_on_failure:
+            return self._input_stream
         return self.identity_structure()
 
     def output_schema(
@@ -767,6 +780,19 @@ class SideEffectNode(StreamBase):
         return (self._pod, self._pod.argument_symmetry((self._input_stream,)))
 
     def pipeline_identity_structure(self) -> Any:
+        """Return the pipeline identity structure for Merkle-chain inclusion.
+
+        When ``drop_on_failure=False`` the node cannot filter rows — every
+        upstream row passes through unconditionally — so it is transparent to
+        downstream pipeline hashes. Returning ``self._input_stream`` directly
+        causes ``hash_object`` to resolve it via ``pipeline_hash()``, making
+        ``self.pipeline_hash()`` equal to ``self._input_stream.pipeline_hash()``.
+
+        When ``drop_on_failure=True`` failed rows are dropped, so the node
+        acts as a filter and must be included in the Merkle chain.
+        """
+        if not self._pod.pod_config.drop_on_failure:
+            return self._input_stream
         return self.identity_structure()
 
     def computed_label(self) -> str | None:
