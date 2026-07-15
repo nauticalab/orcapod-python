@@ -55,7 +55,7 @@ class BasicTrackerManager:
 
     def record_side_effect_pod_invocation(
         self,
-        pod: Any,
+        pod: cp.SideEffectPodProtocol,
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:

@@ -1,8 +1,9 @@
 from contextlib import AbstractContextManager
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.function_pod import FunctionPodProtocol
 from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
+from orcapod.protocols.core_protocols.side_effect_pod import SideEffectPodProtocol
 from orcapod.protocols.core_protocols.streams import StreamProtocol
 
 
@@ -95,7 +96,7 @@ class TrackerProtocol(Protocol):
 
     def record_side_effect_pod_invocation(
         self,
-        pod: Any,
+        pod: SideEffectPodProtocol,
         input_stream: StreamProtocol,
         label: str | None = None,
     ) -> None:
@@ -209,7 +210,7 @@ class TrackerManagerProtocol(Protocol):
 
     def record_side_effect_pod_invocation(
         self,
-        pod: Any,
+        pod: SideEffectPodProtocol,
         input_stream: StreamProtocol,
         label: str | None = None,
     ) -> None:

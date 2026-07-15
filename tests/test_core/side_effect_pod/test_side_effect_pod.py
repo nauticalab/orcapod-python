@@ -295,7 +295,7 @@ class TestSideEffectJobNodeSync:
         return node, stream, db
 
     def test_t5_invocation_log_written_on_success(self):
-        """T5: DB row written with status='success'."""
+        """T5: DB row written for each successful delivery."""
         import polars as pl
         from orcapod.side_effects import SideEffectPod, SideEffectJobNode
 
@@ -314,8 +314,10 @@ class TestSideEffectJobNodeSync:
         assert records is not None
         df = pl.from_arrow(records)
         assert len(df) == 3
-        assert all(df["status"] == "success")
         assert "full_input_packet_hash" in df.columns
+        assert "pod_content_hash" in df.columns
+        assert "executed_at" in df.columns
+        assert "status" not in df.columns  # only success records; no status column
         assert "invocation_hash" not in df.columns  # never stored
 
     def test_t6_track_completion_skips_on_rerun(self):
@@ -343,13 +345,13 @@ class TestSideEffectJobNodeSync:
         node2.attach_databases(pipeline_database=db)
         results2 = node2.execute(stream)
         assert len(results2) == 2  # rows still emitted (pass-through)
-        assert len(calls) == 2  # fn NOT called again
+        assert len(calls) == 2  # fn NOT called again — completion check triggered
 
-        # Check log has skipped rows
+        # Log still has exactly 2 rows (one per unique input); no duplicate writes
         table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
-        assert "skipped" in df["status"].to_list()
+        assert len(df) == 2  # one success record per unique input, not re-written
 
     def test_t7_no_track_completion_reruns_delivery(self):
         """T7: track_completion=False always re-delivers."""
@@ -378,8 +380,11 @@ class TestSideEffectJobNodeSync:
         table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
-        assert len(df) == 4  # two rows × two runs
-        assert all(df["status"] == "success")
+        # track_completion=False → same record_id written twice; skip_duplicates=True
+        # means second write is silently dropped, so we still see 2 unique rows.
+        assert len(df) == 2
+        assert "full_input_packet_hash" in df.columns
+        assert "status" not in df.columns
 
     def test_t11_invocation_hash_determinism(self):
         """T11: Identical inputs produce identical invocation_hash."""
@@ -485,7 +490,8 @@ class TestSideEffectJobNodeAsync:
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
         assert len(df) == 3
-        assert all(df["status"] == "success")
+        assert "full_input_packet_hash" in df.columns
+        assert "status" not in df.columns  # only success records; no status column
 
     def test_t14_async_execute_parallel(self):
         """T14: Concurrent delivery via max_concurrency — all rows complete."""
@@ -574,74 +580,7 @@ class TestSideEffectPodPipelineIntegration:
         assert records is not None
         df = pl.from_arrow(records)
         assert len(df) == 2
-        assert all(df["status"] == "success")
+        assert "full_input_packet_hash" in df.columns
+        assert "status" not in df.columns  # only success records; no status column
 
 
-# ---------------------------------------------------------------------------
-# Pipeline hash transparency tests
-# ---------------------------------------------------------------------------
-
-
-class TestPipelineHashTransparency:
-    """Tests that drop_on_failure=False nodes are transparent to downstream
-    pipeline hashes, while drop_on_failure=True nodes are opaque."""
-
-    def test_tap_pod_is_transparent_to_pipeline_hash(self):
-        """drop_on_failure=False: node pipeline_hash equals upstream pipeline_hash."""
-        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
-
-        pod = SideEffectPod(lambda data, ctx: None,
-                            config=SideEffectPodConfig(drop_on_failure=False))
-        upstream = _make_stream(3)
-        node = SideEffectNode(side_effect_pod=pod, input_stream=upstream)
-
-        assert node.pipeline_hash() == upstream.pipeline_hash()
-
-    def test_sink_pod_is_opaque_to_pipeline_hash(self):
-        """drop_on_failure=True: node pipeline_hash differs from upstream pipeline_hash."""
-        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
-
-        pod = SideEffectPod(lambda data, ctx: None,
-                            config=SideEffectPodConfig(drop_on_failure=True))
-        upstream = _make_stream(3)
-        node = SideEffectNode(side_effect_pod=pod, input_stream=upstream)
-
-        assert node.pipeline_hash() != upstream.pipeline_hash()
-
-    def test_inserting_tap_pod_does_not_change_downstream_hash(self):
-        """Inserting a drop_on_failure=False node leaves downstream hashes unchanged."""
-        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
-
-        upstream = _make_stream(3)
-
-        # Opaque downstream node wired directly to upstream
-        sink_pod = SideEffectPod(lambda data, ctx: None,
-                                 config=SideEffectPodConfig(drop_on_failure=True))
-        direct_downstream = SideEffectNode(side_effect_pod=sink_pod, input_stream=upstream)
-
-        # Transparent tap inserted between upstream and the same downstream
-        tap_pod = SideEffectPod(lambda data, ctx: None,
-                                config=SideEffectPodConfig(drop_on_failure=False))
-        tap_node = SideEffectNode(side_effect_pod=tap_pod, input_stream=upstream)
-        downstream_via_tap = SideEffectNode(side_effect_pod=sink_pod, input_stream=tap_node)
-
-        assert direct_downstream.pipeline_hash() == downstream_via_tap.pipeline_hash()
-
-    def test_inserting_sink_pod_changes_downstream_hash(self):
-        """Inserting a drop_on_failure=True node changes downstream hashes."""
-        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, SideEffectNode
-
-        upstream = _make_stream(3)
-
-        # Opaque downstream node wired directly to upstream
-        sink_pod = SideEffectPod(lambda data, ctx: None,
-                                 config=SideEffectPodConfig(drop_on_failure=True))
-        direct_downstream = SideEffectNode(side_effect_pod=sink_pod, input_stream=upstream)
-
-        # Another opaque node inserted between upstream and downstream
-        filter_pod = SideEffectPod(lambda data, ctx: None,
-                                   config=SideEffectPodConfig(drop_on_failure=True))
-        filter_node = SideEffectNode(side_effect_pod=filter_pod, input_stream=upstream)
-        downstream_via_sink = SideEffectNode(side_effect_pod=sink_pod, input_stream=filter_node)
-
-        assert direct_downstream.pipeline_hash() != downstream_via_sink.pipeline_hash()

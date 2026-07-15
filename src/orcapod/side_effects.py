@@ -11,9 +11,7 @@ import asyncio
 import base64
 import dataclasses
 import datetime
-import hashlib
 import logging
-import uuid
 from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -50,14 +48,13 @@ class InvocationHashConfig:
     """Controls how ``InvocationContext.invocation_hash`` is serialized.
 
     Args:
-        encoding: Output encoding — ``"hex"`` (default), ``"base64"``, or
-            ``"binary"`` (falls back to hex in string contexts).
+        encoding: Output encoding — ``"hex"`` (default) or ``"base64"``.
         component_length: Bytes of raw digest to use per component. ``None``
             means full digest length. Applied identically to every
             ``::``-separated component.
     """
 
-    encoding: Literal["hex", "base64", "binary"] = "hex"
+    encoding: Literal["hex", "base64"] = "hex"
     component_length: int | None = None
 
 
@@ -71,12 +68,11 @@ def _serialize_component(content_hash: ContentHash, config: InvocationHashConfig
     Returns:
         A string representation of the (optionally truncated) digest.
     """
-    raw: bytes = content_hash.digest
+    raw = content_hash.digest
     if config.component_length is not None:
-        raw = raw[: config.component_length]
+        raw = raw[:config.component_length]
     if config.encoding == "base64":
         return base64.b64encode(raw).decode("ascii")
-    # "hex" and "binary" both produce hex strings in string contexts
     return raw.hex()
 
 
@@ -214,19 +210,6 @@ class SideEffectPodStream(StreamBase):
         return (self._pod, self._pod.argument_symmetry((self._input_stream,)))
 
     def pipeline_identity_structure(self) -> Any:
-        """Return the pipeline identity structure for Merkle-chain inclusion.
-
-        When ``drop_on_failure=False`` the node cannot filter rows — every
-        upstream row passes through unconditionally — so it is transparent to
-        downstream pipeline hashes. Returning ``self._input_stream`` directly
-        causes ``hash_object`` to resolve it via ``pipeline_hash()``, making
-        ``self.pipeline_hash()`` equal to ``self._input_stream.pipeline_hash()``.
-
-        When ``drop_on_failure=True`` failed rows are dropped, so the node
-        acts as a filter and must be included in the Merkle chain.
-        """
-        if not self._pod.pod_config.drop_on_failure:
-            return self._input_stream
         return self.identity_structure()
 
     def output_schema(
@@ -253,7 +236,7 @@ class SideEffectPodStream(StreamBase):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self._pod.pipeline_hash(),
-                pod_content_hash_str=self._pod.content_hash().to_string(),
+                pod_content_hash=self._pod.content_hash(),
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -305,7 +288,7 @@ def _execute_side_effect_row(
     data: DataProtocol,
     pod_config: SideEffectPodConfig,
     pipeline_hash_ch: ContentHash,
-    pod_content_hash_str: str,
+    pod_content_hash: ContentHash,
     pod_name: str,
     run_id: str | None,
     arrow_hasher: Any,
@@ -320,7 +303,8 @@ def _execute_side_effect_row(
         data: Data for this row.
         pod_config: Pod-level configuration.
         pipeline_hash_ch: Pipeline hash of the node (for invocation_hash c1).
-        pod_content_hash_str: String form of the pod's content hash.
+        pod_content_hash: Content hash of the pod (used in record_id and
+            ``InvocationContext``).
         pod_name: Label of the pod.
         run_id: Pipeline run identifier (or ``None`` in standalone mode).
         arrow_hasher: The ``arrow_hasher`` from the pod's data context.
@@ -337,9 +321,12 @@ def _execute_side_effect_row(
     data_table = data.as_table(columns={"source": True})
     full_table = arrow_utils.hstack_tables(tag_table, data_table)
     fip_hash: ContentHash = arrow_hasher.hash_table(full_table)
-    fip_hash_str = fip_hash.to_string()
 
-    # 2. Serialize invocation_hash.
+    # 2. Deterministic record_id: fip_hash(binary) + b'::' + pod_content_hash(binary).
+    #    Scopes completion tracking to the exact (input, pod version) pair.
+    record_id = fip_hash.digest + b"::" + pod_content_hash.digest
+
+    # 3. Serialize invocation_hash for InvocationContext.
     cfg = pod_config.hash_config
     c1 = _serialize_component(pipeline_hash_ch, cfg)
     c2 = _serialize_component(fip_hash, cfg)
@@ -348,34 +335,17 @@ def _execute_side_effect_row(
     else:
         inv_hash = f"{c1}::{c2}"
 
-    # 3. Completion check (only in pipeline mode with DB).
+    # 4. Completion check — look up by deterministic record_id.
     if pod_config.track_completion and pipeline_database is not None and table_path is not None:
-        prior = pipeline_database.get_records_with_column_value(
-            table_path,
-            {"full_input_packet_hash": fip_hash_str},
-        )
+        prior = pipeline_database.get_record_by_id(table_path, record_id)
         if prior is not None:
-            # Check most recent status
-            import polars as pl
-            df = pl.from_arrow(prior).sort("executed_at", descending=True)
-            most_recent_status = df["status"][0]
-            if most_recent_status == "success":
-                _write_invocation_row(
-                    pipeline_database=pipeline_database,
-                    table_path=table_path,
-                    fip_hash_str=fip_hash_str,
-                    pod_content_hash_str=pod_content_hash_str,
-                    run_id=run_id,
-                    status="skipped",
-                    error_message=None,
-                )
-                return (tag, data)  # re-emit without re-delivery
+            return (tag, data)  # already completed — re-emit without re-delivery
 
-    # 4. Build InvocationContext (always).
+    # 5. Build InvocationContext (always).
     ctx = InvocationContext(
         invocation_hash=inv_hash,
         pod_name=pod_name,
-        pod_content_hash=pod_content_hash_str,
+        pod_content_hash=pod_content_hash.to_string(),
         pipeline_run_id=run_id,
         _pipeline_hash_ch=pipeline_hash_ch,
         _full_input_packet_hash_ch=fip_hash,
@@ -383,31 +353,20 @@ def _execute_side_effect_row(
         _track_completion=pod_config.track_completion,
     )
 
-    # 5. Call user function.
+    # 6. Call user function.
     try:
         fn(data, ctx)
         if pipeline_database is not None and table_path is not None:
             _write_invocation_row(
                 pipeline_database=pipeline_database,
                 table_path=table_path,
-                fip_hash_str=fip_hash_str,
-                pod_content_hash_str=pod_content_hash_str,
+                record_id=record_id,
+                fip_hash_str=fip_hash.to_string(),
+                pod_content_hash_str=pod_content_hash.to_string(),
                 run_id=run_id,
-                status="success",
-                error_message=None,
             )
         return (tag, data)
     except Exception as exc:
-        if pipeline_database is not None and table_path is not None:
-            _write_invocation_row(
-                pipeline_database=pipeline_database,
-                table_path=table_path,
-                fip_hash_str=fip_hash_str,
-                pod_content_hash_str=pod_content_hash_str,
-                run_id=run_id,
-                status="failed",
-                error_message=str(exc),
-            )
         if pod_config.on_error == "raise":
             raise
         logger.warning(
@@ -422,30 +381,29 @@ def _write_invocation_row(
     *,
     pipeline_database: ArrowDatabaseProtocol,
     table_path: tuple[str, ...],
+    record_id: bytes,
     fip_hash_str: str,
     pod_content_hash_str: str,
     run_id: str | None,
-    status: str,
-    error_message: str | None,
 ) -> None:
-    """Write one row to the side-effect invocation log table.
+    """Write one success row to the side-effect invocation log table.
 
-    The record_id is a SHA-256 digest of ``(fip_hash_str, pod_content_hash_str,
-    run_id, status, executed_at)`` so that every invocation row is unique even
-    when the same row is re-attempted.
+    Only called on successful delivery. Uses a deterministic ``record_id``
+    (``fip_hash.digest + b'::' + pod_content_hash.digest``) so that
+    ``get_record_by_id`` can look up prior completions without a column scan.
+
+    Args:
+        pipeline_database: The attached pipeline database.
+        table_path: Path tuple for the invocation log table.
+        record_id: Deterministic bytes key scoping completion to this exact
+            ``(input, pod version)`` pair.
+        fip_hash_str: String form of the full-input-packet hash.
+        pod_content_hash_str: String form of the pod content hash.
+        run_id: Pipeline run identifier (or ``None`` for standalone mode).
     """
     executed_at = datetime.datetime.now(datetime.timezone.utc)
-    executed_at_str = executed_at.isoformat()
-    record_id_src = (
-        f"{fip_hash_str}::{pod_content_hash_str}::{run_id}::{status}::{executed_at_str}::{uuid.uuid4()}"
-    ).encode("utf-8")
-    record_id = hashlib.sha256(record_id_src).digest()
-
     record = pa.table(
         {
-            "__invocation_record_id": pa.array(
-                [record_id], type=pa.large_binary()
-            ),
             "full_input_packet_hash": pa.array(
                 [fip_hash_str], type=pa.large_string()
             ),
@@ -459,17 +417,13 @@ def _write_invocation_row(
                 [executed_at],
                 type=pa.timestamp("us", tz="UTC"),
             ),
-            "status": pa.array([status], type=pa.large_string()),
-            "error_message": pa.array(
-                [error_message], type=pa.large_string()
-            ),
         }
     )
-    pipeline_database.add_records(
+    pipeline_database.add_record(
         table_path,
+        record_id,
         record,
-        record_id_column="__invocation_record_id",
-        skip_duplicates=False,
+        skip_duplicates=True,
     )
 
 
@@ -780,19 +734,6 @@ class SideEffectNode(StreamBase):
         return (self._pod, self._pod.argument_symmetry((self._input_stream,)))
 
     def pipeline_identity_structure(self) -> Any:
-        """Return the pipeline identity structure for Merkle-chain inclusion.
-
-        When ``drop_on_failure=False`` the node cannot filter rows — every
-        upstream row passes through unconditionally — so it is transparent to
-        downstream pipeline hashes. Returning ``self._input_stream`` directly
-        causes ``hash_object`` to resolve it via ``pipeline_hash()``, making
-        ``self.pipeline_hash()`` equal to ``self._input_stream.pipeline_hash()``.
-
-        When ``drop_on_failure=True`` failed rows are dropped, so the node
-        acts as a filter and must be included in the Merkle chain.
-        """
-        if not self._pod.pod_config.drop_on_failure:
-            return self._input_stream
         return self.identity_structure()
 
     def computed_label(self) -> str | None:
@@ -823,7 +764,7 @@ class SideEffectNode(StreamBase):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                pod_content_hash_str=self._pod.content_hash().to_string(),
+                pod_content_hash=self._pod.content_hash(),
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -959,7 +900,7 @@ class SideEffectJobNode(SideEffectNode):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                pod_content_hash_str=self._pod.content_hash().to_string(),
+                pod_content_hash=self._pod.content_hash(),
                 pod_name=self._pod.label,
                 run_id=run_id,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -1018,7 +959,7 @@ class SideEffectJobNode(SideEffectNode):
                         data=data,
                         pod_config=self._pod.pod_config,
                         pipeline_hash_ch=self.pipeline_hash(),
-                        pod_content_hash_str=self._pod.content_hash().to_string(),
+                        pod_content_hash=self._pod.content_hash(),
                         pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,
