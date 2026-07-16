@@ -1930,11 +1930,6 @@ class FunctionJobNode(FunctionNodeBase):
                 raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL) or row.get(
                     constants.INPUT_DATA_HASH_COL
                 )
-                hash_col_used = (
-                    constants.OUTPUT_DATA_HASH_COL
-                    if row.get(constants.OUTPUT_DATA_HASH_COL) is not None
-                    else constants.INPUT_DATA_HASH_COL
-                )
                 if raw_hash is None:
                     logger.warning(
                         "Pipeline DB row missing %r column — EmptyData will have "
@@ -1945,7 +1940,6 @@ class FunctionJobNode(FunctionNodeBase):
                     )
                     cached_hash = None
                 else:
-                    _ = hash_col_used  # used for documentation / future logging
                     cached_hash = ContentHash.from_string(raw_hash)
                 empty_data_tokens[base_eid] = EmptyData(
                     cached_content_hash=cached_hash,
