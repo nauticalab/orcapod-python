@@ -1574,6 +1574,9 @@ class FunctionJobNode(FunctionNodeBase):
                 constants.NODE_CONTENT_HASH_COL: pa.array(
                     [self.content_hash().to_string()], type=pa.large_string()
                 ),
+                constants.INPUT_DATA_HASH_COL: pa.array(
+                    [input_data.content_hash().to_string()], type=pa.large_string()
+                ),
                 f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
                     [input_data.data_context_key], type=pa.large_string()
                 ),
