@@ -120,46 +120,46 @@ class SideEffectPodConfig:
 class InvocationContext:
     """Per-invocation context passed to every side-effect pod function.
 
-    Carries the deterministic ``invocation_hash`` string and metadata about
-    the current delivery. ``format_id()`` re-serializes the hash with a
-    caller-supplied ``InvocationHashConfig`` without recomputing.
+    Carries a deterministic ``invocation_hash`` and metadata about the
+    current delivery. ``invocation_hash`` is a computed property that
+    delegates to ``format_id()`` with the pod's default
+    ``InvocationHashConfig``. ``format_id()`` can be called with a custom
+    config to re-serialize without recomputation.
 
     Public fields are read-only by convention (no public setters).
 
     Args:
-        invocation_hash: Serialized compound hash string.
         pod_name: ``pod.label`` of the invoking pod.
-        pod_content_hash: ``pod.content_hash().to_string()``.
         pipeline_run_id: The current pipeline run identifier, or ``None``
             for standalone / lazy pipelines.
     """
 
     def __init__(
         self,
-        invocation_hash: str,
         pod_name: str,
-        pod_content_hash: str,
         pipeline_run_id: str | None,
         _pipeline_hash_ch: ContentHash,
         _record_id_hash_ch: ContentHash,
         _hash_config: InvocationHashConfig,
         _track_completion: bool,
     ) -> None:
-        self.invocation_hash = invocation_hash
         self.pod_name = pod_name
-        self.pod_content_hash = pod_content_hash
         self.pipeline_run_id = pipeline_run_id
         self._pipeline_hash_ch = _pipeline_hash_ch
         self._record_id_hash_ch = _record_id_hash_ch
         self._hash_config = _hash_config
         self._track_completion = _track_completion
 
+    @property
+    def invocation_hash(self) -> str:
+        """Serialized invocation hash — delegates to ``format_id()``."""
+        return self.format_id()
+
     def format_id(self, config: InvocationHashConfig | None = None) -> str:
         """Return ``'orcapod-{hash}'`` with an optional format override.
 
-        Re-serializes from the stored raw ``ContentHash`` components — no
-        recomputation. Uses ``config`` if supplied, otherwise the pod's own
-        ``InvocationHashConfig``.
+        Serializes the stored ``ContentHash`` components. Uses ``config``
+        if supplied, otherwise the pod's own ``InvocationHashConfig``.
 
         Args:
             config: Optional encoding/truncation override.
@@ -203,7 +203,7 @@ class SideEffectPodStream(StreamBase):
         super().__init__(**kwargs)
 
     @property
-    def producer(self):  # type: ignore[override]
+    def producer(self) -> SideEffectPod:  # type: ignore[override]
         return self._pod
 
     @property
@@ -321,8 +321,8 @@ def _execute_side_effect_row(
         pod_config: Pod-level configuration.
         pipeline_hash_ch: Pipeline hash of the node (for invocation_hash c1).
         node_content_hash_str: ``pod.content_hash().to_string()`` — included in
-            the preimage as ``NODE_CONTENT_HASH_COL`` and exposed via
-            ``InvocationContext.pod_content_hash``.
+            the preimage as ``NODE_CONTENT_HASH_COL`` to scope the record ID
+            to this specific pod version.
         pod_name: Label of the pod.
         run_id: Pipeline run identifier (or ``None`` in standalone mode).
         arrow_hasher: The ``arrow_hasher`` from the pod's data context.
@@ -355,30 +355,19 @@ def _execute_side_effect_row(
     record_id_hash: ContentHash = arrow_hasher.hash_table(preimage)
     record_id: bytes = record_id_hash.to_prefixed_digest()
 
-    # 2. Serialize invocation_hash: pipeline_hash :: record_id_hash
-    cfg = pod_config.hash_config
-    c1 = _serialize_component(pipeline_hash_ch, cfg)
-    c2 = _serialize_component(record_id_hash, cfg)
-    if not pod_config.track_completion and run_id is not None:
-        inv_hash = f"{c1}::{c2}::{run_id}"
-    else:
-        inv_hash = f"{c1}::{c2}"
-
-    # 3. Completion check — look up by deterministic record_id.
+    # 2. Completion check — look up by deterministic record_id.
     if pod_config.track_completion and pipeline_database is not None and table_path is not None:
         prior = pipeline_database.get_record_by_id(table_path, record_id)
         if prior is not None:
             return (tag, data)  # already completed — re-emit without re-delivery
 
-    # 4. Build InvocationContext (always).
+    # 3. Build InvocationContext (invocation_hash derived lazily via format_id()).
     ctx = InvocationContext(
-        invocation_hash=inv_hash,
         pod_name=pod_name,
-        pod_content_hash=node_content_hash_str,
         pipeline_run_id=run_id,
         _pipeline_hash_ch=pipeline_hash_ch,
         _record_id_hash_ch=record_id_hash,
-        _hash_config=cfg,
+        _hash_config=pod_config.hash_config,
         _track_completion=pod_config.track_completion,
     )
 
@@ -760,7 +749,7 @@ class SideEffectNode(StreamBase):
     # ------------------------------------------------------------------
 
     @property
-    def producer(self):  # type: ignore[override]
+    def producer(self) -> SideEffectPod:  # type: ignore[override]
         return self._pod
 
     @property
