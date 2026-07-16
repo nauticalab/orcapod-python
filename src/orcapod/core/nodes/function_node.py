@@ -30,7 +30,8 @@ from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import PipelineJobRequiredError
+from orcapod.core.datagrams.tag_data import EmptyData
+from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -679,20 +680,24 @@ class _JoinedRecords(NamedTuple):
     """Internal result type returned by ``_fetch_joined_records``.
 
     Attributes:
-        table: The joined ``pa.Table``, always including a
-            ``__pipeline_entry_id`` column (the pipeline DB row key) and
-            ``DATA_RECORD_ID``. Does not have ``ColumnConfig`` filtering
-            applied — that is the caller's responsibility.
+        table: The joined ``pa.Table`` for rows that matched in the result DB.
+            Always includes a ``_PIPELINE_BASE_ENTRY_ID_COL`` column.
         taginfo_columns: Column names from the pipeline database fetch,
             captured before the join. Used by ``_load_cached_entries`` to
-            derive tag keys in the CACHE_ONLY (``_input_stream is None``)
-            fallback path, where the tag columns cannot be inferred from the
-            input stream and must be identified by exclusion from the taginfo
-            column set.
+            derive tag keys in the CACHE_ONLY fallback path.
+        empty_data_tokens: Mapping from ``base_entry_id`` bytes to an
+            ``EmptyData`` token for each ephemeral tag row whose result
+            was not found in either store (cross-session miss). Empty dict
+            when no ephemeral misses occurred.
+        empty_taginfo_rows: Mapping from ``base_entry_id`` bytes to the raw
+            taginfo row dict for each entry in ``empty_data_tokens``. Used
+            by ``_load_cached_entries`` to reconstruct the tag for each token.
     """
 
     table: pa.Table
     taginfo_columns: tuple[str, ...]
+    empty_data_tokens: dict[bytes, EmptyData]
+    empty_taginfo_rows: dict[bytes, dict]
 
 
 class FunctionJobNode(FunctionNodeBase):
@@ -1809,11 +1814,16 @@ class FunctionJobNode(FunctionNodeBase):
         # Ephemeral join
         # ------------------------------------------------------------------
         ephemeral_df = pl.DataFrame()
-        if ephemeral_taginfo_df.height > 0 and self._ephemeral_cached_pod is not None:
-            eph_results = self._ephemeral_cached_pod.result_database.get_all_records(
-                self._ephemeral_cached_pod.record_path,
-                record_id_column=constants.DATA_RECORD_ID,
-            )
+        empty_data_tokens: dict[bytes, EmptyData] = {}
+        empty_taginfo_rows: dict[bytes, dict] = {}
+
+        if ephemeral_taginfo_df.height > 0:
+            eph_results = None
+            if self._ephemeral_cached_pod is not None:
+                eph_results = self._ephemeral_cached_pod.result_database.get_all_records(
+                    self._ephemeral_cached_pod.record_path,
+                    record_id_column=constants.DATA_RECORD_ID,
+                )
             if eph_results is not None:
                 if results_schema is None:
                     results_schema = eph_results.schema
@@ -1822,7 +1832,38 @@ class FunctionJobNode(FunctionNodeBase):
                     on=constants.DATA_RECORD_ID,
                     how="inner",
                 )
-            # Cross-session miss: eph_results is None → silently drop ephemeral entries
+
+            # Emit EmptyData tokens for unmatched ephemeral rows
+            # (cross-session miss: ephemeral data is gone).
+            if eph_results is not None:
+                unmatched_df = ephemeral_taginfo_df.join(
+                    pl.DataFrame(eph_results),
+                    on=constants.DATA_RECORD_ID,
+                    how="anti",
+                )
+            else:
+                # No ephemeral store or empty store — all ephemeral rows are misses.
+                unmatched_df = ephemeral_taginfo_df
+            for row in unmatched_df.iter_rows(named=True):
+                base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
+                raw_hash = row.get(constants.INPUT_DATA_HASH_COL)
+                if raw_hash is None:
+                    logger.warning(
+                        "Pipeline DB row missing %r column — EmptyData will have "
+                        "no cached hash; flow-through unavailable for this row. "
+                        "base_entry_id: %r",
+                        constants.INPUT_DATA_HASH_COL,
+                        base_eid,
+                    )
+                    cached_hash = None
+                else:
+                    from orcapod.types import ContentHash as _ContentHash
+                    cached_hash = _ContentHash.from_string(raw_hash)
+                empty_data_tokens[base_eid] = EmptyData(
+                    cached_content_hash=cached_hash,
+                    data_context=self.data_context,
+                )
+                empty_taginfo_rows[base_eid] = row
 
         # ------------------------------------------------------------------
         # Merge with persistent priority (anti-join + concat)
@@ -1841,7 +1882,12 @@ class FunctionJobNode(FunctionNodeBase):
         else:
             # No results found in either store — return empty table preserving taginfo schema
             empty_table = taginfo.slice(0, 0)
-            return _JoinedRecords(table=empty_table, taginfo_columns=taginfo_columns)
+            return _JoinedRecords(
+                table=empty_table,
+                taginfo_columns=taginfo_columns,
+                empty_data_tokens=empty_data_tokens,
+                empty_taginfo_rows=empty_taginfo_rows,
+            )
 
         # Apply base_entry_id filter if requested
         if base_entry_ids is not None:
@@ -1854,7 +1900,12 @@ class FunctionJobNode(FunctionNodeBase):
             joined = arrow_utils.restore_schema_nullability(
                 joined, taginfo_schema, results_schema
             )
-        return _JoinedRecords(table=joined, taginfo_columns=taginfo_columns)
+        return _JoinedRecords(
+            table=joined,
+            taginfo_columns=taginfo_columns,
+            empty_data_tokens=empty_data_tokens,
+            empty_taginfo_rows=empty_taginfo_rows,
+        )
 
     def _load_cached_entries(
         self,
