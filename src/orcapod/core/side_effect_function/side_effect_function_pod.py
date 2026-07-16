@@ -5,7 +5,6 @@ import asyncio
 import functools
 import inspect
 import logging
-import sys
 import uuid
 from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any
@@ -13,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from uuid_utils import uuid7
 
 from orcapod.core.base import TraceableBase
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.errors import PipelineJobRequiredError
@@ -20,10 +20,8 @@ from orcapod.side_effects import (
     InvocationContext,
     SideEffectPodConfig,
     _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
-    _write_invocation_row,
 )
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.utils.schema_utils import extract_function_schemas
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -210,36 +208,29 @@ class SideEffectFunctionPod(TraceableBase):
         self._fn = fn
         self._ctx_arg_name = ctx_arg_name
         self._pod_config = config or SideEffectPodConfig()
-        self._version = version
-        self._name: str = name if name is not None else getattr(fn, "__name__", "unknown")
         self._output_keys: list[str] = (
             [output_keys] if isinstance(output_keys, str) else list(output_keys)
         )
         self.tracker_manager: "TrackerManagerProtocol" = DEFAULT_TRACKER_MANAGER
-        self._is_async = inspect.iscoroutinefunction(fn)
 
         # Strip ctx for schema inference (raises ValueError if ctx_arg_name missing)
         stripped = _strip_ctx_from_fn(fn, ctx_arg_name)
 
-        # Extract schemas from the stripped wrapper
-        self.input_data_schema, self.output_data_schema = extract_function_schemas(
-            stripped, output_keys=self._output_keys
+        # Create a PythonDataFunction from the ctx-stripped wrapper.
+        # This is the same pattern as the function_pod() decorator — it gives us
+        # schema inference, variation data, git hash, and content hashing for free.
+        self._data_function = PythonDataFunction(
+            stripped,
+            output_keys=self._output_keys,
+            function_name=name if name is not None else getattr(fn, "__name__", "unknown"),
+            version=f"v{version}.0",
+            label=label,
+            data_context=data_context,
         )
 
-        # Pre-compute hashes for URI and result-cache variation data
-        from orcapod.hashing.hash_utils import get_function_components, get_function_signature
-
-        semantic_hasher = self.data_context.semantic_hasher
-        self._function_signature_hash = semantic_hasher.hash_object(
-            get_function_signature(fn)
-        ).to_string()
-        self._function_content_hash = semantic_hasher.hash_object(
-            get_function_components(fn)
-        ).to_string()
-        self._output_schema_hash = semantic_hasher.hash_object(
-            self.output_data_schema
-        ).to_string()
-        self._git_hash: str = ""  # stable empty string; populated by CI
+        # Expose schemas from the data function (ctx already stripped)
+        self.input_data_schema = self._data_function.input_data_schema
+        self.output_data_schema = self._data_function.output_data_schema
 
         # Register Arrow types
         self.data_context.type_converter.ensure_types_registered_for_schemas(
@@ -253,18 +244,11 @@ class SideEffectFunctionPod(TraceableBase):
 
     @property
     def uri(self) -> tuple[str, ...]:
-        """Canonical URI: ``("side_effect_function", name, schema_hash, "vN", "python_side_effect_function")``."""
-        return (
-            "side_effect_function",
-            self.canonical_function_name,
-            self._output_schema_hash,
-            f"v{self._version}",
-            "python_side_effect_function",
-        )
+        """Canonical URI: ``("side_effect_function",) + data_function.uri``."""
+        return ("side_effect_function",) + self._data_function.uri
 
     def identity_structure(self) -> Any:
-        # Include ctx_arg_name so renaming the context parameter changes the hash,
-        # consistent with SideEffectPod.identity_structure().
+        # Include ctx_arg_name so renaming the context parameter changes the hash
         return (self.uri, self._ctx_arg_name)
 
     def pipeline_identity_structure(self) -> Any:
@@ -282,11 +266,11 @@ class SideEffectFunctionPod(TraceableBase):
     @property
     def canonical_function_name(self) -> str:
         """Human-readable function identifier."""
-        return self._name
+        return self._data_function.canonical_function_name
 
     def computed_label(self) -> str | None:
-        """Use the callable's ``__name__`` as the default label."""
-        return getattr(self._fn, "__name__", None)
+        """Use the data function's canonical name as the default label."""
+        return self._data_function.canonical_function_name
 
     def argument_symmetry(self, streams: Collection["StreamProtocol"]) -> Any:
         """Single ordered input — return as an ordered tuple."""
@@ -376,7 +360,7 @@ class SideEffectFunctionPod(TraceableBase):
                 f"same name. Choose a different ctx_arg_name or rename the data column."
             )
         kwargs = {self._ctx_arg_name: ctx, **data_dict}
-        if self._is_async:
+        if inspect.iscoroutinefunction(self._fn):
             return self._call_async_sync(kwargs)
         return self._fn(**kwargs)
 
@@ -429,47 +413,24 @@ class SideEffectFunctionPod(TraceableBase):
         )
 
     # ------------------------------------------------------------------
-    # Result cache metadata (mirrors PythonDataFunction)
+    # Result cache metadata (delegates to underlying data function)
     # ------------------------------------------------------------------
 
     def get_function_variation_data(self) -> dict[str, Any]:
-        """Data defining function variation for ``ResultCache.store()``."""
-        return {
-            "function_name": self.canonical_function_name,
-            "function_signature_hash": self._function_signature_hash,
-            "function_content_hash": self._function_content_hash,
-            "git_hash": self._git_hash,
-        }
+        """Delegate to the underlying data function."""
+        return self._data_function.get_function_variation_data()
 
     def get_function_variation_data_schema(self) -> "Schema":
-        """Schema for ``get_function_variation_data``."""
-        from orcapod.types import Schema
-        return Schema({
-            "function_name": str,
-            "function_signature_hash": str,
-            "function_content_hash": str,
-            "git_hash": str,
-        })
+        """Delegate to the underlying data function."""
+        return self._data_function.get_function_variation_data_schema()
 
     def get_execution_data(self) -> dict[str, Any]:
-        """Data defining execution context for ``ResultCache.store()``."""
-        vi = sys.version_info
-        return {
-            "executor_type": "none",
-            "executor_info": {},
-            "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
-            "extra_info": {},
-        }
+        """Delegate to the underlying data function."""
+        return self._data_function.get_execution_data()
 
     def get_execution_data_schema(self) -> "Schema":
-        """Schema for ``get_execution_data``."""
-        from orcapod.types import Schema
-        return Schema({
-            "executor_type": str,
-            "executor_info": dict[str, str],
-            "python_version": str,
-            "extra_info": dict[str, str],
-        })
+        """Delegate to the underlying data function."""
+        return self._data_function.get_execution_data_schema()
 
 
 # ---------------------------------------------------------------------------
@@ -682,11 +643,10 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
     Created at pipeline compile time by ``PipelineJob``. Receives databases
     via ``attach_databases()``. On each ``execute()`` call:
 
-    1. Cache hit check (if ``track_completion=True``).
+    1. Cache hit check (always — no track_completion flag).
     2. Build ``InvocationContext`` per row.
     3. Call user function — exceptions always propagate.
     4. Wrap output in ``Data`` and cache in result DB.
-    5. Write invocation log row to pipeline DB.
 
     Args:
         pod: The ``SideEffectFunctionPod`` this node wraps.
@@ -701,38 +661,26 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
         label: str | None = None,
     ) -> None:
         super().__init__(pod=pod, input_stream=input_stream, label=label)
-        self._pipeline_database: "ArrowDatabaseProtocol | None" = None
         self._result_cache: Any = None
-        self._table_path: tuple[str, ...] | None = None
 
     def attach_databases(
         self,
-        pipeline_database: "ArrowDatabaseProtocol | None" = None,
         result_database: "ArrowDatabaseProtocol | None" = None,
     ) -> None:
-        """Attach pipeline and result databases.
+        """Attach result database for output caching.
 
-        Sets up the result cache and the invocation log table path.
-        Called by ``PipelineJob._distribute_databases()``.
+        Sets up the result cache. Called by ``PipelineJob._distribute_databases()``.
 
         Args:
-            pipeline_database: Pre-scoped pipeline DB for invocation logging.
             result_database: DB for output caching via ``ResultCache``.
         """
         from orcapod.core.result_cache import ResultCache
 
-        self._pipeline_database = pipeline_database
         self._result_cache = (
             ResultCache(result_database, record_path=self.node_uri)
             if result_database is not None
             else None
         )
-        if pipeline_database is not None:
-            self._table_path = self.node_uri + (
-                f"schema:{self.pipeline_hash().to_string()}",
-            )
-        else:
-            self._table_path = None
 
     def execute(
         self,
@@ -756,17 +704,14 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
         results: list[tuple[TagProtocol, DataProtocol]] = []
 
         for tag, data in input_stream.iter_data():
-            # 1. Cache hit check
-            if (
-                self._pod.pod_config.track_completion
-                and self._result_cache is not None
-            ):
+            # 1. Cache hit check (always — no track_completion flag)
+            if self._result_cache is not None:
                 cached = self._result_cache.lookup(data)
                 if cached is not None:
                     results.append((tag, cached))
                     continue
 
-            # 2. Build InvocationContext + record_id (single preimage computation)
+            # 2. Build InvocationContext
             ctx, record_id_hash, record_id = _build_ctx_and_record_id(
                 pod=self._pod,
                 tag=tag,
@@ -775,10 +720,7 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                 run_id=run_id,
             )
 
-            # 3. Call user function — always re-raise (no silent row suppression).
-            # Unlike SideEffectPod, dropping a row would break the downstream
-            # stream that consumers depend on. on_error="log" only controls whether
-            # the exception is logged before propagating.
+            # 3. Call user function — always re-raise
             try:
                 raw = self._pod._call_with_ctx(data, ctx)
             except Exception as exc:
@@ -805,24 +747,6 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                     data_context=self._pod.data_context,
                 )
                 self._result_cache.store(data, output_data, var_dg, exec_dg)
-
-            # 5. Log invocation to pipeline database
-            if self._pipeline_database is not None and self._table_path is not None:
-                # When track_completion=False, every invocation must get its own
-                # log row. The deterministic record_id would be silently dropped
-                # by skip_duplicates=True on subsequent runs for the same input.
-                # Use a fresh UUID7 as the DB key so the row is always appended.
-                if self._pod.pod_config.track_completion:
-                    log_record_id: bytes = record_id
-                else:
-                    log_record_id = uuid7().bytes
-                _write_invocation_row(
-                    pipeline_database=self._pipeline_database,
-                    table_path=self._table_path,
-                    record_id=log_record_id,
-                    record_id_hash_str=record_id_hash.to_string(),
-                    run_id=run_id,
-                )
 
             results.append((tag, output_data))
 
@@ -866,16 +790,14 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                 try:
                     from orcapod.core.datagrams import Datagram
 
-                    # Cache hit check
-                    if (
-                        self._pod.pod_config.track_completion
-                        and self._result_cache is not None
-                    ):
+                    # 1. Cache hit check (always — no track_completion flag)
+                    if self._result_cache is not None:
                         cached = self._result_cache.lookup(data)
                         if cached is not None:
                             await output.send((tag, cached))
                             return
 
+                    # 2. Build InvocationContext
                     ctx, record_id_hash, record_id = _build_ctx_and_record_id(
                         pod=self._pod,
                         tag=tag,
@@ -884,7 +806,7 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                         run_id=run_id,
                     )
 
-                    # Always re-raise — on_error="log" only controls logging.
+                    # 3. Call user function — always re-raise
                     try:
                         raw = self._pod._call_with_ctx(data, ctx)
                     except Exception as exc:
@@ -897,6 +819,7 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                             )
                         raise
 
+                    # 4. Wrap output and cache it
                     output_data = self._pod._build_output_data(raw)
 
                     if self._result_cache is not None:
@@ -911,21 +834,6 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                             data_context=self._pod.data_context,
                         )
                         self._result_cache.store(data, output_data, var_dg, exec_dg)
-
-                    if self._pipeline_database is not None and self._table_path is not None:
-                        # Same rationale as sync execute: use a fresh UUID7 key
-                        # when track_completion=False so every run appends a row.
-                        if self._pod.pod_config.track_completion:
-                            async_log_record_id: bytes = record_id
-                        else:
-                            async_log_record_id = uuid7().bytes
-                        _write_invocation_row(
-                            pipeline_database=self._pipeline_database,
-                            table_path=self._table_path,
-                            record_id=async_log_record_id,
-                            record_id_hash_str=record_id_hash.to_string(),
-                            run_id=run_id,
-                        )
 
                     await output.send((tag, output_data))
                 finally:

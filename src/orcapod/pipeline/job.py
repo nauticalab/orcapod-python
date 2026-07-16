@@ -399,10 +399,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             elif isinstance(node, SideEffectJobNode):
                 node.attach_databases(pipeline_database=pipeline_db)
             elif isinstance(node, SideEffectFunctionJobNode):
-                node.attach_databases(
-                    pipeline_database=pipeline_db,
-                    result_database=result_db,
-                )
+                node.attach_databases(result_database=result_db)
 
     # ------------------------------------------------------------------
     # _iter_function_job_nodes() / apply_node_config()

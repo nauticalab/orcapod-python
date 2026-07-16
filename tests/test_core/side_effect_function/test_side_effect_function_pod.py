@@ -71,7 +71,7 @@ class TestSideEffectFunctionPodSchema:
             # Default ctx_arg_name="ctx" is missing from my_fn's signature
 
     def test_sf10_node_uri_shape(self):
-        """SF-10: node_uri starts with 'side_effect_function' and has 5 elements."""
+        """SF-10: uri[0]=='side_effect_function', uri[1:]==data_function.uri, len==5."""
         from orcapod.core.side_effect_function import SideEffectFunctionPod
 
         def my_fn(value: int, ctx: InvocationContext) -> str:
@@ -79,7 +79,7 @@ class TestSideEffectFunctionPodSchema:
 
         pod = SideEffectFunctionPod(my_fn, output_keys=["result"])
         assert pod.uri[0] == "side_effect_function"
-        assert pod.uri[-1] == "python_side_effect_function"
+        assert pod.uri[-1] == "python.function.v0"
         assert len(pod.uri) == 5
         assert pod.uri[3] == "v1"
 
@@ -147,7 +147,7 @@ class TestSideEffectFunctionPodStreamStandalone:
 
 
 class TestSideEffectFunctionJobNode:
-    """SF-06, SF-07, SF-08, SF-09: DB-backed sync execution."""
+    """SF-06, SF-07, SF-09: DB-backed sync execution."""
 
     def test_sf06_output_cached_after_first_run(self):
         """SF-06: Output cached; second run returns cached result without re-calling fn."""
@@ -162,18 +162,17 @@ class TestSideEffectFunctionJobNode:
 
         pod = SideEffectFunctionPod(my_fn, output_keys=["result"])
         stream = _make_stream(2)
-        pipeline_db = _make_in_memory_db()
         result_db = _make_in_memory_db()
 
         node1 = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node1.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
+        node1.attach_databases(result_database=result_db)
         results1 = node1.execute(stream)
         assert len(results1) == 2
         assert call_count == 2
 
         # Second run — same pod, same data, same DBs — fn must NOT be called again
         node2 = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node2.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
+        node2.attach_databases(result_database=result_db)
         results2 = node2.execute(stream)
         assert len(results2) == 2
         assert call_count == 2  # NOT incremented — cache hit
@@ -182,67 +181,18 @@ class TestSideEffectFunctionJobNode:
         for (_, d1), (_, d2) in zip(results1, results2):
             assert d1.as_dict()["result"] == d2.as_dict()["result"]
 
-    def test_sf07_invocation_log_written_on_first_run(self):
-        """SF-07: Invocation log row written to pipeline_database on first run."""
-        import polars as pl
-        from orcapod.core.side_effect_function import SideEffectFunctionPod, SideEffectFunctionJobNode
+    def test_sf07_data_function_accessible_and_uri_consistent(self):
+        """SF-07: pod._data_function is a PythonDataFunction; uri = ('side_effect_function',) + data_function.uri."""
+        from orcapod.core.side_effect_function import SideEffectFunctionPod
+        from orcapod.core.data_function import PythonDataFunction
 
         def my_fn(value: int, ctx: InvocationContext) -> str:
             return f"r{value}"
 
         pod = SideEffectFunctionPod(my_fn, output_keys=["result"])
-        stream = _make_stream(3)
-        pipeline_db = _make_in_memory_db()
-        result_db = _make_in_memory_db()
-        node = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
-        results = node.execute(stream)
-
-        assert len(results) == 3
-
-        # Invocation log has 3 rows
-        table_path = node._table_path
-        records = pipeline_db.get_all_records(table_path)
-        assert records is not None
-        df = pl.from_arrow(records)
-        assert len(df) == 3
-        assert "record_id_hash" in df.columns
-        assert "executed_at" in df.columns
-
-    def test_sf08_track_completion_false_always_reruns(self):
-        """SF-08: track_completion=False — fn called every run; invocation logged each time."""
-        from orcapod.side_effects import SideEffectPodConfig
-        from orcapod.core.side_effect_function import SideEffectFunctionPod, SideEffectFunctionJobNode
-
-        call_count = 0
-
-        def my_fn(value: int, ctx: InvocationContext) -> str:
-            nonlocal call_count
-            call_count += 1
-            return f"r{value}"
-
-        cfg = SideEffectPodConfig(track_completion=False)
-        pod = SideEffectFunctionPod(my_fn, output_keys=["result"], config=cfg)
-        stream = _make_stream(2)
-        pipeline_db = _make_in_memory_db()
-        result_db = _make_in_memory_db()
-
-        node1 = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node1.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
-        node1.execute(stream)
-        assert call_count == 2
-
-        node2 = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node2.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
-        node2.execute(stream)
-        assert call_count == 4  # called again — track_completion=False
-
-        # Invocation log must grow with each run (track_completion=False means always re-log)
-        import polars as pl
-        records = pipeline_db.get_all_records(node2._table_path)
-        assert records is not None
-        df = pl.from_arrow(records)
-        assert len(df) == 4  # 2 rows from run 1 + 2 rows from run 2
+        assert isinstance(pod._data_function, PythonDataFunction)
+        assert pod.uri[0] == "side_effect_function"
+        assert pod.uri[1:] == pod._data_function.uri
 
     def test_sf09_on_error_log_reraises(self):
         """SF-09: on_error='log' — exception logged then always re-raised."""
@@ -255,18 +205,13 @@ class TestSideEffectFunctionJobNode:
         cfg = SideEffectPodConfig(on_error="log")
         pod = SideEffectFunctionPod(my_fn, output_keys=["result"], config=cfg)
         stream = _make_stream(1)
-        pipeline_db = _make_in_memory_db()
         result_db = _make_in_memory_db()
         node = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
+        node.attach_databases(result_database=result_db)
 
         # Must propagate — no silent row suppression
         with pytest.raises(RuntimeError, match="test error"):
             node.execute(stream)
-
-        # Invocation log must NOT be written when fn raises
-        records = pipeline_db.get_all_records(node._table_path)
-        assert records is None or len(records) == 0
 
 
 class TestSideEffectFunctionPodDecorator:
@@ -298,8 +243,7 @@ class TestSideEffectFunctionPodPipelineIntegration:
     """SF-12: Full pipeline compilation and execution."""
 
     def test_sf12_pipeline_compilation_and_execution(self):
-        """SF-12: SideEffectFunctionJobNode compiled, fn called, invocation logged."""
-        import polars as pl
+        """SF-12: SideEffectFunctionJobNode compiled, fn called, caching works."""
         from orcapod.pipeline.job import PipelineJob
         from orcapod.core.side_effect_function import SideEffectFunctionPod, SideEffectFunctionJobNode
         from orcapod.core.sources.dict_source import DictSource
@@ -330,16 +274,6 @@ class TestSideEffectFunctionPodPipelineIntegration:
             if getattr(n, "node_type", None) == "side_effect_function"
         ]
         assert len(sef_nodes) == 1
-
-        # Verify the invocation log was written to the pipeline_db
-        node = sef_nodes[0]
-        pipeline_db = db.at("test_sef")
-        table_path = node._table_path
-        records = pipeline_db.get_all_records(table_path)
-        assert records is not None
-        df = pl.from_arrow(records)
-        assert len(df) == 2
-        assert "record_id_hash" in df.columns
 
     def test_sf12_second_pipeline_run_uses_cache(self):
         """SF-12: Second pipeline run uses cached output; fn not called again."""
@@ -375,9 +309,8 @@ class TestSideEffectFunctionJobNodeAsync:
     """SF-13: async_execute produces same output as sync path."""
 
     def test_sf13_async_execute_basic(self):
-        """SF-13: async_execute processes all rows, writes cache + log, returns correct output."""
+        """SF-13: async_execute processes all rows, writes cache, returns correct output."""
         import asyncio
-        import polars as pl
         from orcapod.core.side_effect_function import SideEffectFunctionPod, SideEffectFunctionJobNode
         from orcapod.channels import Channel
 
@@ -390,10 +323,9 @@ class TestSideEffectFunctionJobNodeAsync:
 
         pod = SideEffectFunctionPod(my_fn, output_keys=["result"])
         stream = _make_stream(3)
-        pipeline_db = _make_in_memory_db()
         result_db = _make_in_memory_db()
         node = SideEffectFunctionJobNode(pod=pod, input_stream=stream)
-        node.attach_databases(pipeline_database=pipeline_db, result_database=result_db)
+        node.attach_databases(result_database=result_db)
 
         async def _run():
             ch_in = Channel(buffer_size=10)
@@ -415,14 +347,6 @@ class TestSideEffectFunctionJobNodeAsync:
         results = asyncio.run(_run())
         assert len(results) == 3
         assert call_count == 3
-
-        # Verify invocation log written
-        table_path = node._table_path
-        records = pipeline_db.get_all_records(table_path)
-        assert records is not None
-        df = pl.from_arrow(records)
-        assert len(df) == 3
-        assert "record_id_hash" in df.columns
 
         # Verify output values
         output_values = [data.as_dict()["result"] for _, data in results]
