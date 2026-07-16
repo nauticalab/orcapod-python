@@ -127,6 +127,24 @@ class TestSideEffectFunctionPodStreamStandalone:
         assert "::" in ctx.invocation_hash
         assert ctx.pipeline_run_id is None  # standalone: no run_id
 
+    def test_sf05b_async_fn_routed_through_sync_execute(self):
+        """SF-05b: async user function executed correctly via _call_async_sync."""
+        from orcapod.core.side_effect_function import SideEffectFunctionPod
+
+        import asyncio
+
+        async def my_async_fn(value: int, ctx: InvocationContext) -> str:
+            await asyncio.sleep(0)  # yield control to ensure coroutine runs correctly
+            return f"async_{value}"
+
+        pod = SideEffectFunctionPod(my_async_fn, output_keys=["result"])
+        stream = _make_stream(2)
+        rows = list(pod.process(stream).iter_data())
+
+        assert len(rows) == 2
+        assert rows[0][1].as_dict()["result"] == "async_0"
+        assert rows[1][1].as_dict()["result"] == "async_1"
+
 
 class TestSideEffectFunctionJobNode:
     """SF-06, SF-07, SF-08, SF-09: DB-backed sync execution."""

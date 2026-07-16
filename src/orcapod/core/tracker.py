@@ -116,6 +116,14 @@ class AutoRegisteringContextBasedTracker(ABC):
         label: str | None = None,
     ) -> None: ...
 
+    @abstractmethod
+    def record_side_effect_function_pod_invocation(
+        self,
+        pod: Any,
+        input_stream: cp.StreamProtocol,
+        label: str | None = None,
+    ) -> None: ...
+
     def __enter__(self):
         self.set_active(True)
         return self

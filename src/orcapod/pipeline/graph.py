@@ -212,6 +212,14 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                         descriptor["operator_config"] = node._operator.to_config()
                     descriptor["table_scope"] = node._table_scope
 
+                case _ if node.node_type == "side_effect_function":
+                    raise NotImplementedError(
+                        f"Pipeline.save() does not support SideEffectFunctionNode "
+                        f"(node {node.label!r}). Serialization of side-effect function "
+                        f"nodes is deferred — remove the SideEffectFunctionPod from the "
+                        f"pipeline before calling save()."
+                    )
+
             nodes[content_hash_str] = descriptor
 
         output: dict[str, Any] = {

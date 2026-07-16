@@ -396,7 +396,11 @@ class SideEffectFunctionPod(TraceableBase):
 
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(1) as executor:
-            future = executor.submit(asyncio.run, self._fn(**kwargs))
+            # Defer coroutine creation to the worker thread via lambda;
+            # evaluating self._fn(**kwargs) here would create the coroutine in
+            # the calling thread and cause "coroutine was never awaited" warnings
+            # if asyncio.run raises before the coroutine starts.
+            future = executor.submit(lambda: asyncio.run(self._fn(**kwargs)))
             return future.result()
 
     def _build_output_data(self, raw_output: Any) -> "DataProtocol":
