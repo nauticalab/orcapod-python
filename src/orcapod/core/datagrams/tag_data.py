@@ -616,6 +616,30 @@ class EmptyData(Data):
         raise EmptyDataAccessError(self, "arrow_schema")
 
     # ------------------------------------------------------------------
+    # Copy — preserves EmptyData-specific fields
+    # ------------------------------------------------------------------
+
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
+        """Return a shallow copy of this token, preserving EmptyData-specific fields.
+
+        Overrides ``Datagram.copy()`` so that ``_cached_content_hash`` and
+        ``_empty_source_info`` are carried across (the base implementation uses
+        ``object.__new__`` and only copies ``Datagram`` fields, which would
+        silently drop our extra attributes).
+
+        Args:
+            include_cache: Forwarded to ``super().copy()``.
+            preserve_id: Forwarded to ``super().copy()``.
+
+        Returns:
+            A new ``EmptyData`` instance with all fields copied.
+        """
+        new_p = super().copy(include_cache=include_cache, preserve_id=preserve_id)
+        new_p._cached_content_hash = self._cached_content_hash
+        new_p._empty_source_info = self._empty_source_info
+        return new_p
+
+    # ------------------------------------------------------------------
     # Read-only accessors
     # ------------------------------------------------------------------
 

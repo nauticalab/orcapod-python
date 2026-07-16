@@ -1924,12 +1924,11 @@ class FunctionJobNode(FunctionNodeBase):
                 # Use OUTPUT_DATA_HASH_COL so that the downstream result cache
                 # lookup in _process_data_internal finds the correct entry.
                 # The downstream's result cache is keyed by the INPUT to the
-                # downstream (= the OUTPUT of this ephemeral node), so we store
-                # the output hash here. Fall back to INPUT_DATA_HASH_COL for
-                # old-format rows that pre-date OUTPUT_DATA_HASH_COL.
-                raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL) or row.get(
-                    constants.INPUT_DATA_HASH_COL
-                )
+                # downstream (= the OUTPUT of this ephemeral node), so we must
+                # use the output hash. INPUT_DATA_HASH_COL is deliberately not
+                # used as a fallback — it carries the wrong hash (the upstream's
+                # input, not its output) and would silently cause cache misses.
+                raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL)
                 if raw_hash is None:
                     logger.warning(
                         "Pipeline DB row missing %r column — EmptyData will have "
