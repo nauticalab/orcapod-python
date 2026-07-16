@@ -162,7 +162,7 @@ class InvocationContext:
         return self.format_id()
 
     def format_id(self, config: InvocationHashConfig | None = None) -> str:
-        """Return ``'orcapod-{hash}'`` with an optional format override.
+        """Return the invocation hash string with an optional format override.
 
         Serializes the stored ``ContentHash`` components. Uses ``config``
         if supplied, otherwise the pod's own ``InvocationHashConfig``.
@@ -171,19 +171,18 @@ class InvocationContext:
             config: Optional encoding/truncation override.
 
         Returns:
-            A string of the form ``"orcapod-{component1}::{component2}"``
+            A string of the form ``"{component1}::{component2}"``
             (two components when ``track_completion=True``) or
-            ``"orcapod-{c1}::{c2}::{run_id}"`` (three components when
+            ``"{c1}::{c2}::{run_id}"`` (three components when
             ``track_completion=False`` and ``pipeline_run_id`` is not ``None``).
+            Each component is ``"{method}:{encoded_digest}"``.
         """
         cfg = config or self._hash_config
         c1 = _serialize_component(self._pipeline_hash_ch, cfg)
         c2 = _serialize_component(self._record_id_hash_ch, cfg)
         if not self._track_completion and self.pipeline_run_id is not None:
-            parts = f"{c1}::{c2}::{self.pipeline_run_id}"
-        else:
-            parts = f"{c1}::{c2}"
-        return f"orcapod-{parts}"
+            return f"{c1}::{c2}::{self.pipeline_run_id}"
+        return f"{c1}::{c2}"
 
 
 # ---------------------------------------------------------------------------

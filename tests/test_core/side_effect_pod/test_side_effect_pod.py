@@ -149,7 +149,7 @@ class TestSideEffectPodStandalone:
         assert isinstance(ctx, InvocationContext)
         assert isinstance(ctx.invocation_hash, str)
         assert len(ctx.invocation_hash) > 0
-        assert ctx.format_id().startswith("orcapod-")
+        assert "::" in ctx.format_id()
 
     def test_t4_invocation_context_ignored_by_callee(self):
         """T4: Pod works fine when callee ignores ctx."""
@@ -529,9 +529,8 @@ class TestSideEffectJobNodeSync:
         override = InvocationHashConfig(encoding="base64", component_length=8)
         fid = ctx.format_id(override)
 
-        assert fid.startswith("orcapod-")
         # Two components of the form "{method}:{base64_digest}", separated by "::"
-        parts = fid[len("orcapod-"):].split("::")
+        parts = fid.split("::")
         assert len(parts) == 2
         import base64
         for part in parts:
