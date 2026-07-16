@@ -18,6 +18,12 @@ from .side_effects import (
     sink_pod,
     tap_pod,
 )
+from .core.side_effect_function import (
+    SideEffectFunctionPod,
+    SideEffectFunctionNode,
+    SideEffectFunctionJobNode,
+    side_effect_function_pod,
+)
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
 # Subpackage re-exports for clean public API
@@ -72,6 +78,10 @@ __all__ = [
     "side_effect_pod",
     "sink_pod",
     "tap_pod",
+    "SideEffectFunctionPod",
+    "SideEffectFunctionNode",
+    "SideEffectFunctionJobNode",
+    "side_effect_function_pod",
     "Pipeline",
     "PipelineJob",
     "SourceNode",
