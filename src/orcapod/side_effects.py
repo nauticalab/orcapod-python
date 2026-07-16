@@ -882,7 +882,9 @@ class SideEffectJobNode(SideEffectNode):
         """Attach or detach the pipeline database.
 
         Called by ``PipelineJob._distribute_databases()``. The table path is
-        scoped to ``(self.pipeline_hash().to_string(), "side_effect_invocations")``.
+        ``self.node_uri + (f"schema:{self.pipeline_hash().to_string()}",)`` —
+        the same scoping convention used by ``FunctionNode`` and
+        ``OperatorNode``.
 
         Args:
             pipeline_database: Pre-scoped pipeline DB (at pipeline root),
