@@ -1283,7 +1283,7 @@ class FunctionJobNode(FunctionNodeBase):
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
                         is_ephemeral=True,
-                        output_data=output_data,
+                        output_data_hash=output_data.content_hash(),
                     )
         elif self._cached_function_pod is not None:
             tag_out, output_data = self._cached_function_pod.process_data(
@@ -1300,7 +1300,7 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
-                    output_data=output_data,
+                    output_data_hash=output_data.content_hash(),
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
@@ -1418,7 +1418,7 @@ class FunctionJobNode(FunctionNodeBase):
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
                         is_ephemeral=True,
-                        output_data=output_data,
+                        output_data_hash=output_data.content_hash(),
                     )
         elif self._cached_function_pod is not None:
             tag_out, output_data = await self._cached_function_pod.async_process_data(
@@ -1435,7 +1435,7 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
-                    output_data=output_data,
+                    output_data_hash=output_data.content_hash(),
                 )
         else:
             tag_out, output_data = await self._function_pod.async_process_data(
@@ -1551,7 +1551,7 @@ class FunctionJobNode(FunctionNodeBase):
         data_record_id: uuid.UUID,
         computed: bool,
         is_ephemeral: bool = False,
-        output_data: DataProtocol | None = None,
+        output_data_hash: ContentHash | None = None,
     ) -> None:
         """Add a pipeline record to the database for a processed data.
 
@@ -1582,8 +1582,8 @@ class FunctionJobNode(FunctionNodeBase):
             computed: Whether the result was freshly computed (``True``) or
                 served from a cache (``False``).
             is_ephemeral: Whether the result is stored in the ephemeral store.
-            output_data: The output data produced by processing ``input_data``.
-                When provided, its content hash is stored as ``OUTPUT_DATA_HASH_COL``
+            output_data_hash: Content hash of the output produced by processing
+                ``input_data``. When provided, stored as ``OUTPUT_DATA_HASH_COL``
                 so that downstream ``EmptyData`` flow-through can locate its cached
                 result keyed by the same hash (= the downstream's ``INPUT_DATA_HASH_COL``).
         """
@@ -1644,7 +1644,7 @@ class FunctionJobNode(FunctionNodeBase):
                     [input_data.content_hash().to_string()], type=pa.large_string()
                 ),
                 constants.OUTPUT_DATA_HASH_COL: pa.array(
-                    [output_data.content_hash().to_string() if output_data is not None else None],
+                    [output_data_hash.to_string() if output_data_hash is not None else None],
                     type=pa.large_string(),
                 ),
                 f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
@@ -2304,7 +2304,7 @@ class FunctionJobNode(FunctionNodeBase):
                             data_record_id=output_data.datagram_uuid,
                             computed=result_computed,
                             is_ephemeral=is_ephemeral,
-                            output_data=output_data,
+                            output_data_hash=output_data.content_hash(),
                         )
                         # Update in-memory cache so iter_data() sees the result.
                         base_entry_id = self.compute_base_entry_id(original_tag, input_data)

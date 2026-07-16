@@ -195,7 +195,7 @@ meta_table = pa.table({
         type=pa.large_string(),
     ),
     constants.OUTPUT_DATA_HASH_COL: pa.array(         # NEW — large_string
-        [output_data.content_hash().to_string() if output_data else None],
+        [output_data_hash.to_string() if output_data_hash else None],
         type=pa.large_string(),
     ),
     f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": ...,
