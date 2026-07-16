@@ -128,3 +128,21 @@ class TestEmptyDataMetadata:
         uid = uuid.uuid4()
         ed = EmptyData(record_uuid=uid)
         assert ed.datagram_uuid == uid
+
+
+class TestCachedFunctionPodResultCacheProperty:
+    def test_result_cache_is_result_cache_instance(self):
+        """CachedFunctionPod exposes result_cache as a ResultCache."""
+        from orcapod.core.cached_function_pod import CachedFunctionPod
+        from orcapod.core.data_function import PythonDataFunction
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.result_cache import ResultCache
+        from orcapod.databases import InMemoryArrowDatabase
+
+        def double(x: int) -> int:
+            return x * 2
+
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf)
+        cached_pod = CachedFunctionPod(pod, result_database=InMemoryArrowDatabase())
+        assert isinstance(cached_pod.result_cache, ResultCache)

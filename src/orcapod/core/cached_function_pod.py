@@ -66,6 +66,16 @@ class CachedFunctionPod(WrappedFunctionPod):
         """Return the path to the cached records in the result store."""
         return self._cache.record_path
 
+    @property
+    def result_cache(self) -> ResultCache:
+        """The underlying ``ResultCache`` instance.
+
+        Exposed so that callers (e.g. ``FunctionJobNode._process_data_internal``)
+        can perform a cache-only lookup without triggering computation — necessary
+        when the input is an ``EmptyData`` token.
+        """
+        return self._cache
+
     def process_data(
         self,
         tag: TagProtocol,
