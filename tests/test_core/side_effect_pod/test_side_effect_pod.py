@@ -309,7 +309,7 @@ class TestSideEffectJobNodeSync:
         assert len(calls) == 3
 
         # Read log table
-        table_path = (node.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node._table_path
         records = db.get_all_records(table_path)
         assert records is not None
         df = pl.from_arrow(records)
@@ -348,7 +348,7 @@ class TestSideEffectJobNodeSync:
         assert len(calls) == 2  # fn NOT called again — completion check triggered
 
         # Log still has exactly 2 rows (one per unique input); no duplicate writes
-        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node1._table_path
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
         assert len(df) == 2  # one success record per unique input, not re-written
@@ -377,7 +377,7 @@ class TestSideEffectJobNodeSync:
 
         assert len(calls) == 4  # called twice per run
 
-        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node1._table_path
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
         # track_completion=False → same record_id written twice; skip_duplicates=True
@@ -416,7 +416,7 @@ class TestSideEffectJobNodeSync:
         assert len(results1) == 1  # row still emitted (drop_on_failure=False)
         assert call_count == 1     # fn was invoked
 
-        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node1._table_path
         assert db.get_all_records(table_path) is None  # no success record in DB
 
         # Run 2: no record found → fn is called again, still fails.
@@ -461,7 +461,7 @@ class TestSideEffectJobNodeSync:
         assert len(results1) == 1  # emitted despite failure
         assert call_count == 1
 
-        table_path = (node1.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node1._table_path
         assert db.get_all_records(table_path) is None  # failure ≠ completion
 
         # Run 2: no record → fn retried → succeeds → record written.
@@ -586,7 +586,7 @@ class TestSideEffectJobNodeAsync:
         assert len(results) == 3
         assert len(calls) == 3
 
-        table_path = (node.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node._table_path
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
         assert len(df) == 3
@@ -675,7 +675,7 @@ class TestSideEffectPodPipelineIntegration:
 
         # Invocation log written to DB (pipeline_db is scoped to the pipeline name)
         pipeline_db = db.at("test_pipeline")
-        table_path = (node.pipeline_hash().to_string(), "side_effect_invocations")
+        table_path = node._table_path
         records = pipeline_db.get_all_records(table_path)
         assert records is not None
         df = pl.from_arrow(records)

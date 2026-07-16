@@ -235,7 +235,7 @@ class SideEffectPodStream(StreamBase):
                 tag=tag,
                 data=data,
                 pod_config=self._pod.pod_config,
-                pipeline_hash_ch=self._pod.pipeline_hash(),
+                pipeline_hash_ch=self.pipeline_hash(),
                 pod_content_hash=self._pod.content_hash(),
                 pod_name=self._pod.label,
                 run_id=None,
@@ -453,7 +453,9 @@ class SideEffectPod(TraceableBase):
         fn: A callable ``(data, ctx: InvocationContext) -> None``.
         config: Pod-level configuration. Defaults to ``SideEffectPodConfig()``.
         tracker_manager: Optional tracker manager override.
-        label: Optional display label.
+        name: Optional canonical function name used in ``uri`` and the
+            invocation-log table path. Defaults to ``fn.__name__``.
+        label: Optional display label (separate from ``name``).
         data_context: Optional data context override.
     """
 
@@ -462,11 +464,13 @@ class SideEffectPod(TraceableBase):
         fn: Callable,
         config: SideEffectPodConfig | None = None,
         tracker_manager: TrackerManagerProtocol | None = None,
+        name: str | None = None,
         label: str | None = None,
         data_context: Any = None,
     ) -> None:
         super().__init__(label=label, data_context=data_context)
         self._fn = fn
+        self._name: str = name if name is not None else getattr(fn, "__name__", "unknown")
         self._pod_config = config or SideEffectPodConfig()
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
 
@@ -475,22 +479,25 @@ class SideEffectPod(TraceableBase):
         """Pod-level configuration."""
         return self._pod_config
 
+    @property
+    def canonical_function_name(self) -> str:
+        """Human-readable function identifier, defaults to ``fn.__name__``."""
+        return self._name
+
     def computed_label(self) -> str | None:
         """Use the callable's ``__name__`` as the default label."""
         return getattr(self._fn, "__name__", None)
 
     def identity_structure(self) -> Any:
-        return ("SideEffectPod", self._fn, dataclasses.asdict(self._pod_config))
+        return (self.uri, self._pod_config.track_completion, self._pod_config.drop_on_failure)
 
     def pipeline_identity_structure(self) -> Any:
         return self.identity_structure()
 
     @property
     def uri(self) -> tuple[str, ...]:
-        """Canonical URI for this pod."""
-        module = getattr(self._fn, "__module__", "unknown")
-        name = getattr(self._fn, "__qualname__", getattr(self._fn, "__name__", "unknown"))
-        return (module, name)
+        """Canonical URI for this pod: ``("side_effects", canonical_function_name)``."""
+        return ("side_effects", self.canonical_function_name)
 
     def argument_symmetry(self, streams: Collection[StreamProtocol]) -> Any:
         """Single ordered input — return as an ordered tuple."""
@@ -564,6 +571,7 @@ def side_effect_pod(
     fn: Callable | None = None,
     *,
     config: SideEffectPodConfig | None = None,
+    name: str | None = None,
 ) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
     """Decorator that wraps a callable as a ``SideEffectPod``.
 
@@ -573,12 +581,13 @@ def side_effect_pod(
     Args:
         fn: The callable to wrap (when used as a bare decorator).
         config: Optional ``SideEffectPodConfig`` to apply.
+        name: Optional canonical function name override (see ``SideEffectPod``).
 
     Returns:
         A ``SideEffectPod`` (bare usage) or a decorator (parameterised usage).
     """
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=config)
+        return SideEffectPod(f, config=config, name=name)
 
     if fn is not None:
         return _wrap(fn)
@@ -589,6 +598,7 @@ def sink_pod(
     fn: Callable | None = None,
     *,
     config: SideEffectPodConfig | None = None,
+    name: str | None = None,
 ) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
     """Decorator preset: ``track_completion=True``, ``drop_on_failure=True``.
 
@@ -598,6 +608,7 @@ def sink_pod(
     Args:
         fn: The callable to wrap (bare usage).
         config: Optional config override.
+        name: Optional canonical function name override (see ``SideEffectPod``).
 
     Returns:
         A ``SideEffectPod`` or decorator.
@@ -606,7 +617,7 @@ def sink_pod(
     effective_config = _merge_config(preset, config)
 
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=effective_config)
+        return SideEffectPod(f, config=effective_config, name=name)
 
     if fn is not None:
         return _wrap(fn)
@@ -617,6 +628,7 @@ def tap_pod(
     fn: Callable | None = None,
     *,
     config: SideEffectPodConfig | None = None,
+    name: str | None = None,
 ) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
     """Decorator preset: ``track_completion=False``, ``drop_on_failure=False``.
 
@@ -626,6 +638,7 @@ def tap_pod(
     Args:
         fn: The callable to wrap (bare usage).
         config: Optional config override.
+        name: Optional canonical function name override (see ``SideEffectPod``).
 
     Returns:
         A ``SideEffectPod`` or decorator.
@@ -634,7 +647,7 @@ def tap_pod(
     effective_config = _merge_config(preset, config)
 
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=effective_config)
+        return SideEffectPod(f, config=effective_config, name=name)
 
     if fn is not None:
         return _wrap(fn)
@@ -864,9 +877,8 @@ class SideEffectJobNode(SideEffectNode):
         """
         self._pipeline_database = pipeline_database
         if pipeline_database is not None:
-            self._table_path = (
-                self.pipeline_hash().to_string(),
-                "side_effect_invocations",
+            self._table_path = self.node_uri + (
+                f"schema:{self.pipeline_hash().to_string()}",
             )
         else:
             self._table_path = None
