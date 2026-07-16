@@ -240,7 +240,10 @@ class _FunctionPodBase(TraceableBase):
         Raises:
             ValueError: If ``_ctx_arg_name`` collides with a data column name.
         """
-        assert self._ctx_arg_name is not None and self._original_fn is not None
+        if self._ctx_arg_name is None or self._original_fn is None:
+            raise RuntimeError(
+                "_call_with_ctx called on a non-ctx-aware pod (ctx_arg_name or _original_fn is None)"
+            )
         data_dict = data.as_dict()
         if self._ctx_arg_name in data_dict:
             raise ValueError(
@@ -261,7 +264,8 @@ class _FunctionPodBase(TraceableBase):
         Returns:
             The coroutine's return value.
         """
-        assert self._original_fn is not None
+        if self._original_fn is None:
+            raise RuntimeError("_call_async_sync called but _original_fn is None")
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -379,7 +383,22 @@ class _FunctionPodBase(TraceableBase):
         logger: DataExecutionLoggerProtocol | None = None,
         run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
-        """Async counterpart of ``process_data``."""
+        """Async counterpart of ``process_data``.
+
+        When ``_ctx_arg_name`` is set, builds a per-row ``InvocationContext``
+        and injects it as an extra kwarg to the original function.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional ``DataExecutionLoggerProtocol`` for I/O capture.
+            run_id: Pipeline run identifier forwarded to ``InvocationContext``.
+                Only used when ``_ctx_arg_name`` is set.
+
+        Returns:
+            A ``(tag, output_data)`` tuple; ``output_data`` is ``None`` if
+            the function filters the data out.
+        """
         if self._ctx_arg_name is not None:
             ctx = self._build_invocation_context(tag, data, run_id=run_id)
             # _call_with_ctx handles both sync and async originals
@@ -857,6 +876,12 @@ class FunctionPod(_FunctionPodBase):
 
         Returns:
             A new ``FunctionPod`` instance.
+
+        Note:
+            Ctx-aware pods (where ``ctx_arg_name`` is set in config) are reconstructed
+            as read-only stubs: ``_original_fn`` is always ``None`` after deserialization,
+            so calling ``process_data`` on such a pod will raise ``RuntimeError``. These
+            stubs can only serve cached results via ``FunctionJobNode``.
         """
         from orcapod.pipeline.serialization import resolve_data_function_from_config
 
