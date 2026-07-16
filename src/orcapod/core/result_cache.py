@@ -75,7 +75,7 @@ class ResultCache:
     def lookup(
         self,
         input_data: DataProtocol,
-        additional_constraints: dict[str, str | bytes] | None = None,
+        additional_constraints: dict[str, str] | None = None,
     ) -> DataProtocol | None:
         """Look up a cached output data for *input_data*.
 
@@ -99,7 +99,7 @@ class ResultCache:
 
         RECORD_ID_COL = "_record_id"
 
-        constraints: dict[str, str | bytes] = {
+        constraints: dict[str, str] = {
             constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_string(),
         }
         if additional_constraints:

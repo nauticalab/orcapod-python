@@ -1258,7 +1258,7 @@ class FunctionJobNode(FunctionNodeBase):
                 ),
             )
 
-        ephemeral_result = self._node_config.is_result_ephemeral or False
+        ephemeral_result = bool(self._node_config.is_result_ephemeral)
 
         if ephemeral_result:
             if self._ephemeral_cached_pod is None:
@@ -1393,7 +1393,7 @@ class FunctionJobNode(FunctionNodeBase):
                 ),
             )
 
-        ephemeral_result = self._node_config.is_result_ephemeral or False
+        ephemeral_result = bool(self._node_config.is_result_ephemeral)
 
         if ephemeral_result:
             if self._ephemeral_cached_pod is None:
