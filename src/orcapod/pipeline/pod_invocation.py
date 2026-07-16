@@ -155,3 +155,29 @@ class SideEffectInvocation(PodInvocation):
                 f"got {len(input_streams)}."
             )
         super().__init__(pod=pod, input_streams=input_streams, label=label)
+
+
+class SideEffectFunctionInvocation(PodInvocation):
+    """Invocation of a side-effect function pod against exactly one input stream.
+
+    Args:
+        pod: A ``SideEffectFunctionPod`` instance.
+        input_streams: Tuple with exactly one stream.
+        label: Optional display label.
+
+    Raises:
+        ValueError: If ``input_streams`` does not contain exactly one element.
+    """
+
+    def __init__(
+        self,
+        pod: Any,
+        input_streams: "tuple[StreamProtocol, ...]",
+        label: str | None = None,
+    ) -> None:
+        if len(input_streams) != 1:
+            raise ValueError(
+                f"SideEffectFunctionInvocation requires exactly 1 input stream; "
+                f"got {len(input_streams)}."
+            )
+        super().__init__(pod=pod, input_streams=input_streams, label=label)

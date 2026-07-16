@@ -82,3 +82,47 @@ class TestSideEffectFunctionPodSchema:
         assert pod.uri[-1] == "python_side_effect_function"
         assert len(pod.uri) == 5
         assert pod.uri[3] == "v1"
+
+
+class TestSideEffectFunctionPodStreamStandalone:
+    """SF-04, SF-05: standalone execution via SideEffectFunctionPodStream."""
+
+    def test_sf04_iter_data_returns_correct_output(self):
+        """SF-04: iter_data() returns correct (tag, output_data) per row."""
+        from orcapod.core.side_effect_function import SideEffectFunctionPod
+
+        def my_fn(value: int, ctx: InvocationContext) -> str:
+            return f"v{value}"
+
+        pod = SideEffectFunctionPod(my_fn, output_keys=["result"])
+        stream = _make_stream(3)
+        rows = list(pod.process(stream).iter_data())
+
+        assert len(rows) == 3
+        for i, (tag, data) in enumerate(rows):
+            assert data.as_dict()["result"] == f"v{i}"
+        # Tags pass through unchanged
+        assert rows[0][0].as_dict()["id"] == 0
+        assert rows[1][0].as_dict()["id"] == 1
+
+    def test_sf05_invocation_context_fields_standalone(self):
+        """SF-05: InvocationContext has pod_name, non-empty hash, pipeline_run_id=None."""
+        from orcapod.core.side_effect_function import SideEffectFunctionPod
+
+        received_ctx: list[InvocationContext] = []
+
+        def my_fn(value: int, ctx: InvocationContext) -> str:
+            received_ctx.append(ctx)
+            return str(value)
+
+        pod = SideEffectFunctionPod(my_fn, output_keys=["result"])
+        stream = _make_stream(1)
+        list(pod.process(stream).iter_data())
+
+        assert len(received_ctx) == 1
+        ctx = received_ctx[0]
+        assert ctx.pod_name == pod.label
+        assert isinstance(ctx.invocation_hash, str)
+        assert len(ctx.invocation_hash) > 0
+        assert "::" in ctx.invocation_hash
+        assert ctx.pipeline_run_id is None  # standalone: no run_id

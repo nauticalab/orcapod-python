@@ -63,6 +63,16 @@ class BasicTrackerManager:
         for tracker in self.get_active_trackers():
             tracker.record_side_effect_pod_invocation(pod, input_stream, label=label)
 
+    def record_side_effect_function_pod_invocation(
+        self,
+        pod: Any,
+        input_stream: cp.StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        """Record a side-effect function pod invocation in all active trackers."""
+        for tracker in self.get_active_trackers():
+            tracker.record_side_effect_function_pod_invocation(pod, input_stream, label=label)
+
     @contextmanager
     def no_tracking(self) -> Generator[None, Any, None]:
         original_state = self._active

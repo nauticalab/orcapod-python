@@ -10,6 +10,7 @@ from .pod import ArgumentGroup, PodProtocol
 from .sources import DynamicSourceProtocol, SourceProtocol
 from .streams import StreamProtocol
 from .side_effect_pod import SideEffectPodProtocol
+from .side_effect_function_pod import SideEffectFunctionPodProtocol
 from .trackers import TrackerProtocol, TrackerManagerProtocol
 
 __all__ = [
@@ -31,4 +32,5 @@ __all__ = [
     "TrackerProtocol",
     "TrackerManagerProtocol",
     "SideEffectPodProtocol",
+    "SideEffectFunctionPodProtocol",
 ]

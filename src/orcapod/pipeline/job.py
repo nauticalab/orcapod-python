@@ -10,6 +10,7 @@ from orcapod.core.nodes import JobNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
+from orcapod.core.side_effect_function.side_effect_function_pod import SideEffectFunctionJobNode
 from orcapod.side_effects import SideEffectJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
@@ -65,6 +66,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     function_node_class = FunctionJobNode
     operator_node_class = OperatorJobNode
     side_effect_node_class = SideEffectJobNode
+    side_effect_function_node_class = SideEffectFunctionJobNode
 
     def __init__(
         self,
