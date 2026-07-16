@@ -432,7 +432,7 @@ class TestRecordDataColumns:
         cached_pf.call(input_data)
         table = db.get_all_records(cached_pf.record_path)
         stored_hash = table.column(constants.INPUT_DATA_HASH_COL).to_pylist()[0]
-        assert stored_hash == input_data.content_hash().to_prefixed_digest()
+        assert stored_hash == input_data.content_hash().to_string()
 
     def test_variation_columns_present(self, cached_pf, input_data, db):
         cached_pf.call(input_data)

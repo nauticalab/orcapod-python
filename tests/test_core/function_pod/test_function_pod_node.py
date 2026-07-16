@@ -499,11 +499,11 @@ class TestGetAllRecordsMetaColumns:
         assert "id" in result.column_names
         assert "result" in result.column_names
 
-    def test_input_data_hash_values_are_non_empty_bytes(self, filled_node):
+    def test_input_data_hash_values_are_non_empty_strings(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
         hashes = result.column(constants.INPUT_DATA_HASH_COL).to_pylist()
-        assert all(isinstance(h, bytes) and len(h) > 0 for h in hashes)
+        assert all(isinstance(h, str) and len(h) > 0 for h in hashes)
 
     def test_data_record_id_values_are_non_empty_bytes(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})

@@ -184,21 +184,19 @@ lost and from which node, to make debugging tractable.
 **Method:** `FunctionJobNode.add_pipeline_record()`
 
 Add `INPUT_DATA_HASH_COL` and `OUTPUT_DATA_HASH_COL` to `meta_table`. Both are stored
-as `large_binary` using `ContentHash.to_prefixed_digest()` (format:
-`b"{method}:{raw_digest}"`), which is more compact than hex strings and allows lossless
-reconstruction via `ContentHash.from_prefixed_digest()`.
+as `large_string` using `ContentHash.to_string()` (format: `"{method}:{hex_digest}"`).
 
 ```python
 meta_table = pa.table({
     constants.DATA_RECORD_ID: ...,
     constants.NODE_CONTENT_HASH_COL: ...,
-    constants.INPUT_DATA_HASH_COL: pa.array(          # NEW — large_binary
-        [input_data.content_hash().to_prefixed_digest()],
-        type=pa.large_binary(),
+    constants.INPUT_DATA_HASH_COL: pa.array(          # NEW — large_string
+        [input_data.content_hash().to_string()],
+        type=pa.large_string(),
     ),
-    constants.OUTPUT_DATA_HASH_COL: pa.array(         # NEW — large_binary
-        [output_data.content_hash().to_prefixed_digest() if output_data else None],
-        type=pa.large_binary(),
+    constants.OUTPUT_DATA_HASH_COL: pa.array(         # NEW — large_string
+        [output_data.content_hash().to_string() if output_data else None],
+        type=pa.large_string(),
     ),
     f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": ...,
     f"{constants.META_PREFIX}computed": ...,
@@ -327,8 +325,7 @@ Old pipeline DB rows lacking `OUTPUT_DATA_HASH_COL` (rows written before this ch
 |---|---|
 | `src/orcapod/core/datagrams/tag_data.py` | Add `EmptyData(Data)` |
 | `src/orcapod/errors.py` | Add three exception types |
-| `src/orcapod/types.py` | Add `ContentHash.from_prefixed_digest()` |
-| `src/orcapod/core/result_cache.py` | Store `INPUT_DATA_HASH_COL` as `large_binary` |
+| `src/orcapod/core/result_cache.py` | Store `INPUT_DATA_HASH_COL` as `large_string` |
 | `src/orcapod/core/cached_function_pod.py` | Add `lookup_cached_data()` method |
 | `src/orcapod/core/nodes/function_node.py` | Write path, read path, downstream guard |
 | `src/orcapod/protocols/pipeline_protocols.py` | Update `add_pipeline_record` signature |

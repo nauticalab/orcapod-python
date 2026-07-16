@@ -661,26 +661,6 @@ class ContentHash:
         method, hex_digest = hash_string.split(":", 1)
         return cls(method, bytes.fromhex(hex_digest))
 
-    @classmethod
-    def from_prefixed_digest(cls, data: bytes) -> "ContentHash":
-        """Parse a ``b"method:raw_digest"`` prefixed digest into a ``ContentHash``.
-
-        This is the inverse of ``to_prefixed_digest()``.  The format is the
-        method name encoded as ASCII, a literal ``:`` byte, then the raw digest
-        bytes (not hex-encoded).
-
-        Args:
-            data: Raw bytes in the form ``b"{method}:{raw_digest}"`` as
-                produced by ``to_prefixed_digest()``.
-
-        Returns:
-            A new ``ContentHash`` instance with the parsed method and digest.
-        """
-        colon_pos = data.index(b":")
-        method = data[:colon_pos].decode("ascii")
-        digest = data[colon_pos + 1:]
-        return cls(method, digest)
-
     def display_name(self, length: int = 8) -> str:
         """Return a short, human-friendly label for this hash.
 

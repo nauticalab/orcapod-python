@@ -1632,15 +1632,6 @@ class FunctionJobNode(FunctionNodeBase):
         input_source_table = input_table_with_source.select(source_col_names)
 
         # Build the meta columns table.
-        # INPUT_DATA_HASH_COL and OUTPUT_DATA_HASH_COL are stored as large_binary
-        # using to_prefixed_digest() (b"{method}:{raw_digest}"), which is more
-        # compact than hex strings and allows lossless reconstruction of ContentHash
-        # via ContentHash.from_prefixed_digest().
-        output_hash_bytes = (
-            output_data.content_hash().to_prefixed_digest()
-            if output_data is not None
-            else None
-        )
         meta_table = pa.table(
             {
                 constants.DATA_RECORD_ID: pa.array(
@@ -1650,11 +1641,11 @@ class FunctionJobNode(FunctionNodeBase):
                     [self.content_hash().to_string()], type=pa.large_string()
                 ),
                 constants.INPUT_DATA_HASH_COL: pa.array(
-                    [input_data.content_hash().to_prefixed_digest()],
-                    type=pa.large_binary(),
+                    [input_data.content_hash().to_string()], type=pa.large_string()
                 ),
                 constants.OUTPUT_DATA_HASH_COL: pa.array(
-                    [output_hash_bytes], type=pa.large_binary()
+                    [output_data.content_hash().to_string() if output_data is not None else None],
+                    type=pa.large_string(),
                 ),
                 f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
                     [input_data.data_context_key], type=pa.large_string()
@@ -1938,9 +1929,7 @@ class FunctionJobNode(FunctionNodeBase):
                     )
                     cached_hash = None
                 else:
-                    # raw_hash is bytes from a large_binary column; parse it
-                    # back to a ContentHash using the inverse of to_prefixed_digest().
-                    cached_hash = ContentHash.from_prefixed_digest(raw_hash)
+                    cached_hash = ContentHash.from_string(raw_hash)
                 empty_data_tokens[base_eid] = EmptyData(
                     cached_content_hash=cached_hash,
                     data_context=self.data_context,

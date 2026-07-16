@@ -100,7 +100,7 @@ class ResultCache:
         RECORD_ID_COL = "_record_id"
 
         constraints: dict[str, str | bytes] = {
-            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_prefixed_digest(),
+            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_string(),
         }
         if additional_constraints:
             constraints.update(additional_constraints)
@@ -184,15 +184,12 @@ class ResultCache:
             )
             col_idx += 1
 
-        # Add input data hash as large_binary (method-prefixed digest) at position 0.
-        # Using to_prefixed_digest() stores raw bytes instead of a hex string, which
-        # is more compact and allows lossless ContentHash reconstruction via
-        # ContentHash.from_prefixed_digest(). Lookup uses the same encoding.
+        # Add input data hash as large_string at position 0.
         data_table = data_table.add_column(
             0,
             constants.INPUT_DATA_HASH_COL,
             pa.array(
-                [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
+                [input_data.content_hash().to_string()], type=pa.large_string()
             ),
         )
 
