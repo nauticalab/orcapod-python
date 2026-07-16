@@ -108,12 +108,17 @@ class TestFetchJoinedRecordsEmptyData:
         assert isinstance(token, EmptyData)
         assert token.cached_content_hash is not None
 
-    def test_empty_data_token_hash_matches_input(self, ephemeral_node):
-        """The EmptyData token's cached hash matches the original input's content hash."""
+    def test_empty_data_token_hash_matches_output(self, ephemeral_node):
+        """The EmptyData token's cached hash matches the upstream OUTPUT's content hash.
+
+        The downstream result cache is keyed by the INPUT to the downstream
+        (= the OUTPUT of the ephemeral upstream node). So the EmptyData token
+        must carry the upstream output hash, not the upstream input hash.
+        """
         node = ephemeral_node
         input_pairs = list(node._input_stream.iter_data())
         tag0, data0 = input_pairs[0]
-        node.execute_data(tag0, data0)
+        _, output0 = node.execute_data(tag0, data0)
 
         # Clear ephemeral store
         node.set_ephemeral_store(InMemoryArrowDatabase())
@@ -121,7 +126,8 @@ class TestFetchJoinedRecordsEmptyData:
         result = node._fetch_joined_records()
         assert result is not None
         token = next(iter(result.empty_data_tokens.values()))
-        assert token.cached_content_hash.to_string() == data0.content_hash().to_string()
+        assert output0 is not None
+        assert token.cached_content_hash.to_string() == output0.content_hash().to_string()
 
 
 class TestLoadCachedEntriesEmptyData:
@@ -151,3 +157,89 @@ class TestLoadCachedEntriesEmptyData:
         for base_eid, (tag, data) in loaded.items():
             assert not isinstance(data, EmptyData)
             assert isinstance(data, Data)
+
+
+from orcapod.errors import EphemeralResultMissingError
+
+
+class TestProcessDataInternalEmptyData:
+    def test_cache_hit_returns_cached_result(self, ephemeral_node):
+        """Downstream cache hit on EmptyData input returns the cached result."""
+        node = ephemeral_node
+        # Step 1: Run upstream to populate ephemeral store and pipeline DB
+        for tag, data in node._input_stream.iter_data():
+            node.execute_data(tag, data)
+
+        # Step 2: Build a downstream node over the ephemeral node
+        table = pa.table({
+            "key": pa.array(["a"], type=pa.large_string()),
+            "value": pa.array([1], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+
+        def triple_value(result: int) -> int:
+            return result * 3
+
+        pod = FunctionPod(PythonDataFunction(triple_value, output_keys="final"))
+        downstream = FunctionJobNode(
+            pod, node,
+            pipeline_database=InMemoryArrowDatabase(),
+            result_database=InMemoryArrowDatabase(),
+        )
+
+        # Step 3: Run downstream with real data to populate its result cache
+        for tag, data in node.iter_data():
+            downstream.execute_data(tag, data)
+
+        # Step 4: Simulate upstream ephemeral expiry
+        node.set_ephemeral_store(InMemoryArrowDatabase())
+        node._cached_output_datas.clear()
+
+        # Step 5: Upstream now emits EmptyData
+        upstream_items = list(node.iter_data())
+        assert len(upstream_items) == 1
+        tag_in, data_in = upstream_items[0]
+        assert isinstance(data_in, EmptyData)
+
+        # Step 6: Downstream processes EmptyData — should hit its result cache
+        tag_out, result = downstream.execute_data(tag_in, data_in)
+        assert result is not None
+        assert result.as_dict()["final"] == 6  # double(1)=2, triple(2)=6
+
+    def test_cache_miss_raises_ephemeral_result_missing_error(self, ephemeral_node):
+        """Downstream cache miss on EmptyData input raises EphemeralResultMissingError."""
+        node = ephemeral_node
+        # Run upstream but NOT downstream
+        for tag, data in node._input_stream.iter_data():
+            node.execute_data(tag, data)
+
+        # Simulate expiry
+        node.set_ephemeral_store(InMemoryArrowDatabase())
+        node._cached_output_datas.clear()
+
+        # Build a downstream node that has NEVER run before
+        table = pa.table({
+            "key": pa.array(["a"], type=pa.large_string()),
+            "value": pa.array([1], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+
+        def triple_value(result: int) -> int:
+            return result * 3
+
+        pod = FunctionPod(PythonDataFunction(triple_value, output_keys="final"))
+        downstream = FunctionJobNode(
+            pod, node,
+            pipeline_database=InMemoryArrowDatabase(),
+            result_database=InMemoryArrowDatabase(),
+        )
+
+        upstream_items = list(node.iter_data())
+        tag_in, data_in = upstream_items[0]
+        assert isinstance(data_in, EmptyData)
+
+        with pytest.raises(EphemeralResultMissingError) as exc_info:
+            downstream.execute_data(tag_in, data_in)
+
+        assert exc_info.value.cached_content_hash is not None
+        assert exc_info.value.node_identity_path == downstream.node_identity_path

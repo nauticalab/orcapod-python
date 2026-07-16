@@ -1165,7 +1165,9 @@ class FunctionJobNode(FunctionNodeBase):
         for tag, data, base_entry_id in upstream_entries:
             ctx_obs.on_data_start(node_label, tag, data)
 
-            if base_entry_id in self._cached_output_datas:
+            if base_entry_id in self._cached_output_datas and not isinstance(
+                self._cached_output_datas[base_entry_id][1], EmptyData
+            ):
                 tag_out, result = self._cached_output_datas[base_entry_id]
                 ctx_obs.on_data_end(node_label, tag, data, result, cached=True)
                 if result is not None:
@@ -1229,6 +1231,36 @@ class FunctionJobNode(FunctionNodeBase):
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
+        # Guard: EmptyData inputs skip all computation and go straight to cache lookup.
+        # EmptyData.content_hash() returns the cached_content_hash, so
+        # result_cache.lookup(data) works transparently — it finds the downstream
+        # cached result keyed by the same input hash as the original upstream execution.
+        # add_pipeline_record is intentionally skipped for EmptyData inputs because
+        # EmptyData.as_table() raises EmptyDataAccessError (no payload to read source
+        # columns from). Pipeline DB write for this path is deferred.
+        if isinstance(data, EmptyData):
+            if self._cached_function_pod is not None:
+                cached = self._cached_function_pod.result_cache.lookup(data)
+                if cached is not None:
+                    cached = cached.with_meta_columns(
+                        **{self._cached_function_pod.RESULT_COMPUTED_FLAG: False}
+                    )
+                    base_entry_id = self.compute_base_entry_id(tag, data)
+                    self._cached_output_datas[base_entry_id] = (tag, cached)
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
+                    return tag, cached
+            raise EphemeralResultMissingError(
+                tag=tag,
+                cached_content_hash=data.cached_content_hash,
+                node_identity_path=self.node_identity_path,
+                message=(
+                    "Downstream cache miss for EmptyData input — "
+                    "ephemeral result is gone and downstream has not yet computed "
+                    "a result for this input hash."
+                ),
+            )
+
         ephemeral_result = self._node_config.is_result_ephemeral or False
 
         if ephemeral_result:
@@ -1254,6 +1286,7 @@ class FunctionJobNode(FunctionNodeBase):
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
                         is_ephemeral=True,
+                        output_data=output_data,
                     )
         elif self._cached_function_pod is not None:
             tag_out, output_data = self._cached_function_pod.process_data(
@@ -1270,6 +1303,7 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
+                    output_data=output_data,
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
@@ -1341,6 +1375,30 @@ class FunctionJobNode(FunctionNodeBase):
         Returns:
             A ``(tag, output_data)`` 2-tuple.
         """
+        # Guard: same logic as sync _process_data_internal — see inline comment there.
+        if isinstance(data, EmptyData):
+            if self._cached_function_pod is not None:
+                cached = self._cached_function_pod.result_cache.lookup(data)
+                if cached is not None:
+                    cached = cached.with_meta_columns(
+                        **{self._cached_function_pod.RESULT_COMPUTED_FLAG: False}
+                    )
+                    base_entry_id = self.compute_base_entry_id(tag, data)
+                    self._cached_output_datas[base_entry_id] = (tag, cached)
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
+                    return tag, cached
+            raise EphemeralResultMissingError(
+                tag=tag,
+                cached_content_hash=data.cached_content_hash,
+                node_identity_path=self.node_identity_path,
+                message=(
+                    "Downstream cache miss for EmptyData input — "
+                    "ephemeral result is gone and downstream has not yet computed "
+                    "a result for this input hash."
+                ),
+            )
+
         ephemeral_result = self._node_config.is_result_ephemeral or False
 
         if ephemeral_result:
@@ -1366,6 +1424,7 @@ class FunctionJobNode(FunctionNodeBase):
                         data_record_id=output_data.datagram_uuid,
                         computed=result_computed,
                         is_ephemeral=True,
+                        output_data=output_data,
                     )
         elif self._cached_function_pod is not None:
             tag_out, output_data = await self._cached_function_pod.async_process_data(
@@ -1382,6 +1441,7 @@ class FunctionJobNode(FunctionNodeBase):
                     data,
                     data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
+                    output_data=output_data,
                 )
         else:
             tag_out, output_data = await self._function_pod.async_process_data(
@@ -1497,6 +1557,7 @@ class FunctionJobNode(FunctionNodeBase):
         data_record_id: uuid.UUID,
         computed: bool,
         is_ephemeral: bool = False,
+        output_data: DataProtocol | None = None,
     ) -> None:
         """Add a pipeline record to the database for a processed data.
 
@@ -1517,6 +1578,8 @@ class FunctionJobNode(FunctionNodeBase):
         - Whether the result is stored in the ephemeral store
         - Input data context key
         - Whether the result was freshly computed or cached
+        - Output data content hash (``OUTPUT_DATA_HASH_COL``) — used by downstream
+          ``EmptyData`` flow-through to look up the downstream result cache.
 
         Args:
             tag: The tag associated with the input data.
@@ -1525,6 +1588,10 @@ class FunctionJobNode(FunctionNodeBase):
             computed: Whether the result was freshly computed (``True``) or
                 served from a cache (``False``).
             is_ephemeral: Whether the result is stored in the ephemeral store.
+            output_data: The output data produced by processing ``input_data``.
+                When provided, its content hash is stored as ``OUTPUT_DATA_HASH_COL``
+                so that downstream ``EmptyData`` flow-through can locate its cached
+                result keyed by the same hash (= the downstream's ``INPUT_DATA_HASH_COL``).
         """
         self._require_pipeline_database()
         base_entry_id = self.compute_base_entry_id(tag, input_data)
@@ -1571,6 +1638,11 @@ class FunctionJobNode(FunctionNodeBase):
         input_source_table = input_table_with_source.select(source_col_names)
 
         # Build the meta columns table
+        output_hash_str = (
+            output_data.content_hash().to_string()
+            if output_data is not None
+            else None
+        )
         meta_table = pa.table(
             {
                 constants.DATA_RECORD_ID: pa.array(
@@ -1581,6 +1653,9 @@ class FunctionJobNode(FunctionNodeBase):
                 ),
                 constants.INPUT_DATA_HASH_COL: pa.array(
                     [input_data.content_hash().to_string()], type=pa.large_string()
+                ),
+                constants.OUTPUT_DATA_HASH_COL: pa.array(
+                    [output_hash_str], type=pa.large_string()
                 ),
                 f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
                     [input_data.data_context_key], type=pa.large_string()
@@ -1846,17 +1921,31 @@ class FunctionJobNode(FunctionNodeBase):
                 unmatched_df = ephemeral_taginfo_df
             for row in unmatched_df.iter_rows(named=True):
                 base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
-                raw_hash = row.get(constants.INPUT_DATA_HASH_COL)
+                # Use OUTPUT_DATA_HASH_COL so that the downstream result cache
+                # lookup in _process_data_internal finds the correct entry.
+                # The downstream's result cache is keyed by the INPUT to the
+                # downstream (= the OUTPUT of this ephemeral node), so we store
+                # the output hash here. Fall back to INPUT_DATA_HASH_COL for
+                # old-format rows that pre-date OUTPUT_DATA_HASH_COL.
+                raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL) or row.get(
+                    constants.INPUT_DATA_HASH_COL
+                )
+                hash_col_used = (
+                    constants.OUTPUT_DATA_HASH_COL
+                    if row.get(constants.OUTPUT_DATA_HASH_COL) is not None
+                    else constants.INPUT_DATA_HASH_COL
+                )
                 if raw_hash is None:
                     logger.warning(
                         "Pipeline DB row missing %r column — EmptyData will have "
                         "no cached hash; flow-through unavailable for this row. "
                         "base_entry_id: %r",
-                        constants.INPUT_DATA_HASH_COL,
+                        constants.OUTPUT_DATA_HASH_COL,
                         base_eid,
                     )
                     cached_hash = None
                 else:
+                    _ = hash_col_used  # used for documentation / future logging
                     cached_hash = ContentHash.from_string(raw_hash)
                 empty_data_tokens[base_eid] = EmptyData(
                     cached_content_hash=cached_hash,
@@ -2232,6 +2321,7 @@ class FunctionJobNode(FunctionNodeBase):
                             data_record_id=output_data.datagram_uuid,
                             computed=result_computed,
                             is_ephemeral=is_ephemeral,
+                            output_data=output_data,
                         )
                         # Update in-memory cache so iter_data() sees the result.
                         base_entry_id = self.compute_base_entry_id(original_tag, input_data)
