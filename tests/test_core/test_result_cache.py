@@ -16,10 +16,12 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams import Datagram, Data
+from orcapod.core.datagrams.tag_data import EmptyData
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.result_cache import ResultCache
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.system_constants import constants
+from orcapod.types import ContentHash
 
 
 # ---------------------------------------------------------------------------
@@ -362,3 +364,36 @@ class TestStoreDictColumns:
         # dict[str, str] should be stored as an Arrow map (list of key-value structs)
         field_type = records.schema.field(extra_info_col).type
         assert pa.types.is_large_list(field_type), f"Expected large_list (map), got {field_type}"
+
+
+# ---------------------------------------------------------------------------
+# EmptyData lookup
+# ---------------------------------------------------------------------------
+
+
+class TestLookupViaEmptyData:
+    def test_empty_data_cache_hit(self):
+        """ResultCache.lookup works for EmptyData with a matching cached hash."""
+        cache, _ = _make_cache()
+        pf = _make_pf()
+        input_data = Data({"x": 10})
+        _compute_and_store(cache, pf, input_data)
+
+        empty_data = EmptyData(cached_content_hash=input_data.content_hash())
+        cached = cache.lookup(empty_data)
+
+        assert cached is not None
+        assert cached.as_dict()["result"] == 20
+
+    def test_empty_data_cache_miss(self):
+        """ResultCache.lookup returns None for EmptyData with an unknown hash."""
+        cache, _ = _make_cache()
+        pf = _make_pf()
+        # Store something so the DB is non-empty
+        _compute_and_store(cache, pf, Data({"x": 10}))
+
+        unknown_hash = ContentHash(method="arrow_v2.1", digest=bytes(32))
+        empty_data = EmptyData(cached_content_hash=unknown_hash)
+        result = cache.lookup(empty_data)
+
+        assert result is None

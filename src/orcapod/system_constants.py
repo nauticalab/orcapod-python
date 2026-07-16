@@ -7,6 +7,7 @@ PF_VARIATION_PREFIX = "pf_var_"
 PF_EXECUTION_PREFIX = "pf_exec_"
 DATA_CONTEXT_KEY = "context_key"
 INPUT_DATA_HASH_COL = "input_data_hash"
+OUTPUT_DATA_HASH_COL = "output_data_hash"
 DATA_RECORD_ID = "data_id"
 NODE_CONTENT_HASH_COL = "node_content_hash"
 SYSTEM_TAG_PREFIX_NAME = "tag"
@@ -64,6 +65,10 @@ class SystemConstant:
     @property
     def INPUT_DATA_HASH_COL(self) -> str:
         return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{INPUT_DATA_HASH_COL}"
+
+    @property
+    def OUTPUT_DATA_HASH_COL(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{OUTPUT_DATA_HASH_COL}"
 
     @property
     def DATA_RECORD_ID(self) -> str:
