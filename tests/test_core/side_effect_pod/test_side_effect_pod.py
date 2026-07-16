@@ -729,3 +729,16 @@ class TestSideEffectPodCtxArgName:
         list(pod.process(stream).iter_data())
 
         assert isinstance(received["context"], InvocationContext)
+
+    def test_sep_ctx_name_collision_raises(self):
+        """ctx_arg_name colliding with a data column name raises ValueError."""
+        from orcapod.side_effects import SideEffectPod
+
+        def fn(value, ctx):
+            pass
+
+        # _make_stream has 'value' as the data column; use ctx_arg_name='value' to force collision
+        pod = SideEffectPod(fn, ctx_arg_name="value")
+        stream = _make_stream(1)
+        with pytest.raises(ValueError, match="collides"):
+            list(pod.process(stream).iter_data())

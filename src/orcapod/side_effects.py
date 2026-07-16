@@ -380,8 +380,14 @@ def _execute_side_effect_row(
     )
 
     # 5. Call user function.
+    data_dict = data.as_dict()
+    if ctx_arg_name in data_dict:
+        raise ValueError(
+            f"ctx_arg_name {ctx_arg_name!r} collides with a data column of the same name. "
+            f"Choose a different ctx_arg_name or rename the data column."
+        )
     try:
-        fn(**{ctx_arg_name: ctx, **data.as_dict()})
+        fn(**{ctx_arg_name: ctx, **data_dict})
         if pipeline_database is not None and table_path is not None:
             _write_invocation_row(
                 pipeline_database=pipeline_database,
