@@ -301,12 +301,13 @@ def _execute_side_effect_row(
 ) -> tuple[TagProtocol, DataProtocol] | None:
     """Execute delivery for one (tag, data) row.
 
-    Computes a deterministic ``record_id`` from a unified preimage (matching
+    Computes a deterministic ``record_id`` from a preimage that matches
     ``FunctionNode._build_entry_id_preimage`` plus a recomputation index of
-    ``0``).  The preimage covers:
+    ``0``.  The preimage covers:
 
     * tag system-tag columns,
-    * input data values and source-info provenance columns,
+    * ``INPUT_DATA_HASH_COL`` — ``data.content_hash()`` (data values only,
+      no source-info provenance columns),
     * ``NODE_CONTENT_HASH_COL`` (the pod's own content hash), and
     * a recomputation index of ``0`` (side effects never recompute).
 
@@ -335,20 +336,19 @@ def _execute_side_effect_row(
     from orcapod.system_constants import constants
     from orcapod.utils import arrow_utils
 
-    # 1. Build the unified preimage (identical structure to FunctionNode).
+    # 1. Build the unified preimage (same structure as FunctionNode._build_entry_id_preimage
+    #    plus a recomputation index fixed at 0).
     preimage = arrow_utils.hstack_tables(
         tag.as_table(columns={"system_tags": True}),
-        data.as_table(columns={"source": True}),
         pa.table(
             {
+                constants.INPUT_DATA_HASH_COL: pa.array(
+                    [data.content_hash().to_string()], type=pa.large_string()
+                ),
                 constants.NODE_CONTENT_HASH_COL: pa.array(
                     [node_content_hash_str], type=pa.large_string()
-                )
-            }
-        ),
-        pa.table(
-            {
-                _SIDE_EFFECT_RECOMPUTATION_INDEX_COL: pa.array([0], type=pa.int32())
+                ),
+                _SIDE_EFFECT_RECOMPUTATION_INDEX_COL: pa.array([0], type=pa.int32()),
             }
         ),
     )
