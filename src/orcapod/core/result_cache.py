@@ -99,7 +99,7 @@ class ResultCache:
 
         RECORD_ID_COL = "_record_id"
 
-        constraints: dict[str, bytes] = {
+        constraints: dict[str, str | bytes] = {
             constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_prefixed_digest(),
         }
         if additional_constraints:
