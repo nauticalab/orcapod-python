@@ -27,6 +27,7 @@ from orcapod.utils.schema_utils import extract_function_schemas
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.channels import ReadableChannel, WritableChannel
     from orcapod.protocols.core_protocols import (
         DataProtocol,
         StreamProtocol,
@@ -262,7 +263,9 @@ class SideEffectFunctionPod(TraceableBase):
         )
 
     def identity_structure(self) -> Any:
-        return self.uri
+        # Include ctx_arg_name so renaming the context parameter changes the hash,
+        # consistent with SideEffectPod.identity_structure().
+        return (self.uri, self._ctx_arg_name)
 
     def pipeline_identity_structure(self) -> Any:
         return self.identity_structure()
@@ -768,7 +771,10 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                 run_id=run_id,
             )
 
-            # 3. Call user function — always re-raise (no silent row suppression)
+            # 3. Call user function — always re-raise (no silent row suppression).
+            # Unlike SideEffectPod, dropping a row would break the downstream
+            # stream that consumers depend on. on_error="log" only controls whether
+            # the exception is logged before propagating.
             try:
                 raw = self._pod._call_with_ctx(data, ctx)
             except Exception as exc:
@@ -866,6 +872,7 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                         run_id=run_id,
                     )
 
+                    # Always re-raise — on_error="log" only controls logging.
                     try:
                         raw = self._pod._call_with_ctx(data, ctx)
                     except Exception as exc:
