@@ -66,6 +66,31 @@ class CachedFunctionPod(WrappedFunctionPod):
         """Return the path to the cached records in the result store."""
         return self._cache.record_path
 
+    def lookup_cached_data(self, data: DataProtocol) -> DataProtocol | None:
+        """Look up a cached result for ``data`` without triggering computation.
+
+        Uses the input data content hash as the cache key (same as
+        ``process_data``). When a cached result is found, it is tagged with
+        ``RESULT_COMPUTED_FLAG=False`` before being returned, exactly as
+        ``process_data`` does on a cache hit.
+
+        This method is the correct entry point for callers that need a
+        cache-only probe — for example, when processing an ``EmptyData``
+        token where computation cannot proceed because the upstream result
+        is missing.
+
+        Args:
+            data: The input data whose content hash is used as the cache key.
+
+        Returns:
+            The cached output ``Data`` (with ``RESULT_COMPUTED_FLAG=False``
+            appended), or ``None`` if no cached result exists for this input.
+        """
+        cached = self._cache.lookup(data)
+        if cached is None:
+            return None
+        return cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
+
     def process_data(
         self,
         tag: TagProtocol,

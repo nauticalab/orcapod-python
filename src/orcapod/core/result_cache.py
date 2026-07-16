@@ -184,11 +184,13 @@ class ResultCache:
             )
             col_idx += 1
 
-        # Add input data hash (position 0)
+        # Add input data hash as large_string at position 0.
         data_table = data_table.add_column(
             0,
             constants.INPUT_DATA_HASH_COL,
-            pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
+            pa.array(
+                [input_data.content_hash().to_string()], type=pa.large_string()
+            ),
         )
 
         data_table = data_table.append_column(

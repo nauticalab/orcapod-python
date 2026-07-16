@@ -10,6 +10,7 @@ from orcapod.protocols import core_protocols as cp
 if TYPE_CHECKING:
     import pyarrow as pa
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+    from orcapod.types import ContentHash
     from orcapod.pipeline.dag import GraphProtocol
 
 
@@ -124,4 +125,5 @@ class PodNodeProtocol(cp.PodProtocol, Protocol):
         data_record_id: uuid.UUID,
         computed: bool,
         is_ephemeral: bool = False,
+        output_data_hash: "ContentHash | None" = None,
     ) -> None: ...
