@@ -530,12 +530,15 @@ class TestSideEffectJobNodeSync:
         fid = ctx.format_id(override)
 
         assert fid.startswith("orcapod-")
-        # Two base64-encoded components of 8 bytes each (11 chars each in base64)
+        # Two components of the form "{method}:{base64_digest}", separated by "::"
         parts = fid[len("orcapod-"):].split("::")
         assert len(parts) == 2
         import base64
         for part in parts:
-            decoded = base64.b64decode(part)
+            # Each component is "{method}:{encoded_digest}"; split on the first ":"
+            assert ":" in part
+            _method, encoded = part.split(":", 1)
+            decoded = base64.b64decode(encoded)
             assert len(decoded) == 8
 
 

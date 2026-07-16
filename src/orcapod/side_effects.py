@@ -65,19 +65,25 @@ class InvocationHashConfig:
 def _serialize_component(content_hash: ContentHash, config: InvocationHashConfig) -> str:
     """Serialize one ``ContentHash`` component per ``InvocationHashConfig``.
 
+    The method name is always included as a prefix (e.g. ``"arrow_v2.1:abcd1234"``).
+    Only the digest bytes are subject to truncation via ``component_length``.
+
     Args:
         content_hash: The hash to serialize.
         config: Encoding and truncation config.
 
     Returns:
-        A string representation of the (optionally truncated) digest.
+        A string of the form ``"{method}:{encoded_digest}"`` where the digest
+        is optionally truncated then encoded as hex or base64.
     """
     raw = content_hash.digest
     if config.component_length is not None:
         raw = raw[:config.component_length]
     if config.encoding == "base64":
-        return base64.b64encode(raw).decode("ascii")
-    return raw.hex()
+        encoded = base64.b64encode(raw).decode("ascii")
+    else:
+        encoded = raw.hex()
+    return f"{content_hash.method}:{encoded}"
 
 
 # ---------------------------------------------------------------------------
