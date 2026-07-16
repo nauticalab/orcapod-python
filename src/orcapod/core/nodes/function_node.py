@@ -118,7 +118,7 @@ class FunctionNodeBase(StreamBase):
         # Derive node_type from the pod: "side_effect_function" when ctx_arg_name is set
         self._node_type: str = (
             "side_effect_function"
-            if getattr(function_pod, "_ctx_arg_name", None) is not None
+            if function_pod.ctx_arg_name is not None
             else "function"
         )
         if tracker_manager is None:

@@ -113,6 +113,11 @@ class _FunctionPodBase(TraceableBase):
         return self._data_function.canonical_function_name
 
     @property
+    def ctx_arg_name(self) -> str | None:
+        """Parameter name auto-injected with ``InvocationContext``, or ``None``."""
+        return self._ctx_arg_name
+
+    @property
     def input_data_schema(self) -> "Schema":
         """Input schema as exposed to callers of this pod.
 
@@ -260,7 +265,7 @@ class _FunctionPodBase(TraceableBase):
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Process a single data using the pod's data function.
 
-        When ``_ctx_arg_name`` is set, builds a per-row ``InvocationContext``
+        When ``ctx_arg_name`` is set, builds a per-row ``InvocationContext``
         and injects it as an extra kwarg to the original function.
 
         Args:
@@ -268,20 +273,16 @@ class _FunctionPodBase(TraceableBase):
             data: The input data to process.
             logger: Optional ``DataExecutionLoggerProtocol`` for I/O capture.
             run_id: Pipeline run identifier forwarded to ``InvocationContext``.
-                Only used when ``_ctx_arg_name`` is set.
+                Only used when ``ctx_arg_name`` is set.
 
         Returns:
             A ``(tag, output_data)`` tuple; ``output_data`` is ``None`` if
             the function filters the data out.
         """
+        extra: dict[str, Any] = {}
         if self._ctx_arg_name is not None:
-            ctx = self._build_invocation_context(tag, data, run_id=run_id)
-            result = self.data_function.call(
-                data, logger=logger, **{self._ctx_arg_name: ctx}
-            )
-            return tag, result
-        result = self.data_function.call(data, logger=logger)
-        return tag, result
+            extra[self._ctx_arg_name] = self._build_invocation_context(tag, data, run_id=run_id)
+        return tag, self.data_function.call(data, logger=logger, **extra)
 
     async def async_process_data(
         self,
@@ -293,7 +294,7 @@ class _FunctionPodBase(TraceableBase):
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``process_data``.
 
-        When ``_ctx_arg_name`` is set, builds a per-row ``InvocationContext``
+        When ``ctx_arg_name`` is set, builds a per-row ``InvocationContext``
         and injects it as an extra kwarg to the original function.
 
         Args:
@@ -301,20 +302,16 @@ class _FunctionPodBase(TraceableBase):
             data: The input data to process.
             logger: Optional ``DataExecutionLoggerProtocol`` for I/O capture.
             run_id: Pipeline run identifier forwarded to ``InvocationContext``.
-                Only used when ``_ctx_arg_name`` is set.
+                Only used when ``ctx_arg_name`` is set.
 
         Returns:
             A ``(tag, output_data)`` tuple; ``output_data`` is ``None`` if
             the function filters the data out.
         """
+        extra: dict[str, Any] = {}
         if self._ctx_arg_name is not None:
-            ctx = self._build_invocation_context(tag, data, run_id=run_id)
-            result = await self.data_function.async_call(
-                data, logger=logger, **{self._ctx_arg_name: ctx}
-            )
-            return tag, result
-        result = await self.data_function.async_call(data, logger=logger)
-        return tag, result
+            extra[self._ctx_arg_name] = self._build_invocation_context(tag, data, run_id=run_id)
+        return tag, await self.data_function.async_call(data, logger=logger, **extra)
 
     def add_post_run_hook(self, hook: PostRunHook) -> None:
         """Register a post-run hook on this pod.
@@ -745,7 +742,7 @@ class FunctionPod(_FunctionPodBase):
             "uri": list(self.uri),
             "data_function": self.data_function.to_config(),
             "pod_config": None,
-            "ctx_arg_name": self._ctx_arg_name,
+            "ctx_arg_name": self.ctx_arg_name,
         }
         if self._pod_config.max_concurrency is not None:
             config["pod_config"] = {
@@ -1179,7 +1176,7 @@ class WrappedFunctionPod(_FunctionPodBase):
             data_function=function_pod.data_function,
             data_context=data_context,
             # Propagate ctx_arg_name so input_data_schema filters ctx correctly.
-            ctx_arg_name=getattr(function_pod, "_ctx_arg_name", None),
+            ctx_arg_name=function_pod.ctx_arg_name,
             **kwargs,
         )
         self._function_pod = function_pod

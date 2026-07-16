@@ -249,7 +249,7 @@ class SideEffectPodStream(StreamBase):
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
-                ctx_arg_name=self._pod._ctx_arg_name,
+                ctx_arg_name=self._pod.ctx_arg_name,
             )
             if result is not None:
                 yield result
@@ -824,7 +824,7 @@ class SideEffectNode(StreamBase):
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
-                ctx_arg_name=self._pod._ctx_arg_name,
+                ctx_arg_name=self._pod.ctx_arg_name,
                 pipeline_database=None,
                 table_path=None,
             )
@@ -962,7 +962,7 @@ class SideEffectJobNode(SideEffectNode):
                 pod_name=self._pod.label,
                 run_id=run_id,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
-                ctx_arg_name=self._pod._ctx_arg_name,
+                ctx_arg_name=self._pod.ctx_arg_name,
                 pipeline_database=self._pipeline_database,
                 table_path=self._table_path,
             )
@@ -1022,7 +1022,7 @@ class SideEffectJobNode(SideEffectNode):
                         pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,
-                        ctx_arg_name=self._pod._ctx_arg_name,
+                        ctx_arg_name=self._pod.ctx_arg_name,
                         pipeline_database=self._pipeline_database,
                         table_path=self._table_path,
                     )
