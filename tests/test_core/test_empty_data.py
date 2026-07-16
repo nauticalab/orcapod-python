@@ -2,13 +2,23 @@
 """Tests for EmptyData and its associated exception types."""
 from __future__ import annotations
 
+import uuid
+
+import pyarrow as pa
 import pytest
 
+from orcapod.core.datagrams import Data
+from orcapod.core.datagrams.tag_data import EmptyData
 from orcapod.errors import (
     EmptyDataAccessError,
     EmptyDataHashMissingError,
     EphemeralResultMissingError,
 )
+from orcapod.types import ContentHash
+
+
+def _make_hash(hex_str: str = "a" * 64) -> ContentHash:
+    return ContentHash("arrow_v2.1", bytes.fromhex(hex_str))
 
 
 class TestExceptionTypes:
@@ -35,3 +45,86 @@ class TestExceptionTypes:
         assert exc.cached_content_hash is None
         assert exc.node_identity_path == ("a", "b")
         assert "gone" in str(exc)
+
+
+class TestEmptyDataSubclass:
+    def test_is_data_subclass(self):
+        assert issubclass(EmptyData, Data)
+
+    def test_instance_is_data(self):
+        ed = EmptyData()
+        assert isinstance(ed, Data)
+
+
+class TestEmptyDataContentHash:
+    def test_returns_cached_hash_when_set(self):
+        h = _make_hash()
+        ed = EmptyData(cached_content_hash=h)
+        assert ed.content_hash() == h
+
+    def test_raises_when_no_cached_hash(self):
+        ed = EmptyData()
+        with pytest.raises(EmptyDataHashMissingError):
+            ed.content_hash()
+
+    def test_cached_content_hash_property(self):
+        h = _make_hash()
+        ed = EmptyData(cached_content_hash=h)
+        assert ed.cached_content_hash is h
+
+    def test_cached_content_hash_property_none(self):
+        ed = EmptyData()
+        assert ed.cached_content_hash is None
+
+
+class TestEmptyDataPayloadAccess:
+    """All payload-access methods must raise EmptyDataAccessError."""
+
+    def setup_method(self):
+        self.ed = EmptyData(cached_content_hash=_make_hash())
+
+    def test_as_dict_raises(self):
+        with pytest.raises(EmptyDataAccessError):
+            self.ed.as_dict()
+
+    def test_as_table_raises(self):
+        with pytest.raises(EmptyDataAccessError):
+            self.ed.as_table()
+
+    def test_keys_raises(self):
+        with pytest.raises(EmptyDataAccessError):
+            self.ed.keys()
+
+    def test_schema_raises(self):
+        with pytest.raises(EmptyDataAccessError):
+            self.ed.schema()
+
+    def test_arrow_schema_raises(self):
+        with pytest.raises(EmptyDataAccessError):
+            self.ed.arrow_schema()
+
+    def test_identity_structure_raises(self):
+        with pytest.raises(EmptyDataAccessError):
+            self.ed.identity_structure()
+
+
+class TestEmptyDataSourceInfo:
+    def test_empty_source_info_none_by_default(self):
+        ed = EmptyData()
+        assert ed.empty_source_info is None
+
+    def test_empty_source_info_stored(self):
+        si = {"source_id": "abc", "record_id": None}
+        ed = EmptyData(empty_source_info=si)
+        assert ed.empty_source_info == si
+
+
+class TestEmptyDataMetadata:
+    def test_record_uuid_assigned(self):
+        ed = EmptyData()
+        assert ed.datagram_uuid is not None
+
+    def test_custom_record_uuid(self):
+        uid = uuid.uuid4()
+        ed = EmptyData(record_uuid=uid)
+        assert ed.datagram_uuid == uid

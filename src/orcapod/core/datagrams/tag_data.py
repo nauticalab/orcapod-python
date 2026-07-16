@@ -473,3 +473,158 @@ class Data(Datagram):
         new_p._source_info = dict(self._source_info)
         new_p._source_info_table = self._source_info_table if include_cache else None
         return new_p
+
+
+# ---------------------------------------------------------------------------
+# EmptyData
+# ---------------------------------------------------------------------------
+
+
+class EmptyData(Data):
+    """A ``Data``-shaped token representing missing data.
+
+    ``EmptyData`` is produced when an upstream pod's ephemeral result has
+    expired or been pruned. It carries all normal datagram metadata (data
+    context, record UUID) but has no data payload. Every payload-access
+    method raises ``EmptyDataAccessError`` — callers must
+    ``isinstance(data, EmptyData)`` before touching columns.
+
+    ``content_hash()`` is overridden to return ``cached_content_hash`` (the
+    hash of the original input data this token stands in for). This makes
+    ``ResultCache.lookup(empty_data)`` work transparently without changes to
+    the cache infrastructure. If ``cached_content_hash`` is ``None`` (old
+    pipeline DB row lacking the hash column), ``content_hash()`` raises
+    ``EmptyDataHashMissingError`` loudly.
+
+    ``empty_source_info`` is an optional provenance field for the future
+    tag-row reconstruction follow-up. This PR defines the field; the write
+    logic is deferred.
+
+    Args:
+        cached_content_hash: The content hash of the original data this token
+            represents. ``None`` for old-format rows lacking the hash column.
+        empty_source_info: Optional provenance dict for tag-row reconstruction
+            (follow-up). Keys match tag-row source columns; ``record_id`` may
+            be ``None``.
+        python_schema: Optional schema hint (passed to parent).
+        data_context: Data context key or instance (passed to parent).
+        record_uuid: Optional explicit UUID for this token.
+    """
+
+    def __init__(
+        self,
+        cached_content_hash=None,
+        empty_source_info=None,
+        python_schema=None,
+        data_context=None,
+        record_uuid=None,
+    ) -> None:
+        # Initialise the parent with an empty dict — no payload columns.
+        super().__init__(
+            {},
+            python_schema=python_schema,
+            data_context=data_context,
+            record_uuid=record_uuid,
+        )
+        self._cached_content_hash = cached_content_hash
+        self._empty_source_info = empty_source_info
+
+    # ------------------------------------------------------------------
+    # Content identity
+    # ------------------------------------------------------------------
+
+    def content_hash(self, hasher=None):
+        """Return the cached content hash or raise ``EmptyDataHashMissingError``.
+
+        The returned hash is the hash of the original input data this token
+        represents, enabling ``ResultCache.lookup(empty_data)`` to find the
+        downstream cached result without accessing the missing payload.
+
+        Args:
+            hasher: Ignored — ``EmptyData`` uses the stored hash directly.
+
+        Returns:
+            The ``cached_content_hash`` set at construction.
+
+        Raises:
+            EmptyDataHashMissingError: If ``cached_content_hash`` is ``None``.
+        """
+        from orcapod.errors import EmptyDataHashMissingError
+
+        if self._cached_content_hash is None:
+            raise EmptyDataHashMissingError(self)
+        return self._cached_content_hash
+
+    def identity_structure(self):
+        """Always raises ``EmptyDataAccessError`` — no payload to hash."""
+        from orcapod.errors import EmptyDataAccessError
+
+        raise EmptyDataAccessError(self, "identity_structure")
+
+    # ------------------------------------------------------------------
+    # Payload-access overrides — all raise EmptyDataAccessError
+    # ------------------------------------------------------------------
+
+    def as_dict(
+        self,
+        *,
+        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        all_info: bool = False,
+    ):
+        from orcapod.errors import EmptyDataAccessError
+
+        raise EmptyDataAccessError(self, "as_dict")
+
+    def as_table(
+        self,
+        *,
+        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        all_info: bool = False,
+    ):
+        from orcapod.errors import EmptyDataAccessError
+
+        raise EmptyDataAccessError(self, "as_table")
+
+    def keys(
+        self,
+        *,
+        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        all_info: bool = False,
+    ):
+        from orcapod.errors import EmptyDataAccessError
+
+        raise EmptyDataAccessError(self, "keys")
+
+    def schema(
+        self,
+        *,
+        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        all_info: bool = False,
+    ):
+        from orcapod.errors import EmptyDataAccessError
+
+        raise EmptyDataAccessError(self, "schema")
+
+    def arrow_schema(
+        self,
+        *,
+        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        all_info: bool = False,
+    ):
+        from orcapod.errors import EmptyDataAccessError
+
+        raise EmptyDataAccessError(self, "arrow_schema")
+
+    # ------------------------------------------------------------------
+    # Read-only accessors
+    # ------------------------------------------------------------------
+
+    @property
+    def cached_content_hash(self):
+        """The stored content hash, or ``None`` if absent (old-format row)."""
+        return self._cached_content_hash
+
+    @property
+    def empty_source_info(self):
+        """Optional provenance dict for future tag-row reconstruction."""
+        return self._empty_source_info
