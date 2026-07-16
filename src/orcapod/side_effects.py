@@ -306,10 +306,10 @@ def _execute_side_effect_row(
     ``0``.  The preimage covers:
 
     * tag system-tag columns,
-    * ``INPUT_DATA_HASH_COL`` — ``data.content_hash()`` (data values only,
-      no source-info provenance columns),
+    * ``INPUT_DATA_HASH_COL`` — ``data.content_hash().to_string()``,
     * ``NODE_CONTENT_HASH_COL`` (the pod's own content hash), and
-    * a recomputation index of ``0`` (side effects never recompute).
+    * ``_SIDE_EFFECT_RECOMPUTATION_INDEX_COL`` fixed at ``0`` (side effects
+      never recompute).
 
     The invocation hash is ``pipeline_hash :: record_id_hash``, where
     ``pipeline_hash`` uniquely identifies the table path and ``record_id_hash``
@@ -334,23 +334,24 @@ def _execute_side_effect_row(
         ``(tag, data)`` to emit downstream, or ``None`` to drop the row.
     """
     from orcapod.system_constants import constants
-    from orcapod.utils import arrow_utils
 
-    # 1. Build the unified preimage (same structure as FunctionNode._build_entry_id_preimage
-    #    plus a recomputation index fixed at 0).
-    preimage = arrow_utils.hstack_tables(
-        tag.as_table(columns={"system_tags": True}),
-        pa.table(
-            {
-                constants.INPUT_DATA_HASH_COL: pa.array(
-                    [data.content_hash().to_string()], type=pa.large_string()
-                ),
-                constants.NODE_CONTENT_HASH_COL: pa.array(
-                    [node_content_hash_str], type=pa.large_string()
-                ),
-                _SIDE_EFFECT_RECOMPUTATION_INDEX_COL: pa.array([0], type=pa.int32()),
-            }
-        ),
+    # 1. Build the preimage — identical structure to FunctionNode._build_entry_id_preimage
+    #    (chained .append_column()) with the recomputation index appended last, matching
+    #    FunctionNode.compute_pipeline_entry_id at recomputation_index=0.
+    preimage = (
+        tag.as_table(columns={"system_tags": True})
+        .append_column(
+            constants.INPUT_DATA_HASH_COL,
+            pa.array([data.content_hash().to_string()], type=pa.large_string()),
+        )
+        .append_column(
+            constants.NODE_CONTENT_HASH_COL,
+            pa.array([node_content_hash_str], type=pa.large_string()),
+        )
+        .append_column(
+            _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
+            pa.array([0], type=pa.int32()),
+        )
     )
     record_id_hash: ContentHash = arrow_hasher.hash_table(preimage)
     record_id: bytes = record_id_hash.to_prefixed_digest()
