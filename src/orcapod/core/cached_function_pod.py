@@ -156,6 +156,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Override to detect cache hit status from ``RESULT_COMPUTED_FLAG`` meta.
 
@@ -170,6 +171,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
+            run_id: Pipeline run identifier (unused in cached path).
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -215,6 +217,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``_invoke_with_hooks`` for ``CachedFunctionPod``.
 
@@ -225,6 +228,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
+            run_id: Pipeline run identifier (unused in cached path).
 
         Returns:
             A ``(tag, output_data)`` tuple.
