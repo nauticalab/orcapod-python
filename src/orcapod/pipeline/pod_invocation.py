@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import (
         FunctionPodProtocol,
         OperatorPodProtocol,
+        SideEffectFunctionPodProtocol,
         SideEffectPodProtocol,
         StreamProtocol,
     )
@@ -171,7 +172,7 @@ class SideEffectFunctionInvocation(PodInvocation):
 
     def __init__(
         self,
-        pod: Any,
+        pod: "SideEffectFunctionPodProtocol",
         input_streams: "tuple[StreamProtocol, ...]",
         label: str | None = None,
     ) -> None:

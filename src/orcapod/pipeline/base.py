@@ -575,6 +575,10 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                     input_streams=(node.upstreams[0],),
                     label=node._label,
                 )
+            # IMPORTANT: _SEFNode must be checked AFTER SideEffectNode.
+            # SideEffectFunctionNode does NOT inherit from SideEffectNode, so the
+            # order is safe today. If that ever changes, this branch must come first
+            # or the SideEffectNode branch above will swallow SEF nodes silently.
             elif isinstance(node, _SEFNode):
                 inv_by_node_hash[node_hash] = SideEffectFunctionInvocation(
                     pod=node._pod,
