@@ -25,7 +25,7 @@ from orcapod import contexts
 from orcapod.core.datagrams.datagram import Datagram
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, DataValue, Schema, SchemaLike
+from orcapod.types import ColumnConfig, ContentHash, DataValue, Schema, SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -513,11 +513,11 @@ class EmptyData(Data):
 
     def __init__(
         self,
-        cached_content_hash=None,
-        empty_source_info=None,
-        python_schema=None,
-        data_context=None,
-        record_uuid=None,
+        cached_content_hash: ContentHash | None = None,
+        empty_source_info: dict[str, str | None] | None = None,
+        python_schema: SchemaLike | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        record_uuid: uuid.UUID | None = None,
     ) -> None:
         # Initialise the parent with an empty dict — no payload columns.
         super().__init__(
@@ -526,14 +526,14 @@ class EmptyData(Data):
             data_context=data_context,
             record_uuid=record_uuid,
         )
-        self._cached_content_hash = cached_content_hash
-        self._empty_source_info = empty_source_info
+        self._cached_content_hash: ContentHash | None = cached_content_hash
+        self._empty_source_info: dict[str, str | None] | None = empty_source_info
 
     # ------------------------------------------------------------------
     # Content identity
     # ------------------------------------------------------------------
 
-    def content_hash(self, hasher=None):
+    def content_hash(self, hasher: Any = None) -> ContentHash:
         """Return the cached content hash or raise ``EmptyDataHashMissingError``.
 
         The returned hash is the hash of the original input data this token
@@ -555,7 +555,7 @@ class EmptyData(Data):
             raise EmptyDataHashMissingError(self)
         return self._cached_content_hash
 
-    def identity_structure(self):
+    def identity_structure(self) -> Any:
         """Always raises ``EmptyDataAccessError`` — no payload to hash."""
         from orcapod.errors import EmptyDataAccessError
 
@@ -568,9 +568,9 @@ class EmptyData(Data):
     def as_dict(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ):
+    ) -> dict[str, DataValue]:
         from orcapod.errors import EmptyDataAccessError
 
         raise EmptyDataAccessError(self, "as_dict")
@@ -578,9 +578,9 @@ class EmptyData(Data):
     def as_table(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ):
+    ) -> pa.Table:
         from orcapod.errors import EmptyDataAccessError
 
         raise EmptyDataAccessError(self, "as_table")
@@ -588,9 +588,9 @@ class EmptyData(Data):
     def keys(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ):
+    ) -> tuple[str, ...]:
         from orcapod.errors import EmptyDataAccessError
 
         raise EmptyDataAccessError(self, "keys")
@@ -598,9 +598,9 @@ class EmptyData(Data):
     def schema(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ):
+    ) -> Schema:
         from orcapod.errors import EmptyDataAccessError
 
         raise EmptyDataAccessError(self, "schema")
@@ -608,9 +608,9 @@ class EmptyData(Data):
     def arrow_schema(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ):
+    ) -> pa.Schema:
         from orcapod.errors import EmptyDataAccessError
 
         raise EmptyDataAccessError(self, "arrow_schema")
@@ -644,11 +644,11 @@ class EmptyData(Data):
     # ------------------------------------------------------------------
 
     @property
-    def cached_content_hash(self):
+    def cached_content_hash(self) -> ContentHash | None:
         """The stored content hash, or ``None`` if absent (old-format row)."""
         return self._cached_content_hash
 
     @property
-    def empty_source_info(self):
+    def empty_source_info(self) -> dict[str, str | None] | None:
         """Optional provenance dict for future tag-row reconstruction."""
         return self._empty_source_info

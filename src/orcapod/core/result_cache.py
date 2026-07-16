@@ -75,7 +75,7 @@ class ResultCache:
     def lookup(
         self,
         input_data: DataProtocol,
-        additional_constraints: dict[str, str] | None = None,
+        additional_constraints: dict[str, str | bytes] | None = None,
     ) -> DataProtocol | None:
         """Look up a cached output data for *input_data*.
 
@@ -99,8 +99,8 @@ class ResultCache:
 
         RECORD_ID_COL = "_record_id"
 
-        constraints: dict[str, str] = {
-            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_string(),
+        constraints: dict[str, bytes] = {
+            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_prefixed_digest(),
         }
         if additional_constraints:
             constraints.update(additional_constraints)
@@ -184,11 +184,16 @@ class ResultCache:
             )
             col_idx += 1
 
-        # Add input data hash (position 0)
+        # Add input data hash as large_binary (method-prefixed digest) at position 0.
+        # Using to_prefixed_digest() stores raw bytes instead of a hex string, which
+        # is more compact and allows lossless ContentHash reconstruction via
+        # ContentHash.from_prefixed_digest(). Lookup uses the same encoding.
         data_table = data_table.add_column(
             0,
             constants.INPUT_DATA_HASH_COL,
-            pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
+            pa.array(
+                [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
+            ),
         )
 
         data_table = data_table.append_column(

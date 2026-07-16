@@ -130,13 +130,14 @@ class TestEmptyDataMetadata:
         assert ed.datagram_uuid == uid
 
 
-class TestCachedFunctionPodResultCacheProperty:
-    def test_result_cache_is_result_cache_instance(self):
-        """CachedFunctionPod exposes result_cache as a ResultCache."""
+class TestCachedFunctionPodLookupCachedData:
+    def test_lookup_returns_none_when_cache_empty(self):
+        """lookup_cached_data returns None when no result is cached yet."""
+        import pyarrow as pa
         from orcapod.core.cached_function_pod import CachedFunctionPod
         from orcapod.core.data_function import PythonDataFunction
+        from orcapod.core.datagrams import Data, Tag
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.result_cache import ResultCache
         from orcapod.databases import InMemoryArrowDatabase
 
         def double(x: int) -> int:
@@ -145,4 +146,26 @@ class TestCachedFunctionPodResultCacheProperty:
         pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)
         cached_pod = CachedFunctionPod(pod, result_database=InMemoryArrowDatabase())
-        assert isinstance(cached_pod.result_cache, ResultCache)
+        data = Data({"x": 1})
+        assert cached_pod.lookup_cached_data(data) is None
+
+    def test_lookup_returns_data_after_process(self):
+        """lookup_cached_data returns the cached result after process_data populates the cache."""
+        from orcapod.core.cached_function_pod import CachedFunctionPod
+        from orcapod.core.data_function import PythonDataFunction
+        from orcapod.core.datagrams import Data, Tag
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.databases import InMemoryArrowDatabase
+
+        def double(x: int) -> int:
+            return x * 2
+
+        pf = PythonDataFunction(double, output_keys="result")
+        pod = FunctionPod(pf)
+        cached_pod = CachedFunctionPod(pod, result_database=InMemoryArrowDatabase())
+        tag = Tag({})
+        data = Data({"x": 1})
+        cached_pod.process_data(tag, data)
+        result = cached_pod.lookup_cached_data(data)
+        assert result is not None
+        assert result.as_dict()["result"] == 2

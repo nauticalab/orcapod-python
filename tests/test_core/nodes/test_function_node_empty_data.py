@@ -57,7 +57,7 @@ class TestAddPipelineRecordStoresInputHash:
         all_records = node._pipeline_database.get_all_records(node.node_identity_path)
         assert all_records is not None
         stored_hashes = all_records.column(constants.INPUT_DATA_HASH_COL).to_pylist()
-        assert data0.content_hash().to_string() in stored_hashes
+        assert data0.content_hash().to_prefixed_digest() in stored_hashes
 
 
 @pytest.fixture
