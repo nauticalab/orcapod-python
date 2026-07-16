@@ -219,6 +219,13 @@ class TestSideEffectFunctionJobNode:
         node2.execute(stream)
         assert call_count == 4  # called again — track_completion=False
 
+        # Invocation log must grow with each run (track_completion=False means always re-log)
+        import polars as pl
+        records = pipeline_db.get_all_records(node2._table_path)
+        assert records is not None
+        df = pl.from_arrow(records)
+        assert len(df) == 4  # 2 rows from run 1 + 2 rows from run 2
+
     def test_sf09_on_error_log_reraises(self):
         """SF-09: on_error='log' — exception logged then always re-raised."""
         from orcapod.side_effects import SideEffectPodConfig
@@ -238,6 +245,10 @@ class TestSideEffectFunctionJobNode:
         # Must propagate — no silent row suppression
         with pytest.raises(RuntimeError, match="test error"):
             node.execute(stream)
+
+        # Invocation log must NOT be written when fn raises
+        records = pipeline_db.get_all_records(node._table_path)
+        assert records is None or len(records) == 0
 
 
 class TestSideEffectFunctionPodDecorator:

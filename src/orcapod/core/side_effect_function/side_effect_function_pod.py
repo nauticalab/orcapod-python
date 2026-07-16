@@ -804,10 +804,18 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
 
             # 5. Log invocation to pipeline database
             if self._pipeline_database is not None and self._table_path is not None:
+                # When track_completion=False, every invocation must get its own
+                # log row. The deterministic record_id would be silently dropped
+                # by skip_duplicates=True on subsequent runs for the same input.
+                # Use a fresh UUID7 as the DB key so the row is always appended.
+                if self._pod.pod_config.track_completion:
+                    log_record_id: bytes = record_id
+                else:
+                    log_record_id = uuid7().bytes
                 _write_invocation_row(
                     pipeline_database=self._pipeline_database,
                     table_path=self._table_path,
-                    record_id=record_id,
+                    record_id=log_record_id,
                     record_id_hash_str=record_id_hash.to_string(),
                     run_id=run_id,
                 )
@@ -901,10 +909,16 @@ class SideEffectFunctionJobNode(SideEffectFunctionNode):
                         self._result_cache.store(data, output_data, var_dg, exec_dg)
 
                     if self._pipeline_database is not None and self._table_path is not None:
+                        # Same rationale as sync execute: use a fresh UUID7 key
+                        # when track_completion=False so every run appends a row.
+                        if self._pod.pod_config.track_completion:
+                            async_log_record_id: bytes = record_id
+                        else:
+                            async_log_record_id = uuid7().bytes
                         _write_invocation_row(
                             pipeline_database=self._pipeline_database,
                             table_path=self._table_path,
-                            record_id=record_id,
+                            record_id=async_log_record_id,
                             record_id_hash_str=record_id_hash.to_string(),
                             run_id=run_id,
                         )
