@@ -70,8 +70,8 @@ class TestSideEffectInvocation:
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
         calls = []
-        def fn(data, ctx):
-            calls.append(data)
+        def fn(value, ctx):
+            calls.append(value)
 
         pod = SideEffectPod(fn)
         stream = _make_stream()
@@ -83,7 +83,7 @@ class TestSideEffectInvocation:
         from orcapod.pipeline.pod_invocation import SideEffectInvocation
         from orcapod.side_effects import SideEffectPod
 
-        def fn(data, ctx): pass
+        def fn(value, ctx): pass
         pod = SideEffectPod(fn)
         stream = _make_stream()
 
@@ -107,8 +107,8 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
         calls = []
-        def fn(data, ctx):
-            calls.append(dict(data))
+        def fn(value, ctx):
+            calls.append({"value": value})
 
         pod = SideEffectPod(fn, config=SideEffectPodConfig(drop_on_failure=False))
         stream = _make_stream(3)
@@ -122,8 +122,8 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
         calls = []
-        def fn(data, ctx):
-            calls.append(dict(data))
+        def fn(value, ctx):
+            calls.append({"value": value})
 
         pod = SideEffectPod(fn)  # default: drop_on_failure=True
         stream = _make_stream(3)
@@ -137,7 +137,7 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod, InvocationContext
 
         received = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             received.append(ctx)
 
         pod = SideEffectPod(fn)
@@ -156,7 +156,7 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod
 
         calls = []
-        def fn(data, _ctx):
+        def fn(value, ctx):
             calls.append(True)
 
         pod = SideEffectPod(fn)
@@ -170,7 +170,7 @@ class TestSideEffectPodStandalone:
         """T8: on_error='raise' propagates the exception."""
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
-        def fn(data, ctx):
+        def fn(value, ctx):
             raise RuntimeError("boom")
 
         pod = SideEffectPod(fn, config=SideEffectPodConfig(on_error="raise"))
@@ -183,7 +183,7 @@ class TestSideEffectPodStandalone:
         """T9: on_error='log' + drop_on_failure=True drops failed rows."""
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
-        def fn(data, ctx):
+        def fn(value, ctx):
             raise RuntimeError("oops")
 
         pod = SideEffectPod(
@@ -199,7 +199,7 @@ class TestSideEffectPodStandalone:
         """T10: on_error='log' + drop_on_failure=False passes through despite failure."""
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
-        def fn(data, ctx):
+        def fn(value, ctx):
             raise RuntimeError("oops")
 
         pod = SideEffectPod(
@@ -220,7 +220,7 @@ class TestDecorators:
         from orcapod.side_effects import sink_pod, SideEffectPod
 
         @sink_pod
-        def my_sink(data, ctx):
+        def my_sink(value, ctx):
             pass
 
         assert isinstance(my_sink, SideEffectPod)
@@ -232,7 +232,7 @@ class TestDecorators:
         from orcapod.side_effects import tap_pod, SideEffectPod
 
         @tap_pod
-        def my_tap(data, ctx):
+        def my_tap(value, ctx):
             pass
 
         assert isinstance(my_tap, SideEffectPod)
@@ -248,7 +248,7 @@ class TestDecorators:
                 cfg = SideEffectPodConfig(track_completion=tc, drop_on_failure=dof)
 
                 @side_effect_pod(config=cfg)
-                def fn(data, ctx):
+                def fn(value, ctx):
                     pass
 
                 assert fn.pod_config.track_completion is tc
@@ -261,7 +261,7 @@ class TestDecorators:
         cfg = SideEffectPodConfig(on_error="log")
 
         @sink_pod(config=cfg)
-        def my_sink(data, ctx):
+        def my_sink(value, ctx):
             pass
 
         assert my_sink.pod_config.on_error == "log"
@@ -300,7 +300,7 @@ class TestSideEffectJobNodeSync:
         from orcapod.side_effects import SideEffectPod, SideEffectJobNode
 
         calls = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             calls.append(True)
 
         node, stream, db = self._make_node_with_db(fn)
@@ -325,7 +325,7 @@ class TestSideEffectJobNodeSync:
         from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
 
         calls = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             calls.append(True)
 
         cfg = SideEffectPodConfig(track_completion=True)
@@ -358,7 +358,7 @@ class TestSideEffectJobNodeSync:
         from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
 
         calls = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             calls.append(True)
 
         cfg = SideEffectPodConfig(track_completion=False)
@@ -396,7 +396,7 @@ class TestSideEffectJobNodeSync:
 
         call_count = 0
 
-        def fn(data, ctx):
+        def fn(value, ctx):
             nonlocal call_count
             call_count += 1
             raise RuntimeError("always fails")
@@ -439,7 +439,7 @@ class TestSideEffectJobNodeSync:
 
         call_count = 0
 
-        def fn(data, ctx):
+        def fn(value, ctx):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -490,7 +490,7 @@ class TestSideEffectJobNodeSync:
         from orcapod.side_effects import SideEffectPod, SideEffectJobNode, InvocationContext
 
         ctx_list: list[InvocationContext] = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             ctx_list.append(ctx)
 
         pod = SideEffectPod(fn)
@@ -516,7 +516,7 @@ class TestSideEffectJobNodeSync:
         )
 
         ctx_list: list[InvocationContext] = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             ctx_list.append(ctx)
 
         pod = SideEffectPod(fn)
@@ -557,7 +557,7 @@ class TestSideEffectJobNodeAsync:
         from orcapod.channels import Channel
 
         calls = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             calls.append(True)
 
         pod = SideEffectPod(fn)
@@ -601,7 +601,7 @@ class TestSideEffectJobNodeAsync:
         from orcapod.channels import Channel
 
         results_store = []
-        def fn(data, ctx):
+        def fn(value, ctx):
             results_store.append(True)
 
         pod = SideEffectPod(fn)
@@ -647,8 +647,8 @@ class TestSideEffectPodPipelineIntegration:
 
         delivery_log = []
 
-        def log_delivery(data, ctx):
-            delivery_log.append(dict(data))
+        def log_delivery(value, ctx):
+            delivery_log.append({"value": value})
 
         log_pod = SideEffectPod(log_delivery)
 
@@ -685,3 +685,47 @@ class TestSideEffectPodPipelineIntegration:
         assert "status" not in df.columns  # only success records; no status column
 
 
+# ---------------------------------------------------------------------------
+# New call style + ctx_arg_name tests
+# ---------------------------------------------------------------------------
+
+
+class TestSideEffectPodNewCallStyle:
+    """SEP-UPDATE: Data fields passed as kwargs, not as DataProtocol."""
+
+    def test_sep_update_kwargs_passed_to_fn(self):
+        """Data fields unpacked as kwargs; ctx passed by ctx_arg_name."""
+        from orcapod.side_effects import SideEffectPod
+
+        received: dict = {}
+
+        def fn(value, ctx):
+            received["value"] = value
+            received["ctx"] = ctx
+
+        pod = SideEffectPod(fn)
+        stream = _make_stream(1)  # stream has 'value' data column (int64)
+        list(pod.process(stream).iter_data())
+
+        assert "value" in received
+        assert isinstance(received["value"], int)
+        assert received["ctx"] is not None
+
+
+class TestSideEffectPodCtxArgName:
+    """SEP-CTX-NAME: ctx_arg_name routes InvocationContext to correct parameter."""
+
+    def test_sep_ctx_name_custom(self):
+        """ctx_arg_name='context' injects InvocationContext under that name."""
+        from orcapod.side_effects import SideEffectPod, InvocationContext
+
+        received: dict = {}
+
+        def fn(value, context):
+            received["context"] = context
+
+        pod = SideEffectPod(fn, ctx_arg_name="context")
+        stream = _make_stream(1)
+        list(pod.process(stream).iter_data())
+
+        assert isinstance(received["context"], InvocationContext)

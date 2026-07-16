@@ -249,6 +249,7 @@ class SideEffectPodStream(StreamBase):
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
+                ctx_arg_name=self._pod._ctx_arg_name,
             )
             if result is not None:
                 yield result
@@ -301,6 +302,7 @@ def _execute_side_effect_row(
     pod_name: str,
     run_id: str | None,
     arrow_hasher: Any,
+    ctx_arg_name: str = "ctx",
     pipeline_database: ArrowDatabaseProtocol | None = None,
     table_path: tuple[str, ...] | None = None,
 ) -> tuple[TagProtocol, DataProtocol] | None:
@@ -321,7 +323,7 @@ def _execute_side_effect_row(
     uniquely identifies the entry within that table.
 
     Args:
-        fn: The side-effect callable ``(data, ctx) -> None``.
+        fn: The side-effect callable receiving data fields as kwargs plus ``InvocationContext``.
         tag: Tag for this row.
         data: Data for this row.
         pod_config: Pod-level configuration.
@@ -379,7 +381,7 @@ def _execute_side_effect_row(
 
     # 5. Call user function.
     try:
-        fn(data, ctx)
+        fn(**{ctx_arg_name: ctx, **data.as_dict()})
         if pipeline_database is not None and table_path is not None:
             _write_invocation_row(
                 pipeline_database=pipeline_database,
@@ -486,12 +488,14 @@ class SideEffectPod(TraceableBase):
         name: str | None = None,
         label: str | None = None,
         data_context: Any = None,
+        ctx_arg_name: str = "ctx",
     ) -> None:
         super().__init__(label=label, data_context=data_context)
         self._fn = fn
         self._name: str = name if name is not None else getattr(fn, "__name__", "unknown")
         self._pod_config = config or SideEffectPodConfig()
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
+        self._ctx_arg_name: str = ctx_arg_name
 
     @property
     def pod_config(self) -> SideEffectPodConfig:
@@ -508,7 +512,12 @@ class SideEffectPod(TraceableBase):
         return getattr(self._fn, "__name__", None)
 
     def identity_structure(self) -> Any:
-        return (self.uri, self._pod_config.track_completion, self._pod_config.drop_on_failure)
+        return (
+            self.uri,
+            self._ctx_arg_name,
+            self._pod_config.track_completion,
+            self._pod_config.drop_on_failure,
+        )
 
     def pipeline_identity_structure(self) -> Any:
         return self.identity_structure()
@@ -591,6 +600,7 @@ def side_effect_pod(
     *,
     config: SideEffectPodConfig | None = None,
     name: str | None = None,
+    ctx_arg_name: str = "ctx",
 ) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
     """Decorator that wraps a callable as a ``SideEffectPod``.
 
@@ -601,12 +611,14 @@ def side_effect_pod(
         fn: The callable to wrap (when used as a bare decorator).
         config: Optional ``SideEffectPodConfig`` to apply.
         name: Optional canonical function name override (see ``SideEffectPod``).
+        ctx_arg_name: Name of the parameter that receives ``InvocationContext``.
+            Defaults to ``"ctx"``.
 
     Returns:
         A ``SideEffectPod`` (bare usage) or a decorator (parameterised usage).
     """
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=config, name=name)
+        return SideEffectPod(f, config=config, name=name, ctx_arg_name=ctx_arg_name)
 
     if fn is not None:
         return _wrap(fn)
@@ -618,6 +630,7 @@ def sink_pod(
     *,
     config: SideEffectPodConfig | None = None,
     name: str | None = None,
+    ctx_arg_name: str = "ctx",
 ) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
     """Decorator preset: ``track_completion=True``, ``drop_on_failure=True``.
 
@@ -628,6 +641,8 @@ def sink_pod(
         fn: The callable to wrap (bare usage).
         config: Optional config override.
         name: Optional canonical function name override (see ``SideEffectPod``).
+        ctx_arg_name: Name of the parameter that receives ``InvocationContext``.
+            Defaults to ``"ctx"``.
 
     Returns:
         A ``SideEffectPod`` or decorator.
@@ -636,7 +651,7 @@ def sink_pod(
     effective_config = _merge_config(preset, config)
 
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=effective_config, name=name)
+        return SideEffectPod(f, config=effective_config, name=name, ctx_arg_name=ctx_arg_name)
 
     if fn is not None:
         return _wrap(fn)
@@ -648,6 +663,7 @@ def tap_pod(
     *,
     config: SideEffectPodConfig | None = None,
     name: str | None = None,
+    ctx_arg_name: str = "ctx",
 ) -> SideEffectPod | Callable[[Callable], SideEffectPod]:
     """Decorator preset: ``track_completion=False``, ``drop_on_failure=False``.
 
@@ -658,6 +674,8 @@ def tap_pod(
         fn: The callable to wrap (bare usage).
         config: Optional config override.
         name: Optional canonical function name override (see ``SideEffectPod``).
+        ctx_arg_name: Name of the parameter that receives ``InvocationContext``.
+            Defaults to ``"ctx"``.
 
     Returns:
         A ``SideEffectPod`` or decorator.
@@ -666,7 +684,7 @@ def tap_pod(
     effective_config = _merge_config(preset, config)
 
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=effective_config, name=name)
+        return SideEffectPod(f, config=effective_config, name=name, ctx_arg_name=ctx_arg_name)
 
     if fn is not None:
         return _wrap(fn)
@@ -800,6 +818,7 @@ class SideEffectNode(StreamBase):
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
+                ctx_arg_name=self._pod._ctx_arg_name,
                 pipeline_database=None,
                 table_path=None,
             )
@@ -937,6 +956,7 @@ class SideEffectJobNode(SideEffectNode):
                 pod_name=self._pod.label,
                 run_id=run_id,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
+                ctx_arg_name=self._pod._ctx_arg_name,
                 pipeline_database=self._pipeline_database,
                 table_path=self._table_path,
             )
@@ -996,6 +1016,7 @@ class SideEffectJobNode(SideEffectNode):
                         pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,
+                        ctx_arg_name=self._pod._ctx_arg_name,
                         pipeline_database=self._pipeline_database,
                         table_path=self._table_path,
                     )
