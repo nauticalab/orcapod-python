@@ -314,8 +314,7 @@ class TestSideEffectJobNodeSync:
         assert records is not None
         df = pl.from_arrow(records)
         assert len(df) == 3
-        assert "full_input_packet_hash" in df.columns
-        assert "pod_content_hash" in df.columns
+        assert "record_id_hash" in df.columns
         assert "executed_at" in df.columns
         assert "status" not in df.columns  # only success records; no status column
         assert "invocation_hash" not in df.columns  # never stored
@@ -383,7 +382,7 @@ class TestSideEffectJobNodeSync:
         # track_completion=False → same record_id written twice; skip_duplicates=True
         # means second write is silently dropped, so we still see 2 unique rows.
         assert len(df) == 2
-        assert "full_input_packet_hash" in df.columns
+        assert "record_id_hash" in df.columns
         assert "status" not in df.columns
 
     def test_failure_does_not_write_log_so_next_run_retries(self):
@@ -590,7 +589,7 @@ class TestSideEffectJobNodeAsync:
         records = db.get_all_records(table_path)
         df = pl.from_arrow(records)
         assert len(df) == 3
-        assert "full_input_packet_hash" in df.columns
+        assert "record_id_hash" in df.columns
         assert "status" not in df.columns  # only success records; no status column
 
     def test_t14_async_execute_parallel(self):
@@ -680,7 +679,7 @@ class TestSideEffectPodPipelineIntegration:
         assert records is not None
         df = pl.from_arrow(records)
         assert len(df) == 2
-        assert "full_input_packet_hash" in df.columns
+        assert "record_id_hash" in df.columns
         assert "status" not in df.columns  # only success records; no status column
 
 

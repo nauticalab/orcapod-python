@@ -1398,27 +1398,33 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> pa.Table:
         """Builds the shared Arrow preimage used by both entry-ID methods.
 
-        Combines the tag's system columns with the input data hash and
-        node content hash into a single-row Arrow table.
+        Combines the tag's system columns, the full input data (data column
+        values plus source-info provenance columns), and the node content hash
+        into a single-row Arrow table.
+
+        Including source-info columns (``_source_*``) alongside data values
+        ensures that two rows with identical data values but different column
+        provenance (e.g. same value derived from different originating sources)
+        produce distinct entry IDs.
 
         Args:
             tag: The tag datagram for the input row.
             input_data: The data datagram for the input row.
 
         Returns:
-            A single-row ``pa.Table`` with system-tag columns,
-            ``INPUT_DATA_HASH_COL``, and ``NODE_CONTENT_HASH_COL``.
+            A single-row ``pa.Table`` with system-tag columns, data-value
+            columns, source-info columns, and ``NODE_CONTENT_HASH_COL``.
         """
-        return (
-            tag.as_table(columns={"system_tags": True})
-            .append_column(
-                constants.INPUT_DATA_HASH_COL,
-                pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                constants.NODE_CONTENT_HASH_COL,
-                pa.array([self.content_hash().to_string()], type=pa.large_string()),
-            )
+        return arrow_utils.hstack_tables(
+            tag.as_table(columns={"system_tags": True}),
+            input_data.as_table(columns={"source": True}),
+            pa.table(
+                {
+                    constants.NODE_CONTENT_HASH_COL: pa.array(
+                        [self.content_hash().to_string()], type=pa.large_string()
+                    )
+                }
+            ),
         )
 
     def compute_base_entry_id(

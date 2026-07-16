@@ -37,6 +37,10 @@ else:
 
 logger = logging.getLogger(__name__)
 
+# Column name used in the record-ID preimage table (same semantic as
+# ``_PIPELINE_RECOMPUTATION_INDEX_COL`` in ``function_node.py``).
+_SIDE_EFFECT_RECOMPUTATION_INDEX_COL = "__pipeline_recomputation_index"
+
 
 # ---------------------------------------------------------------------------
 # InvocationHashConfig
@@ -137,7 +141,7 @@ class InvocationContext:
         pod_content_hash: str,
         pipeline_run_id: str | None,
         _pipeline_hash_ch: ContentHash,
-        _full_input_packet_hash_ch: ContentHash,
+        _record_id_hash_ch: ContentHash,
         _hash_config: InvocationHashConfig,
         _track_completion: bool,
     ) -> None:
@@ -146,7 +150,7 @@ class InvocationContext:
         self.pod_content_hash = pod_content_hash
         self.pipeline_run_id = pipeline_run_id
         self._pipeline_hash_ch = _pipeline_hash_ch
-        self._full_input_packet_hash_ch = _full_input_packet_hash_ch
+        self._record_id_hash_ch = _record_id_hash_ch
         self._hash_config = _hash_config
         self._track_completion = _track_completion
 
@@ -168,7 +172,7 @@ class InvocationContext:
         """
         cfg = config or self._hash_config
         c1 = _serialize_component(self._pipeline_hash_ch, cfg)
-        c2 = _serialize_component(self._full_input_packet_hash_ch, cfg)
+        c2 = _serialize_component(self._record_id_hash_ch, cfg)
         if not self._track_completion and self.pipeline_run_id is not None:
             parts = f"{c1}::{c2}::{self.pipeline_run_id}"
         else:
@@ -236,7 +240,7 @@ class SideEffectPodStream(StreamBase):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                pod_content_hash=self._pod.content_hash(),
+                node_content_hash_str=self._pod.content_hash().to_string(),
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -288,7 +292,7 @@ def _execute_side_effect_row(
     data: DataProtocol,
     pod_config: SideEffectPodConfig,
     pipeline_hash_ch: ContentHash,
-    pod_content_hash: ContentHash,
+    node_content_hash_str: str,
     pod_name: str,
     run_id: str | None,
     arrow_hasher: Any,
@@ -297,14 +301,28 @@ def _execute_side_effect_row(
 ) -> tuple[TagProtocol, DataProtocol] | None:
     """Execute delivery for one (tag, data) row.
 
+    Computes a deterministic ``record_id`` from a unified preimage (matching
+    ``FunctionNode._build_entry_id_preimage`` plus a recomputation index of
+    ``0``).  The preimage covers:
+
+    * tag system-tag columns,
+    * input data values and source-info provenance columns,
+    * ``NODE_CONTENT_HASH_COL`` (the pod's own content hash), and
+    * a recomputation index of ``0`` (side effects never recompute).
+
+    The invocation hash is ``pipeline_hash :: record_id_hash``, where
+    ``pipeline_hash`` uniquely identifies the table path and ``record_id_hash``
+    uniquely identifies the entry within that table.
+
     Args:
         fn: The side-effect callable ``(data, ctx) -> None``.
         tag: Tag for this row.
         data: Data for this row.
         pod_config: Pod-level configuration.
         pipeline_hash_ch: Pipeline hash of the node (for invocation_hash c1).
-        pod_content_hash: Content hash of the pod (used in record_id and
-            ``InvocationContext``).
+        node_content_hash_str: ``pod.content_hash().to_string()`` — included in
+            the preimage as ``NODE_CONTENT_HASH_COL`` and exposed via
+            ``InvocationContext.pod_content_hash``.
         pod_name: Label of the pod.
         run_id: Pipeline run identifier (or ``None`` in standalone mode).
         arrow_hasher: The ``arrow_hasher`` from the pod's data context.
@@ -314,46 +332,57 @@ def _execute_side_effect_row(
     Returns:
         ``(tag, data)`` to emit downstream, or ``None`` to drop the row.
     """
+    from orcapod.system_constants import constants
     from orcapod.utils import arrow_utils
 
-    # 1. Compute full_input_packet_hash over all four column groups.
-    tag_table = tag.as_table(columns={"system_tags": True})
-    data_table = data.as_table(columns={"source": True})
-    full_table = arrow_utils.hstack_tables(tag_table, data_table)
-    fip_hash: ContentHash = arrow_hasher.hash_table(full_table)
+    # 1. Build the unified preimage (identical structure to FunctionNode).
+    preimage = arrow_utils.hstack_tables(
+        tag.as_table(columns={"system_tags": True}),
+        data.as_table(columns={"source": True}),
+        pa.table(
+            {
+                constants.NODE_CONTENT_HASH_COL: pa.array(
+                    [node_content_hash_str], type=pa.large_string()
+                )
+            }
+        ),
+        pa.table(
+            {
+                _SIDE_EFFECT_RECOMPUTATION_INDEX_COL: pa.array([0], type=pa.int32())
+            }
+        ),
+    )
+    record_id_hash: ContentHash = arrow_hasher.hash_table(preimage)
+    record_id: bytes = record_id_hash.to_prefixed_digest()
 
-    # 2. Deterministic record_id: fip_hash(binary) + b'::' + pod_content_hash(binary).
-    #    Scopes completion tracking to the exact (input, pod version) pair.
-    record_id = fip_hash.digest + b"::" + pod_content_hash.digest
-
-    # 3. Serialize invocation_hash for InvocationContext.
+    # 2. Serialize invocation_hash: pipeline_hash :: record_id_hash
     cfg = pod_config.hash_config
     c1 = _serialize_component(pipeline_hash_ch, cfg)
-    c2 = _serialize_component(fip_hash, cfg)
+    c2 = _serialize_component(record_id_hash, cfg)
     if not pod_config.track_completion and run_id is not None:
         inv_hash = f"{c1}::{c2}::{run_id}"
     else:
         inv_hash = f"{c1}::{c2}"
 
-    # 4. Completion check — look up by deterministic record_id.
+    # 3. Completion check — look up by deterministic record_id.
     if pod_config.track_completion and pipeline_database is not None and table_path is not None:
         prior = pipeline_database.get_record_by_id(table_path, record_id)
         if prior is not None:
             return (tag, data)  # already completed — re-emit without re-delivery
 
-    # 5. Build InvocationContext (always).
+    # 4. Build InvocationContext (always).
     ctx = InvocationContext(
         invocation_hash=inv_hash,
         pod_name=pod_name,
-        pod_content_hash=pod_content_hash.to_string(),
+        pod_content_hash=node_content_hash_str,
         pipeline_run_id=run_id,
         _pipeline_hash_ch=pipeline_hash_ch,
-        _full_input_packet_hash_ch=fip_hash,
+        _record_id_hash_ch=record_id_hash,
         _hash_config=cfg,
         _track_completion=pod_config.track_completion,
     )
 
-    # 6. Call user function.
+    # 5. Call user function.
     try:
         fn(data, ctx)
         if pipeline_database is not None and table_path is not None:
@@ -361,8 +390,7 @@ def _execute_side_effect_row(
                 pipeline_database=pipeline_database,
                 table_path=table_path,
                 record_id=record_id,
-                fip_hash_str=fip_hash.to_string(),
-                pod_content_hash_str=pod_content_hash.to_string(),
+                record_id_hash_str=record_id_hash.to_string(),
                 run_id=run_id,
             )
         return (tag, data)
@@ -382,33 +410,29 @@ def _write_invocation_row(
     pipeline_database: ArrowDatabaseProtocol,
     table_path: tuple[str, ...],
     record_id: bytes,
-    fip_hash_str: str,
-    pod_content_hash_str: str,
+    record_id_hash_str: str,
     run_id: str | None,
 ) -> None:
     """Write one success row to the side-effect invocation log table.
 
     Only called on successful delivery. Uses a deterministic ``record_id``
-    (``fip_hash.digest + b'::' + pod_content_hash.digest``) so that
+    (the prefixed digest of the unified preimage hash) so that
     ``get_record_by_id`` can look up prior completions without a column scan.
 
     Args:
         pipeline_database: The attached pipeline database.
         table_path: Path tuple for the invocation log table.
-        record_id: Deterministic bytes key scoping completion to this exact
-            ``(input, pod version)`` pair.
-        fip_hash_str: String form of the full-input-packet hash.
-        pod_content_hash_str: String form of the pod content hash.
+        record_id: Deterministic bytes key for this ``(input, pod version)``
+            pair — the prefixed digest of the unified preimage hash.
+        record_id_hash_str: String form of the record-ID hash (stored for
+            human inspection).
         run_id: Pipeline run identifier (or ``None`` for standalone mode).
     """
     executed_at = datetime.datetime.now(datetime.timezone.utc)
     record = pa.table(
         {
-            "full_input_packet_hash": pa.array(
-                [fip_hash_str], type=pa.large_string()
-            ),
-            "pod_content_hash": pa.array(
-                [pod_content_hash_str], type=pa.large_string()
+            "record_id_hash": pa.array(
+                [record_id_hash_str], type=pa.large_string()
             ),
             "pipeline_run_id": pa.array(
                 [run_id], type=pa.large_string()
@@ -777,7 +801,7 @@ class SideEffectNode(StreamBase):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                pod_content_hash=self._pod.content_hash(),
+                node_content_hash_str=self._pod.content_hash().to_string(),
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -912,7 +936,7 @@ class SideEffectJobNode(SideEffectNode):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                pod_content_hash=self._pod.content_hash(),
+                node_content_hash_str=self._pod.content_hash().to_string(),
                 pod_name=self._pod.label,
                 run_id=run_id,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -971,7 +995,7 @@ class SideEffectJobNode(SideEffectNode):
                         data=data,
                         pod_config=self._pod.pod_config,
                         pipeline_hash_ch=self.pipeline_hash(),
-                        pod_content_hash=self._pod.content_hash(),
+                        node_content_hash_str=self._pod.content_hash().to_string(),
                         pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,
