@@ -504,6 +504,11 @@ class SideEffectPod(TraceableBase):
         self._ctx_arg_name: str = ctx_arg_name
 
     @property
+    def ctx_arg_name(self) -> str:
+        """Parameter name injected with ``InvocationContext`` on each call."""
+        return self._ctx_arg_name
+
+    @property
     def pod_config(self) -> SideEffectPodConfig:
         """Pod-level configuration."""
         return self._pod_config
