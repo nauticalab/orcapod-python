@@ -30,7 +30,7 @@ from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.core.datagrams.tag_data import EmptyData
+from orcapod.core.datagrams.tag_data import EmptyData, Tag
 from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
@@ -1935,15 +1935,15 @@ class FunctionJobNode(FunctionNodeBase):
             match after joining.
         """
         fetched = self._fetch_joined_records(base_entry_ids=base_entry_ids)
-        if fetched is None or fetched.table.num_rows == 0:
+        if fetched is None:
+            return {}
+        if fetched.table.num_rows == 0 and not fetched.empty_data_tokens:
             return {}
 
         joined = fetched.table
 
         # Derive tag keys: prefer input_stream when available; fall back to
         # taginfo column exclusion for CACHE_ONLY / deserialized nodes.
-        # taginfo_columns from _fetch_joined_records preserves the pipeline DB
-        # column names before joining, which is the correct exclusion set.
         if self._input_stream is not None:
             tag_keys = self._input_stream.keys()[0]
         else:
@@ -1957,22 +1957,39 @@ class FunctionJobNode(FunctionNodeBase):
                 and c != constants.NODE_CONTENT_HASH_COL
             )
 
-        # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it).
-        # All meta columns (starting with META_PREFIX "__") are dropped including
-        # _PIPELINE_ENTRY_ID_COL and _PIPELINE_BASE_ENTRY_ID_COL.
-        base_entry_ids_col = joined.column(_PIPELINE_BASE_ENTRY_ID_COL).to_pylist()
-        drop_cols = [
-            c
-            for c in joined.column_names
-            if c.startswith(constants.META_PREFIX)
-            or c == constants.NODE_CONTENT_HASH_COL
-        ]
-        data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
-        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-
         loaded: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
-        for base_eid, (tag, data) in zip(base_entry_ids_col, stream.iter_data()):
-            loaded[base_eid] = (tag, data)
+
+        # --- Process normal (fully matched) rows ---
+        if joined.num_rows > 0:
+            base_entry_ids_col = joined.column(_PIPELINE_BASE_ENTRY_ID_COL).to_pylist()
+            drop_cols = [
+                c
+                for c in joined.column_names
+                if c.startswith(constants.META_PREFIX)
+                or c == constants.NODE_CONTENT_HASH_COL
+            ]
+            data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
+            stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+            for base_eid, (tag, data) in zip(base_entry_ids_col, stream.iter_data()):
+                loaded[base_eid] = (tag, data)
+
+        # --- Process EmptyData tokens (ephemeral misses) ---
+        for base_eid, empty_data in fetched.empty_data_tokens.items():
+            if base_eid in loaded:
+                # A persistent result exists for the same entry — it wins.
+                continue
+            raw_row = fetched.empty_taginfo_rows[base_eid]
+            tag_data = {k: v for k, v in raw_row.items() if k in tag_keys}
+            system_tags = {
+                k: v
+                for k, v in raw_row.items()
+                if k.startswith(constants.SYSTEM_TAG_PREFIX)
+            }
+            tag = Tag(
+                tag_data, system_tags=system_tags, data_context=self.data_context
+            )
+            loaded[base_eid] = (tag, empty_data)
+
         return loaded
 
     async def _async_execute_cache_only(

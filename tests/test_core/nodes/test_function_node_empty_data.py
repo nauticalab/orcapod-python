@@ -122,3 +122,32 @@ class TestFetchJoinedRecordsEmptyData:
         assert result is not None
         token = next(iter(result.empty_data_tokens.values()))
         assert token.cached_content_hash.to_string() == data0.content_hash().to_string()
+
+
+class TestLoadCachedEntriesEmptyData:
+    def test_empty_data_token_appears_in_loaded_entries(self, ephemeral_node):
+        """_load_cached_entries yields (tag, EmptyData) for ephemeral miss rows."""
+        node = ephemeral_node
+        for tag, data in node._input_stream.iter_data():
+            node.execute_data(tag, data)
+
+        # Simulate expiry by replacing ephemeral store
+        node.set_ephemeral_store(InMemoryArrowDatabase())
+
+        loaded = node._load_cached_entries()
+        assert len(loaded) == 1
+        base_eid = next(iter(loaded))
+        tag_out, data_out = loaded[base_eid]
+        assert isinstance(data_out, EmptyData)
+        assert data_out.cached_content_hash is not None
+
+    def test_normal_result_wins_over_empty_data_token(self, persistent_node):
+        """Non-ephemeral rows produce real Data, not EmptyData."""
+        node = persistent_node
+        for tag, data in node._input_stream.iter_data():
+            node.execute_data(tag, data)
+
+        loaded = node._load_cached_entries()
+        for base_eid, (tag, data) in loaded.items():
+            assert not isinstance(data, EmptyData)
+            assert isinstance(data, Data)
