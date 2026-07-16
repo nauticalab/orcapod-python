@@ -377,6 +377,7 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         data_context: str | DataContext | None = None,
         config: OrcapodConfig | None = None,
         executor: PythonFunctionExecutorProtocol | None = None,
+        function_for_hashing: Callable[..., Any] | None = None,
     ) -> None:
 
         # default to the basic PythonFunctionExecutor
@@ -432,9 +433,15 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             output_typespec=output_schema,
         )
 
+        # When function_for_hashing is provided (e.g. the original pre-stripped function
+        # for ctx-aware pods), use it for identity hashing so that the content hash,
+        # signature hash, and git info reflect the actual user-written function rather
+        # than a generic wrapper shim.
+        _hash_fn = function_for_hashing if function_for_hashing is not None else self._function
+
         # get git info for the function
         # TODO: turn this into optional addition
-        env_info = get_git_info_for_python_object(self._function, try_cwd=True)
+        env_info = get_git_info_for_python_object(_hash_fn, try_cwd=True)
         if env_info is None:
             git_hash = "unknown"
         else:
@@ -449,10 +456,10 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
 
         semantic_hasher = self.data_context.semantic_hasher
         self._function_signature_hash = semantic_hasher.hash_object(
-            get_function_signature(function)
+            get_function_signature(_hash_fn)
         ).to_string()
         self._function_content_hash = semantic_hasher.hash_object(
-            get_function_components(self._function)
+            get_function_components(_hash_fn)
         ).to_string()
 
     @property

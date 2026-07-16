@@ -777,6 +777,7 @@ class FunctionPod(_FunctionPodBase):
                 function_name=name or getattr(fn, "__name__", "unknown"),
                 version=version,
                 label=label,
+                function_for_hashing=original_fn,
             )
             return cls(
                 data_function=data_function,
