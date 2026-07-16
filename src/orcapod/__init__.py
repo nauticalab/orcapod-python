@@ -8,6 +8,7 @@ from .config import (
 from .core.function_pod import (
     FunctionPod,
     function_pod,
+    side_effect_function_pod,
 )
 from .side_effects import (
     InvocationContext,
@@ -17,12 +18,6 @@ from .side_effects import (
     side_effect_pod,
     sink_pod,
     tap_pod,
-)
-from .core.side_effect_function import (
-    SideEffectFunctionPod,
-    SideEffectFunctionNode,
-    SideEffectFunctionJobNode,
-    side_effect_function_pod,
 )
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
@@ -78,9 +73,6 @@ __all__ = [
     "side_effect_pod",
     "sink_pod",
     "tap_pod",
-    "SideEffectFunctionPod",
-    "SideEffectFunctionNode",
-    "SideEffectFunctionJobNode",
     "side_effect_function_pod",
     "Pipeline",
     "PipelineJob",

@@ -13,7 +13,6 @@ from orcapod.pipeline.pod_invocation import (
     FunctionInvocation,
     OperatorInvocation,
     PodInvocation,
-    SideEffectFunctionInvocation,
     SideEffectInvocation,
 )
 from orcapod.side_effects import SideEffectNode
@@ -205,12 +204,6 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """Node class to use for side-effect pod invocations — e.g. ``SideEffectJobNode``."""
         ...
 
-    @property
-    @abstractmethod
-    def side_effect_function_node_class(self) -> type:
-        """Node class for side-effect-function pod invocations."""
-        ...
-
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
@@ -264,23 +257,6 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """
         self._record_invocation(
             SideEffectInvocation(pod=pod, input_streams=(input_stream,), label=label)
-        )
-
-    def record_side_effect_function_pod_invocation(
-        self,
-        pod: Any,
-        input_stream: "cp.StreamProtocol",
-        label: str | None = None,
-    ) -> None:
-        """Record a side-effect function pod invocation into the graph.
-
-        Args:
-            pod: The ``SideEffectFunctionPod`` being invoked.
-            input_stream: The upstream stream.
-            label: Optional display label for the resulting compiled node.
-        """
-        self._record_invocation(
-            SideEffectFunctionInvocation(pod=pod, input_streams=(input_stream,), label=label)
         )
 
     def _record_invocation(self, invocation: PodInvocation) -> None:
@@ -442,12 +418,6 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                     input_stream=upstream_nodes[0],
                     label=inv.label,
                 )
-            elif isinstance(inv, SideEffectFunctionInvocation):
-                node_map[key] = self.side_effect_function_node_class(
-                    pod=inv.pod,
-                    input_stream=upstream_nodes[0],
-                    label=inv.label,
-                )
             else:
                 node_map[key] = self.operator_node_class(
                     operator=inv.pod,
@@ -541,8 +511,6 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                 "Use 'with pipeline:' or call compile() first."
             )
 
-        from orcapod.core.side_effect_function.side_effect_function_pod import SideEffectFunctionNode as _SEFNode
-
         source_node_cls = self.source_node_class
         fn_node_cls = self.function_node_class
         source_streams: dict[str, Any] = {}
@@ -571,16 +539,6 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                 )
             elif isinstance(node, SideEffectNode):
                 inv_by_node_hash[node_hash] = SideEffectInvocation(
-                    pod=node._pod,
-                    input_streams=(node.upstreams[0],),
-                    label=node._label,
-                )
-            # IMPORTANT: _SEFNode must be checked AFTER SideEffectNode.
-            # SideEffectFunctionNode does NOT inherit from SideEffectNode, so the
-            # order is safe today. If that ever changes, this branch must come first
-            # or the SideEffectNode branch above will swallow SEF nodes silently.
-            elif isinstance(node, _SEFNode):
-                inv_by_node_hash[node_hash] = SideEffectFunctionInvocation(
                     pod=node._pod,
                     input_streams=(node.upstreams[0],),
                     label=node._label,

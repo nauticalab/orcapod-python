@@ -12,7 +12,6 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
-from orcapod.core.side_effect_function.side_effect_function_pod import SideEffectFunctionNode
 from orcapod.side_effects import SideEffectNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
@@ -67,7 +66,6 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
     function_node_class = FunctionNode
     operator_node_class = OperatorNode
     side_effect_node_class = SideEffectNode
-    side_effect_function_node_class = SideEffectFunctionNode
 
     def __init__(
         self,
@@ -211,14 +209,6 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                     if node._operator is not None:
                         descriptor["operator_config"] = node._operator.to_config()
                     descriptor["table_scope"] = node._table_scope
-
-                case _ if node.node_type == "side_effect_function":
-                    raise NotImplementedError(
-                        f"Pipeline.save() does not support SideEffectFunctionNode "
-                        f"(node {node.label!r}). Serialization of side-effect function "
-                        f"nodes is deferred — remove the SideEffectFunctionPod from the "
-                        f"pipeline before calling save()."
-                    )
 
             nodes[content_hash_str] = descriptor
 

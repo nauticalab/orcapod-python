@@ -190,17 +190,16 @@ class AsyncPipelineOrchestrator:
                         tg.create_task(
                             node.async_execute(writer, observer=effective_observer)
                         )
-                    elif is_function_node(node):
+                    elif is_function_node(node) or is_side_effect_function_node(node):
                         predecessors = in_edges.get(node, [])
                         if len(predecessors) != 1:
                             raise ValueError(
-                                f"FunctionNode expects exactly 1 upstream, "
-                                f"got {len(predecessors)}"
+                                f"FunctionNode expects exactly 1 upstream, got {len(predecessors)}"
                             )
                         input_reader = edge_readers[(predecessors[0], node)]
                         tg.create_task(
                             node.async_execute(
-                                input_reader, writer, observer=effective_observer
+                                input_reader, writer, observer=effective_observer, run_id=run_id
                             )
                         )
                     elif is_operator_node(node):
@@ -225,21 +224,6 @@ class AsyncPipelineOrchestrator:
                         if not predecessors:
                             raise ValueError(
                                 f"SideEffectNode expects exactly 1 upstream, got 0"
-                            )
-                        input_reader = edge_readers[(predecessors[0], node)]
-                        tg.create_task(
-                            node.async_execute(
-                                [input_reader],
-                                writer,
-                                observer=effective_observer,
-                                run_id=run_id,
-                            )
-                        )
-                    elif is_side_effect_function_node(node):
-                        predecessors = in_edges.get(node, [])
-                        if not predecessors:
-                            raise ValueError(
-                                "SideEffectFunctionNode expects exactly 1 upstream, got 0"
                             )
                         input_reader = edge_readers[(predecessors[0], node)]
                         tg.create_task(
