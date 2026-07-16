@@ -14,6 +14,7 @@ from orcapod.pipeline.result import OrchestratorResult
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
+    is_side_effect_node,
     is_source_node,
 )
 
@@ -98,6 +99,15 @@ class SyncPipelineOrchestrator:
                         for buf, upstream_node in upstream_buffers
                     ]
                     buffers[node] = node.execute(*input_streams, observer=effective_observer)
+                elif is_side_effect_node(node):
+                    upstream_buf = self._gather_upstream(node, graph, buffers)
+                    upstream_node = list(graph.predecessors(node))[0]
+                    input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
+                    buffers[node] = node.execute(
+                        input_stream,
+                        observer=effective_observer,
+                        run_id=run_id,
+                    )
                 else:
                     raise TypeError(
                         f"Unknown node type: {getattr(node, 'node_type', None)!r}"

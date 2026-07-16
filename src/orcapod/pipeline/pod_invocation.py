@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import (
         FunctionPodProtocol,
         OperatorPodProtocol,
+        SideEffectPodProtocol,
         StreamProtocol,
     )
 
@@ -127,4 +128,30 @@ class OperatorInvocation(PodInvocation):
     ) -> None:
         if len(input_streams) == 0:
             raise ValueError("OperatorInvocation requires at least 1 input stream.")
+        super().__init__(pod=pod, input_streams=input_streams, label=label)
+
+
+class SideEffectInvocation(PodInvocation):
+    """Invocation of a side-effect pod against exactly one input stream.
+
+    Args:
+        pod: A ``SideEffectPodProtocol`` instance.
+        input_streams: Tuple with exactly one stream.
+        label: Optional display label.
+
+    Raises:
+        ValueError: If ``input_streams`` does not contain exactly one element.
+    """
+
+    def __init__(
+        self,
+        pod: "SideEffectPodProtocol",
+        input_streams: "tuple[StreamProtocol, ...]",
+        label: str | None = None,
+    ) -> None:
+        if len(input_streams) != 1:
+            raise ValueError(
+                f"SideEffectInvocation requires exactly 1 input stream; "
+                f"got {len(input_streams)}."
+            )
         super().__init__(pod=pod, input_streams=input_streams, label=label)

@@ -13,7 +13,9 @@ from orcapod.pipeline.pod_invocation import (
     FunctionInvocation,
     OperatorInvocation,
     PodInvocation,
+    SideEffectInvocation,
 )
+from orcapod.side_effects import SideEffectNode
 from orcapod.protocols import core_protocols as cp
 from orcapod.utils.lazy_module import LazyModule
 
@@ -196,6 +198,12 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """Node class to use for operator-pod invocations — e.g. ``OperatorNode``."""
         ...
 
+    @property
+    @abstractmethod
+    def side_effect_node_class(self) -> type:
+        """Node class to use for side-effect pod invocations — e.g. ``SideEffectJobNode``."""
+        ...
+
     # ------------------------------------------------------------------
     # Recording
     # ------------------------------------------------------------------
@@ -232,6 +240,23 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """
         self._record_invocation(
             OperatorInvocation(pod=pod, input_streams=tuple(upstreams), label=label)
+        )
+
+    def record_side_effect_pod_invocation(
+        self,
+        pod: "cp.SideEffectPodProtocol",
+        input_stream: "cp.StreamProtocol",
+        label: str | None = None,
+    ) -> None:
+        """Record a side-effect pod invocation into the graph.
+
+        Args:
+            pod: The side-effect pod being invoked.
+            input_stream: The upstream stream.
+            label: Optional display label for the resulting compiled node.
+        """
+        self._record_invocation(
+            SideEffectInvocation(pod=pod, input_streams=(input_stream,), label=label)
         )
 
     def _record_invocation(self, invocation: PodInvocation) -> None:
@@ -387,6 +412,12 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                     input_stream=upstream_nodes[0],
                     label=inv.label,
                 )
+            elif isinstance(inv, SideEffectInvocation):
+                node_map[key] = self.side_effect_node_class(
+                    side_effect_pod=inv.pod,
+                    input_stream=upstream_nodes[0],
+                    label=inv.label,
+                )
             else:
                 node_map[key] = self.operator_node_class(
                     operator=inv.pod,
@@ -503,6 +534,12 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                     )
                 inv_by_node_hash[node_hash] = FunctionInvocation(
                     pod=node._function_pod,
+                    input_streams=(node.upstreams[0],),
+                    label=node._label,
+                )
+            elif isinstance(node, SideEffectNode):
+                inv_by_node_hash[node_hash] = SideEffectInvocation(
+                    pod=node._pod,
                     input_streams=(node.upstreams[0],),
                     label=node._label,
                 )
