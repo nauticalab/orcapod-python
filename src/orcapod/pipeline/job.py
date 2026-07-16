@@ -10,7 +10,10 @@ from orcapod.core.nodes import JobNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
-from orcapod.core.side_effect_function.side_effect_function_pod import SideEffectFunctionJobNode
+from orcapod.core.side_effect_function.side_effect_function_pod import (
+    SideEffectFunctionJobNode,
+    SideEffectFunctionNode,
+)
 from orcapod.side_effects import SideEffectJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
@@ -395,6 +398,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 )
             elif isinstance(node, SideEffectJobNode):
                 node.attach_databases(pipeline_database=pipeline_db)
+            elif isinstance(node, SideEffectFunctionJobNode):
+                node.attach_databases(
+                    pipeline_database=pipeline_db,
+                    result_database=result_db,
+                )
 
     # ------------------------------------------------------------------
     # _iter_function_job_nodes() / apply_node_config()
@@ -526,6 +534,14 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 upstream_bp_hash = job_id_to_bp_hash[id(job_node._input_stream)]
                 node_map[node_hash] = SideEffectNode(
                     side_effect_pod=job_node._pod,
+                    input_stream=node_map[upstream_bp_hash],
+                    label=job_node._label,
+                )
+
+            elif isinstance(job_node, SideEffectFunctionJobNode):
+                upstream_bp_hash = job_id_to_bp_hash[id(job_node._input_stream)]
+                node_map[node_hash] = SideEffectFunctionNode(
+                    pod=job_node._pod,
                     input_stream=node_map[upstream_bp_hash],
                     label=job_node._label,
                 )
