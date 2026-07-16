@@ -490,19 +490,23 @@ class EmptyData(Data):
     ``isinstance(data, EmptyData)`` before touching columns.
 
     ``content_hash()`` is overridden to return ``cached_content_hash`` (the
-    hash of the original input data this token stands in for). This makes
-    ``ResultCache.lookup(empty_data)`` work transparently without changes to
-    the cache infrastructure. If ``cached_content_hash`` is ``None`` (old
-    pipeline DB row lacking the hash column), ``content_hash()`` raises
+    hash of the **upstream output** — i.e., the data payload this token stands
+    in for). Because the downstream node's result cache is keyed by its own
+    input (= the upstream output), returning this hash lets
+    ``ResultCache.lookup(empty_data)`` work transparently without any changes
+    to the cache infrastructure. If ``cached_content_hash`` is ``None`` (a
+    pipeline DB row lacking the stored hash column), ``content_hash()`` raises
     ``EmptyDataHashMissingError`` loudly.
 
     ``empty_source_info`` is an optional provenance field for the future
-    tag-row reconstruction follow-up. This PR defines the field; the write
+    tag-row reconstruction follow-up. This release defines the field; the write
     logic is deferred.
 
     Args:
-        cached_content_hash: The content hash of the original data this token
-            represents. ``None`` for old-format rows lacking the hash column.
+        cached_content_hash: The content hash of the missing data payload this
+            token represents — typically the upstream node's output hash, which
+            equals the downstream node's input hash. ``None`` for old-format
+            rows lacking the stored hash column.
         empty_source_info: Optional provenance dict for tag-row reconstruction
             (follow-up). Keys match tag-row source columns; ``record_id`` may
             be ``None``.
@@ -536,9 +540,12 @@ class EmptyData(Data):
     def content_hash(self, hasher: Any = None) -> ContentHash:
         """Return the cached content hash or raise ``EmptyDataHashMissingError``.
 
-        The returned hash is the hash of the original input data this token
-        represents, enabling ``ResultCache.lookup(empty_data)`` to find the
-        downstream cached result without accessing the missing payload.
+        The returned hash is the hash of the **missing payload** this token
+        stands in for — typically the upstream node's output hash (stored as
+        ``OUTPUT_DATA_HASH_COL`` in the pipeline DB). This equals the
+        downstream node's input hash, so ``ResultCache.lookup(empty_data)``
+        finds the correct cached result transparently without touching the
+        missing data.
 
         Args:
             hasher: Ignored — ``EmptyData`` uses the stored hash directly.

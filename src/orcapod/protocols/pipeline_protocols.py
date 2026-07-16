@@ -124,4 +124,5 @@ class PodNodeProtocol(cp.PodProtocol, Protocol):
         data_record_id: uuid.UUID,
         computed: bool,
         is_ephemeral: bool = False,
+        output_data: cp.DataProtocol | None = None,
     ) -> None: ...

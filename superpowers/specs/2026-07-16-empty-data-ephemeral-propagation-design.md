@@ -16,12 +16,16 @@ where the downstream pod has already computed a result for that same input conte
 This design introduces:
 
 1. **`EmptyData`** — a `Data` subclass that represents missing data. Carries an optional
-   cached content hash (the hash of the original input data) and an optional source-info
-   field (data model only; reconstruction logic is deferred).
-2. **Tag table schema extension** — `INPUT_DATA_HASH_COL` is now persisted in every
-   pipeline DB row so it is available at read time.
+   cached content hash (the hash of the **upstream output** payload, which equals the
+   downstream node's input hash) and an optional source-info field (data model only;
+   reconstruction logic is deferred).
+2. **Tag table schema extension** — `INPUT_DATA_HASH_COL` (upstream input hash) and
+   `OUTPUT_DATA_HASH_COL` (upstream output hash) are now both persisted in every pipeline
+   DB row so the read path can reconstruct a `ContentHash` for cache lookup. Hash columns
+   are stored as `large_binary` using `ContentHash.to_prefixed_digest()`.
 3. **Read path change** — `_fetch_joined_records()` emits `EmptyData` tokens for
-   ephemeral miss rows instead of silently dropping them.
+   ephemeral miss rows instead of silently dropping them.  `cached_content_hash` is
+   populated from `OUTPUT_DATA_HASH_COL` (the correct key for downstream cache lookup).
 4. **Downstream handling** — `_process_data_internal()` performs a cache lookup via the
    `EmptyData`'s cached content hash; a cache miss raises `EphemeralResultMissingError`
    loudly.
@@ -35,7 +39,7 @@ This design introduces:
   produces its output without touching the missing intermediate data.
 - A downstream pod with no cached result for the missing input fails loudly with a
   structured exception carrying enough context to debug.
-- Old pipeline DB rows (lacking `INPUT_DATA_HASH_COL`) produce a WARNING log and
+- Old pipeline DB rows (lacking `OUTPUT_DATA_HASH_COL`) produce a WARNING log and
   continue to work in degraded mode (no flow-through, no forced migration).
 - All non-ephemeral paths are unaffected.
 
@@ -90,16 +94,20 @@ This design introduces:
 
 ```
 Upstream (is_result_ephemeral=True)
-  → writes INPUT_DATA_HASH_COL into tag table row
+  → writes INPUT_DATA_HASH_COL (upstream input hash) into tag table row
+  → writes OUTPUT_DATA_HASH_COL (upstream output hash) into tag table row
   → result expires from ephemeral store
 
 Downstream _fetch_joined_records
   → sees ephemeral tag row, finds no result DB row
-  → emits EmptyData(cached_content_hash=<stored hash>)
+  → reads OUTPUT_DATA_HASH_COL from the tag row
+  → emits EmptyData(cached_content_hash=<OUTPUT_DATA_HASH_COL value>)
     instead of silently dropping
+    (OUTPUT_DATA_HASH_COL = upstream output = downstream input = correct cache key)
 
 Downstream _process_data_internal(tag, EmptyData)
-  → ResultCache.lookup(empty_data)   # uses content_hash() = cached hash
+  → CachedFunctionPod.lookup_cached_data(empty_data)
+      # uses empty_data.content_hash() = cached upstream output hash
   → Hit  → return cached output (normal flow)
   → Miss → raise EphemeralResultMissingError(tag, hash, node_identity_path)
 ```
@@ -119,8 +127,9 @@ the payload raises `EmptyDataAccessError`.
 **`content_hash()` override:**  
 Returns `self._cached_content_hash` if set. Raises `EmptyDataHashMissingError` if
 `cached_content_hash` is `None`. This makes `ResultCache.lookup(empty_data)` work
-transparently — the cached hash matches the `INPUT_DATA_HASH_COL` written by the
-original upstream execution.
+transparently — the cached hash is the upstream output hash (sourced from
+`OUTPUT_DATA_HASH_COL`), which equals the downstream's input hash and therefore matches
+the key used by the downstream's result cache.
 
 **`empty_source_info` field:**  
 An optional `dict[str, str | None]` structurally matching tag-row provenance columns,
@@ -174,15 +183,22 @@ lost and from which node, to make debugging tractable.
 **File:** `src/orcapod/core/nodes/function_node.py`  
 **Method:** `FunctionJobNode.add_pipeline_record()`
 
-Add `INPUT_DATA_HASH_COL` to `meta_table`:
+Add `INPUT_DATA_HASH_COL` and `OUTPUT_DATA_HASH_COL` to `meta_table`. Both are stored
+as `large_binary` using `ContentHash.to_prefixed_digest()` (format:
+`b"{method}:{raw_digest}"`), which is more compact than hex strings and allows lossless
+reconstruction via `ContentHash.from_prefixed_digest()`.
 
 ```python
 meta_table = pa.table({
     constants.DATA_RECORD_ID: ...,
     constants.NODE_CONTENT_HASH_COL: ...,
-    constants.INPUT_DATA_HASH_COL: pa.array(          # NEW
-        [input_data.content_hash().to_string()],
-        type=pa.large_string(),
+    constants.INPUT_DATA_HASH_COL: pa.array(          # NEW — large_binary
+        [input_data.content_hash().to_prefixed_digest()],
+        type=pa.large_binary(),
+    ),
+    constants.OUTPUT_DATA_HASH_COL: pa.array(         # NEW — large_binary
+        [output_data.content_hash().to_prefixed_digest() if output_data else None],
+        type=pa.large_binary(),
     ),
     f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": ...,
     f"{constants.META_PREFIX}computed": ...,
@@ -192,9 +208,10 @@ meta_table = pa.table({
 })
 ```
 
-`INPUT_DATA_HASH_COL` is already used in `_build_entry_id_preimage()` for entry ID
-computation; this change persists it explicitly in the stored row so the read path can
-use it without recomputation.
+`OUTPUT_DATA_HASH_COL` is the key column: it stores the upstream output hash, which is
+the correct lookup key for the downstream result cache. `INPUT_DATA_HASH_COL` is also
+persisted for provenance. The read path exclusively uses `OUTPUT_DATA_HASH_COL` for
+`EmptyData` token construction.
 
 ### 4. Tag table read path
 
@@ -294,7 +311,7 @@ The async counterpart (`_async_process_data_internal()`) gets the identical guar
 
 ### 6. Old-format row handling
 
-Old pipeline DB rows lacking `INPUT_DATA_HASH_COL`:
+Old pipeline DB rows lacking `OUTPUT_DATA_HASH_COL` (rows written before this change):
 
 - Read path emits a `WARNING`-level log per unmatched row.
 - `EmptyData` is constructed with `cached_content_hash=None`.
@@ -310,7 +327,11 @@ Old pipeline DB rows lacking `INPUT_DATA_HASH_COL`:
 |---|---|
 | `src/orcapod/core/datagrams/tag_data.py` | Add `EmptyData(Data)` |
 | `src/orcapod/errors.py` | Add three exception types |
+| `src/orcapod/types.py` | Add `ContentHash.from_prefixed_digest()` |
+| `src/orcapod/core/result_cache.py` | Store `INPUT_DATA_HASH_COL` as `large_binary` |
+| `src/orcapod/core/cached_function_pod.py` | Add `lookup_cached_data()` method |
 | `src/orcapod/core/nodes/function_node.py` | Write path, read path, downstream guard |
+| `src/orcapod/protocols/pipeline_protocols.py` | Update `add_pipeline_record` signature |
 | `tests/test_core/test_empty_data.py` | New unit tests for `EmptyData` |
 | `tests/test_core/test_result_cache.py` | Extended: lookup via `EmptyData` |
 | `tests/test_core/nodes/test_function_node_empty_data.py` | New integration tests |

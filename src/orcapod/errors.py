@@ -147,8 +147,9 @@ class EmptyDataHashMissingError(Exception):
         self.empty_data = empty_data
         super().__init__(
             "content_hash() called on EmptyData with no cached_content_hash. "
-            "This EmptyData was constructed from a pipeline DB row that predates "
-            "the INPUT_DATA_HASH_COL column. Flow-through is unavailable for this row."
+            "The pipeline DB row that produced this token is missing the stored "
+            "hash column (OUTPUT_DATA_HASH_COL or INPUT_DATA_HASH_COL). "
+            "Flow-through is unavailable for this row."
         )
 
 
