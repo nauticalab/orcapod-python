@@ -65,6 +65,7 @@ def extract_function_schemas(
     output_keys: Collection[str],
     input_typespec: SchemaLike | None = None,
     output_typespec: SchemaLike | Sequence[type] | None = None,
+    excluded_params: set[str] | None = None,
 ) -> tuple[Schema, Schema]:
     """
     Extract input and output data types from a function signature.
@@ -85,6 +86,10 @@ def extract_function_schemas(
             annotation, an error is raised.
         output_types: Optional type specification for return values. Can be either:
             - A dict mapping output keys to types (TypeSpec)
+        excluded_params: Optional set of parameter names to exclude from the input
+            schema entirely. Useful when a pod or wrapper auto-supplies certain
+            arguments (e.g. an ``InvocationContext``) that should not appear in the
+            exposed input schema.
             - A sequence of types that will be mapped to output_keys in order
             These types override any inferred types from the function's return annotation.
 
@@ -169,6 +174,8 @@ def extract_function_schemas(
     param_info: Schema = {}
     optional_params: set[str] = set()
     for name, param in signature.parameters.items():
+        if excluded_params and name in excluded_params:
+            continue
         if input_typespec and name in input_typespec:
             param_info[name] = input_typespec[name]
         elif name in resolved_hints:

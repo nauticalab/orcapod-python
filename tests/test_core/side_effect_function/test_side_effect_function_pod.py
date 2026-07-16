@@ -39,10 +39,13 @@ class TestSideEffectFunctionPodSchema:
 
         pod = FunctionPod.from_fn(my_fn, output_keys=["result"], ctx_arg_name="ctx")
 
-        # Input schema excludes 'ctx'
-        assert "ctx" not in pod._data_function.input_data_schema
-        assert "value" in pod._data_function.input_data_schema
-        assert pod._data_function.input_data_schema["value"] == int
+        # Pod's exposed input schema excludes 'ctx' (pod-level filter)
+        assert "ctx" not in pod.input_data_schema
+        assert "value" in pod.input_data_schema
+        assert pod.input_data_schema["value"] == int
+
+        # Underlying data function retains full schema (ctx included)
+        assert "ctx" in pod._data_function.input_data_schema
 
         # Output schema has the declared key
         assert "result" in pod._data_function.output_data_schema
@@ -56,8 +59,8 @@ class TestSideEffectFunctionPodSchema:
             return f"r_{value}"
 
         pod = FunctionPod.from_fn(my_fn, output_keys=["result"], ctx_arg_name="context")
-        assert "context" not in pod._data_function.input_data_schema
-        assert "value" in pod._data_function.input_data_schema
+        assert "context" not in pod.input_data_schema
+        assert "value" in pod.input_data_schema
 
     def test_sf03_missing_ctx_arg_raises_at_construction(self):
         """SF-03: Missing ctx_arg_name raises ValueError at construction time."""
@@ -127,7 +130,7 @@ class TestSideEffectFunctionPodStreamStandalone:
         assert ctx.pipeline_run_id is None  # standalone: no run_id
 
     def test_sf05b_async_fn_routed_through_sync_execute(self):
-        """SF-05b: async user function executed correctly via _call_async_sync."""
+        """SF-05b: async user function executed correctly via synchronous wrapper."""
         from orcapod.core.function_pod import FunctionPod
 
         import asyncio

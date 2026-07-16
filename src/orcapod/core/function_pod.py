@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
@@ -69,43 +68,6 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
-def _strip_ctx_from_fn(fn: Callable, ctx_arg_name: str) -> Callable:
-    """Return a wrapper of ``fn`` with ``ctx_arg_name`` removed from its signature.
-
-    Used for schema inference: the wrapper is passed to ``PythonDataFunction``
-    so the context parameter is invisible to schema extraction. The original
-    ``fn`` is stored on the pod for actual invocation.
-
-    Args:
-        fn: The original user function.
-        ctx_arg_name: Name of the parameter receiving ``InvocationContext``.
-
-    Returns:
-        A wrapper whose ``__signature__`` and ``__annotations__`` exclude
-        ``ctx_arg_name``.
-
-    Raises:
-        ValueError: If ``ctx_arg_name`` is not in ``fn``'s signature.
-    """
-    sig = inspect.signature(fn)
-    if ctx_arg_name not in sig.parameters:
-        raise ValueError(
-            f"ctx_arg_name {ctx_arg_name!r} not found in function signature "
-            f"{fn.__name__!r}. Available parameters: {list(sig.parameters)}"
-        )
-    new_params = [p for n, p in sig.parameters.items() if n != ctx_arg_name]
-    new_sig = sig.replace(parameters=new_params)
-
-    @wraps(fn)
-    def wrapper(*args, **kwargs):  # pragma: no cover
-        return fn(*args, **kwargs)
-
-    wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
-    wrapper.__annotations__ = {
-        k: v for k, v in fn.__annotations__.items() if k != ctx_arg_name
-    }
-    return wrapper
-
 
 class _FunctionPodBase(TraceableBase):
     """Base pod that applies a data function to each input data."""
@@ -118,7 +80,6 @@ class _FunctionPodBase(TraceableBase):
         data_context: str | contexts.DataContext | None = None,
         config: OrcapodConfig | None = None,
         ctx_arg_name: str | None = None,
-        _original_fn: Callable | None = None,
     ) -> None:
         super().__init__(
             label=label,
@@ -128,11 +89,17 @@ class _FunctionPodBase(TraceableBase):
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
         self._post_run_hooks: list[PostRunHook] = []
-        # ctx-injection support
+        # ctx-injection support: ctx_arg_name is excluded from the pod's
+        # exposed input schema and auto-injected per row at process_data time.
+        if ctx_arg_name is not None and ctx_arg_name not in data_function.input_data_schema:
+            raise ValueError(
+                f"ctx_arg_name={ctx_arg_name!r} is not a parameter of the data function "
+                f"(schema keys: {list(data_function.input_data_schema.keys())})"
+            )
         self._ctx_arg_name: str | None = ctx_arg_name
-        self._original_fn: Callable | None = _original_fn
+        # Register types for schema validation, excluding ctx (not a data column).
         self.data_context.type_converter.ensure_types_registered_for_schemas(
-            data_function.input_data_schema,
+            self.input_data_schema,
             data_function.output_data_schema,
         )
 
@@ -144,6 +111,22 @@ class _FunctionPodBase(TraceableBase):
     def canonical_function_name(self) -> str:
         """Canonical function name from the underlying data function."""
         return self._data_function.canonical_function_name
+
+    @property
+    def input_data_schema(self) -> "Schema":
+        """Input schema as exposed to callers of this pod.
+
+        When ``ctx_arg_name`` is set, the corresponding parameter is excluded
+        from the schema — it is auto-provided by the pod and is not a data
+        column that upstream streams need to supply.
+        """
+        schema = self._data_function.input_data_schema
+        if self._ctx_arg_name is None or self._ctx_arg_name not in schema:
+            return schema
+        from orcapod.types import Schema
+        items = {k: v for k, v in schema.items() if k != self._ctx_arg_name}
+        opt = schema.optional_fields - {self._ctx_arg_name}
+        return Schema(items, optional_fields=opt)
 
     @property
     def data_function(self) -> DataFunctionProtocol:
@@ -227,83 +210,6 @@ class _FunctionPodBase(TraceableBase):
             _track_completion=True,
         )
 
-    def _call_with_ctx(self, data: DataProtocol, ctx: Any) -> Any:
-        """Call the original function with data kwargs and ``InvocationContext``.
-
-        Args:
-            data: Input data row.
-            ctx: Per-row ``InvocationContext``.
-
-        Returns:
-            Raw function return value.
-
-        Raises:
-            ValueError: If ``_ctx_arg_name`` collides with a data column name.
-        """
-        if self._ctx_arg_name is None or self._original_fn is None:
-            raise RuntimeError(
-                "_call_with_ctx called on a non-ctx-aware pod (ctx_arg_name or _original_fn is None)"
-            )
-        data_dict = data.as_dict()
-        if self._ctx_arg_name in data_dict:
-            raise ValueError(
-                f"ctx_arg_name {self._ctx_arg_name!r} collides with data column "
-                f"of the same name. Choose a different ctx_arg_name or rename the column."
-            )
-        kwargs = {self._ctx_arg_name: ctx, **data_dict}
-        if inspect.iscoroutinefunction(self._original_fn):
-            return self._call_async_sync(kwargs)
-        return self._original_fn(**kwargs)
-
-    def _call_async_sync(self, kwargs: dict[str, Any]) -> Any:
-        """Run the async original function synchronously.
-
-        Args:
-            kwargs: Keyword arguments to pass to ``self._original_fn``.
-
-        Returns:
-            The coroutine's return value.
-        """
-        if self._original_fn is None:
-            raise RuntimeError("_call_async_sync called but _original_fn is None")
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self._original_fn(**kwargs))
-
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(1) as executor:
-            future = executor.submit(lambda: asyncio.run(self._original_fn(**kwargs)))
-            return future.result()
-
-    def _build_output_data(self, raw_output: Any) -> DataProtocol:
-        """Wrap raw function return value in a ``Data`` object with source info.
-
-        Args:
-            raw_output: Raw return value from the user function.
-
-        Returns:
-            A ``Data`` with source info and a new UUID.
-        """
-        import uuid
-        from uuid_utils import uuid7
-        from orcapod.core.datagrams import Data
-        from orcapod.core.data_function import parse_function_outputs
-
-        output_keys = list(self._data_function.output_data_schema.keys())
-        output_dict = parse_function_outputs(output_keys, raw_output)
-        new_uuid = uuid.UUID(bytes=uuid7().bytes)
-        source_info = {
-            k: f"{':'.join(self.uri)}::{new_uuid.hex}::{k}" for k in output_dict
-        }
-        return Data(
-            output_dict,
-            source_info=source_info,
-            record_uuid=new_uuid,
-            python_schema=self._data_function.output_data_schema,
-            data_context=self.data_context,
-        )
-
     @property
     def uri(self) -> tuple[str, ...]:
         """Canonical URI, prefixed with ``"side_effect_function"`` when ctx is set."""
@@ -331,7 +237,7 @@ class _FunctionPodBase(TraceableBase):
         self._validate_input_schema(incoming_data_schema)
 
     def _validate_input_schema(self, input_schema: Schema) -> None:
-        expected_data_schema = self.data_function.input_data_schema
+        expected_data_schema = self.input_data_schema
         # When expected_data_schema contains a union type (e.g. str | Path),
         # check_schema_compatibility uses beartype.door.is_subhint which accepts
         # any concrete branch: is_subhint(str, str | Path) → True,
@@ -370,8 +276,10 @@ class _FunctionPodBase(TraceableBase):
         """
         if self._ctx_arg_name is not None:
             ctx = self._build_invocation_context(tag, data, run_id=run_id)
-            raw = self._call_with_ctx(data, ctx)
-            return tag, self._build_output_data(raw)
+            result = self.data_function.call(
+                data, logger=logger, **{self._ctx_arg_name: ctx}
+            )
+            return tag, result
         result = self.data_function.call(data, logger=logger)
         return tag, result
 
@@ -401,9 +309,10 @@ class _FunctionPodBase(TraceableBase):
         """
         if self._ctx_arg_name is not None:
             ctx = self._build_invocation_context(tag, data, run_id=run_id)
-            # _call_with_ctx handles both sync and async originals
-            raw = self._call_with_ctx(data, ctx)
-            return tag, self._build_output_data(raw)
+            result = await self.data_function.async_call(
+                data, logger=logger, **{self._ctx_arg_name: ctx}
+            )
+            return tag, result
         result = await self.data_function.async_call(data, logger=logger)
         return tag, result
 
@@ -725,13 +634,11 @@ class FunctionPod(_FunctionPodBase):
         data_function: DataFunctionProtocol,
         pod_config: PodConfig | None = None,
         ctx_arg_name: str | None = None,
-        _original_fn: Callable | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
             data_function,
             ctx_arg_name=ctx_arg_name,
-            _original_fn=_original_fn,
             **kwargs,
         )
         self._pod_config = pod_config or PodConfig()
@@ -751,11 +658,17 @@ class FunctionPod(_FunctionPodBase):
     ) -> "FunctionPod":
         """Construct a ``FunctionPod`` directly from a callable.
 
+        When ``ctx_arg_name`` is set, the named parameter is excluded from the
+        pod's exposed ``input_data_schema`` and auto-injected with a per-row
+        ``InvocationContext`` at ``process_data`` time.  The full function
+        signature (including ``ctx_arg_name``) is retained in the underlying
+        ``PythonDataFunction`` for correct identity hashing.
+
         Args:
             fn: The user function.
             output_keys: Output column key(s).
-            ctx_arg_name: If set, strip this parameter from schema inference
-                and inject an ``InvocationContext`` per row under this name.
+            ctx_arg_name: If set, exclude this parameter from the exposed input
+                schema and inject an ``InvocationContext`` per row under this name.
             name: Optional canonical function name override.
             version: Version string (default ``"v1.0"``).
             pod_config: Optional per-pod config.
@@ -764,29 +677,7 @@ class FunctionPod(_FunctionPodBase):
 
         Returns:
             A new ``FunctionPod``.
-
-        Raises:
-            ValueError: If ``ctx_arg_name`` is set but not in ``fn``'s signature.
         """
-        if ctx_arg_name is not None:
-            original_fn = fn
-            stripped = _strip_ctx_from_fn(fn, ctx_arg_name)
-            data_function = PythonDataFunction(
-                stripped,
-                output_keys=output_keys,
-                function_name=name or getattr(fn, "__name__", "unknown"),
-                version=version,
-                label=label,
-                function_for_hashing=original_fn,
-            )
-            return cls(
-                data_function=data_function,
-                pod_config=pod_config,
-                ctx_arg_name=ctx_arg_name,
-                _original_fn=original_fn,
-                label=label,
-                **kwargs,
-            )
         data_function = PythonDataFunction(
             fn,
             output_keys=output_keys,
@@ -797,6 +688,7 @@ class FunctionPod(_FunctionPodBase):
         return cls(
             data_function=data_function,
             pod_config=pod_config,
+            ctx_arg_name=ctx_arg_name,
             label=label,
             **kwargs,
         )
@@ -880,9 +772,10 @@ class FunctionPod(_FunctionPodBase):
 
         Note:
             Ctx-aware pods (where ``ctx_arg_name`` is set in config) are reconstructed
-            as read-only stubs: ``_original_fn`` is always ``None`` after deserialization,
-            so calling ``process_data`` on such a pod will raise ``RuntimeError``. These
-            stubs can only serve cached results via ``FunctionJobNode``.
+            from the serialized data function config. If the underlying function cannot
+            be resolved, a ``DataFunctionProxy`` is used and calling ``process_data``
+            will raise ``RuntimeError``. These stubs can only serve cached results via
+            ``FunctionJobNode``.
         """
         from orcapod.pipeline.serialization import resolve_data_function_from_config
 
@@ -1285,6 +1178,8 @@ class WrappedFunctionPod(_FunctionPodBase):
         super().__init__(
             data_function=function_pod.data_function,
             data_context=data_context,
+            # Propagate ctx_arg_name so input_data_schema filters ctx correctly.
+            ctx_arg_name=getattr(function_pod, "_ctx_arg_name", None),
             **kwargs,
         )
         self._function_pod = function_pod

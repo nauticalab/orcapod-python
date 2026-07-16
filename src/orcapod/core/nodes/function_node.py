@@ -142,7 +142,9 @@ class FunctionNodeBase(StreamBase):
         )
         if not _stream_unavailable:
             _, incoming_data_types = input_stream.output_schema()
-            expected_data_schema = self._data_function.input_data_schema
+            # Use the pod's exposed input schema (ctx excluded) rather than the
+            # data function's full schema, because ctx is auto-injected per row.
+            expected_data_schema = function_pod.input_data_schema
             if not schema_utils.check_schema_compatibility(
                 incoming_data_types, expected_data_schema
             ):
