@@ -1857,8 +1857,7 @@ class FunctionJobNode(FunctionNodeBase):
                     )
                     cached_hash = None
                 else:
-                    from orcapod.types import ContentHash as _ContentHash
-                    cached_hash = _ContentHash.from_string(raw_hash)
+                    cached_hash = ContentHash.from_string(raw_hash)
                 empty_data_tokens[base_eid] = EmptyData(
                     cached_content_hash=cached_hash,
                     data_context=self.data_context,

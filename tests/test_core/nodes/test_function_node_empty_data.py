@@ -7,11 +7,13 @@ import pytest
 
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.datagrams import Data
+from orcapod.core.datagrams.tag_data import EmptyData
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.system_constants import constants
+from orcapod.types import NodeConfig
 
 
 def double_value(value: int) -> int:
@@ -56,10 +58,6 @@ class TestAddPipelineRecordStoresInputHash:
         assert all_records is not None
         stored_hashes = all_records.column(constants.INPUT_DATA_HASH_COL).to_pylist()
         assert data0.content_hash().to_string() in stored_hashes
-
-
-from orcapod.core.datagrams.tag_data import EmptyData
-from orcapod.types import NodeConfig
 
 
 @pytest.fixture
