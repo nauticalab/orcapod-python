@@ -97,6 +97,11 @@ class TestCtxArgStandaloneExecution:
             assert isinstance(ctx, InvocationContext)
             assert isinstance(ctx.invocation_hash, str)
             assert len(ctx.invocation_hash) > 0
+            assert "::" in ctx.invocation_hash
+
+        # Standalone execution: no pipeline run id; pod_name matches pod label
+        assert received_ctx[0].pipeline_run_id is None
+        assert received_ctx[0].pod_name == pod.label
 
         # Output values match expected
         for i, (tag, data) in enumerate(rows):
@@ -228,8 +233,8 @@ class TestCtxArgDecoratorForms:
         assert "ctx" not in pod.input_data_schema
 
 
-class TestCtxArgCollision:
-    """Scenario 9: ctx_arg names a param not in the function — ValueError at decoration time."""
+class TestCtxArgInvalidParam:
+    """Scenario 9: ValueError at construction time when ctx_arg names a parameter not present in the function."""
 
     def test_ctx09_invalid_ctx_arg_raises_at_decoration(self):
         """Scenario 9: ValueError at decoration time if ctx_arg is not a parameter of the function.
@@ -283,6 +288,7 @@ class TestCtxArgCachedPodWrapping:
         rows1 = list(pod.process(stream).iter_data())
         assert call_count == 2
         assert len(received_ctx) == 2
+        assert len(rows1) == 2
         for ctx in received_ctx:
             assert isinstance(ctx, InvocationContext)
             assert len(ctx.invocation_hash) > 0
