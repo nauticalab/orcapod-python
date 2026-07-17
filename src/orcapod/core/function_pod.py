@@ -4,7 +4,7 @@ import asyncio
 import logging
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
-from functools import wraps
+from functools import update_wrapper, wraps
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
@@ -1221,7 +1221,7 @@ def side_effect_function_pod(
     output_keys: list[str] | str,
     ctx_arg_name: str = "ctx",
     name: str | None = None,
-    version: int = 1,
+    version: str = "v1.0",
     pod_config: PodConfig | None = None,
 ) -> "FunctionPod | Callable":
     """Decorator wrapping a callable as a ctx-aware ``FunctionPod``.
@@ -1235,7 +1235,7 @@ def side_effect_function_pod(
         output_keys: Output column key(s).
         ctx_arg_name: Name of the ``InvocationContext`` parameter (default ``"ctx"``).
         name: Optional canonical function name override.
-        version: Version integer for the URI (default 1).
+        version: Version string for the data function (default ``"v1.0"``).
         pod_config: Optional per-pod configuration.
 
     Returns:
@@ -1246,14 +1246,16 @@ def side_effect_function_pod(
         ValueError: If ``ctx_arg_name`` is not in ``fn``'s signature.
     """
     def decorator(func: Callable) -> FunctionPod:
-        return FunctionPod.from_fn(
+        pod = FunctionPod.from_fn(
             func,
             output_keys=output_keys,
             ctx_arg_name=ctx_arg_name,
             name=name,
-            version=f"v{version}.0",
+            version=version,
             pod_config=pod_config,
         )
+        update_wrapper(pod, func)
+        return pod
 
     if fn is not None:
         return decorator(fn)
