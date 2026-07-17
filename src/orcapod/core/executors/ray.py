@@ -240,13 +240,19 @@ class RayExecutor(PythonFunctionExecutorBase):
         """
         opts = self._build_remote_opts()
         cache_key = (self._normalize_opts(opts), fn_name)
+        if opts:
+            remote_caller = ray.remote(**opts)
+        else:
+            # ray remote cannot be preconfigured with empty opts
+            # use it directly
+            remote_caller = ray.remote
         if cache_key not in self._remote_fn_cache:
             with self._remote_fn_cache_lock:
                 # Double-checked: another thread may have filled the slot
                 # while we waited for the lock.
                 if cache_key not in self._remote_fn_cache:
                     wrapper = make_capture_wrapper(name=fn_name)
-                    self._remote_fn_cache[cache_key] = ray.remote(**opts)(wrapper)
+                    self._remote_fn_cache[cache_key] = remote_caller(wrapper)
         return self._remote_fn_cache[cache_key]
 
     @staticmethod
