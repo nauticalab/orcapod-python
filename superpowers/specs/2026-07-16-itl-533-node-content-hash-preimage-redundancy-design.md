@@ -10,9 +10,24 @@
 
 `FunctionJobNode` and `SideEffectPod` compute a `record_id` by hashing a preimage
 table. The preimage currently contains `NODE_CONTENT_HASH_COL` (`_node_content_hash`),
-which is `self.content_hash()` for the node. This column is redundant: the combination
-of `system_tags` and `INPUT_DATA_HASH_COL` already uniquely identifies every pipeline
-record without it.
+which is `self.content_hash()` for the node — a hash of the function identity and the
+upstream data content. This column is redundant because those two pieces of information
+are already present elsewhere in every stored record:
+
+* **Table path** — the pipeline DB table is stored at `node_identity_path`, which is
+  scoped by `pipeline_hash`. `pipeline_hash` encodes the function identity and the
+  upstream topology/schema. It already captures the same function-version information
+  that `NODE_CONTENT_HASH_COL` carries.
+
+* **System tags** — each record stores one or more `_tag_source_id::*` columns whose
+  values default to `table_hash` (content-addressed). These already encode the upstream
+  data content — the same information `NODE_CONTENT_HASH_COL` encodes via
+  `upstream_content_hash`.
+
+Since `node_content_hash = hash(pod_content_hash, upstream_content_hash)` and both
+components are fully determined by `(table_path, system_tags)`, `NODE_CONTENT_HASH_COL`
+can be derived from information already in the record. Storing it separately is
+redundant.
 
 This spec defines the changes required to remove `NODE_CONTENT_HASH_COL` from (a) the
 preimage, (b) the stored DB row, and (c) the `_filter_by_content_hash()` filtering
@@ -55,26 +70,39 @@ record. The current preimage is:
 preimage = system_tags + INPUT_DATA_HASH_COL + NODE_CONTENT_HASH_COL
 ```
 
-There are exactly two cases:
+**Structural argument.** `node_content_hash = hash(pod_content_hash, upstream_content_hash)`.
 
-**Case A — Different inputs.** Two rows with different upstream data have different
-`system_tags` (because `ArrowTableSource.source_id` defaults to `table_hash`, so
-different table content → different `source_id` → different `_tag_source_id::*` column
-value). This alone makes `base_entry_id = hash(system_tags + INPUT_DATA_HASH_COL)`
-distinct. `NODE_CONTENT_HASH_COL` adds nothing.
+* `pod_content_hash` is already captured by the DB table path: every `FunctionJobNode`
+  stores its records under `node_identity_path`, which is scoped by `pipeline_hash`.
+  `pipeline_hash` is a hash of the function identity and upstream topology/schema —
+  exactly what `pod_content_hash` encodes. Any two nodes that share the same
+  `pipeline_hash` (and therefore the same DB table) also share the same
+  `pod_content_hash`.
 
-**Case B — Same inputs.** Same source content → same `source_id` → same `system_tags`
-→ same `base_entry_id`. But the lockstep property (see below) means
-`NODE_CONTENT_HASH_COL` is also identical in this case. The two rows represent the same
-logical record, so sharing a `record_id` is correct (idempotency).
+* `upstream_content_hash` is already captured by the system tags: each record stores
+  `_tag_source_id::*` columns whose values default to `table_hash` — a content-addressed
+  fingerprint of the upstream data. `ArrowTableSource.identity_structure()` =
+  `(class_name, schema, source_id)`, so two sources with the same `source_id` have
+  identical content hashes and produce identical `upstream_content_hash`.
 
-**Lockstep property.** `NODE_CONTENT_HASH_COL = self.content_hash()`, which for a
-`FunctionJobNode` is `hash(content_hash(FunctionPod), content_hash(upstream))`. Because
-`ArrowTableSource.identity_structure()` = `(class_name, schema, source_id)`, two nodes
-with the same `source_id` and schema always produce the same `content_hash`. Therefore:
+Since `node_content_hash` is fully determined by `(pipeline_hash_in_table_path,
+source_id_in_system_tags)`, and both of those are already encoded in every stored record,
+`NODE_CONTENT_HASH_COL` carries no new information. This leads directly to the lockstep
+property below.
 
-> There is no scenario where `base_entry_id` is the same but `NODE_CONTENT_HASH_COL`
-> differs — or vice versa. They are always in lockstep.
+**Lockstep property.** There is no scenario where two records in the same pipeline DB
+table have the same `(system_tags, INPUT_DATA_HASH_COL)` but different
+`NODE_CONTENT_HASH_COL`:
+
+* Same table path → same `pipeline_hash` → same `pod_content_hash`.
+* Same `system_tags` → same `source_id` → same `upstream_content_hash`.
+* Therefore same `node_content_hash` → same `NODE_CONTENT_HASH_COL`.
+
+Equivalently, different `NODE_CONTENT_HASH_COL` values can only arise from different
+`system_tags`, which already produce a different `base_entry_id`:
+
+> `NODE_CONTENT_HASH_COL` and `base_entry_id` are always in lockstep.
+> One cannot differ without the other differing first.
 
 Verified empirically in
 `tests/test_core/function_pod/test_node_content_hash_redundancy.py`.
