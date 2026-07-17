@@ -15,14 +15,17 @@ class FunctionPodProtocol(PodProtocol, PipelineElementProtocol, Protocol):
 
     @property
     def data_function(self) -> DataFunctionProtocol:
-        """
-        The DataFunctionProtocol that defines the computation for this FunctionPodProtocol.
-        """
+        """The ``DataFunctionProtocol`` that defines the computation for this pod."""
         ...
 
     @property
     def pod_config(self) -> PodConfig:
         """Per-pod executor configuration."""
+        ...
+
+    @property
+    def ctx_arg_name(self) -> str | None:
+        """Parameter name auto-injected with ``InvocationContext``, or ``None``."""
         ...
 
     def process_data(

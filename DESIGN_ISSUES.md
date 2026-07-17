@@ -273,17 +273,23 @@ grouping. It should be co-located with `function_pod` or moved to the protocols 
 **Status:** open
 **Severity:** high
 
-`_validate_input_schema()` (line ~162) raises a generic `ValueError` when the data schema
-is incompatible:
+`_validate_input_schema()` in `_FunctionPodBase` raises a generic `ValueError` when the
+incoming data schema is incompatible with the function's expected input schema:
 ```python
 # TODO: use custom exception type for better error handling
+raise ValueError(
+    f"Incoming data data type {input_schema} is not compatible with ..."
+)
 ```
 
-The codebase already has `InputValidationError` (in `errors.py`) which is the correct exception
-for this case. Using `ValueError` means callers cannot distinguish schema incompatibility from
-other value errors without string-matching the message.
+Using `ValueError` means callers cannot distinguish schema incompatibility from other value
+errors without string-matching the message.
 
-Fix: change `ValueError` to `InputValidationError`.
+Fix: define a new `SchemaCompatibilityError` (subclass of `InputValidationError`) in
+`errors.py` and raise it from `_validate_input_schema()`. The existing
+`SchemaInconsistencyError` covers batch/polling-source schema drift; this new type covers
+function-pod input schema mismatch. Name the exception to reflect the cause:
+incompatible upstream stream schema vs. function's expected input schema.
 
 ---
 

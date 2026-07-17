@@ -151,6 +151,47 @@ class TestFunctionPodPipelineHash:
         assert node_double.pipeline_hash() != node_add.pipeline_hash()
 
 
+class TestFunctionPodContentHashStability:
+    """Verify that identity_structure() returning self.data_function (the
+    ContentIdentifiable object) produces the same content_hash as the
+    previous implementation that returned self.data_function.identity_structure()
+    (the raw struct).
+
+    hash_object routes ContentIdentifiableProtocol objects through resolver(obj),
+    which calls obj.content_hash() — identical to hash_object(obj.identity_structure()).
+    So both return values are semantically equivalent under the hashing system.
+    """
+
+    def test_plain_pod_content_hash_equals_data_function_content_hash(self, double_pf):
+        """FunctionPod.content_hash() == data_function.content_hash().
+
+        Since identity_structure() returns self.data_function, hash_object resolves
+        it via the ContentIdentifiable path: resolver(df) == df.content_hash().
+        This confirms existing plain FunctionPod content hashes are unaffected.
+        """
+        pod = FunctionPod(data_function=double_pf)
+        assert pod.content_hash() == double_pf.content_hash()
+
+    def test_pod_content_hash_stable_across_construction(self, double_pf):
+        """Two independently constructed pods wrapping the same data function
+        produce the same content_hash."""
+        pod1 = FunctionPod(data_function=double_pf)
+        pod2 = FunctionPod(data_function=double_pf)
+        assert pod1.content_hash() == pod2.content_hash()
+
+    def test_identity_structure_object_vs_raw_produces_same_hash(self, double_pf):
+        """hash_object(data_function) == hash_object(data_function.identity_structure()).
+
+        This directly verifies that returning the ContentIdentifiable object from
+        identity_structure() is hash-equivalent to returning its raw identity struct.
+        """
+        pod = FunctionPod(data_function=double_pf)
+        h = pod.data_context.semantic_hasher
+        via_object = h.hash_object(double_pf)
+        via_raw_struct = h.hash_object(double_pf.identity_structure())
+        assert via_object == via_raw_struct
+
+
 # ---------------------------------------------------------------------------
 # Phase 3: RootSource pipeline_hash — the base case
 # ---------------------------------------------------------------------------

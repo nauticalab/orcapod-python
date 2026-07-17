@@ -8,6 +8,7 @@ from .config import (
 from .core.function_pod import (
     FunctionPod,
     function_pod,
+    side_effect_function_pod,
 )
 from .side_effects import (
     InvocationContext,
@@ -72,6 +73,7 @@ __all__ = [
     "side_effect_pod",
     "sink_pod",
     "tap_pod",
+    "side_effect_function_pod",
     "Pipeline",
     "PipelineJob",
     "SourceNode",

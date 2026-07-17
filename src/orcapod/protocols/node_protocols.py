@@ -87,6 +87,7 @@ class FunctionNodeProtocol(Protocol):
         *,
         observer: ExecutionObserverProtocol | None = None,
         error_policy: Literal["continue", "fail_fast"] = "continue",
+        run_id: str | None = None,
     ) -> list[tuple[TagProtocol, DataProtocol]]: ...
 
     async def async_execute(
@@ -95,6 +96,7 @@ class FunctionNodeProtocol(Protocol):
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
+        run_id: str | None = None,
     ) -> None: ...
 
     def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
@@ -189,3 +191,8 @@ def is_operator_node(node: GraphNode) -> TypeGuard[OperatorNodeProtocol]:
 def is_side_effect_node(node: GraphNode) -> TypeGuard[SideEffectNodeProtocol]:
     """Check if a node is a side-effect node."""
     return node.node_type == "side_effect"
+
+
+def is_side_effect_function_node(node: "GraphNode") -> TypeGuard[FunctionNodeProtocol]:
+    """Check if a node is a side-effect-function node."""
+    return node.node_type == "side_effect_function"
