@@ -683,9 +683,9 @@ class TestExecuteDataRouting:
         # Monkey-patch to verify routing through internal path
         original = node._process_data_internal
 
-        def patched(tag, data, *, logger=None):
+        def patched(tag, data, *, logger=None, run_id=None):
             call_log.append("_process_data_internal")
-            return original(tag, data, logger=logger)
+            return original(tag, data, logger=logger, run_id=run_id)
 
         node._process_data_internal = patched
 

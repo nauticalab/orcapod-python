@@ -97,6 +97,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Process a data with pod-level caching.
 
@@ -109,6 +110,9 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
+            run_id: Pipeline run identifier forwarded to the inner pod's
+                ``process_data``. Used to populate ``InvocationContext.pipeline_run_id``
+                for ctx-aware pods.
 
         Returns:
             A ``(tag, output_data)`` tuple; output_data is ``None``
@@ -120,7 +124,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
             return tag, cached
 
-        tag, output = self._function_pod.process_data(tag, data, logger=logger)
+        tag, output = self._function_pod.process_data(tag, data, logger=logger, run_id=run_id)
         if output is not None:
             pf = self._function_pod.data_function
             var_dg = Datagram(
@@ -143,12 +147,25 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``process_data``.
 
         DB lookup and store are synchronous (DB protocol is sync), but the
         actual computation uses the inner pod's ``async_process_data``
         for true async execution.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+            run_id: Pipeline run identifier forwarded to the inner pod's
+                ``async_process_data``. Used to populate ``InvocationContext.pipeline_run_id``
+                for ctx-aware pods.
+
+        Returns:
+            A ``(tag, output_data)`` tuple; output_data is ``None``
+            if the inner function filters the data out.
         """
         cached = self._cache.lookup(data)
         if cached is not None:
@@ -157,7 +174,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             return tag, cached
 
         tag, output = await self._function_pod.async_process_data(
-            tag, data, logger=logger
+            tag, data, logger=logger, run_id=run_id
         )
         if output is not None:
             pf = self._function_pod.data_function
@@ -181,6 +198,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Override to detect cache hit status from ``RESULT_COMPUTED_FLAG`` meta.
 
@@ -195,19 +213,20 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
+            run_id: Pipeline run identifier (unused in cached path).
 
         Returns:
             A ``(tag, output_data)`` tuple.
         """
         if not self._post_run_hooks:
-            return self.process_data(tag, data, logger=logger)
+            return self.process_data(tag, data, logger=logger, run_id=run_id)
 
         started_at = datetime.now(timezone.utc)
         out_tag = tag
         output_data: DataProtocol | None = None
 
         try:
-            out_tag, output_data = self.process_data(tag, data, logger=logger)
+            out_tag, output_data = self.process_data(tag, data, logger=logger, run_id=run_id)
             if output_data is not None:
                 status = (
                     InvocationStatus.HIT
@@ -240,6 +259,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``_invoke_with_hooks`` for ``CachedFunctionPod``.
 
@@ -250,12 +270,13 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
+            run_id: Pipeline run identifier (unused in cached path).
 
         Returns:
             A ``(tag, output_data)`` tuple.
         """
         if not self._post_run_hooks:
-            return await self.async_process_data(tag, data, logger=logger)
+            return await self.async_process_data(tag, data, logger=logger, run_id=run_id)
 
         started_at = datetime.now(timezone.utc)
         out_tag = tag
@@ -263,7 +284,7 @@ class CachedFunctionPod(WrappedFunctionPod):
 
         try:
             out_tag, output_data = await self.async_process_data(
-                tag, data, logger=logger
+                tag, data, logger=logger, run_id=run_id
             )
             if output_data is not None:
                 status = (

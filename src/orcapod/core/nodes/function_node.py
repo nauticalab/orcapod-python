@@ -107,8 +107,6 @@ class FunctionNodeBase(StreamBase):
     shared by both the blueprint and the execution variant.
     """
 
-    node_type = "function"
-
     def __init__(
         self,
         function_pod: FunctionPodProtocol,
@@ -118,6 +116,12 @@ class FunctionNodeBase(StreamBase):
         config: OrcapodConfig | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
+        # Derive node_type from the pod: "side_effect_function" when ctx_arg_name is set
+        self._node_type: str = (
+            "side_effect_function"
+            if function_pod.ctx_arg_name is not None
+            else "function"
+        )
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
         self.tracker_manager = tracker_manager
@@ -139,7 +143,9 @@ class FunctionNodeBase(StreamBase):
         )
         if not _stream_unavailable:
             _, incoming_data_types = input_stream.output_schema()
-            expected_data_schema = self._data_function.input_data_schema
+            # Use the pod's exposed input schema (ctx excluded) rather than the
+            # data function's full schema, because ctx is auto-injected per row.
+            expected_data_schema = function_pod.input_data_schema
             if not schema_utils.check_schema_compatibility(
                 incoming_data_types, expected_data_schema
             ):
@@ -189,6 +195,11 @@ class FunctionNodeBase(StreamBase):
     # ------------------------------------------------------------------
     # Core properties
     # ------------------------------------------------------------------
+
+    @property
+    def node_type(self) -> str:
+        """Return ``"side_effect_function"`` when the pod injects ``InvocationContext``, else ``"function"``."""
+        return self._node_type
 
     @property
     def producer(self) -> FunctionPodProtocol:
@@ -585,6 +596,13 @@ class FunctionNode(FunctionNodeBase):
 
         # FunctionNode loaded read-only is always UNAVAILABLE (no DB)
         node._load_status = LoadStatus.UNAVAILABLE
+
+        # Restore node_type from the stored URI prefix
+        node._node_type = (
+            "side_effect_function"
+            if descriptor.get("node_uri", [""])[0] == "side_effect_function"
+            else "function"
+        )
 
         return node
 
@@ -986,6 +1004,13 @@ class FunctionJobNode(FunctionNodeBase):
                 result_database=result_db,
             )
 
+        # Restore node_type from the stored URI prefix
+        node._node_type = (
+            "side_effect_function"
+            if descriptor.get("node_uri", [""])[0] == "side_effect_function"
+            else "function"
+        )
+
         return node
 
     # ------------------------------------------------------------------
@@ -1118,6 +1143,7 @@ class FunctionJobNode(FunctionNodeBase):
         *,
         observer: ExecutionObserverProtocol | None = None,
         error_policy: Literal["continue", "fail_fast"] = "continue",
+        run_id: str | None = None,
     ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute all data from a stream: compute, persist, and cache.
 
@@ -1130,6 +1156,8 @@ class FunctionJobNode(FunctionNodeBase):
             observer: Optional execution observer for hooks.
             error_policy: ``"continue"`` skips failed data;
                 ``"fail_fast"`` re-raises on the first failure.
+            run_id: Optional pipeline run identifier threaded through to
+                ``InvocationContext.pipeline_run_id``.
 
         Returns:
             Materialized list of (tag, output_data) pairs, excluding
@@ -1176,7 +1204,7 @@ class FunctionJobNode(FunctionNodeBase):
                 pkt_logger = ctx_obs.create_data_logger(tag, data)
                 try:
                     tag_out, result = self._process_data_internal(
-                        tag, data, logger=pkt_logger
+                        tag, data, logger=pkt_logger, run_id=run_id
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1208,12 +1236,20 @@ class FunctionJobNode(FunctionNodeBase):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Core compute + persist + cache.
 
         Used by ``execute_data`` and ``execute``.
         Stores result in ``_cached_output_datas`` keyed by base_entry_id.
         Exceptions propagate to the caller — no error handling here.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+            run_id: Optional pipeline run identifier threaded through to
+                ``InvocationContext.pipeline_run_id``.
 
         When ``node_config.is_result_ephemeral=True``:
         - Uses ``_ephemeral_cached_pod`` for both compute and storage.
@@ -1268,7 +1304,7 @@ class FunctionJobNode(FunctionNodeBase):
                     "an ArrowDatabaseProtocol before executing this node."
                 )
             tag_out, output_data = self._ephemeral_cached_pod.process_data(
-                tag, data, logger=logger
+                tag, data, logger=logger, run_id=run_id
             )
             if output_data is not None:
                 result_computed = bool(
@@ -1287,7 +1323,7 @@ class FunctionJobNode(FunctionNodeBase):
                     )
         elif self._cached_function_pod is not None:
             tag_out, output_data = self._cached_function_pod.process_data(
-                tag, data, logger=logger
+                tag, data, logger=logger, run_id=run_id
             )
             if output_data is not None:
                 result_computed = bool(
@@ -1304,7 +1340,7 @@ class FunctionJobNode(FunctionNodeBase):
                 )
         else:
             tag_out, output_data = self._function_pod.process_data(
-                tag, data, logger=logger
+                tag, data, logger=logger, run_id=run_id
             )
 
         # Store by base_entry_id (stable across recomputation cycles) and invalidate caches
@@ -2192,6 +2228,7 @@ class FunctionJobNode(FunctionNodeBase):
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Streaming async execution for FunctionJobNode.
 
@@ -2207,6 +2244,8 @@ class FunctionJobNode(FunctionNodeBase):
             input_channel: Single readable channel of (tag, data) pairs.
             output: Writable channel for output (tag, data) pairs.
             observer: Optional execution observer for hooks.
+            run_id: Optional pipeline run identifier threaded through to
+                ``InvocationContext.pipeline_run_id``.
         """
         from orcapod.pipeline.serialization import LoadStatus
 
@@ -2412,6 +2451,7 @@ class FunctionJobNode(FunctionNodeBase):
                             [compute_channel.reader],
                             result_channel.writer,
                             observer=_NodeLabelObserver(),
+                            run_id=run_id,
                         )
                     )
                     tg.create_task(record_and_forward())
@@ -2419,7 +2459,7 @@ class FunctionJobNode(FunctionNodeBase):
                 # No-DB path: delegate dispatch entirely to the pod.
                 # The pod's async_execute() closes `output` in its own finally.
                 await self._function_pod.async_execute(
-                    [input_channel], output, observer=ctx_obs
+                    [input_channel], output, observer=ctx_obs, run_id=run_id
                 )
 
             ctx_obs.on_node_end(node_label, node_hash)

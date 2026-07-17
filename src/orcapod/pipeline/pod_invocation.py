@@ -155,3 +155,5 @@ class SideEffectInvocation(PodInvocation):
                 f"got {len(input_streams)}."
             )
         super().__init__(pod=pod, input_streams=input_streams, label=label)
+
+

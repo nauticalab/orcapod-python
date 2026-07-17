@@ -14,6 +14,7 @@ from orcapod.pipeline.result import OrchestratorResult
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
+    is_side_effect_function_node,
     is_side_effect_node,
     is_source_node,
 )
@@ -83,7 +84,7 @@ class SyncPipelineOrchestrator:
             for node in topo_order:
                 if is_source_node(node):
                     buffers[node] = node.execute(observer=effective_observer)
-                elif is_function_node(node):
+                elif is_function_node(node) or is_side_effect_function_node(node):
                     upstream_buf = self._gather_upstream(node, graph, buffers)
                     upstream_node = list(graph.predecessors(node))[0]
                     input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
@@ -91,6 +92,7 @@ class SyncPipelineOrchestrator:
                         input_stream,
                         observer=effective_observer,
                         error_policy=self._error_policy,
+                        run_id=run_id,
                     )
                 elif is_operator_node(node):
                     upstream_buffers = self._gather_upstream_multi(node, graph, buffers)
