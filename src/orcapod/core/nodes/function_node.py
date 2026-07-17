@@ -46,7 +46,7 @@ from orcapod.protocols.observability_protocols import (
     DataExecutionLoggerProtocol,
     ExecutionObserverProtocol,
 )
-from orcapod.system_constants import constants, PIPELINE_DB_SCHEMA_VERSION
+from orcapod.system_constants import constants, PIPELINE_DB_SCHEMA_VERSION, RESULT_DB_SCHEMA_VERSION
 from orcapod.types import (
     ColumnConfig,
     ContentHash,
@@ -690,8 +690,13 @@ class _ResultDatabaseReader:
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """Path to cached records in the result store."""
-        return self._record_path
+        """Path to cached records in the result store (versioned).
+
+        Returns the v1 schema path: ``_record_path + (RESULT_DB_SCHEMA_VERSION,)``.
+        Matches ``CachedFunctionPod.record_path`` semantics so that stub nodes
+        (loaded from a saved job) resolve to the same storage location as live nodes.
+        """
+        return self._record_path + (RESULT_DB_SCHEMA_VERSION,)
 
 
 # ---------------------------------------------------------------------------
