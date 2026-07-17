@@ -354,3 +354,70 @@ class TestSideEffectFunctionJobNodeAsync:
         output_values = [data.as_dict()["result"] for _, data in results]
         for i in range(3):
             assert f"async_{i}" in output_values
+
+
+class TestSideEffectFunctionPodDecorator:
+    """Tests for the side_effect_function_pod decorator."""
+
+    def test_direct_decoration_returns_function_pod(self):
+        """SF-D1: @side_effect_function_pod used without factory (fn passed directly)."""
+        from orcapod.core.function_pod import side_effect_function_pod, FunctionPod
+
+        @side_effect_function_pod(output_keys="result", ctx_arg_name="ctx")
+        def my_fn(value: int, ctx: InvocationContext) -> str:
+            return f"v{value}"
+
+        assert isinstance(my_fn, FunctionPod)
+        assert my_fn.ctx_arg_name == "ctx"
+        # update_wrapper should have copied __name__ and __doc__
+        assert my_fn.__name__ == "my_fn"
+
+    def test_factory_form_returns_decorator(self):
+        """SF-D2: side_effect_function_pod() without fn returns a callable decorator."""
+        from orcapod.core.function_pod import side_effect_function_pod, FunctionPod
+
+        decorator = side_effect_function_pod(output_keys="result", ctx_arg_name="ctx")
+        assert callable(decorator)
+
+        def my_fn(value: int, ctx: InvocationContext) -> str:
+            return f"v{value}"
+
+        pod = decorator(my_fn)
+        assert isinstance(pod, FunctionPod)
+        assert pod.ctx_arg_name == "ctx"
+
+    def test_direct_fn_argument_returns_function_pod(self):
+        """SF-D3: side_effect_function_pod(fn, output_keys=...) direct call path."""
+        from orcapod.core.function_pod import side_effect_function_pod, FunctionPod
+
+        def my_fn(value: int, ctx: InvocationContext) -> str:
+            return f"v{value}"
+
+        pod = side_effect_function_pod(my_fn, output_keys="result", ctx_arg_name="ctx")
+        assert isinstance(pod, FunctionPod)
+        assert pod.ctx_arg_name == "ctx"
+        assert pod.__name__ == "my_fn"
+
+
+class TestSideEffectCtxCollision:
+    """Tests for ctx_arg_name collision with data columns in SideEffectPod."""
+
+    def test_ctx_collision_raises_value_error(self):
+        """SEP-COL: SideEffectPod raises ValueError when ctx_arg_name matches a data column."""
+        from orcapod.side_effects import SideEffectPod
+        import pyarrow as pa
+        from orcapod.core.streams import ArrowTableStream
+        from orcapod.side_effects import InvocationContext
+
+        calls = []
+
+        def fn(id: int, ctx: InvocationContext) -> None:  # type: ignore[override]
+            calls.append(id)
+
+        # Stream where a data column is named 'ctx' — same as ctx_arg_name
+        table = pa.table({"id": [1, 2], "ctx": ["a", "b"]})
+        stream = ArrowTableStream(table, tag_columns=["id"])
+        pod = SideEffectPod(fn, ctx_arg_name="ctx")
+
+        with pytest.raises(ValueError, match="collides with a data column"):
+            list(pod.process(stream).iter_data())
