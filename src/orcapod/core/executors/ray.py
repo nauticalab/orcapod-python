@@ -246,8 +246,9 @@ class RayExecutor(PythonFunctionExecutorBase):
                 # while we waited for the lock.
                 if cache_key not in self._remote_fn_cache:
                     wrapper = make_capture_wrapper(name=fn_name)
-                    if opts:
-                        self._remote_fn_cache[cache_key] = ray.remote(**opts)(wrapper) if opts else ray.remote(wrapper)
+                    self._remote_fn_cache[cache_key] = (
+                        ray.remote(**opts)(wrapper) if opts else ray.remote(wrapper)
+                    )
         return self._remote_fn_cache[cache_key]
 
     @staticmethod
