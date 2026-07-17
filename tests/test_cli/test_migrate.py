@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
+from pathlib import Path
+
+# Repo root: tests/test_cli/test_migrate.py → tests/test_cli/ → tests/ → repo root
+_REPO_ROOT = Path(__file__).parent.parent.parent
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
@@ -11,7 +14,7 @@ def _run(*args: str) -> subprocess.CompletedProcess:
         ["uv", "run", "orcapod", *args],
         capture_output=True,
         text=True,
-        cwd="/home/kurouto/kurouto-jobs/02b03799-4dca-4679-bb1a-1e4388c5d776/orcapod-python",
+        cwd=str(_REPO_ROOT),
     )
 
 
