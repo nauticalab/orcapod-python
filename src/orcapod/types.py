@@ -355,9 +355,15 @@ class NodeConfig:
             Persistent cache hits are still served when available. Raises
             ``RuntimeError`` at execution time if ``True`` but no ephemeral
             store has been injected via ``set_ephemeral_store()``.
+        ignore_schema: Tuple of schema version strings that this node will
+            tolerate without raising ``SchemaVersionError``. ``None`` (default)
+            means no old schema is tolerated — any detected v0 table raises
+            ``SchemaVersionError``. Pass ``("v0",)`` to suppress the error
+            and allow the node to recompute all results from scratch.
     """
 
     is_result_ephemeral: bool | None = None
+    ignore_schema: tuple[str, ...] | None = None
 
     def merge(self, other: "NodeConfig") -> "NodeConfig":
         """Return a new ``NodeConfig`` with ``other``'s non-``None`` fields overriding self.
@@ -383,6 +389,11 @@ class NodeConfig:
                 other.is_result_ephemeral
                 if other.is_result_ephemeral is not None
                 else self.is_result_ephemeral
+            ),
+            ignore_schema=(
+                other.ignore_schema
+                if other.ignore_schema is not None
+                else self.ignore_schema
             ),
         )
 
@@ -644,6 +655,27 @@ class ContentHash:
             Raw bytes in the form ``b"{method}:{raw_digest}"``.
         """
         return self.method.encode("ascii") + b":" + self.digest
+
+    @classmethod
+    def from_prefixed_digest(cls, data: bytes) -> "ContentHash":
+        """Parse method-prefixed raw bytes back into a ``ContentHash``.
+
+        Inverse of ``to_prefixed_digest()``.
+
+        Args:
+            data: Bytes in the form ``b"{method}:{raw_digest}"``, as
+                produced by ``to_prefixed_digest()``.
+
+        Returns:
+            A new ``ContentHash`` instance.
+
+        Raises:
+            ValueError: If ``data`` does not contain a colon separator.
+        """
+        colon_idx = data.index(b":")
+        method = data[:colon_idx].decode("ascii")
+        digest = data[colon_idx + 1:]
+        return cls(method=method, digest=digest)
 
     def __str__(self) -> str:
         return self.to_string()

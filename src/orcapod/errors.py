@@ -153,6 +153,19 @@ class EmptyDataHashMissingError(Exception):
         )
 
 
+class SchemaVersionError(Exception):
+    """Raised when an old schema version is detected at a database path.
+
+    Occurs when a table exists at the unversioned (v0) path but not at the
+    expected versioned path, and the node has not opted in to tolerating
+    the old schema via ``NodeConfig.ignore_schema``.
+
+    To suppress this error, set ``node.node_config = NodeConfig(ignore_schema=("v0",))``
+    and re-run. The node will recompute all results from scratch rather than
+    reading from the v0 cache.
+    """
+
+
 class EphemeralResultMissingError(Exception):
     """Raised when a downstream pod has a cache miss for an ``EmptyData`` input.
 
