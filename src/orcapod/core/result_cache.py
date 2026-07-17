@@ -233,6 +233,8 @@ class ResultCache:
             skip_duplicates: If True, silently skip if a record with the
                 same ID already exists.
         """
+        self._ensure_rdb_schema()
+
         data_table = output_data.as_table(columns={"source": True, "context": True})
 
         # Add variation and execution columns with prefixes.
@@ -310,6 +312,8 @@ class ResultCache:
         Returns:
             A PyArrow table of cached results, or ``None`` if empty.
         """
+        self._ensure_rdb_schema()
+
         record_id_column = (
             constants.DATA_RECORD_ID if include_system_columns else None
         )

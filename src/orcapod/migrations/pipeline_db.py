@@ -45,9 +45,15 @@ def migrate_pipeline_v0_to_v1(
     ``__output_data_hash``) from ``large_string`` to ``large_binary``,
     and writes the transformed rows to ``pipeline_path + ("pdb_v1",)``.
 
-    Rows whose result data cannot be found (e.g. ephemeral results that have
-    since expired) are written with ``null`` hash values and counted as
-    ``rows_unresolvable``.
+    **Backfill strategy for ``__input_data_hash``:** when the column value is
+    ``None`` in the pdb row (older writes may lack it), the migration falls
+    back to the rdb index keyed by ``DATA_RECORD_ID``.  Rows where both the
+    pdb value is ``None`` and the rdb lookup fails are counted as
+    ``rows_unresolvable`` and written with a ``null`` ``__input_data_hash``.
+
+    **``__output_data_hash`` is not backfilled** — the rdb does not store this
+    value, so rows where it is ``None`` in v0 will remain ``null`` in v1
+    (these are not counted as unresolvable).
 
     Rows already present at the v1 path are skipped (idempotent re-runs).
 
@@ -94,6 +100,10 @@ def migrate_pipeline_v0_to_v1(
     # Build an index from rdb v0: data_id (bytes) → row dict.
     # The rdb record ID (internal UUID) equals the DATA_RECORD_ID stored in
     # the pdb (both set to output_data.datagram_uuid.bytes at write time).
+    # Note: the full rdb v0 table is loaded once into memory for simple, correct
+    # indexing. For very large result tables this can spike memory; a per-batch
+    # lookup (requires get_records_by_ids on the DB protocol) would avoid this
+    # but is out of scope for this migration utility.
     rdb_v0 = result_db.get_all_records(result_path, record_id_column=_RECORD_ID_COL)
     rdb_index: dict[bytes, dict] = {}
     if rdb_v0 is not None:
@@ -172,11 +182,16 @@ def _transform_pdb_batch(
     """Transform a batch of v0 pdb rows into v1 format.
 
     Converts ContentHash columns from ``large_string`` to ``large_binary``.
-    For ``__input_data_hash`` and ``__output_data_hash``, first tries to
-    re-encode directly from the pdb row (most cases), falling back to the
-    rdb index when the value is missing.  Rows whose ``DATA_RECORD_ID``
-    cannot be found in the rdb index are marked unresolvable and written
-    with ``null`` hash values.
+
+    For ``__input_data_hash``, first tries to re-encode directly from the pdb
+    row (most cases), then falls back to the rdb index when the value is
+    ``None``.  Rows where both pdb and rdb lack the value are counted as
+    unresolvable (written with ``null``).
+
+    For ``__output_data_hash`` and ``__node_content_hash``, only direct
+    pdb-row re-encoding is performed — the rdb does not store these values,
+    so ``None`` values remain ``null`` without incrementing the unresolvable
+    counter.
 
     Args:
         batch: Arrow table slice of v0 pdb rows (with ``_RECORD_ID_COL``

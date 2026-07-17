@@ -16,6 +16,27 @@ migrate_app = typer.Typer(
 )
 
 
+def _result_path_from_node_path(node_path_str: str) -> tuple[str, ...]:
+    """Derive the rdb record path (pod URI) from a node identity path string.
+
+    A node identity path has the form ``pod/uri/schema:<hash>`` (and optionally
+    ``instance:<hash>`` for fine-grained paths). The result DB is scoped to
+    just the pod URI portion — i.e. all components before any ``schema:`` or
+    ``instance:`` segment.
+
+    Args:
+        node_path_str: Slash-separated node identity path as passed on the CLI.
+
+    Returns:
+        Tuple of path components with ``schema:`` and ``instance:`` suffix
+        components stripped.
+    """
+    return tuple(
+        p for p in node_path_str.split("/")
+        if not p.startswith("schema:") and not p.startswith("instance:")
+    )
+
+
 @migrate_app.command("pipeline-db")
 def migrate_pipeline_db(
     pipeline_db_path: str = typer.Argument(..., help="Path to the pipeline DB (Delta Lake root)."),
@@ -35,7 +56,9 @@ def migrate_pipeline_db(
 
     for node_path_str in node_paths:
         pipeline_path = tuple(node_path_str.split("/"))
-        result_path = pipeline_path  # by convention result DB mirrors pipeline path
+        # The rdb is scoped to the pod URI (function_pod.uri), which is the
+        # node identity path with schema:/instance: suffix components removed.
+        result_path = _result_path_from_node_path(node_path_str)
 
         if progress:
             typer.echo(f"Migrating pipeline DB: {pipeline_db_path}")
