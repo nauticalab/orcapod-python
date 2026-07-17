@@ -1082,6 +1082,7 @@ def function_pod(
     function_name: str | None = None,
     version: str = "v0.0",
     label: str | None = None,
+    ctx_arg: str | None = None,
     result_database: ArrowDatabaseProtocol | None = None,
     pod_cache_database: ArrowDatabaseProtocol | None = None,
     executor: DataFunctionExecutorProtocol | None = None,
@@ -1134,6 +1135,7 @@ def function_pod(
         # Create a simple typed function pod
         pod: _FunctionPodBase = FunctionPod(
             data_function=data_function,
+            ctx_arg_name=ctx_arg,
         )
 
         # if pod_cache_database is provided, wrap in CachedFunctionPod
