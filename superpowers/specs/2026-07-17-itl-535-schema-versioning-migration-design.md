@@ -68,7 +68,61 @@ Delta Lake update is required.
 For any pair of consecutive minor releases `vX.Y` and `vX.(Y+1)`, Orcapod ships a migration
 command that upgrades all affected table types from the `vX.Y` stable schema to the
 `vX.(Y+1)` stable schema. Running the migration is opt-in; without it, old tables remain
-at v0 paths and new code silently recomputes everything (because v1 paths are initially empty).
+at v0 paths.
+
+### Old schema detection and hard stop
+
+When `FunctionJobNode` or `ResultCache` first accesses their respective DB path, they check
+whether a table exists at the **old** (un-versioned) path. If records are found there and the
+node has not explicitly opted in to tolerating that version, a `SchemaVersionError` is raised
+immediately — no computation proceeds.
+
+Detection is lazy (on first DB access, not at construction) and cached **per v1 path, per
+process**: a module-level `set[tuple[str, ...]]` records every v1 path that has already been
+verified. Once a v1 path is in the set, no DB call is issued for it again — regardless of how
+many instances point to that path within the same process. This ensures the schema check is
+always O(1) after the first access.
+
+Detection flow:
+1. If v1 path is in `_checked_paths` → return immediately (O(1), no DB access)
+2. Call `db.table_exists(v1_path)` — if the v1 table already exists, add to `_checked_paths`
+   and proceed; no further check needed
+3. Only if v1 does not exist: call `db.table_exists(v0_path)`
+   - v0 exists → check `node_config.ignore_schema`:
+     - `"v0"` not in `ignore_schema` → raise `SchemaVersionError`
+     - `"v0"` in `ignore_schema` → log info, continue
+   - v0 also absent → fresh database, proceed normally
+4. Add v1 path to `_checked_paths` (covers both the "v1 present" and "full check completed"
+   cases)
+
+The opt-in lives on `NodeConfig` (defined in `types.py`):
+
+```python
+@dataclass(frozen=True, slots=True)
+class NodeConfig:
+    is_result_ephemeral: bool | None = None
+    ignore_schema: tuple[str, ...] | None = None  # NEW
+```
+
+- `None` (default) — not set; any old schema version found → `SchemaVersionError`
+- `()` — explicitly error on any old schema (same as `None` in practice)
+- `("v0",)` — tolerate v0 tables, proceed without error (logs an info message)
+- `("v0", "v1")` — tolerate v0 and v1 (useful if re-running against deliberately old data)
+
+`NodeConfig.merge()` follows the existing `None`-as-not-set pattern.
+
+**Error text** when an old schema is detected and not ignored:
+
+```
+SchemaVersionError: Pipeline DB rows found at v0 schema path '<path>'.
+Run migration first:
+  orcapod migrate pipeline-db <DB_PATH> <NODE_PATH>
+To suppress this error and recompute all results instead, set:
+  node.node_config = NodeConfig(ignore_schema=("v0",))
+```
+
+The same error and opt-in applies to `ResultCache` (rdb), with the equivalent
+`orcapod migrate result-db` command shown in the message.
 
 ---
 
@@ -203,17 +257,64 @@ PIPELINE_DB_SCHEMA_VERSION = "pdb_v1"
 RESULT_DB_SCHEMA_VERSION   = "rdb_v1"
 ```
 
+### `ArrowDatabaseProtocol` changes
+
+Add one new method:
+
+```python
+def table_exists(self, record_path: tuple[str, ...]) -> bool:
+    """Return True if a table exists at the given path, even if it has no rows.
+
+    For Delta Lake backends: checks whether the ``_delta_log/`` directory
+    exists at the resolved path. For in-memory backends: checks whether the
+    path key is present in the internal store.
+
+    Args:
+        record_path: Path tuple identifying the table.
+
+    Returns:
+        ``True`` if the table has been created; ``False`` if the path is
+        entirely absent.
+    """
+    ...
+```
+
+Must be implemented in all `ArrowDatabaseProtocol` backends: `DeltaTableDatabase`,
+`InMemoryArrowDatabase`, and any others.
+
+### `NodeConfig` changes (`types.py`)
+
+Add `ignore_schema: tuple[str, ...] | None = None` to `NodeConfig`. Update `merge()` to
+propagate non-`None` values from the incoming config, following the existing pattern used
+by `is_result_ephemeral`.
+
+Add `SchemaVersionError` to `errors.py` — a new exception class (subclass of `Exception`)
+raised when an old schema version is detected and not listed in `ignore_schema`.
+
 ### `FunctionJobNode` / `CachedFunctionPod` changes
+
+Schema detection uses two module-level sets keyed on the **v1 path**:
+
+```python
+_checked_pdb_paths: set[tuple[str, ...]] = set()   # in function_node.py
+_checked_rdb_paths: set[tuple[str, ...]] = set()   # in result_cache.py
+```
 
 `FunctionJobNode`:
 - `node_identity_path` property appends `constants.PIPELINE_DB_SCHEMA_VERSION` as the last
   component when accessing the pipeline DB
+- On first pipeline DB access: runs the detection flow above using `_checked_pdb_paths`,
+  with `v1_path = node_identity_path + (PIPELINE_DB_SCHEMA_VERSION,)` and
+  `v0_path = node_identity_path`
 - All `ContentHash` values written via `to_prefixed_digest()` / read via `from_prefixed_digest()`
 - ITL-508 hard-fail guard in `add_pipeline_record()` removed — v1 tables are always freshly
   written; old v0 rows cannot be present at a v1 path
 
 `CachedFunctionPod` / `ResultCache`:
 - `record_path` for the result DB appends `constants.RESULT_DB_SCHEMA_VERSION`
+- On first rdb access: runs the detection flow above using `_checked_rdb_paths`,
+  with `v1_path = pod_record_path + (RESULT_DB_SCHEMA_VERSION,)` and
+  `v0_path = pod_record_path`
 - `ResultCache.lookup()` and `store()` use `to_prefixed_digest()` / `from_prefixed_digest()`
   for `INPUT_DATA_HASH_COL`
 - `get_function_variation_data()` hash fields serialized as binary in `ResultCache.store()`
@@ -360,11 +461,58 @@ A dedicated section in the user-facing docs (`docs/`) titled **"Schema versionin
 
 ## Testing
 
+### Schema sample fixtures
+
+All schema versions for every table type are represented by committed sample fixture tables
+stored under `tests/fixtures/`:
+
+```
+tests/fixtures/
+├── pdb_v0_sample/    # Delta Lake table at pdb v0 schema
+├── pdb_v1_sample/    # Delta Lake table at pdb v1 schema — same logical data as pdb_v0_sample
+├── rdb_v0_sample/    # Delta Lake table at rdb v0 schema
+└── rdb_v1_sample/    # Delta Lake table at rdb v1 schema — same logical data as rdb_v0_sample
+```
+
+**Invariant:** for every adjacent pair `vX-1` / `vX`, the two fixtures contain the same logical
+rows — identical data, different serialization format. They are generated once and committed to
+the repository; they never change unless the schema changes (in which case new fixtures are
+added alongside the old ones, not replaced).
+
+**Maintenance rule:** when a new schema version vX is introduced in a future release:
+1. The existing `v{X-1}` fixture stays committed and unmodified.
+2. A new `vX` fixture is created with the same logical content in the new format.
+3. A new golden migration test is added (see below).
+
+### Golden migration tests
+
+For each adjacent schema pair, there is an automated test that:
+1. Reads the `v{X-1}` sample fixture
+2. Runs `migrate_*_v{X-1}_to_v{X}()` on it (writing to a temp path)
+3. Reads the migrated output
+4. Reads the `vX` sample fixture directly
+5. Asserts the two tables match row-for-row (sorted by record ID, all columns compared)
+
+This test is the authoritative correctness check for each migration: if the migration
+produces output that differs from the golden `vX` fixture in any way, the test fails.
+
+For the current release, the concrete test is:
+- `test_migrate_pdb_v0_to_v1_matches_golden` — migrates `pdb_v0_sample`, compares against `pdb_v1_sample`
+- `test_migrate_rdb_v0_to_v1_matches_golden` — migrates `rdb_v0_sample`, compares against `rdb_v1_sample`
+
+### Unit and integration tests
+
 - Unit tests for `ContentHash.from_prefixed_digest()` round-trip
+- Unit tests for `NodeConfig.ignore_schema` merge behaviour
+- Unit tests for `ArrowDatabaseProtocol.table_exists()` in all backends
+- Unit tests for old-schema detection:
+  - v1 table exists → no check performed, proceeds immediately
+  - v1 absent, v0 exists, `ignore_schema=None` → `SchemaVersionError` raised
+  - v1 absent, v0 exists, `ignore_schema=("v0",)` → proceeds with info log, no error
+  - v1 absent, v0 also absent → fresh database, no error
+  - second access to same v1 path → no DB call made (cache hit verified)
 - Unit tests for `migrate_pipeline_v0_to_v1()` and `migrate_result_v0_to_v1()`:
-  - happy path: all result data resolvable → full backfill
-  - partial path: some results expired → correct `rows_unresolvable` count
+  - partial path: some results expired → correct `rows_unresolvable` count, null `__output_data_hash`
   - idempotent: running migration twice produces same result
   - dry-run: no writes occur
-- Integration test: create v0 tables via old write path, migrate, assert v1 tables correct
 - CLI smoke test: `orcapod migrate pipeline-db --dry-run` exits 0, prints expected summary
