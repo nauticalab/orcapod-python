@@ -89,6 +89,18 @@ class NoOpArrowDatabase:
     def flush(self) -> None:
         pass
 
+    def table_exists(self, record_path: tuple[str, ...]) -> bool:
+        """Return ``False`` — no tables are ever persisted by this no-op implementation.
+
+        Args:
+            record_path: Path components identifying the table, relative to
+                ``self.base_path``.
+
+        Returns:
+            Always ``False``.
+        """
+        return False
+
     @property
     def base_path(self) -> tuple[str, ...]:
         """The current relative root of this database view (always () for root instances)."""

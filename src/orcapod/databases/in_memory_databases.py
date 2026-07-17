@@ -334,6 +334,21 @@ class InMemoryArrowDatabase:
                 seen.add(key[len(prefix_slash):])
         return sorted(tuple(k.split("/")) for k in seen if k)
 
+    def table_exists(self, record_path: tuple[str, ...]) -> bool:
+        """Return ``True`` if a table exists at ``record_path``.
+
+        This is a cheap existence check that does NOT load any records.
+
+        Args:
+            record_path: Path components identifying the table, relative to
+                ``self.base_path``.
+
+        Returns:
+            ``True`` if a table exists at the given path, ``False`` otherwise.
+        """
+        key = "/".join(self._path_prefix + record_path)
+        return key in self._tables or key in self._pending_batches
+
     # ------------------------------------------------------------------
     # Read helpers
     # ------------------------------------------------------------------

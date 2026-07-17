@@ -201,3 +201,14 @@ class TestAtMethod:
         scoped.add_record(("outputs",), b"id1", pa.table({"v": [1]}))
         assert scoped.get_record_by_id(("outputs",), b"id1") is None
         assert scoped.get_all_records(("outputs",)) is None
+
+
+class TestTableExists:
+    def test_always_returns_false(self):
+        db = NoOpArrowDatabase()
+        assert db.table_exists(("any", "path")) is False
+
+    def test_still_false_after_write(self):
+        db = NoOpArrowDatabase()
+        db.add_record(("outputs",), b"id1", pa.table({"v": [1]}))
+        assert db.table_exists(("outputs",)) is False
