@@ -153,10 +153,9 @@ class _FunctionPodBase(TraceableBase):
         return PodConfig()
 
     def identity_structure(self) -> Any:
-        base = self.data_function.identity_structure()
         if self._ctx_arg_name is not None:
-            return (base, self._ctx_arg_name)
-        return base
+            return (self.data_function, self._ctx_arg_name)
+        return self.data_function
 
     def pipeline_identity_structure(self) -> Any:
         return self.data_function

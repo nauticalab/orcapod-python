@@ -596,18 +596,18 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         import asyncio
 
         call_dict = {**data.as_dict(), **kwargs}
-        fn = self._function
+        original_fn = self._function
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             # No running loop — safe to use asyncio.run()
-            return asyncio.run(fn(**call_dict))
+            return asyncio.run(original_fn(**call_dict))
         else:
             # Already in a loop — run in a separate thread with its own loop.
             # The lambda ensures the coroutine is created inside the executor
             # thread, avoiding unawaited-coroutine warnings on submission failure.
             return (
-                _get_sync_executor().submit(lambda: asyncio.run(fn(**call_dict))).result()
+                _get_sync_executor().submit(lambda: asyncio.run(original_fn(**call_dict))).result()
             )
 
     def call(
