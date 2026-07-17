@@ -63,8 +63,18 @@ class CachedFunctionPod(WrappedFunctionPod):
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """Return the path to the cached records in the result store."""
+        """Return the path to the cached records in the result store (versioned)."""
         return self._cache.record_path
+
+    def set_ignore_schema(self, ignore_schema: tuple[str, ...] | None) -> None:
+        """Propagate ``ignore_schema`` setting to the underlying ``ResultCache``.
+
+        Args:
+            ignore_schema: Tuple of schema version strings to tolerate (e.g.
+                ``("v0",)``), or ``None`` to use the default (raise on any
+                old schema).
+        """
+        self._cache.set_ignore_schema(ignore_schema)
 
     def lookup_cached_data(self, data: DataProtocol) -> DataProtocol | None:
         """Look up a cached result for ``data`` without triggering computation.

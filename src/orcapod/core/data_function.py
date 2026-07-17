@@ -963,7 +963,7 @@ class CachedDataFunction(DataFunctionWrapper):
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """Return the path to the record in the result store."""
+        """Return the path to the cached records in the result store (versioned)."""
         return self._cache.record_path
 
     def call(

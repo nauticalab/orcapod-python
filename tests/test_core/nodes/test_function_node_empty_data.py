@@ -44,7 +44,7 @@ class TestAddPipelineRecordStoresInputHash:
         for tag, data in node._input_stream.iter_data():
             node.execute_data(tag, data)
 
-        all_records = node._pipeline_database.get_all_records(node.node_identity_path)
+        all_records = node._pipeline_database.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert constants.INPUT_DATA_HASH_COL in all_records.column_names
 
@@ -55,10 +55,11 @@ class TestAddPipelineRecordStoresInputHash:
         tag0, data0 = input_pairs[0]
         node.execute_data(tag0, data0)
 
-        all_records = node._pipeline_database.get_all_records(node.node_identity_path)
+        all_records = node._pipeline_database.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
+        # v1 schema: INPUT_DATA_HASH_COL is binary (to_prefixed_digest())
         stored_hashes = all_records.column(constants.INPUT_DATA_HASH_COL).to_pylist()
-        assert data0.content_hash().to_string() in stored_hashes
+        assert data0.content_hash().to_prefixed_digest() in stored_hashes
 
 
 @pytest.fixture
@@ -346,7 +347,7 @@ class TestAsyncProcessDataInternalEphemeralWrite:
         tag_out, output = await node._async_process_data_internal(tag, data)
 
         assert output is not None
-        all_records = node._pipeline_database.get_all_records(node.node_identity_path)
+        all_records = node._pipeline_database.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         vals = all_records.column(constants.IS_EPHEMERAL_COL).to_pylist()
         assert all(v is True for v in vals)
@@ -360,8 +361,9 @@ class TestAsyncProcessDataInternalEphemeralWrite:
         _, output = await node._async_process_data_internal(tag, data)
 
         assert output is not None
-        all_records = node._pipeline_database.get_all_records(node.node_identity_path)
+        all_records = node._pipeline_database.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert constants.OUTPUT_DATA_HASH_COL in all_records.column_names
+        # v1 schema: OUTPUT_DATA_HASH_COL is binary (to_prefixed_digest())
         stored_hash = all_records.column(constants.OUTPUT_DATA_HASH_COL).to_pylist()[0]
-        assert stored_hash == output.content_hash().to_string()
+        assert stored_hash == output.content_hash().to_prefixed_digest()

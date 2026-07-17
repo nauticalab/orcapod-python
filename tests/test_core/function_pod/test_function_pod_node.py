@@ -257,7 +257,7 @@ class TestFunctionNodeExecuteData:
         node.execute_data(tag, data)
         db = node._pipeline_database
         db.flush()
-        all_records = db.get_all_records(node.node_identity_path)
+        all_records = db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
@@ -267,7 +267,7 @@ class TestFunctionNodeExecuteData:
         node._process_data_internal(tag, data)
         db = node._pipeline_database
         db.flush()
-        all_records = db.get_all_records(node.node_identity_path)
+        all_records = db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
@@ -282,7 +282,7 @@ class TestFunctionNodeExecuteData:
         node._process_data_internal(tag, data)
         db = node._pipeline_database
         db.flush()
-        all_records = db.get_all_records(node.node_identity_path)
+        all_records = db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows == 2
 
@@ -293,7 +293,7 @@ class TestFunctionNodeExecuteData:
         node._process_data_internal(tag, data1)
         node._process_data_internal(tag, data2)
         db = node._pipeline_database
-        all_records = db.get_all_records(node.node_identity_path)
+        all_records = db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows == 2
 
@@ -499,11 +499,12 @@ class TestGetAllRecordsMetaColumns:
         assert "id" in result.column_names
         assert "result" in result.column_names
 
-    def test_input_data_hash_values_are_non_empty_strings(self, filled_node):
+    def test_input_data_hash_values_are_non_empty_bytes(self, filled_node):
+        """v1 schema: INPUT_DATA_HASH_COL stores binary (to_prefixed_digest())."""
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
         hashes = result.column(constants.INPUT_DATA_HASH_COL).to_pylist()
-        assert all(isinstance(h, str) and len(h) > 0 for h in hashes)
+        assert all(isinstance(h, bytes) and len(h) > 0 for h in hashes)
 
     def test_data_record_id_values_are_non_empty_bytes(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
@@ -704,5 +705,7 @@ class TestFunctionNodeResultPath:
         node.execute_data(tag, data)
         db.flush()
 
+        # record_path now includes the schema version suffix (v1 schema)
+        from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
         result_path = node._cached_function_pod.record_path
-        assert result_path == pod.uri
+        assert result_path == pod.uri + (RESULT_DB_SCHEMA_VERSION,)
