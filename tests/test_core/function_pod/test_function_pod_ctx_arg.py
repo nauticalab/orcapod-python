@@ -201,7 +201,7 @@ class TestCtxArgDBBacked:
 class TestCtxArgDecoratorForms:
     """Scenarios 7–8: decorator usage with ctx_arg."""
 
-    def test_ctx07_decorator_ctx_arg_only(self):
+    def test_ctx07_decorator_minimal_form(self):
         """Scenario 7: @function_pod(output_keys='result', ctx_arg='ctx') — pod attached correctly."""
         from orcapod.core.function_pod import function_pod, FunctionPod
 
