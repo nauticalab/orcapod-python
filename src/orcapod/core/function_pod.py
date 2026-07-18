@@ -1228,6 +1228,33 @@ def side_effect_function_pod(
 ) -> "FunctionPod | Callable":
     """Decorator wrapping a callable as a ctx-aware ``FunctionPod``.
 
+    Note:
+        This decorator is superseded by ``@function_pod(ctx_arg=<arg_name>)``,
+        which is now the preferred way to author side-effect pods. The two
+        forms are equivalent in computational behaviour but differ in the type
+        of the decorated object: ``@function_pod(...)`` returns a plain callable
+        with a ``.pod`` attribute, whereas this decorator returns the
+        ``FunctionPod`` directly.
+
+        Preferred form (use this instead)::
+
+            @function_pod(output_keys=["result"], ctx_arg="ctx")
+            def my_fn(value: int, ctx: InvocationContext) -> str:
+                ...
+
+            assert callable(my_fn)          # still a plain callable
+            assert isinstance(my_fn.pod, FunctionPod)
+
+        Legacy form (this decorator)::
+
+            @side_effect_function_pod(output_keys=["result"])
+            def my_fn(value: int, ctx: InvocationContext) -> str:
+                ...
+
+            assert isinstance(my_fn, FunctionPod)  # decorated object IS the pod
+
+        Full removal of this decorator is tracked separately.
+
     Equivalent to ``FunctionPod.from_fn(fn, output_keys=..., ctx_arg_name=...)``.
     The decorated object is the ``FunctionPod`` itself (not a wrapper function),
     so it can be called directly as a pod.
