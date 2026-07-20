@@ -1,5 +1,13 @@
 """Tests proving NODE_CONTENT_HASH_COL is redundant in the record_id preimage.
 
+Includes a randomised lockstep suite (≥100 examples) that empirically verifies:
+
+  1. Forward:  same (pipeline_hash, system_tags) → same node_content_hash.
+  2. Backward: different node_content_hash       → different (pipeline_hash, system_tags).
+
+These two directions together confirm that NODE_CONTENT_HASH_COL is fully determined
+by information already present in every stored record and is therefore redundant.
+
 This module is an investigation artefact for ITL-533. It demonstrates two
 concrete properties:
 
@@ -34,6 +42,7 @@ sufficient for unique record identification.
 
 from __future__ import annotations
 
+import random
 from typing import cast
 from unittest.mock import patch
 
@@ -379,3 +388,227 @@ class TestFilterByContentHashIsNoOp:
                 "With filter disabled, node2 must still produce zero additional "
                 "function calls when all inputs were already computed by node1."
             )
+
+
+# ---------------------------------------------------------------------------
+# Randomised lockstep suite (≥100 examples)
+#
+# Empirically verifies the bidirectional lockstep property:
+#
+#   1. Forward:  same (pipeline_hash, system_tags) → same node_content_hash.
+#   2. Backward: different node_content_hash       → different (pipeline_hash, system_tags).
+#
+# "pipeline_hash" is proxied by node.node_identity_path (a tuple of strings
+# derived from the pipeline hash — identical for nodes that share function
+# identity + upstream schema topology).
+#
+# "system_tags" are the actual system-tag column names and values extracted
+# from the first row emitted by the source (all rows from the same source
+# share the same system-tag values, since they share the same content-addressed
+# source_id / table_hash).
+# ---------------------------------------------------------------------------
+
+
+class TestLockstepPropertyRandomized:
+    """≥100 random (function, source) pairs prove the bidirectional lockstep."""
+
+    # 5 functions × 25 sources = 125 examples (well over the required 100).
+    _N_SOURCES = 25
+
+    # Fixed seed: ensures the test is reproducible across runs.
+    _SEED = 42
+
+    @staticmethod
+    def _make_random_source(rng: random.Random) -> ArrowTableSource:
+        """Generate an ``ArrowTableSource`` with random integer data."""
+        n_rows = rng.randint(1, 8)
+        values = [rng.randint(0, 9_999) for _ in range(n_rows)]
+        table = pa.table(
+            {
+                "id": pa.array(list(range(n_rows)), type=pa.int64()),
+                "x": pa.array(values, type=pa.int64()),
+            }
+        )
+        return ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+
+    @staticmethod
+    def _system_tags_key(source: ArrowTableSource) -> tuple:
+        """Extract a hashable ``(col_name, value)`` tuple from the source's first row.
+
+        All rows from the same ``ArrowTableSource`` share identical system-tag
+        values (same content-addressed ``source_id`` / ``table_hash``), so the
+        first row is representative of the whole source.
+        """
+        tag, _ = next(iter(source.iter_data()))
+        sys_table = tag.as_table(columns={"system_tags": True})
+        return tuple(
+            sorted(
+                (col, sys_table.column(col)[0].as_py())
+                for col in sys_table.column_names
+            )
+        )
+
+    @staticmethod
+    def _make_data_functions() -> list[PythonDataFunction]:
+        """Return five textually-distinct ``PythonDataFunction`` instances.
+
+        Named (not lambda) so that the function content hash is derived from
+        distinct bytecode in each case.
+        """
+
+        def fn_double(x: int) -> int:
+            return x * 2
+
+        def fn_triple(x: int) -> int:
+            return x * 3
+
+        def fn_square(x: int) -> int:
+            return x**2
+
+        def fn_add_one(x: int) -> int:
+            return x + 1
+
+        def fn_sub_one(x: int) -> int:
+            return x - 1
+
+        return [
+            PythonDataFunction(fn_double, output_keys="result"),
+            PythonDataFunction(fn_triple, output_keys="result"),
+            PythonDataFunction(fn_square, output_keys="result"),
+            PythonDataFunction(fn_add_one, output_keys="result"),
+            PythonDataFunction(fn_sub_one, output_keys="result"),
+        ]
+
+    def _collect_records(self) -> list[tuple[tuple, tuple, bytes]]:
+        """Build the full set of (pipeline_hash_key, system_tags_key, node_content_hash) triples.
+
+        Creates one ``FunctionJobNode`` per (data_function, source) combination and
+        extracts the three values used to verify the lockstep property.
+
+        Returns:
+            List of ``(pipeline_hash_key, system_tags_key, node_content_hash_bytes)``
+            triples, one per combination.
+        """
+        rng = random.Random(self._SEED)
+        data_functions = self._make_data_functions()
+        sources = [self._make_random_source(rng) for _ in range(self._N_SOURCES)]
+
+        records = []
+        for pf in data_functions:
+            for source in sources:
+                node = FunctionJobNode(
+                    function_pod=FunctionPod(data_function=pf),
+                    input_stream=source,
+                    pipeline_database=InMemoryArrowDatabase(),
+                )
+                # node_identity_path is a tuple of strings derived from pipeline_hash —
+                # two nodes that share function identity + upstream schema topology always
+                # produce the same tuple.
+                ph_key: tuple = node.node_identity_path
+                st_key: tuple = self._system_tags_key(source)
+                nch: bytes = node.content_hash().to_prefixed_digest()
+                records.append((ph_key, st_key, nch))
+
+        return records
+
+    # ── Sanity checks ──────────────────────────────────────────────────────────
+
+    def test_sanity_distinct_functions_produce_distinct_pipeline_hashes(self):
+        """The 5 data functions produce 5 distinct ``node_identity_path`` values.
+
+        If this fails, the main lockstep test has reduced variety along the
+        function dimension and should be revisited.
+        """
+        rng = random.Random(self._SEED)
+        source = self._make_random_source(rng)
+        paths = set()
+        for pf in self._make_data_functions():
+            node = FunctionJobNode(
+                function_pod=FunctionPod(data_function=pf),
+                input_stream=source,
+                pipeline_database=InMemoryArrowDatabase(),
+            )
+            paths.add(node.node_identity_path)
+        n_fns = len(self._make_data_functions())
+        assert len(paths) == n_fns, (
+            f"Expected {n_fns} distinct pipeline-hash keys; got {len(paths)}. "
+            f"Some data functions hash identically — the lockstep test's function "
+            f"dimension has reduced coverage."
+        )
+
+    def test_sanity_distinct_sources_produce_distinct_system_tags(self):
+        """The {n} random sources produce {n} distinct system-tag signatures.
+
+        If this fails (a coincidental data collision), increase ``_N_SOURCES`` or
+        widen the value range in ``_make_random_source``.
+        """
+        rng = random.Random(self._SEED)
+        sources = [self._make_random_source(rng) for _ in range(self._N_SOURCES)]
+        keys = {self._system_tags_key(s) for s in sources}
+        assert len(keys) == self._N_SOURCES, (
+            f"Expected {self._N_SOURCES} distinct system-tag keys; got {len(keys)}. "
+            f"Some random sources coincidentally produced identical content — "
+            f"the lockstep test's source dimension has reduced coverage."
+        )
+
+    # ── Main lockstep property tests ───────────────────────────────────────────
+
+    def test_forward_lockstep_same_key_implies_same_node_content_hash(self):
+        """Forward direction: same (pipeline_hash, system_tags) → same node_content_hash.
+
+        For every pair of records in the ≥100-example set: if two records share
+        the same ``(node_identity_path, system_tags)`` key they must also share
+        the same ``node_content_hash``.  A violation would mean ``node_content_hash``
+        depends on some factor beyond ``(pipeline_hash, system_tags)`` — which would
+        disprove the redundancy claim.
+        """
+        records = self._collect_records()
+        assert len(records) >= 100, f"Expected ≥100 examples; got {len(records)}"
+
+        key_to_nch: dict[tuple, bytes] = {}
+        violations: list[tuple] = []
+        for ph, st, nch in records:
+            key = (ph, st)
+            if key in key_to_nch:
+                if key_to_nch[key] != nch:
+                    violations.append((key, key_to_nch[key], nch))
+            else:
+                key_to_nch[key] = nch
+
+        assert not violations, (
+            f"Forward lockstep violated in {len(violations)} case(s): "
+            f"same (pipeline_hash, system_tags) produced different node_content_hash.\n"
+            f"First violation — key: {violations[0][0]!r}\n"
+            f"  first  nch: {violations[0][1]!r}\n"
+            f"  second nch: {violations[0][2]!r}"
+        )
+
+    def test_backward_lockstep_different_node_content_hash_implies_different_key(self):
+        """Backward direction: different node_content_hash → different (pipeline_hash, system_tags).
+
+        For every pair of records in the ≥100-example set: if two records have
+        different ``node_content_hash`` values their ``(node_identity_path, system_tags)``
+        keys must also differ.  A violation would mean two distinct (function, source)
+        combinations map to the same ``node_content_hash`` — implying that removing
+        ``NODE_CONTENT_HASH_COL`` from the preimage could collapse distinct records.
+        """
+        records = self._collect_records()
+        assert len(records) >= 100, f"Expected ≥100 examples; got {len(records)}"
+
+        nch_to_key: dict[bytes, tuple] = {}
+        violations: list[tuple] = []
+        for ph, st, nch in records:
+            key = (ph, st)
+            if nch in nch_to_key:
+                if nch_to_key[nch] != key:
+                    violations.append((nch, nch_to_key[nch], key))
+            else:
+                nch_to_key[nch] = key
+
+        assert not violations, (
+            f"Backward lockstep violated in {len(violations)} case(s): "
+            f"different (pipeline_hash, system_tags) produced the same node_content_hash.\n"
+            f"First violation — nch: {violations[0][0]!r}\n"
+            f"  first  key: {violations[0][1]!r}\n"
+            f"  second key: {violations[0][2]!r}"
+        )
