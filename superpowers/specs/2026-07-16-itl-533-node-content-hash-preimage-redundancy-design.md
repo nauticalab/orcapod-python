@@ -8,11 +8,35 @@
 
 ## Overview
 
-`FunctionJobNode` and `SideEffectPod` compute a `record_id` by hashing a preimage
-table. The preimage currently contains `NODE_CONTENT_HASH_COL` (`__node_content_hash`),
-which is `self.content_hash()` for the node — a hash of the function identity and the
-upstream data content. This column is redundant because those two pieces of information
-are already present elsewhere in every stored record:
+`FunctionJobNode` and `SideEffectPod` compute a `record_id` (the DB primary key) by
+hashing an Arrow preimage table. The preimage is currently:
+
+**`base_entry_id`** (`__pipeline_base_entry_id`) — the recomputation-stable identifier:
+```
+system_tag columns          (tag.as_table(columns={"system_tags": True}))
+__input_data_hash           (input_data.content_hash(), large_string)
+__node_content_hash         (self.content_hash(), large_string)         ← redundant
+```
+
+**`record_id`** (`__record_id`, DB primary key) — extends the base:
+```
+system_tag columns
+__input_data_hash
+__node_content_hash                                                      ← redundant
+__pipeline_recomputation_index   (int32)
+```
+
+**Side-effect tdb** (`_execute_side_effect_row`) — mirrors the pdb shape at index 0:
+```
+system_tag columns
+__input_data_hash
+__node_content_hash                                                      ← redundant
+__pipeline_recomputation_index   = 0  (fixed; side effects never recompute)
+```
+
+`__node_content_hash` is `self.content_hash()` for the node — a hash of the function
+identity and the upstream data content. This column is redundant because those two
+pieces of information are already present elsewhere in every stored record:
 
 * **Table path** — the pipeline DB table is stored at `node_identity_path`, which is
   scoped by `pipeline_hash`. `pipeline_hash` encodes the function identity and the
@@ -28,6 +52,21 @@ Since `node_content_hash = hash(pod_content_hash, upstream_content_hash)` and bo
 components are fully determined by `(table_path, system_tags)`, `NODE_CONTENT_HASH_COL`
 can be derived from information already in the record. Storing it separately is
 redundant.
+
+After this change, the preimages become:
+
+**`base_entry_id`** (new):
+```
+system_tag columns
+__input_data_hash           (input_data.content_hash(), large_binary)
+```
+
+**`record_id`** (new):
+```
+system_tag columns
+__input_data_hash           (large_binary)
+__pipeline_recomputation_index   (int32)
+```
 
 This spec defines the changes required to remove `NODE_CONTENT_HASH_COL` from (a) the
 hash preimage, (b) the stored pipeline DB row, and (c) the `_filter_by_content_hash()`
