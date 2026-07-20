@@ -37,6 +37,7 @@ def migrate_pipeline_v0_to_v1(
     dry_run: bool = False,
     batch_size: int = 500,
     progress: bool = True,
+    track_skipped: bool = True,
 ) -> MigrationResult:
     """Migrate a pipeline DB table from v0 schema to v1 schema.
 
@@ -47,9 +48,10 @@ def migrate_pipeline_v0_to_v1(
 
     **Backfill strategy for ``__input_data_hash``:** when the column value is
     ``None`` in the pdb row (older writes may lack it), the migration falls
-    back to the rdb index keyed by ``DATA_RECORD_ID``.  Rows where both the
-    pdb value is ``None`` and the rdb lookup fails are counted as
-    ``rows_unresolvable`` and written with a ``null`` ``__input_data_hash``.
+    back to the rdb via a per-batch ``get_records_by_ids`` lookup keyed by
+    ``DATA_RECORD_ID``.  Rows where both the pdb value is ``None`` and the rdb
+    lookup fails are counted as ``rows_unresolvable`` and written with a
+    ``null`` ``__input_data_hash``.
 
     **``__output_data_hash`` is not backfilled** — the rdb does not store this
     value, so rows where it is ``None`` in v0 will remain ``null`` in v1
@@ -65,6 +67,11 @@ def migrate_pipeline_v0_to_v1(
         dry_run: If ``True``, read and count rows but write nothing.
         batch_size: Number of rows to process per batch.
         progress: If ``True``, log progress at INFO level.
+        track_skipped: If ``True`` (default), scan the v1 table upfront to
+            detect already-migrated rows (idempotent re-run support).  Set
+            to ``False`` to skip this scan on the first run of a large table
+            where no v1 rows exist yet; ``rows_skipped`` will be reported as
+            ``0`` in that case.
 
     Returns:
         ``MigrationResult`` summarising the run.
@@ -87,30 +94,16 @@ def migrate_pipeline_v0_to_v1(
 
     rows_total = v0_table.num_rows
 
-    # Collect IDs already at v1 for idempotency.
-    v1_existing = pipeline_db.get_all_records(v1_path, record_id_column=_RECORD_ID_COL)
+    # Collect IDs already at v1 for idempotency (skipped when track_skipped=False).
     existing_ids: set[bytes] = set()
-    if v1_existing is not None and _RECORD_ID_COL in v1_existing.schema.names:
-        existing_ids = {
-            bytes(r)
-            for r in v1_existing.column(_RECORD_ID_COL).to_pylist()
-            if r is not None
-        }
-
-    # Build an index from rdb v0: data_id (bytes) → row dict.
-    # The rdb record ID (internal UUID) equals the DATA_RECORD_ID stored in
-    # the pdb (both set to output_data.datagram_uuid.bytes at write time).
-    # Note: the full rdb v0 table is loaded once into memory for simple, correct
-    # indexing. For very large result tables this can spike memory; a per-batch
-    # lookup (requires get_records_by_ids on the DB protocol) would avoid this
-    # but is out of scope for this migration utility.
-    rdb_v0 = result_db.get_all_records(result_path, record_id_column=_RECORD_ID_COL)
-    rdb_index: dict[bytes, dict] = {}
-    if rdb_v0 is not None:
-        for row in rdb_v0.to_pylist():
-            rid = row.get(_RECORD_ID_COL)
-            if rid is not None:
-                rdb_index[bytes(rid)] = row
+    if track_skipped:
+        v1_existing = pipeline_db.get_all_records(v1_path, record_id_column=_RECORD_ID_COL)
+        if v1_existing is not None and _RECORD_ID_COL in v1_existing.schema.names:
+            existing_ids = {
+                bytes(r)
+                for r in v1_existing.column(_RECORD_ID_COL).to_pylist()
+                if r is not None
+            }
 
     if progress:
         logger.info(
@@ -142,6 +135,28 @@ def migrate_pipeline_v0_to_v1(
 
         if new_rows.num_rows == 0:
             continue
+
+        # Build a per-batch rdb index for rows where __input_data_hash is None.
+        # Uses get_records_by_ids to avoid loading the entire rdb into memory.
+        input_hash_col = constants.INPUT_DATA_HASH_COL
+        data_id_col = constants.DATA_RECORD_ID
+        needed_ids: set[bytes] = set()
+        for row in new_rows.to_pylist():
+            if row.get(input_hash_col) is None:
+                data_id = row.get(data_id_col)
+                if data_id is not None:
+                    needed_ids.add(bytes(data_id))
+
+        rdb_index: dict[bytes, dict] = {}
+        if needed_ids:
+            rdb_batch = result_db.get_records_by_ids(
+                result_path, needed_ids, record_id_column=_RECORD_ID_COL
+            )
+            if rdb_batch is not None:
+                for row in rdb_batch.to_pylist():
+                    rid = row.get(_RECORD_ID_COL)
+                    if rid is not None:
+                        rdb_index[bytes(rid)] = row
 
         transformed, batch_unresolvable = _transform_pdb_batch(new_rows, rdb_index)
         rows_unresolvable += batch_unresolvable
@@ -287,8 +302,8 @@ def migrate_node(
     Extracts the pipeline DB, pipeline path, result DB, and result path
     directly from the node and delegates to ``migrate_pipeline_v0_to_v1()``.
 
-    The ``result_path`` used is the unversioned v0 path (``_cache._record_path``),
-    NOT the versioned v1 path returned by ``_cache.record_path``.
+    The ``result_path`` used is the unversioned v0 path (``base_record_path``),
+    NOT the versioned v1 path returned by ``record_path``.
 
     Args:
         node: The ``FunctionJobNode`` whose pipeline DB to migrate.
@@ -315,9 +330,9 @@ def migrate_node(
         pipeline_db=node._pipeline_database,
         pipeline_path=node.node_identity_path,
         result_db=cached_pod._cache.result_database,
-        # Use the unversioned _record_path (v0 path being migrated FROM),
+        # Use the public base_record_path (unversioned v0 path being migrated FROM),
         # not the versioned record_path (which points to the v1 destination).
-        result_path=cached_pod._cache._record_path,
+        result_path=cached_pod._cache.base_record_path,
         dry_run=dry_run,
         batch_size=batch_size,
         progress=progress,

@@ -35,6 +35,7 @@ def migrate_result_v0_to_v1(
     dry_run: bool = False,
     batch_size: int = 500,
     progress: bool = True,
+    track_skipped: bool = True,
 ) -> MigrationResult:
     """Migrate a result DB table from v0 schema to v1 schema.
 
@@ -51,6 +52,11 @@ def migrate_result_v0_to_v1(
         dry_run: If ``True``, read and count rows but write nothing.
         batch_size: Number of rows to process per batch.
         progress: If ``True``, log progress at INFO level.
+        track_skipped: If ``True`` (default), scan the v1 table upfront to
+            detect already-migrated rows (idempotent re-run support).  Set
+            to ``False`` to skip this scan on the first run of a large table
+            where no v1 rows exist yet; ``rows_skipped`` will be reported as
+            ``0`` in that case.
 
     Returns:
         ``MigrationResult`` summarising the run.
@@ -73,15 +79,16 @@ def migrate_result_v0_to_v1(
 
     rows_total = v0_table.num_rows
 
-    # Collect IDs already at v1 for idempotency check.
-    v1_existing = result_db.get_all_records(v1_path, record_id_column=_RECORD_ID_COL)
+    # Collect IDs already at v1 for idempotency check (skipped when track_skipped=False).
     existing_ids: set[bytes] = set()
-    if v1_existing is not None and _RECORD_ID_COL in v1_existing.schema.names:
-        existing_ids = {
-            bytes(r)
-            for r in v1_existing.column(_RECORD_ID_COL).to_pylist()
-            if r is not None
-        }
+    if track_skipped:
+        v1_existing = result_db.get_all_records(v1_path, record_id_column=_RECORD_ID_COL)
+        if v1_existing is not None and _RECORD_ID_COL in v1_existing.schema.names:
+            existing_ids = {
+                bytes(r)
+                for r in v1_existing.column(_RECORD_ID_COL).to_pylist()
+                if r is not None
+            }
 
     if progress:
         logger.info(

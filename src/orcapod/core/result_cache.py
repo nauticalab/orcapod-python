@@ -28,6 +28,21 @@ else:
 
 logger = logging.getLogger(__name__)
 
+
+def _hash_val_to_binary(val: "str | bytes | memoryview | None") -> "bytes | None":
+    """Convert a ContentHash value to its prefixed binary digest.
+
+    Tolerates both ``str`` (v0 format, passed through ``ContentHash.from_string``)
+    and ``bytes``/``memoryview`` (already binary v1 format, returned as-is).
+    Returns ``None`` for ``None`` inputs.
+    """
+    if val is None:
+        return None
+    if isinstance(val, (bytes, memoryview)):
+        return bytes(val)
+    return ContentHash.from_string(val).to_prefixed_digest()
+
+
 # Process-level cache of v1 result DB paths that have already been checked for
 # legacy v0 schema. Populated on first access; prevents repeated table_exists
 # calls for the same path within a single process.
@@ -72,12 +87,21 @@ class ResultCache:
         return self._result_database
 
     @property
+    def base_record_path(self) -> tuple[str, ...]:
+        """The unversioned base record path (v0 path), without schema version suffix.
+
+        Used by migration utilities that need to reference the legacy v0 table
+        path. The public ``record_path`` property returns the versioned v1 path.
+        """
+        return self._record_path
+
+    @property
     def record_path(self) -> tuple[str, ...]:
         """The versioned path where records are stored.
 
         Returns ``_record_path + (RESULT_DB_SCHEMA_VERSION,)`` — the actual
         storage location of result records in the v1 schema.  Use
-        ``_record_path`` directly only for schema-detection comparisons.
+        ``base_record_path`` to access the unversioned path.
         """
         return self._versioned_record_path
 
@@ -124,13 +148,12 @@ class ResultCache:
             return
         v0_path = self._record_path
         if self._result_database.table_exists(v0_path):
-            _checked_rdb_paths.add(v1_path)
             ignore = self._ignore_schema or ()
             if "v0" not in ignore:
                 raise SchemaVersionError(
-                    f"Result DB rows found at v0 schema path {v0_path!r}.\n"
+                    f"Result DB rows found at v0 schema path {'/'.join(v0_path)!r}.\n"
                     "Run migration first:\n"
-                    "  orcapod migrate result-db <DB_PATH> <RECORD_PATH>\n"
+                    f"  orcapod migrate result-db <DB_PATH> {'/'.join(v0_path)}\n"
                     "To suppress this error and recompute all results instead, set:\n"
                     '  node.node_config = NodeConfig(ignore_schema=("v0",))'
                 )
@@ -140,6 +163,7 @@ class ResultCache:
                 v0_path,
                 ignore,
             )
+        # Only cache as checked after the raise-or-ignore decision passes.
         _checked_rdb_paths.add(v1_path)
 
     def lookup(
@@ -258,7 +282,8 @@ class ResultCache:
             )
             col_idx += 1
 
-        # Convert ContentHash variation columns from string to binary (v1 schema).
+        # Convert ContentHash variation columns to large_binary (v1 schema).
+        # Tolerates both str (v0 format) and bytes/memoryview (already binary — pass through).
         _HASH_VAR_COLS = {
             f"{constants.PF_VARIATION_PREFIX}function_signature_hash",
             f"{constants.PF_VARIATION_PREFIX}function_content_hash",
@@ -266,12 +291,9 @@ class ResultCache:
         for col_name in _HASH_VAR_COLS:
             if col_name in data_table.column_names:
                 col_idx = data_table.column_names.index(col_name)
-                string_vals = data_table.column(col_name).to_pylist()
+                raw_vals = data_table.column(col_name).to_pylist()
                 binary_vals = pa.array(
-                    [
-                        ContentHash.from_string(s).to_prefixed_digest() if s is not None else None
-                        for s in string_vals
-                    ],
+                    [_hash_val_to_binary(v) for v in raw_vals],
                     type=pa.large_binary(),
                 )
                 data_table = data_table.set_column(col_idx, col_name, binary_vals)

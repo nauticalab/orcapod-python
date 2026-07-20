@@ -841,10 +841,13 @@ class FunctionJobNode(FunctionNodeBase):
         if self._pipeline_database.table_exists(self.node_identity_path):
             ignore = self._node_config.ignore_schema or ()
             if "v0" not in ignore:
+                node_path_str = "/".join(self.node_identity_path)
                 raise SchemaVersionError(
-                    f"Pipeline DB at {self.node_identity_path!r} contains a legacy v0 "
-                    f"schema table. Run `orcapod migrate pipeline-db` to migrate, or set "
-                    f"NodeConfig(ignore_schema=('v0',)) to bypass and recompute from scratch."
+                    f"Pipeline DB at {self.node_identity_path!r} contains a legacy v0 schema table.\n"
+                    "Run migration first:\n"
+                    f"  orcapod migrate pipeline-db <PIPELINE_DB_PATH> <RESULT_DB_PATH> {node_path_str}\n"
+                    "To suppress this error and recompute all results instead, set:\n"
+                    '  node.node_config = NodeConfig(ignore_schema=("v0",))'
                 )
             logger.warning(
                 "Pipeline DB at %r has a legacy v0 schema table; "
