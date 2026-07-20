@@ -9,6 +9,7 @@ from __future__ import annotations
 import typer
 
 from orcapod.cli.warm_cache import warm_cache
+from orcapod.cli.migrate import migrate_app
 
 app = typer.Typer(
     name="orcapod",
@@ -23,3 +24,4 @@ def _main() -> None:
 
 
 app.command("warm-cache")(warm_cache)
+app.add_typer(migrate_app, name="migrate")

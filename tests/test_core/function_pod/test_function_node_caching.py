@@ -174,7 +174,7 @@ class TestResultVsPipelineRecordCounts:
         assert result_records.num_rows == 1
 
         # Pipeline DB: 2 records (different tags → different entry_ids)
-        pipeline_records = db.get_all_records(node.node_identity_path)
+        pipeline_records = db.get_all_records(node._versioned_pipeline_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
@@ -194,7 +194,7 @@ class TestResultVsPipelineRecordCounts:
         assert result_records is not None
         assert result_records.num_rows == 2
 
-        pipeline_records = db.get_all_records(node.node_identity_path)
+        pipeline_records = db.get_all_records(node._versioned_pipeline_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
@@ -211,7 +211,7 @@ class TestResultVsPipelineRecordCounts:
         assert result_records is not None
         assert result_records.num_rows == 1
 
-        pipeline_records = db.get_all_records(node.node_identity_path)
+        pipeline_records = db.get_all_records(node._versioned_pipeline_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 1
 
@@ -272,7 +272,7 @@ class TestPhase1Phase2PipelineEntryId:
         node1, _ = _make_node(stream1, db=db)
         node1.run()
 
-        pipeline_count_after_first = db.get_all_records(node1.node_identity_path).num_rows
+        pipeline_count_after_first = db.get_all_records(node1._versioned_pipeline_path).num_rows
         assert pipeline_count_after_first == 1
 
         # Second run: tag=1, x=10 (same data, different tag)
@@ -290,7 +290,7 @@ class TestPhase1Phase2PipelineEntryId:
         assert len(results) == 1
 
         # Shared table now has 2 records (one per node/content_hash)
-        all_pipeline_records = db.get_all_records(node2.node_identity_path)
+        all_pipeline_records = db.get_all_records(node2._versioned_pipeline_path)
         assert all_pipeline_records is not None
         assert all_pipeline_records.num_rows == 2
 
@@ -314,13 +314,13 @@ class TestPhase1Phase2PipelineEntryId:
         stream2 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
         node2, _ = _make_node(stream2, db=db)
 
-        pipeline_count_before = db.get_all_records(node2.node_identity_path).num_rows
+        pipeline_count_before = db.get_all_records(node2._versioned_pipeline_path).num_rows
 
         results = list(node2.iter_data())
         assert len(results) == 2
 
         # No new pipeline records should be added
-        pipeline_count_after = db.get_all_records(node2.node_identity_path).num_rows
+        pipeline_count_after = db.get_all_records(node2._versioned_pipeline_path).num_rows
         assert pipeline_count_after == pipeline_count_before
 
 
@@ -359,7 +359,7 @@ class TestResultCacheHitPipelineNovel:
         node, _ = _make_node(stream, db=db)
         node.run()
 
-        pipeline_records = db.get_all_records(node.node_identity_path)
+        pipeline_records = db.get_all_records(node._versioned_pipeline_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
@@ -380,7 +380,7 @@ class TestPipelineRecordSourceColumns:
         node, db = _make_node(stream)
         node.run()
 
-        pipeline_records = db.get_all_records(node.node_identity_path)
+        pipeline_records = db.get_all_records(node._versioned_pipeline_path)
         assert pipeline_records is not None
 
         source_cols = [
@@ -396,7 +396,7 @@ class TestPipelineRecordSourceColumns:
         node, db = _make_node(stream)
         node.run()
 
-        pipeline_records = db.get_all_records(node.node_identity_path)
+        pipeline_records = db.get_all_records(node._versioned_pipeline_path)
         assert pipeline_records is not None
 
         # "x" is the input data data column — should not appear

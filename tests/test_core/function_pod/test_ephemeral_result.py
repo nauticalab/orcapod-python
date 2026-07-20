@@ -138,7 +138,7 @@ class TestAddPipelineRecord:
         results = node.execute(stream)
         assert len(results) == 1
 
-        all_records = db.get_all_records(node.node_identity_path)
+        all_records = db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert constants.IS_EPHEMERAL_COL in all_records.column_names
         vals = all_records.column(constants.IS_EPHEMERAL_COL).to_pylist()
@@ -157,7 +157,7 @@ class TestAddPipelineRecord:
         results = node.execute(stream)
         assert len(results) == 1
 
-        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        all_records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert constants.IS_EPHEMERAL_COL in all_records.column_names
         vals = all_records.column(constants.IS_EPHEMERAL_COL).to_pylist()
@@ -413,7 +413,7 @@ class TestBulkResolution:
 
         # Step 4: Get the committed row and its entry_id bytes
         existing = pipeline_db.get_all_records(
-            node.node_identity_path,
+            node._versioned_pipeline_path,
             record_id_column=_PIPELINE_ENTRY_ID_COL,
         )
         assert existing is not None and existing.num_rows == 1
@@ -438,7 +438,7 @@ class TestBulkResolution:
         # Step 6: Insert the ephemeral row with the SAME entry_id, skip_duplicates=False.
         # This succeeds because the flushed row is in _tables (not _pending_record_ids).
         pipeline_db.add_record(
-            node.node_identity_path,
+            node._versioned_pipeline_path,
             entry_id_bytes,
             ephemeral_row,
             skip_duplicates=False,
@@ -448,7 +448,7 @@ class TestBulkResolution:
         #   IS_EPHEMERAL=False → persistent result (result=20)
         #   IS_EPHEMERAL=True  → ephemeral result (result=20, same value but different store)
         both = pipeline_db.get_all_records(
-            node.node_identity_path,
+            node._versioned_pipeline_path,
             record_id_column=_PIPELINE_ENTRY_ID_COL,
         )
         assert both is not None and both.num_rows == 2
@@ -855,7 +855,7 @@ class TestAddPipelineRecordIndexed:
         node.add_pipeline_record(tag, data, data_record_id=uuid.uuid4(), computed=True)
         pipeline_db.flush()
 
-        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        all_records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows == 1
         assert all_records.column(_PIPELINE_RECOMPUTATION_INDEX_COL)[0].as_py() == 0
@@ -873,7 +873,7 @@ class TestAddPipelineRecordIndexed:
         node.add_pipeline_record(tag, data, data_record_id=uuid.uuid4(), computed=True)
         pipeline_db.flush()
 
-        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        all_records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows == 2
         indices = all_records.column(_PIPELINE_RECOMPUTATION_INDEX_COL).to_pylist()
@@ -890,7 +890,7 @@ class TestAddPipelineRecordIndexed:
         node.add_pipeline_record(tag, data, data_record_id=uuid.uuid4(), computed=True)
         pipeline_db.flush()
 
-        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        all_records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert _PIPELINE_BASE_ENTRY_ID_COL in all_records.column_names
         expected_base_id = node.compute_base_entry_id(tag, data)
@@ -945,7 +945,7 @@ class TestFetchJoinedRecordsGuards:
 
         # Drop IS_EPHEMERAL_COL from the committed table to simulate a legacy record
         is_eph_col = sc.constants.IS_EPHEMERAL_COL
-        record_key = "/".join(node1.node_identity_path)
+        record_key = "/".join(node1._versioned_pipeline_path)
         old_table = pipeline_db._tables[record_key]
         col_idx = old_table.schema.get_field_index(is_eph_col)
         assert col_idx >= 0, "IS_EPHEMERAL_COL must exist before we drop it"
@@ -1007,7 +1007,7 @@ class TestConcurrentMissSerialization:
 
         # At least one pipeline record must exist for this base_entry_id
         pipeline_db.flush()
-        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        all_records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
@@ -1044,7 +1044,7 @@ class TestConcurrentMissSerialization:
         node.add_pipeline_record(tag, data, data_record_id=uuid.uuid4(), computed=True)
         pipeline_db.flush()
 
-        all_records = pipeline_db.get_all_records(node.node_identity_path)
+        all_records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert all_records is not None
         assert all_records.num_rows == 2
 

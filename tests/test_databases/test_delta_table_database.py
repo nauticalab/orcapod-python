@@ -583,3 +583,34 @@ class TestStringViewColumns:
             assert not any(
                 pa.types.is_string_view(field.type) for field in schema
             ), f"string_view persisted in {f}"
+
+
+# ---------------------------------------------------------------------------
+# N. table_exists
+# ---------------------------------------------------------------------------
+
+
+class TestTableExists:
+    def test_returns_false_when_path_absent(self, db):
+        assert db.table_exists(("no", "table", "here")) is False
+
+    def test_returns_true_after_write_and_flush(self, db):
+        record = make_table(val=[1])
+        db.add_record(("mypath",), b"id1", record)
+        db.flush()
+        assert db.table_exists(("mypath",)) is True
+
+    def test_returns_false_for_different_path(self, db):
+        record = make_table(val=[1])
+        db.add_record(("path_a",), b"id1", record)
+        db.flush()
+        assert db.table_exists(("path_b",)) is False
+
+    def test_scoped_db_sees_correct_path(self, db):
+        scoped = db.at("scope")
+        record = make_table(val=[1])
+        scoped.add_record(("sub",), b"id1", record)
+        scoped.flush()
+        assert scoped.table_exists(("sub",)) is True
+        assert db.table_exists(("scope", "sub")) is True
+        assert db.table_exists(("sub",)) is False

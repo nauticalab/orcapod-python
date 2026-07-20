@@ -31,7 +31,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.core.datagrams.tag_data import EmptyData, Tag
-from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError
+from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError, SchemaVersionError
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -46,7 +46,7 @@ from orcapod.protocols.observability_protocols import (
     DataExecutionLoggerProtocol,
     ExecutionObserverProtocol,
 )
-from orcapod.system_constants import constants
+from orcapod.system_constants import constants, PIPELINE_DB_SCHEMA_VERSION, RESULT_DB_SCHEMA_VERSION
 from orcapod.types import (
     ColumnConfig,
     ContentHash,
@@ -85,6 +85,11 @@ _PIPELINE_RECOMPUTATION_INDEX_COL = "__pipeline_recomputation_index"
 # its original (tag, input_data) pair. Stripped from output tags in
 # record_and_forward() before downstream emission.
 _TAG_NODE_INPUT_REF = "_tag_node_input_ref"
+
+# Module-level set of versioned pdb paths that have been checked for legacy schema.
+# Keyed by the full versioned path (node_identity_path + (PIPELINE_DB_SCHEMA_VERSION,)).
+# Populated on first access; prevents repeated table_exists checks across instances.
+_checked_pdb_paths: set[tuple[str, ...]] = set()
 
 
 def _executor_supports_concurrent(
@@ -685,8 +690,13 @@ class _ResultDatabaseReader:
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """Path to cached records in the result store."""
-        return self._record_path
+        """Path to cached records in the result store (versioned).
+
+        Returns the v1 schema path: ``_record_path + (RESULT_DB_SCHEMA_VERSION,)``.
+        Matches ``CachedFunctionPod.record_path`` semantics so that stub nodes
+        (loaded from a saved job) resolve to the same storage location as live nodes.
+        """
+        return self._record_path + (RESULT_DB_SCHEMA_VERSION,)
 
 
 # ---------------------------------------------------------------------------
@@ -786,6 +796,66 @@ class FunctionJobNode(FunctionNodeBase):
     @node_config.setter
     def node_config(self, value: NodeConfig) -> None:
         self._node_config = value
+        if self._cached_function_pod is not None:
+            self._cached_function_pod.set_ignore_schema(value.ignore_schema)
+        if self._ephemeral_cached_pod is not None:
+            self._ephemeral_cached_pod.set_ignore_schema(value.ignore_schema)
+
+    @property
+    def _versioned_pipeline_path(self) -> tuple[str, ...]:
+        """Pipeline DB path with schema version suffix appended.
+
+        All pipeline DB reads and writes use this path (not ``node_identity_path``
+        directly) so that v0 and v1 schema data live at physically separate locations.
+        """
+        return self.node_identity_path + (PIPELINE_DB_SCHEMA_VERSION,)
+
+    def _ensure_pdb_schema(self) -> None:
+        """Check once per versioned path that no legacy v0 schema table is present.
+
+        Detection flow:
+        1. If the v1 versioned path already exists → already migrated, skip check.
+        2. If v1 absent → check whether the unversioned (v0) path exists.
+        3. If v0 exists AND the version is not in ``ignore_schema`` → raise.
+        4. If v0 exists AND version is ignored → log a warning and proceed.
+        5. If v0 also absent → first use, proceed normally.
+
+        Results are cached per versioned path (module-level set) so the check
+        happens at most once per process per versioned path.
+
+        Raises:
+            SchemaVersionError: When a v0 table is found and ``ignore_schema``
+                does not include ``"v0"``.
+        """
+        global _checked_pdb_paths
+        versioned_path = self._versioned_pipeline_path
+        if versioned_path in _checked_pdb_paths:
+            return
+        if self._pipeline_database is None:
+            return
+        # v1 path exists → schema is current, mark as checked
+        if self._pipeline_database.table_exists(versioned_path):
+            _checked_pdb_paths.add(versioned_path)
+            return
+        # v1 absent — check for legacy v0 table at the unversioned path
+        if self._pipeline_database.table_exists(self.node_identity_path):
+            ignore = self._node_config.ignore_schema or ()
+            if "v0" not in ignore:
+                node_path_str = "/".join(self.node_identity_path)
+                raise SchemaVersionError(
+                    f"Pipeline DB at {self.node_identity_path!r} contains a legacy v0 schema table.\n"
+                    "Run migration first:\n"
+                    f"  orcapod migrate pipeline-db <PIPELINE_DB_PATH> <RESULT_DB_PATH> {node_path_str}\n"
+                    "To suppress this error and recompute all results instead, set:\n"
+                    '  node.node_config = NodeConfig(ignore_schema=("v0",))'
+                )
+            logger.warning(
+                "Pipeline DB at %r has a legacy v0 schema table; "
+                "proceeding without migration because ignore_schema includes 'v0'. "
+                "All results will be recomputed from scratch.",
+                self.node_identity_path,
+            )
+        _checked_pdb_paths.add(versioned_path)
 
     # ------------------------------------------------------------------
     # attach_databases
@@ -1088,7 +1158,7 @@ class FunctionJobNode(FunctionNodeBase):
                 f"required column {col_name!r} is missing from the stored table. "
                 "This may indicate records written by an older version of the code."
             )
-        own_hash = self.content_hash().to_string()
+        own_hash = self.content_hash().to_prefixed_digest()
         mask = pc.equal(table.column(col_name), own_hash)
         return table.filter(mask)
 
@@ -1624,30 +1694,14 @@ class FunctionJobNode(FunctionNodeBase):
                 result keyed by the same hash (= the downstream's ``INPUT_DATA_HASH_COL``).
         """
         self._require_pipeline_database()
+        self._ensure_pdb_schema()
         base_entry_id = self.compute_base_entry_id(tag, input_data)
-
-        # Guard against pre-ITL-508 pipeline DB records that are missing the new
-        # versioning columns. If such records exist, fail fast with a clear message
-        # rather than letting the subsequent filter crash with a cryptic Arrow error.
-        _all_existing = self._pipeline_database.get_all_records(self.node_identity_path)
-        if _all_existing is not None and _all_existing.num_rows > 0:
-            _missing = [
-                col
-                for col in (_PIPELINE_BASE_ENTRY_ID_COL, _PIPELINE_RECOMPUTATION_INDEX_COL)
-                if col not in _all_existing.schema.names
-            ]
-            if _missing:
-                raise ValueError(
-                    f"Pipeline database at {self.node_identity_path!r} contains records "
-                    f"that are missing required ITL-508 columns: {_missing!r}. "
-                    "Please clear or migrate the pipeline database before using this node."
-                )
 
         # Determine the next recomputation index by querying all existing rows
         # for this base_entry_id. No await is used here, so within a single-threaded
         # asyncio event loop this read-then-write sequence is uninterrupted.
         existing = self._pipeline_database.get_records_with_column_value(
-            self.node_identity_path,
+            self._versioned_pipeline_path,
             {_PIPELINE_BASE_ENTRY_ID_COL: base_entry_id},
         )
         if existing is None or existing.num_rows == 0:
@@ -1674,14 +1728,14 @@ class FunctionJobNode(FunctionNodeBase):
                     [data_record_id.bytes], type=pa.large_binary()
                 ),
                 constants.NODE_CONTENT_HASH_COL: pa.array(
-                    [self.content_hash().to_string()], type=pa.large_string()
+                    [self.content_hash().to_prefixed_digest()], type=pa.large_binary()
                 ),
                 constants.INPUT_DATA_HASH_COL: pa.array(
-                    [input_data.content_hash().to_string()], type=pa.large_string()
+                    [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
                 ),
                 constants.OUTPUT_DATA_HASH_COL: pa.array(
-                    [output_data_hash.to_string() if output_data_hash is not None else None],
-                    type=pa.large_string(),
+                    [output_data_hash.to_prefixed_digest() if output_data_hash is not None else None],
+                    type=pa.large_binary(),
                 ),
                 f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
                     [input_data.data_context_key], type=pa.large_string()
@@ -1709,7 +1763,7 @@ class FunctionJobNode(FunctionNodeBase):
         )
 
         self._pipeline_database.add_record(
-            self.node_identity_path,
+            self._versioned_pipeline_path,
             versioned_entry_id,
             combined_record,
             skip_duplicates=True,
@@ -1848,8 +1902,9 @@ class FunctionJobNode(FunctionNodeBase):
         if self._cached_function_pod is None or self._pipeline_database is None:
             return None
 
+        self._ensure_pdb_schema()
         taginfo = self._pipeline_database.get_all_records(
-            self.node_identity_path,
+            self._versioned_pipeline_path,
             record_id_column=_PIPELINE_ENTRY_ID_COL,
         )
 
@@ -1965,7 +2020,7 @@ class FunctionJobNode(FunctionNodeBase):
                     )
                     cached_hash = None
                 else:
-                    cached_hash = ContentHash.from_string(raw_hash)
+                    cached_hash = ContentHash.from_prefixed_digest(raw_hash)
                 empty_data_tokens[base_eid] = EmptyData(
                     cached_content_hash=cached_hash,
                     data_context=self.data_context,

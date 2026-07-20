@@ -187,6 +187,25 @@ class ConnectorArrowDatabase:
             return None
         return pa.Table.from_batches(batches)
 
+    def table_exists(self, record_path: tuple[str, ...]) -> bool:
+        """Return ``True`` if a table exists at ``record_path``.
+
+        Checks both the in-memory pending batch and the connector's committed
+        tables. This is a cheap existence check that does NOT load any records.
+
+        Args:
+            record_path: Path components identifying the table, relative to
+                ``self.base_path``.
+
+        Returns:
+            ``True`` if a table exists at the given path, ``False`` otherwise.
+        """
+        table_name = self._path_to_table_name(self._path_prefix + record_path)
+        record_key = self._get_record_key(record_path)
+        if record_key in self._pending_batches:
+            return True
+        return table_name in self._connector.get_table_names()
+
     # ── Write methods ─────────────────────────────────────────────────────────
 
     def add_record(
