@@ -591,14 +591,21 @@ class TestRayExecutorInitialization:
     def test_get_remote_fn_caches_per_function_name(self):
         """_get_remote_fn must return distinct remote wrappers for different
         function names so Ray metrics report the correct name."""
-        from unittest.mock import MagicMock, call, patch
+        from unittest.mock import MagicMock, patch
 
         from orcapod.core.executors.ray import RayExecutor
 
         mock_ray = MagicMock()
         mock_ray.is_initialized.return_value = True
-        # ray.remote(**opts)(wrapper) returns a mock remote fn
-        mock_ray.remote.return_value = lambda wrapper: MagicMock(name=f"remote_{wrapper.__name__}")
+
+        def fake_remote(fn=None, **opts):
+            # Called as ray.remote(fn) when opts is empty (direct path)
+            if fn is not None:
+                return MagicMock(name=f"remote_{fn.__name__}")
+            # Called as ray.remote(**opts) when opts is non-empty (factory path)
+            return lambda wrapper: MagicMock(name=f"remote_{wrapper.__name__}")
+
+        mock_ray.remote = fake_remote
 
         with patch.dict("sys.modules", {"ray": mock_ray}):
             executor = RayExecutor.__new__(RayExecutor)
@@ -624,7 +631,12 @@ class TestRayExecutorInitialization:
 
         captured_wrappers = []
 
-        def fake_remote(**opts):
+        def fake_remote(fn=None, **opts):
+            # Called as ray.remote(fn) when opts is empty (direct path)
+            if fn is not None:
+                captured_wrappers.append(fn)
+                return MagicMock()
+            # Called as ray.remote(**opts) when opts is non-empty (factory path)
             def decorator(wrapper):
                 captured_wrappers.append(wrapper)
                 return MagicMock()

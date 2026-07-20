@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.types import Schema
+from orcapod.types import ContentHash, NodeConfig, Schema
 
 
 class TestSchemaAdd:
@@ -56,3 +56,76 @@ class TestSchemaAdd:
         assert "b" in result.optional_fields
         assert "c" in result.optional_fields
         assert "a" not in result.optional_fields
+
+
+class TestContentHashPrefixedDigest:
+    """Tests for ContentHash.from_prefixed_digest() round-trip."""
+
+    def test_roundtrip_sha256(self):
+        h = ContentHash("sha256", bytes(range(32)))
+        assert ContentHash.from_prefixed_digest(h.to_prefixed_digest()) == h
+
+    def test_roundtrip_arrow_method(self):
+        h = ContentHash("arrow_v2.1", b"\xde\xad\xbe\xef" * 8)
+        result = ContentHash.from_prefixed_digest(h.to_prefixed_digest())
+        assert result.method == "arrow_v2.1"
+        assert result.digest == b"\xde\xad\xbe\xef" * 8
+
+    def test_preserves_binary_digest_with_colon_bytes(self):
+        # digest bytes that themselves contain a colon — only the first colon splits
+        digest = b"abc:def"
+        h = ContentHash("sha256", digest)
+        assert ContentHash.from_prefixed_digest(h.to_prefixed_digest()) == h
+
+    def test_inverse_of_to_prefixed_digest(self):
+        """from_prefixed_digest is the exact inverse of to_prefixed_digest."""
+        for method, digest in [
+            ("sha256", b"\x00" * 32),
+            ("md5", b"\xff" * 16),
+            ("arrow_v2.1", b"\x01\x02\x03"),
+        ]:
+            h = ContentHash(method, digest)
+            assert ContentHash.from_prefixed_digest(h.to_prefixed_digest()) == h
+
+
+class TestNodeConfig:
+    """Tests for NodeConfig dataclass and merge()."""
+
+    def test_ignore_schema_defaults_to_none(self):
+        config = NodeConfig()
+        assert config.ignore_schema is None
+
+    def test_ignore_schema_set(self):
+        config = NodeConfig(ignore_schema=("v0",))
+        assert config.ignore_schema == ("v0",)
+
+    def test_merge_ignore_schema_none_in_other_self_wins(self):
+        base = NodeConfig(ignore_schema=("v0",))
+        other = NodeConfig()  # ignore_schema=None
+        result = base.merge(other)
+        assert result.ignore_schema == ("v0",)
+
+    def test_merge_ignore_schema_other_overrides(self):
+        base = NodeConfig(ignore_schema=("v0",))
+        other = NodeConfig(ignore_schema=("v0", "v1"))
+        result = base.merge(other)
+        assert result.ignore_schema == ("v0", "v1")
+
+    def test_merge_ignore_schema_empty_tuple_overrides(self):
+        """Empty tuple () is a valid explicit value that overrides None."""
+        base = NodeConfig(ignore_schema=("v0",))
+        other = NodeConfig(ignore_schema=())
+        result = base.merge(other)
+        assert result.ignore_schema == ()
+
+
+class TestSchemaVersionError:
+    def test_is_exception(self):
+        from orcapod.errors import SchemaVersionError
+        err = SchemaVersionError("test message")
+        assert isinstance(err, Exception)
+
+    def test_message_preserved(self):
+        from orcapod.errors import SchemaVersionError
+        err = SchemaVersionError("Pipeline DB at v0 path")
+        assert "v0" in str(err)

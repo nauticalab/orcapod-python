@@ -20,6 +20,8 @@ FIELD_SEPARATOR = ":"
 BLOCK_SEPARATOR = "::"
 ENV_INFO = "env_info"
 IS_EPHEMERAL_COL = "is_ephemeral"
+PIPELINE_DB_SCHEMA_VERSION = "pdb_v1"
+RESULT_DB_SCHEMA_VERSION = "rdb_v1"
 
 
 class SystemConstant:

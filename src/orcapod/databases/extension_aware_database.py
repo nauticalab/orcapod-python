@@ -179,5 +179,20 @@ class ExtensionAwareDatabase:
             converter=self._converter,
         )
 
+    def table_exists(self, record_path: tuple[str, ...]) -> bool:
+        """Return ``True`` if a table exists at ``record_path``.
+
+        Delegates directly to the wrapped database without any extension-type
+        processing — this is a pure existence check, not a data read.
+
+        Args:
+            record_path: Path components identifying the table, relative to
+                ``self.base_path``.
+
+        Returns:
+            ``True`` if a table exists at the given path, ``False`` otherwise.
+        """
+        return self._db.table_exists(record_path)
+
     def to_config(self) -> dict[str, Any]:
         return self._db.to_config()

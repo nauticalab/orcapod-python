@@ -119,7 +119,7 @@ class TestFunctionNodePipelineHashScope:
         node.run()
 
         col_name = SystemConstant().NODE_CONTENT_HASH_COL
-        pipeline_table = node._pipeline_database.get_all_records(node.node_identity_path)
+        pipeline_table = node._pipeline_database.get_all_records(node._versioned_pipeline_path)
         assert pipeline_table is not None
         assert col_name in pipeline_table.column_names
 

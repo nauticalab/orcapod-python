@@ -211,6 +211,20 @@ class DeltaTableDatabase:
                 self._delta_table_cache.pop(record_key)
             raise
 
+    def table_exists(self, record_path: tuple[str, ...]) -> bool:
+        """Return ``True`` if a Delta table exists at ``record_path``.
+
+        This is a cheap existence check that does NOT load any records.
+
+        Args:
+            record_path: Path components identifying the table, relative to
+                ``self.base_path``.
+
+        Returns:
+            ``True`` if a table exists at the given path, ``False`` otherwise.
+        """
+        return self._get_delta_table(record_path) is not None
+
     def _ensure_record_id_column(
         self, arrow_data: pa.Table, record_id: str | bytes
     ) -> pa.Table:
