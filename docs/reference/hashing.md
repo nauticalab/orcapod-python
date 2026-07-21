@@ -21,8 +21,8 @@ documented in the sections that follow.
 | 6 | Join system tag suffix | `stream.pipeline_hash().to_hex(n)` + `:{idx}` appended to column name | Column name suffix | Unique per `(input topology, canonical join position)`; encodes full join lineage in column name |
 | 7 | `compute_base_entry_id()` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL)` | `bytes` (`b"method:digest"`) | Unique per `(node, tag lineage, input_data content)` across all recomputation attempts |
 | 8 | `compute_pipeline_entry_id()` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL + recomputation_index)` | `bytes` (`b"method:digest"`) | Unique per `(node, tag lineage, input_data content, recomputation attempt)` |
-| 9 | Side-effect `record_id` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL + NODE_CONTENT_HASH_COL + recomputation_index=0)` | `bytes` | Unique per `(tag lineage, input_data content, pod version)` |
-| 10 | `invocation_hash` | `f"{serialize(pipeline_hash_ch)}::{serialize(record_id_hash_ch)}"` | `str` | Unique per `(pod topology, tag lineage, input_data content, pod version)` |
+| 9 | Side-effect `record_id` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL + recomputation_index=0)` | `bytes` | Unique per `(tag lineage, input_data content)`; pod-version scoped via table path (`uri` + `pipeline_hash()`) |
+| 10 | `invocation_hash` | `f"{serialize(pipeline_hash_ch)}::{serialize(record_id_hash_ch)}"` | `str` | Unique per `(pod topology, tag lineage, input_data content)`; pod-version scoped via table path |
 | 11 | Output schema hash | `SemanticAwarePythonHasher.hash_object(output_data_schema).to_string()` | `str` (ContentHash `.to_string()`) | Unique per output schema definition; embedded in function URI |
 | 12 | `run_id` | `uuid.uuid4().hex[:16]` | 16-char hex `str` | Non-deterministic; unique per pipeline execution |
 | 13 | `snapshot_hash` | `hashlib.sha256(sorted_leaf_content_hash_strings joined by newline).hexdigest()[:16]` | 16-char hex `str` | Unique per `(DAG leaf topology + data state)` at run time |
@@ -204,9 +204,9 @@ The table below shows what each class returns from `identity_structure()`.
 | `Data` | Data columns only (raw Arrow table) | Source info columns (`_source_*`) excluded — they are provenance metadata, not data content |
 | `EmptyData` | Raises `EmptyDataAccessError` | `content_hash()` is overridden to return a stored `cached_content_hash` directly |
 | `DataFunctionBase` | `self.uri` — `(canonical_function_name, output_schema_hash, major_version, data_function_type_id)` | `output_schema_hash` is site 11; see §5 |
-| `FunctionPod` | `(self.data_function,)` when no ctx arg; `(self.data_function, self._ctx_arg_name)` when ctx arg present | `ctx_arg_name` is included here so a ctx-aware pod has a distinct `content_hash` from a regular pod using the same data function |
-| `ArrowTableStream` | `(producer, argument_symmetry(upstreams))` | Falls back to table content hash if no producer |
-| `RootSource` (`ArrowTableSource`) | Class name + tag columns + table content hash | Data-inclusive base case of the Merkle chain |
+| `FunctionPod` | `self.data_function` (bare object) when no ctx arg; `(self.data_function, self._ctx_arg_name)` when ctx arg present | `ctx_arg_name` is included when present so a ctx-aware pod has a distinct `content_hash` from a plain pod using the same data function |
+| `ArrowTableStream` | `(producer, argument_symmetry(upstreams))` | Falls back to `(class_name, as_table(all_info=True), tag_columns)` when no producer or producer is not a `PipelineElementProtocol` |
+| `RootSource` (`ArrowTableSource`) | `(class_name, (tag_schema, data_schema), source_id)` | `source_id` is the explicit user-supplied value; when not provided it defaults to the Arrow hash of the raw table (site 4). Data-inclusive base case of the Merkle chain. |
 | `DerivedSource` | Origin node's `content_hash` | Inherits its generating node's identity |
 | Operators (unary) | `(operator_class_name, upstream_stream)` | Stream reference resolved via `content_resolver` |
 | Operators (binary/N-ary) | `(operator_class_name, argument_symmetry(streams))` | `frozenset` for commutative (Join, MergeJoin); `tuple` for ordered (SemiJoin) |
@@ -230,12 +230,12 @@ The pipeline hash uses the same `SemanticAwarePythonHasher` with the **`pipeline
 | `RootSource` | `(tag_schema, data_schema)` | Base case — schemas only, no data content |
 | `DerivedSource` | `(tag_schema, data_schema)` | Acts as a new root in the pipeline Merkle chain |
 | `DataFunctionBase` | `self.uri` (same as `identity_structure()`) | Function identity is already schema-only |
-| `FunctionPod` | `self.data_function` **only** (excludes `ctx_arg_name`) | A ctx-aware pod and a regular pod sharing the same data function share a `pipeline_hash` and therefore the same DB table path |
-| `ArrowTableStream` | `(producer, argument_symmetry(upstreams pipeline hashes))` | `pipeline_resolver` routes upstreams through `pipeline_hash()` |
+| `FunctionPod` | `self.data_function` **only** (excludes `ctx_arg_name`) | A ctx-aware pod and a plain pod over the same data function share the same `pipeline_hash` value, but have different `uri` values (`ctx_arg_name` is set → `"side_effect_function"` is prepended to the URI) and therefore write to **different** DB table paths |
+| `ArrowTableStream` | `(producer, argument_symmetry(upstreams pipeline hashes))` | `pipeline_resolver` routes upstreams through `pipeline_hash()`. Falls back to `(tag_schema, data_schema)` when producer is absent or not a `PipelineElementProtocol`. |
 | Operators | `(operator_class_name, argument_symmetry(upstream pipeline hashes))` | Same structure as content identity but using pipeline hashes of upstreams |
 | `SideEffectPodStream` | `(pod, argument_symmetry(upstreams))` | Same as `identity_structure()` |
 
-> **Note:** `FunctionPod.ctx_arg_name` IS included in `content_hash()` (via `identity_structure()`). It is excluded only from `pipeline_identity_structure()`. This means a ctx-aware pod and a plain pod using the same underlying data function write to and read from the same pipeline DB table — but they have different `content_hash` values and therefore different per-row memoization keys.
+> **Note:** `FunctionPod.ctx_arg_name` IS included in `content_hash()` (via `identity_structure()`). It is excluded only from `pipeline_identity_structure()`. A ctx-aware pod receives a system-injected `InvocationContext` argument — a deliberate deviation from the pure data-in / data-out contract — so it is kept distinct from a plain pod at every level: different `content_hash`, different `uri` (prefix `"side_effect_function"`), and different DB table path. The shared `pipeline_hash` value has no practical effect on scoping once the `uri` differs.
 
 ---
 
@@ -295,7 +295,7 @@ topology suffix, encoding the full join lineage into each column name.
 | Field | Value |
 |---|---|
 | **Inputs** | `stream.pipeline_hash()` of each canonically-ordered input stream + its 0-based canonical position index `idx` |
-| **Algorithm** | Streams are first sorted by `stream.pipeline_hash().to_string()` for determinism. For each input at canonical position `idx`, every existing system tag column name has `{BLOCK_SEPARATOR}{stream.pipeline_hash().to_hex(n_char)}:{idx}` appended via `arrow_utils.append_to_system_tags()`. |
+| **Algorithm** | Streams are first sorted by `stream.pipeline_hash().to_string()` for determinism. For each input at canonical position `idx`, every existing system tag column name has `{BLOCK_SEPARATOR}{stream.pipeline_hash().to_hex(system_tag_n_char)}:{idx}` appended via `arrow_utils.append_to_system_tags()`. (`system_tag_n_char` from `OrcapodConfig.hashing`; default `None` = full digest.) |
 | **Output format** | Column name suffix; no separate value is stored |
 | **Uniqueness guarantee** | Each post-join system tag column name uniquely identifies `(original schema, input topology, canonical join position)`; no collision even when joining streams with identical schemas |
 | **Known exclusions** | `SemiJoin` passes system tags through unchanged. `Batch` changes the column type from `str` to `list[str]` but preserves the column name. |
@@ -342,7 +342,7 @@ the row.
 | **Algorithm** | `StarfixArrowHasher.hash_table(preimage).to_prefixed_digest()` — single-row Arrow table hash |
 | **Output format** | `bytes` in `b"{method}:{digest}"` format |
 | **Uniqueness guarantee** | Unique per `(node, tag lineage, input_data content)` across all recomputation attempts; used as the in-memory cache key and Phase 1 DB filter |
-| **Known exclusions** | `NODE_CONTENT_HASH_COL` excluded — the node's content hash is fully determined by the pipeline DB table path (scoped by `pipeline_hash()`). Recomputation index excluded by design — use site 8 for a versioned key. |
+| **Known exclusions** | `NODE_CONTENT_HASH_COL` excluded — the node's content hash is fully determined by the DB table path (scoped by `uri` + `pipeline_hash()`). Recomputation index excluded by design — use site 8 for a versioned key. |
 
 ---
 
@@ -361,9 +361,10 @@ the row.
 ## 4. Side-Effect Record ID & Invocation Hash
 
 Side-effect pods (and `FunctionPod` instances with a `ctx_arg_name`) use a parallel but
-distinct record key scheme. The key difference from §3 is the inclusion of
-`NODE_CONTENT_HASH_COL` in the preimage — so that changing the pod's implementation
-invalidates prior delivery records, even for identical inputs.
+distinct record key scheme. The row-level preimage structure mirrors §3; pod-version
+scoping is handled at the delivery log's table-path level via `pipeline_hash()` and `uri`,
+not at the preimage level — consistent with how `FunctionJobNode` scopes function cache
+entries in §3.
 
 The `invocation_hash` string is composed from two `ContentHash` components and exposed to
 the pod function as an idempotency key via `InvocationContext.invocation_hash`.
@@ -374,11 +375,11 @@ the pod function as an idempotency key via `InvocationContext.invocation_hash`.
 
 | Field | Value |
 |---|---|
-| **Inputs** | System tags + `INPUT_DATA_HASH_COL` (as `pa.large_string()`) + `NODE_CONTENT_HASH_COL` (pod's `content_hash().to_string()`, as `pa.large_string()`) + `_SIDE_EFFECT_RECOMPUTATION_INDEX_COL` (fixed `0`, `pa.int32()`) |
+| **Inputs** | System tags + `INPUT_DATA_HASH_COL` (`input_data.content_hash().to_prefixed_digest()` as `pa.large_binary()`) + `_SIDE_EFFECT_RECOMPUTATION_INDEX_COL` (fixed `0`, `pa.int32()`) |
 | **Algorithm** | `StarfixArrowHasher.hash_table(preimage)` |
 | **Output format** | `ContentHash`; `.to_prefixed_digest()` → `bytes` when stored in the delivery log |
-| **Uniqueness guarantee** | Unique per `(tag lineage, input_data content, pod version)`. Recomputation index is always `0` — side-effect pods do not version recomputations. |
-| **Known exclusions** | Unlike sites 7–8, this includes `NODE_CONTENT_HASH_COL` — a deliberate difference ensuring that changing the pod's version invalidates the delivery record even for unchanged inputs |
+| **Uniqueness guarantee** | Unique per `(tag lineage, input_data content)` at `recomputation_index=0`. Pod-version scoping is provided by the delivery log's table path (derived from `pipeline_hash()` and `uri`), not by the preimage. |
+| **Known exclusions** | `NODE_CONTENT_HASH_COL` is not included — pod-version identity is captured at the table-path level, consistent with how sites 7–8 scope function cache entries. Recomputation index is always `0`; side-effect delivery records are not versioned across recomputation attempts. |
 
 ---
 
@@ -389,7 +390,7 @@ the pod function as an idempotency key via `InvocationContext.invocation_hash`.
 | **Inputs** | `pipeline_hash_ch` — the `SideEffectPodStream`'s `pipeline_hash()` as `ContentHash` + `record_id_hash_ch` — the `ContentHash` from site 9 |
 | **Algorithm** | `f"{serialize(pipeline_hash_ch)}::{serialize(record_id_hash_ch)}"` where each component is serialised as `f"{method}:{hex_or_base64_digest}"` via `InvocationHashConfig` (default: hex, full digest) |
 | **Output format** | `str` of the form `"{method}:{digest}::{method}:{digest}"` |
-| **Uniqueness guarantee** | Unique per `(pod topology, tag lineage, input_data content, pod version)`; exposed to pod functions as an idempotency key |
+| **Uniqueness guarantee** | Unique per `(pod topology, tag lineage, input_data content)`; exposed to pod functions as an idempotency key. Pod-version scoping is provided by the `pipeline_hash()`-derived table path, not by the preimage. |
 | **Known exclusions** | When `track_completion=True` (default): `run_id` is **excluded** — hash is run-independent for idempotency. When `track_completion=False` **and** `pipeline_run_id` is set: `run_id` is appended as a third `::` component so that each run produces a distinct hash. |
 
 ---
