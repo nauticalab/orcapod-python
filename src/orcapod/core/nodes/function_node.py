@@ -61,10 +61,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    import pyarrow.compute as pc
 else:
     pa = LazyModule("pyarrow")
-    pc = LazyModule("pyarrow.compute")
     pl = LazyModule("polars")
 
 # Pipeline entry ID column name used when fetching records from the pipeline
@@ -79,6 +77,31 @@ _PIPELINE_BASE_ENTRY_ID_COL = "__pipeline_base_entry_id"
 # Column storing the recomputation chain index (pa.int32).
 # 0 for the first computation, N+1 for each miss-triggered recompute.
 _PIPELINE_RECOMPUTATION_INDEX_COL = "__pipeline_recomputation_index"
+
+
+def _build_record_id_preimage(
+    tag: "TagProtocol",
+    input_data: "DataProtocol",
+) -> "pa.Table":
+    """Build the Arrow preimage table for record_id / base_entry_id computation.
+
+    Combines the tag's system-tag columns with the binary input data hash into a
+    single-row Arrow table.  ``NODE_CONTENT_HASH_COL`` is intentionally excluded —
+    it is redundant (fully determined by the table path + system tags).
+
+    Args:
+        tag: The tag datagram for the input row.
+        input_data: The data datagram for the input row.
+
+    Returns:
+        A single-row ``pa.Table`` with system-tag columns and
+        ``INPUT_DATA_HASH_COL`` (``large_binary``).
+    """
+    return tag.as_table(columns={"system_tags": True}).append_column(
+        constants.INPUT_DATA_HASH_COL,
+        pa.array([input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()),
+    )
+
 
 # Private meta-column name stamped into tags routed to the compute channel.
 # Carries the correlation key (bytes) that links an execution result back to
@@ -1019,11 +1042,9 @@ class FunctionJobNode(FunctionNodeBase):
 
         # FunctionNodeBase descriptor fields (normally set by __init__)
         node._load_status = LoadStatus.UNAVAILABLE
-        # Use the live (data-inclusive) content hash when available — it must
-        # match the _node_content_hash column written to the DB at run time.
-        # The blueprint hash stored in descriptor["content_hash"] is computed
-        # from schema-only upstreams and differs from the live hash, causing
-        # _filter_by_content_hash() to return zero rows in get_all_records().
+        # Restore the live content hash from the serialised descriptor so that
+        # ``content_hash()`` on the deserialised node matches the hash that was
+        # computed when the original node ran.
         node._stored_content_hash = (
             job_content_hash if job_content_hash is not None
             else descriptor.get("content_hash")
@@ -1140,27 +1161,6 @@ class FunctionJobNode(FunctionNodeBase):
                 "Either construct the pipeline with a pipeline_database argument, "
                 "or supply one via Pipeline.load(..., pipeline_database=<db>)."
             )
-
-    def _filter_by_content_hash(self, table: "pa.Table") -> "pa.Table":
-        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
-
-        Only applied when ``table_scope="pipeline_hash"`` because in that mode
-        multiple runs share the same DB table and must be disambiguated at read
-        time.  In ``"content_hash"`` mode every run has its own table so no
-        filtering is needed.
-        """
-        if self._table_scope != "pipeline_hash":
-            return table
-        col_name = constants.NODE_CONTENT_HASH_COL
-        if col_name not in table.column_names:
-            raise ValueError(
-                f"Cannot isolate records for table_scope='pipeline_hash': "
-                f"required column {col_name!r} is missing from the stored table. "
-                "This may indicate records written by an older version of the code."
-            )
-        own_hash = self.content_hash().to_prefixed_digest()
-        mask = pc.equal(table.column(col_name), own_hash)
-        return table.filter(mask)
 
     # ------------------------------------------------------------------
     # as_node — return the lightweight FunctionNode equivalent
@@ -1560,31 +1560,23 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         tag: TagProtocol,
         input_data: DataProtocol,
-    ) -> pa.Table:
+    ) -> "pa.Table":
         """Builds the shared Arrow preimage used by both entry-ID methods.
 
-        Combines the tag's system columns with the input data hash and
-        node content hash into a single-row Arrow table.
+        Delegates to the module-level ``_build_record_id_preimage()`` helper.
+        The preimage contains system-tag columns and ``INPUT_DATA_HASH_COL``
+        (``large_binary``).  ``NODE_CONTENT_HASH_COL`` is excluded — it is
+        redundant and fully determined by the table path and system tags.
 
         Args:
             tag: The tag datagram for the input row.
             input_data: The data datagram for the input row.
 
         Returns:
-            A single-row ``pa.Table`` with system-tag columns,
-            ``INPUT_DATA_HASH_COL``, and ``NODE_CONTENT_HASH_COL``.
+            A single-row ``pa.Table`` with system-tag columns and
+            ``INPUT_DATA_HASH_COL``.
         """
-        return (
-            tag.as_table(columns={"system_tags": True})
-            .append_column(
-                constants.INPUT_DATA_HASH_COL,
-                pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                constants.NODE_CONTENT_HASH_COL,
-                pa.array([self.content_hash().to_string()], type=pa.large_string()),
-            )
-        )
+        return _build_record_id_preimage(tag, input_data)
 
     def compute_base_entry_id(
         self,
@@ -1593,10 +1585,9 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> bytes:
         """Computes the stable (recomputation-index-free) entry ID for a (tag, data) pair.
 
-        This value is identical to the pre-ITL-508 ``compute_pipeline_entry_id`` output:
-        it hashes the tag's system columns plus ``INPUT_DATA_HASH_COL`` and
-        ``NODE_CONTENT_HASH_COL``. Because it excludes the recomputation index it is
-        stable across all recomputation attempts for the same logical input.
+        Hashes the tag's system-tag columns plus ``INPUT_DATA_HASH_COL`` (binary).
+        Because it excludes the recomputation index it is stable across all
+        recomputation attempts for the same logical input.
 
         The base entry ID is stored in ``_PIPELINE_BASE_ENTRY_ID_COL`` and will be
         used as the in-memory cache key and Phase 1 filter in subsequent tasks.
@@ -1630,8 +1621,7 @@ class FunctionJobNode(FunctionNodeBase):
         Existing pipeline DB records are implicitly invalidated — acceptable
         because the project is pre-v0.1.0.
 
-        ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
-        identical inputs each get a distinct entry ID, regardless of table scope.
+        The preimage is ``system_tags + INPUT_DATA_HASH_COL + recomputation_index``.
 
         Args:
             tag: The tag datagram for the input row.
@@ -1782,9 +1772,11 @@ class FunctionJobNode(FunctionNodeBase):
 
         Calls ``_fetch_joined_records`` to obtain the raw joined table, then
         applies ``ColumnConfig``-driven column dropping to produce a
-        user-facing result. ``_PIPELINE_ENTRY_ID_COL`` and
-        ``NODE_CONTENT_HASH_COL`` are always dropped — they are internal
-        discriminator columns, not user-facing data.
+        user-facing result. ``NODE_CONTENT_HASH_COL``, ``_PIPELINE_ENTRY_ID_COL``,
+        ``_PIPELINE_BASE_ENTRY_ID_COL``, and ``_PIPELINE_RECOMPUTATION_INDEX_COL``
+        are always dropped — they are internal discriminator columns, not
+        user-facing data. These columns are listed explicitly to ensure they are
+        dropped even when ``all_info=True`` (which skips the meta-prefix sweep).
 
         Does NOT populate the in-memory cache — see ``get_cached_results``
         for that.
@@ -1808,10 +1800,8 @@ class FunctionJobNode(FunctionNodeBase):
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
         # Always drop internal discriminator columns regardless of column_config.
-        # _PIPELINE_ENTRY_ID_COL starts with META_PREFIX so it is covered by
-        # the meta drop in the default case, but must be listed explicitly
-        # here so it is also dropped when all_info=True (which skips the
-        # meta-prefix sweep).
+        # Listing them explicitly ensures they are dropped even when all_info=True,
+        # which skips the meta-prefix sweep.
         drop_columns = [
             constants.NODE_CONTENT_HASH_COL,
             _PIPELINE_ENTRY_ID_COL,
@@ -1912,11 +1902,18 @@ class FunctionJobNode(FunctionNodeBase):
             return None
 
         taginfo_columns = tuple(taginfo.column_names)
-        taginfo = self._filter_by_content_hash(taginfo)
         taginfo_schema = taginfo.schema
 
         is_ephemeral_col = constants.IS_EPHEMERAL_COL
         taginfo_df = pl.DataFrame(taginfo)
+
+        # Per-node isolation: when sharing a pipeline table in pipeline_hash scope,
+        # filter to rows written by this node to prevent cross-node contamination.
+        if self._table_scope == "pipeline_hash":
+            own_hash = self.content_hash().to_prefixed_digest()
+            taginfo_df = taginfo_df.filter(
+                pl.col(constants.NODE_CONTENT_HASH_COL) == own_hash
+            )
 
         # Partition by IS_EPHEMERAL_COL (backward-compat: missing col → all persistent)
         if is_ephemeral_col in taginfo.column_names:

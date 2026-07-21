@@ -16,8 +16,10 @@ from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.core.base import TraceableBase
+from orcapod.core.nodes.function_node import _build_record_id_preimage
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -245,7 +247,6 @@ class SideEffectPodStream(StreamBase):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                node_content_hash_str=self._pod.content_hash().to_string(),
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -298,7 +299,6 @@ def _execute_side_effect_row(
     data: DataProtocol,
     pod_config: SideEffectPodConfig,
     pipeline_hash_ch: ContentHash,
-    node_content_hash_str: str,
     pod_name: str,
     run_id: str | None,
     arrow_hasher: Any,
@@ -308,13 +308,12 @@ def _execute_side_effect_row(
 ) -> tuple[TagProtocol, DataProtocol] | None:
     """Execute delivery for one (tag, data) row.
 
-    Computes a deterministic ``record_id`` from a preimage that matches
-    ``FunctionNode._build_entry_id_preimage`` plus a recomputation index of
-    ``0``.  The preimage covers:
+    Computes a deterministic ``record_id`` from a preimage built by
+    ``_build_record_id_preimage(tag, data)`` plus a fixed recomputation index
+    of ``0``.  The preimage covers:
 
     * tag system-tag columns,
-    * ``INPUT_DATA_HASH_COL`` — ``data.content_hash().to_string()``,
-    * ``NODE_CONTENT_HASH_COL`` (the pod's own content hash), and
+    * ``INPUT_DATA_HASH_COL`` (binary ``data.content_hash().to_prefixed_digest()``), and
     * ``_SIDE_EFFECT_RECOMPUTATION_INDEX_COL`` fixed at ``0`` (side effects
       never recompute).
 
@@ -328,9 +327,6 @@ def _execute_side_effect_row(
         data: Data for this row.
         pod_config: Pod-level configuration.
         pipeline_hash_ch: Pipeline hash of the node (for invocation_hash c1).
-        node_content_hash_str: ``pod.content_hash().to_string()`` — included in
-            the preimage as ``NODE_CONTENT_HASH_COL`` to scope the record ID
-            to this specific pod version.
         pod_name: Label of the pod.
         run_id: Pipeline run identifier (or ``None`` in standalone mode).
         arrow_hasher: The ``arrow_hasher`` from the pod's data context.
@@ -340,25 +336,11 @@ def _execute_side_effect_row(
     Returns:
         ``(tag, data)`` to emit downstream, or ``None`` to drop the row.
     """
-    from orcapod.system_constants import constants
-
-    # 1. Build the preimage — identical structure to FunctionNode._build_entry_id_preimage
-    #    (chained .append_column()) with the recomputation index appended last, matching
-    #    FunctionNode.compute_pipeline_entry_id at recomputation_index=0.
-    preimage = (
-        tag.as_table(columns={"system_tags": True})
-        .append_column(
-            constants.INPUT_DATA_HASH_COL,
-            pa.array([data.content_hash().to_string()], type=pa.large_string()),
-        )
-        .append_column(
-            constants.NODE_CONTENT_HASH_COL,
-            pa.array([node_content_hash_str], type=pa.large_string()),
-        )
-        .append_column(
-            _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
-            pa.array([0], type=pa.int32()),
-        )
+    # 1. Build the preimage — delegates to the shared helper used by FunctionJobNode.
+    #    Appends the recomputation index (fixed at 0; side effects never recompute).
+    preimage = _build_record_id_preimage(tag, data).append_column(
+        _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
+        pa.array([0], type=pa.int32()),
     )
     record_id_hash: ContentHash = arrow_hasher.hash_table(preimage)
     record_id: bytes = record_id_hash.to_prefixed_digest()
@@ -825,7 +807,6 @@ class SideEffectNode(StreamBase):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                node_content_hash_str=self._pod.content_hash().to_string(),
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -918,9 +899,8 @@ class SideEffectJobNode(SideEffectNode):
         """Attach or detach the pipeline database.
 
         Called by ``PipelineJob._distribute_databases()``. The table path is
-        ``self.node_uri + (f"schema:{self.pipeline_hash().to_string()}",)`` —
-        the same scoping convention used by ``FunctionNode`` and
-        ``OperatorNode``.
+        ``self.node_uri + (f"schema:{self.pipeline_hash().to_string()}", TRACKING_DB_SCHEMA_VERSION)``
+        — scoped by pipeline hash and tdb schema version.
 
         Args:
             pipeline_database: Pre-scoped pipeline DB (at pipeline root),
@@ -930,6 +910,7 @@ class SideEffectJobNode(SideEffectNode):
         if pipeline_database is not None:
             self._table_path = self.node_uri + (
                 f"schema:{self.pipeline_hash().to_string()}",
+                TRACKING_DB_SCHEMA_VERSION,
             )
         else:
             self._table_path = None
@@ -963,7 +944,6 @@ class SideEffectJobNode(SideEffectNode):
                 data=data,
                 pod_config=self._pod.pod_config,
                 pipeline_hash_ch=self.pipeline_hash(),
-                node_content_hash_str=self._pod.content_hash().to_string(),
                 pod_name=self._pod.label,
                 run_id=run_id,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
@@ -1023,7 +1003,6 @@ class SideEffectJobNode(SideEffectNode):
                         data=data,
                         pod_config=self._pod.pod_config,
                         pipeline_hash_ch=self.pipeline_hash(),
-                        node_content_hash_str=self._pod.content_hash().to_string(),
                         pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,

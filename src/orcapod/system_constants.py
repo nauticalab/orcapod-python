@@ -22,6 +22,7 @@ ENV_INFO = "env_info"
 IS_EPHEMERAL_COL = "is_ephemeral"
 PIPELINE_DB_SCHEMA_VERSION = "pdb_v1"
 RESULT_DB_SCHEMA_VERSION = "rdb_v1"
+TRACKING_DB_SCHEMA_VERSION = "tdb_v1"
 
 
 class SystemConstant:
@@ -78,7 +79,7 @@ class SystemConstant:
 
     @property
     def NODE_CONTENT_HASH_COL(self) -> str:
-        return f"{self._global_prefix}{DATAGRAM_PREFIX}{NODE_CONTENT_HASH_COL}"
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{NODE_CONTENT_HASH_COL}"
 
     @property
     def SYSTEM_TAG_PREFIX(self) -> str:
