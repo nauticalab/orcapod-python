@@ -2,8 +2,8 @@
 """SideEffectPod — pass-through pipeline node for side effects.
 
 Provides ``SideEffectPod``, ``SideEffectPodStream``, ``SideEffectJobNode``,
-``InvocationContext``, ``InvocationHashConfig``, ``SideEffectPodConfig``,
-and the ``side_effect_pod``, ``sink_pod``, ``tap_pod`` decorators.
+``SideEffectPodConfig``, and the ``side_effect_pod``, ``sink_pod``, ``tap_pod``
+decorators.
 """
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.invocation import (
     InvocationContext,
     InvocationHashConfig,
-    _serialize_component,
 )
 from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
 from orcapod.utils.lazy_module import LazyModule

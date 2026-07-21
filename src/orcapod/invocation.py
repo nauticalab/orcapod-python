@@ -75,6 +75,11 @@ class InvocationContext:
         pod_name: ``pod.label`` of the invoking pod.
         pipeline_run_id: The current pipeline run identifier, or ``None``
             for standalone / lazy pipelines.
+        _pipeline_hash_ch: Internal. Pipeline-level ``ContentHash`` component.
+        _record_id_hash_ch: Internal. Record-level ``ContentHash`` component.
+        _hash_config: Internal. Default encoding config for ``format_id``.
+        _track_completion: Internal. When ``True`` omits ``pipeline_run_id``
+            from the hash string.
     """
 
     def __init__(
