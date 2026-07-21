@@ -185,11 +185,8 @@ class _FunctionPodBase(TraceableBase):
         """
         import pyarrow as pa
         from orcapod.core.nodes.function_node import _build_record_id_preimage
-        from orcapod.side_effects import (
-            InvocationContext,
-            InvocationHashConfig,
-            _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
-        )
+        from orcapod.invocation import InvocationContext, InvocationHashConfig
+        from orcapod.side_effects import _SIDE_EFFECT_RECOMPUTATION_INDEX_COL
 
         preimage = _build_record_id_preimage(tag, data).append_column(
             _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
