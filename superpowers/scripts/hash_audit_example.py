@@ -178,7 +178,7 @@ def main() -> None:
 
     captured_ctx: list[InvocationContext] = []
 
-    def _log_fn(data, ctx: InvocationContext) -> None:  # noqa: ANN001
+    def _log_fn(ctx: InvocationContext, **kwargs) -> None:  # noqa: ANN001
         captured_ctx.append(ctx)
 
     side_pod = SideEffectPod(_log_fn, name="audit_logger")
@@ -190,3 +190,74 @@ def main() -> None:
         row_label = "alice" if i == 0 else "bob"
         sub(f"Site 10 — invocation_hash for {row_label}")
         print(f"    invocation_hash             = {ctx.invocation_hash!r}")
+
+    # ==================================================================
+    # [5]  DATA FUNCTION URI HASH  (site 11)
+    # ==================================================================
+    section("[5] DATA FUNCTION URI HASH")
+
+    sub("Site 11 — output_schema_hash embedded in data_function.uri")
+    print(f"    data_function.uri           = {data_fn.uri!r}")
+    print(f"    output_schema_hash (site 11)= {data_fn.uri[1]!r}")
+    print("    uri layout: (canonical_name, output_schema_hash, major_version, type_id)")
+
+    # ==================================================================
+    # [6]  PIPELINE RUN IDENTITY  (sites 12 + 13)
+    # ==================================================================
+    section("[6] PIPELINE RUN IDENTITY")
+
+    # Use a simple single-source pipeline so snapshot_hash is easy to reproduce.
+    @function_pod(output_keys="grade_simple")
+    def grade_simple(math: int) -> float:
+        return math * 0.7
+
+    simple_pod = grade_simple.pod
+    job_db = InMemoryArrowDatabase()
+
+    with PipelineJob(name="hash_audit", store=job_db) as job:
+        job_scores = DictSource(
+            [
+                {"student": "alice", "math": 90},
+                {"student": "bob",   "math": 75},
+            ],
+            tag_columns=["student"],
+            source_id="scores_v1",
+        )
+        simple_pod.process(job_scores)
+
+    job.run()
+
+    sub("Site 12 — run_id (non-deterministic UUID v4 truncated)")
+    print(f"    run_id                      = {job._run_id!r}  (random each run)")
+
+    sub("Site 13 — snapshot_hash (deterministic from leaf content hashes)")
+    # Reproduce PipelineJob.run() algorithm from the compiled node map.
+    # Edge (u_hash, v_hash): u is upstream → v is downstream.
+    # Leaf = node whose hash does NOT appear as the upstream (u) in any edge.
+    upstream_set = {u_hash for u_hash, _ in job._graph_edges}
+    leaf_hashes = sorted(
+        n.content_hash().to_string()
+        for h, n in job._persistent_node_map.items()
+        if h not in upstream_set and hasattr(n, "content_hash")
+    )
+    snapshot_hash = hashlib.sha256("\n".join(leaf_hashes).encode()).hexdigest()[:16]
+    print(f"    leaf node count             = {len(leaf_hashes)}")
+    for lh in leaf_hashes:
+        print(f"    leaf content_hash           = {lh!r}")
+    print(f"    snapshot_hash (site 13)     = {snapshot_hash!r}")
+    print(f"    pipeline_uri                = hash_audit@{snapshot_hash}")
+
+    # ==================================================================
+    # [14] DATAGRAM UUID
+    # ==================================================================
+    section("[14] DATAGRAM UUID")
+
+    sub("site 14 — datagram_uuid (time-ordered, not a content hash)")
+    print(f"    alice_data_j.datagram_uuid  = {alice_data_j.datagram_uuid}")
+    print(f"    bob_data_j.datagram_uuid    = {bob_data_j.datagram_uuid}")
+    print("    (UUIDs differ between runs — not reproducible)")
+    print()
+
+
+if __name__ == "__main__":
+    main()
