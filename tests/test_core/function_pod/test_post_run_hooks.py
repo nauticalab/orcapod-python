@@ -436,6 +436,8 @@ class TestDecoratorConvenience:
         assert hasattr(orcapod, "InvocationStatus")
         assert hasattr(orcapod, "RunStats")
         assert hasattr(orcapod, "PodContext")
+        assert hasattr(orcapod, "InvocationContext")
+        assert hasattr(orcapod, "InvocationHashConfig")
 
 
 # ---------------------------------------------------------------------------
