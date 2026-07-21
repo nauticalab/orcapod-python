@@ -97,3 +97,73 @@ The pipeline hash uses the same `SemanticAwarePythonHasher` with the **`pipeline
 > **Note:** `FunctionPod.ctx_arg_name` IS included in `content_hash()` (via `identity_structure()`). It is excluded only from `pipeline_identity_structure()`. This means a ctx-aware pod and a plain pod using the same underlying data function write to and read from the same pipeline DB table — but they have different `content_hash` values and therefore different per-row memoization keys.
 
 ---
+
+## 2. Source Provenance & System Tags
+
+When a source is built by `SourceStreamBuilder`, four hash-related operations happen in
+sequence before the stream is returned:
+
+1. **Site 3 — Schema hash:** computed from `(tag_schema, data_schema)`; embedded in system tag column names.
+2. **Site 4 — Default `source_id`:** derived from the raw table hash if no explicit `source_id` is given.
+3. **Site 5 — Per-row `record_id`:** a UUID v5 computed from `(source_id, row_provenance_token)` and stored per row.
+4. Two system tag columns, `_tag_source_id::{schema_hash}` and `_tag_record_id::{schema_hash}`, are appended to every row.
+
+At Join time (site 6), all existing system tag columns are **renamed** by appending a
+topology suffix, encoding the full join lineage into each column name.
+
+---
+
+### Site 3 — Schema hash
+
+| Field | Value |
+|---|---|
+| **Inputs** | `(tag_schema, data_schema)` — Python `Schema` objects mapping column names to Python types |
+| **Algorithm** | `SemanticAwarePythonHasher.hash_object((tag_schema, data_schema)).to_hex(schema_n_char)` where `schema_n_char = OrcapodConfig.hashing.schema_n_char` |
+| **Output format** | Truncated hex `str` (length = `schema_n_char`; `None` = full digest) |
+| **Uniqueness guarantee** | Unique per `(tag_schema, data_schema)` pair; two sources with identical schemas produce identically-named system tag columns, enabling consistent system tag lookup across sources of the same schema |
+| **Known exclusions** | No data content; no source identity; purely structural |
+
+---
+
+### Site 4 — Default `source_id`
+
+| Field | Value |
+|---|---|
+| **Inputs** | Full raw Arrow table (all columns, before any system tag injection) |
+| **Algorithm** | `StarfixArrowHasher.hash_table(table).to_hex(path_n_char)` — versioned SHA-256 via the `starfix` Rust crate |
+| **Output format** | Truncated hex `str` (length = `path_n_char`) |
+| **Uniqueness guarantee** | Unique per raw table content; changes if any cell value changes |
+| **Known exclusions** | Used **only** as a fallback when no explicit `source_id` is provided. A user-supplied `source_id` bypasses this computation entirely. |
+
+---
+
+### Site 5 — Per-row `record_id` (system tag value)
+
+| Field | Value |
+|---|---|
+| **Inputs** | `source_id` string + provenance token: `"{col}={value}"` when `record_id_column` is specified, otherwise `"row_{index}"` |
+| **Algorithm** | `uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, f"{source_id}::{provenance_token}")` where `_SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(NAMESPACE_URL, "orcapod::record_id")` is a fixed constant |
+| **Output format** | `bytes` (16 bytes, UUID v5 bit pattern), stored in a `pa.binary(16)` Arrow column |
+| **Uniqueness guarantee** | Deterministic per `(source_id, row_identity)`; stable across identical re-runs of the same source |
+| **Known exclusions** | When `record_id_column` is not specified, the row index is used as the provenance token; `record_id` changes if rows are **reordered** within the source table |
+
+---
+
+### Site 6 — Join system tag suffix
+
+| Field | Value |
+|---|---|
+| **Inputs** | `stream.pipeline_hash()` of each canonically-ordered input stream + its 0-based canonical position index `idx` |
+| **Algorithm** | Streams are first sorted by `stream.pipeline_hash().to_string()` for determinism. For each input at canonical position `idx`, every existing system tag column name has `{BLOCK_SEPARATOR}{stream.pipeline_hash().to_hex(n_char)}:{idx}` appended via `arrow_utils.append_to_system_tags()`. |
+| **Output format** | Column name suffix; no separate value is stored |
+| **Uniqueness guarantee** | Each post-join system tag column name uniquely identifies `(original schema, input topology, canonical join position)`; no collision even when joining streams with identical schemas |
+| **Known exclusions** | `SemiJoin` passes system tags through unchanged. `Batch` changes the column type from `str` to `list[str]` but preserves the column name. |
+
+> **Key insight for entry IDs:** Because `compute_base_entry_id()` (§3) calls
+> `tag.as_table(columns={"system_tags": True})`, its preimage captures the full set of
+> chained system tag column names. After a two-way join, the preimage contains four system
+> tag columns — two per input — each with the join topology embedded in its name. The entry
+> ID therefore implicitly commits to the complete join provenance graph without any
+> join-awareness in the entry ID computation itself.
+
+---
