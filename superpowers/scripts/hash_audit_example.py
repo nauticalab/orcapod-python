@@ -142,3 +142,51 @@ def main() -> None:
     alice_joined_sys = alice_tag_j.as_table(columns={"system_tags": True})
     print(f"    post-join system tag cols   = {alice_joined_sys.schema.names!r}")
     print("    (each original col name → col name + '::{pipeline_hash}:{idx}')")
+
+    # ==================================================================
+    # [3]  PIPELINE DB ENTRY KEYS  (sites 7 + 8)
+    # ==================================================================
+    section("[3] PIPELINE DB ENTRY KEYS (FunctionJobNode)")
+
+    db_for_node = InMemoryArrowDatabase()
+    node = FunctionJobNode(
+        function_pod=pod,
+        input_stream=joined,
+        pipeline_database=db_for_node,
+    )
+
+    sub("Site 7 — compute_base_entry_id() — recomputation-index-free")
+    alice_base = node.compute_base_entry_id(alice_tag_j, alice_data_j)
+    bob_base   = node.compute_base_entry_id(bob_tag_j, bob_data_j)
+    print(f"    alice base_entry_id (hex)   = {alice_base.hex()!r}")
+    print(f"    bob   base_entry_id (hex)   = {bob_base.hex()!r}")
+
+    sub("Site 8 — compute_pipeline_entry_id() — includes recomputation_index=0")
+    alice_pipe = node.compute_pipeline_entry_id(alice_tag_j, alice_data_j, recomputation_index=0)
+    bob_pipe   = node.compute_pipeline_entry_id(bob_tag_j, bob_data_j,   recomputation_index=0)
+    print(f"    alice pipeline_entry_id (hex) = {alice_pipe.hex()!r}")
+    print(f"    bob   pipeline_entry_id (hex) = {bob_pipe.hex()!r}")
+
+    sub("FunctionJobNode hashes")
+    print(f"    node.content_hash()         = {node.content_hash()}")
+    print(f"    node.pipeline_hash()        = {node.pipeline_hash()}")
+
+    # ==================================================================
+    # [4]  SIDE-EFFECT RECORD ID & INVOCATION HASH  (sites 9 + 10)
+    # ==================================================================
+    section("[4] SIDE-EFFECT RECORD ID & INVOCATION HASH")
+
+    captured_ctx: list[InvocationContext] = []
+
+    def _log_fn(data, ctx: InvocationContext) -> None:  # noqa: ANN001
+        captured_ctx.append(ctx)
+
+    side_pod = SideEffectPod(_log_fn, name="audit_logger")
+    side_stream = side_pod.process(joined)
+    for _ in side_stream.iter_data():  # trigger execution to populate captured_ctx
+        pass
+
+    for i, ctx in enumerate(captured_ctx):
+        row_label = "alice" if i == 0 else "bob"
+        sub(f"Site 10 — invocation_hash for {row_label}")
+        print(f"    invocation_hash             = {ctx.invocation_hash!r}")
