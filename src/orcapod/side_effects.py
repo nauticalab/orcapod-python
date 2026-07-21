@@ -16,6 +16,7 @@ from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.core.base import TraceableBase
+from orcapod.core.nodes.function_node import _build_record_id_preimage
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
@@ -335,8 +336,6 @@ def _execute_side_effect_row(
     Returns:
         ``(tag, data)`` to emit downstream, or ``None`` to drop the row.
     """
-    from orcapod.core.nodes.function_node import _build_record_id_preimage
-
     # 1. Build the preimage — delegates to the shared helper used by FunctionJobNode.
     #    Appends the recomputation index (fixed at 0; side effects never recompute).
     preimage = _build_record_id_preimage(tag, data).append_column(
@@ -1004,7 +1003,7 @@ class SideEffectJobNode(SideEffectNode):
                         data=data,
                         pod_config=self._pod.pod_config,
                         pipeline_hash_ch=self.pipeline_hash(),
-                                pod_name=self._pod.label,
+                        pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,
                         ctx_arg_name=self._pod.ctx_arg_name,
