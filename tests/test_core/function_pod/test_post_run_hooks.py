@@ -18,6 +18,7 @@ from orcapod.core.function_pod import FunctionPod, function_pod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.hooks import HookConfig, InvocationStatus, PostRunPayload
+from orcapod import InvocationHashConfig
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +436,100 @@ class TestDecoratorConvenience:
         assert hasattr(orcapod, "InvocationStatus")
         assert hasattr(orcapod, "RunStats")
         assert hasattr(orcapod, "PodContext")
+
+
+# ---------------------------------------------------------------------------
+# InvocationContext on PostRunPayload (ITL-531)
+# ---------------------------------------------------------------------------
+
+
+class TestInvocationContextOnPayload:
+    def test_invocation_context_always_present(self):
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = pod.process(_make_stream(n=1))
+        list(stream.iter_data())
+
+        assert payloads[0].invocation_context is not None
+
+    def test_invocation_hash_is_nonempty_string(self):
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = pod.process(_make_stream(n=1))
+        list(stream.iter_data())
+
+        ctx = payloads[0].invocation_context
+        assert isinstance(ctx.invocation_hash, str)
+        assert len(ctx.invocation_hash) > 0
+
+    def test_format_id_matches_invocation_hash(self):
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = pod.process(_make_stream(n=1))
+        list(stream.iter_data())
+
+        ctx = payloads[0].invocation_context
+        assert ctx.format_id() == ctx.invocation_hash
+
+    def test_format_id_base64_differs_from_hex(self):
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = pod.process(_make_stream(n=1))
+        list(stream.iter_data())
+
+        ctx = payloads[0].invocation_context
+        hex_id = ctx.invocation_hash
+        b64_id = ctx.format_id(InvocationHashConfig(encoding="base64"))
+        assert hex_id != b64_id
+
+    def test_pipeline_run_id_is_none_standalone(self):
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        stream = pod.process(_make_stream(n=1))
+        list(stream.iter_data())
+
+        assert payloads[0].invocation_context.pipeline_run_id is None
+
+    def test_invocation_hash_deterministic(self):
+        pod = _make_double_pod()
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(payloads.append)
+
+        # Process the same input stream twice
+        stream1 = pod.process(_make_stream(n=1))
+        list(stream1.iter_data())
+        stream2 = pod.process(_make_stream(n=1))
+        list(stream2.iter_data())
+
+        assert len(payloads) == 2
+        assert (
+            payloads[0].invocation_context.invocation_hash
+            == payloads[1].invocation_context.invocation_hash
+        )
+
+    def test_error_payload_has_invocation_context(self):
+        def explodes(x: int) -> int:
+            raise RuntimeError("boom")
+
+        pf = PythonDataFunction(explodes, output_keys="result")
+        pod = FunctionPod(pf)
+        payloads: list[PostRunPayload] = []
+        pod.add_post_run_hook(HookConfig(fn=payloads.append, on_error="log"))
+
+        stream = pod.process(_make_stream(n=1))
+        with pytest.raises(RuntimeError, match="boom"):
+            list(stream.iter_data())
+
+        assert len(payloads) == 1
+        assert payloads[0].invocation_context is not None
+        assert isinstance(payloads[0].invocation_context.invocation_hash, str)
