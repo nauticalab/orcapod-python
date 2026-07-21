@@ -286,3 +286,73 @@ Then, at Join time, site 6 renames all existing system tag columns by appending 
 | Output format | `uuid.UUID` |
 | Uniqueness guarantee | Unique per datagram instance; time-ordered (monotonically increasing within a process) |
 | Known exclusions | **Not a content hash** — two datagrams with identical content have different UUIDs; not used in any hash preimage; serves as an object identity token, not a content fingerprint |
+
+---
+
+### Section 7: Worked Example
+
+**Format:** Inline Python code + prose annotations + concrete hash value table. This section is
+the only one that requires running actual code as part of authoring. A helper script at
+`superpowers/scripts/hash_audit_example.py` produces all values and must be re-run whenever
+the hashing implementation changes.
+
+#### Example pipeline
+
+A minimal pipeline that exercises all 14 hash sites:
+
+```
+scores  = DictSource([{"student": "alice", "math": 90},
+                      {"student": "bob",   "math": 75}],
+                     tag_columns=["student"])
+
+attendance = DictSource([{"student": "alice", "days": 180},
+                         {"student": "bob",   "days": 160}],
+                        tag_columns=["student"])
+
+joined = Join()(scores, attendance)        # exercises sites 3–6
+
+@orcapod  (or PythonDataFunction)
+def grade(math, days) -> {"grade": float}:
+    return {"grade": math * 0.7 + days / 180 * 30}
+
+pod    = FunctionPod(grade_fn)
+stream = pod(joined)                       # exercises sites 1, 2, 11
+node   = FunctionJobNode(pod, joined, db)  # exercises sites 7, 8
+
+side_effect_pod = SideEffectPod(log_fn)    # exercises sites 9, 10
+
+job = PipelineJob(...)                     # exercises sites 12, 13
+```
+
+Data rows: two students (`alice`, `bob`). Fixed seed / explicit `source_id` values
+used to make all hashes fully deterministic and reproducible in the doc.
+
+#### What the example shows per section
+
+| Section | Hash sites exercised | What is shown |
+|---------|---------------------|---------------|
+| Section 1 | 1, 2 | `content_hash()` and `pipeline_hash()` of source, joined stream, pod, and node; how values differ between alice and bob rows |
+| Section 2 | 3, 4, 5, 6 | Actual system tag column names with embedded schema hash; record_id bytes for each row; post-join column names with pipeline hash suffix |
+| Section 3 | 7, 8 | Concrete entry ID bytes for alice and bob at recomputation_index 0 |
+| Section 4 | 9, 10 | Full `invocation_hash` strings for each delivery |
+| Section 5 | 11 | The output schema hash string embedded in the function's URI |
+| Section 6 | 12, 13, 14 | A sample run_id, snapshot_hash, and datagram_uuid (14 noted as non-deterministic) |
+
+#### Helper script
+
+`superpowers/scripts/hash_audit_example.py` — a standalone runnable script that:
+1. Constructs the example pipeline with explicit `source_id="scores_v1"` and
+   `source_id="attendance_v1"` so all content hashes are deterministic.
+2. Iterates the joined stream and prints all system tag column names and values.
+3. Runs the `FunctionNode` with an `InMemoryArrowDatabase` and captures entry IDs.
+4. Runs the `SideEffectPod` and captures `invocation_hash` strings.
+5. Runs `PipelineJob` and captures `run_id` and `snapshot_hash`.
+6. Prints all values in a structured format suitable for copy-paste into the doc.
+
+Run with: `uv run python superpowers/scripts/hash_audit_example.py`
+
+#### Placement in `docs/reference/hashing.md`
+
+The worked example appears **after the Hash Site Index and before Section 1**, so a reader
+gets concrete intuition before the detailed per-site reference. Each of Sections 1–6 then
+cross-references the relevant rows of the worked example output table.
