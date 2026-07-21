@@ -216,3 +216,39 @@ the row.
 | **Known exclusions** | At `recomputation_index=0` this produces a hash that differs from the pre-ITL-508 implementation (the index column is now part of the preimage); existing pipeline DB records were intentionally invalidated when ITL-508 landed |
 
 ---
+
+## 4. Side-Effect Record ID & Invocation Hash
+
+Side-effect pods (and `FunctionPod` instances with a `ctx_arg_name`) use a parallel but
+distinct record key scheme. The key difference from §3 is the inclusion of
+`NODE_CONTENT_HASH_COL` in the preimage — so that changing the pod's implementation
+invalidates prior delivery records, even for identical inputs.
+
+The `invocation_hash` string is composed from two `ContentHash` components and exposed to
+the pod function as an idempotency key via `InvocationContext.invocation_hash`.
+
+---
+
+### Site 9 — Side-effect `record_id`
+
+| Field | Value |
+|---|---|
+| **Inputs** | System tags + `INPUT_DATA_HASH_COL` (as `pa.large_string()`) + `NODE_CONTENT_HASH_COL` (pod's `content_hash().to_string()`, as `pa.large_string()`) + `_SIDE_EFFECT_RECOMPUTATION_INDEX_COL` (fixed `0`, `pa.int32()`) |
+| **Algorithm** | `StarfixArrowHasher.hash_table(preimage)` |
+| **Output format** | `ContentHash`; `.to_prefixed_digest()` → `bytes` when stored in the delivery log |
+| **Uniqueness guarantee** | Unique per `(tag lineage, input_data content, pod version)`. Recomputation index is always `0` — side-effect pods do not version recomputations. |
+| **Known exclusions** | Unlike sites 7–8, this includes `NODE_CONTENT_HASH_COL` — a deliberate difference ensuring that changing the pod's version invalidates the delivery record even for unchanged inputs |
+
+---
+
+### Site 10 — `invocation_hash`
+
+| Field | Value |
+|---|---|
+| **Inputs** | `pipeline_hash_ch` — the `SideEffectPodStream`'s `pipeline_hash()` as `ContentHash` + `record_id_hash_ch` — the `ContentHash` from site 9 |
+| **Algorithm** | `f"{serialize(pipeline_hash_ch)}::{serialize(record_id_hash_ch)}"` where each component is serialised as `f"{method}:{hex_or_base64_digest}"` via `InvocationHashConfig` (default: hex, full digest) |
+| **Output format** | `str` of the form `"{method}:{digest}::{method}:{digest}"` |
+| **Uniqueness guarantee** | Unique per `(pod topology, tag lineage, input_data content, pod version)`; exposed to pod functions as an idempotency key |
+| **Known exclusions** | When `track_completion=True` (default): `run_id` is **excluded** — hash is run-independent for idempotency. When `track_completion=False` **and** `pipeline_run_id` is set: `run_id` is appended as a third `::` component so that each run produces a distinct hash. |
+
+---
