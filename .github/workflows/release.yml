@@ -14,6 +14,22 @@ on:
         default: main
 
 jobs:
+  validate-branch:
+    name: Validate release branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check branch exists on origin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="${{ inputs.branch }}"
+          if ! gh api "repos/${{ github.repository }}/branches/${BRANCH}" --silent 2>/dev/null; then
+            echo "::error::Branch '${BRANCH}' does not exist. Check for typos."
+            exit 1
+          fi
+          echo "Branch '${BRANCH}' confirmed."
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
