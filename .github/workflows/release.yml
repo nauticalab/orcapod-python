@@ -7,6 +7,11 @@ on:
         description: 'Release version (e.g. 0.1.0 or v0.1.0 — leading v is stripped automatically)'
         required: true
         type: string
+      branch:
+        description: 'Branch to cut the release from (defaults to main)'
+        required: false
+        type: string
+        default: main
 
 jobs:
   test:
