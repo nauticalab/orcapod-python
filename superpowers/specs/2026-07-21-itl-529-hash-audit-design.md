@@ -95,14 +95,15 @@ Per-class `identity_structure()` table:
 | Operators (unary) | `(operator_class_name, upstream_stream)` | Stream reference recursed via `content_resolver` |
 | Operators (binary/N-ary) | `(operator_class_name, argument_symmetry(streams))` | `frozenset` for commutative (Join, MergeJoin); `tuple` for ordered (SemiJoin) |
 
-Known exclusions table:
+Known exclusions table (`content_hash()` / `identity_structure()`):
 
 | Class | Excluded from `identity_structure()` | Reason |
 |-------|--------------------------------------|--------|
 | `Tag` | System tag columns (`_tag::*`) | System tags are provenance metadata, not tag content |
 | `Data` | Source info columns (`_source_*`) | Source info is provenance metadata, not data content |
-| `FunctionPod` | `ctx_arg_name` in pipeline identity (see pipeline section) | Discussed below |
-| `EmptyData` | Everything (identity raises) | `EmptyData` has no data payload to hash |
+| `EmptyData` | Everything (identity raises) | `EmptyData` has no data payload to hash; `content_hash()` is overridden to return a stored hash directly |
+
+Note: `FunctionPod.ctx_arg_name` IS included in `identity_structure()` (and therefore in `content_hash()`). It is excluded only from `pipeline_identity_structure()` — see the pipeline hash subsection below.
 
 **`pipeline_hash()` subsection:**
 
