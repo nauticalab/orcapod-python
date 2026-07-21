@@ -463,10 +463,10 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         semantic_hasher = self.data_context.semantic_hasher
         self._function_signature_hash = semantic_hasher.hash_object(
             get_function_signature(function)
-        ).to_string()
+        ).to_prefixed_digest()
         self._function_content_hash = semantic_hasher.hash_object(
             get_function_components(self._function)
-        ).to_string()
+        ).to_prefixed_digest()
 
     @property
     def canonical_function_name(self) -> str:
@@ -486,8 +486,8 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         """Schema for the data returned by ``get_function_variation_data``."""
         return Schema({
             "function_name": str,
-            "function_signature_hash": str,
-            "function_content_hash": str,
+            "function_signature_hash": bytes,
+            "function_content_hash": bytes,
             "git_hash": str,
         })
 
