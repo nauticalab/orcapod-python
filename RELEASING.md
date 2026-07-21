@@ -24,12 +24,12 @@ Releases are triggered from the GitHub Actions UI — no manual `git tag` step r
 3. **CI takes over** — the workflow runs the following jobs automatically:
 
    ```
-      test ──────────┐
-   license-check ────┤─ build ─┬─ publish-testpypi ─ publish-pypi ─┐
-                               └─ linear-sync ─────────────────────┴─ linear-complete
+   validate-branch ─┬─ test ──────────┐
+                    └─ license-check ──┤─ build ─┬─ publish-testpypi ─ publish-pypi ─┐
+                                                 └─ linear-sync ──────────────────────┴─ linear-complete
    ```
 
-   - Pre-flight: tests on Python 3.11 and 3.12, plus license check (in parallel)
+   - Pre-flight: branch validation, then tests on Python 3.11 and 3.12 and license check (parallel after validation)
    - Build: normalises version, creates local tag, builds wheel + sdist, pushes tag to origin
    - TestPyPI: publishes to test.pypi.org first as a staging step
    - PyPI: publishes to pypi.org and creates a GitHub Release with generated release notes
