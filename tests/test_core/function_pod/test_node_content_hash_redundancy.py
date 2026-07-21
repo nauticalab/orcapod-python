@@ -215,14 +215,19 @@ class TestPreimageShape:
         )
 
     def test_node_content_hash_lockstep_with_base_entry_id(self, double_pf):
-        """NODE_CONTENT_HASH_COL is always in lockstep with base_entry_id.
+        """node_content_hash is always in lockstep with base_entry_id.
 
         Same input (same source_id, same data) → same base_entry_id AND
-        same NODE_CONTENT_HASH_COL.  There is no case where one differs
+        same node content_hash.  There is no case where one differs
         without the other differing too: ArrowTableSource.identity_structure()
         = (class_name, schema, source_id), so equal source_ids + equal schemas
         always produce equal source content_hashes and therefore equal node
         content_hashes.
+
+        After ITL-533, NODE_CONTENT_HASH_COL is no longer part of the preimage.
+        The lockstep property is verified by comparing node.content_hash()
+        directly, which is still well-defined and identical for nodes built from
+        the same source.
         """
         db = InMemoryArrowDatabase()
         src = _make_source_stream([10, 20, 30])
@@ -239,20 +244,20 @@ class TestPreimageShape:
         )
 
         # Both nodes have the same content_hash (same source object → same upstream)
-        assert node1.content_hash() == node2.content_hash()
+        nch1 = node1.content_hash()
+        nch2 = node2.content_hash()
+        assert nch1 == nch2, "Nodes built from the same source must have the same content_hash."
 
         for tag, data in src.iter_data():
             eid1 = node1.compute_base_entry_id(tag, data)
             eid2 = node2.compute_base_entry_id(tag, data)
             # Same input → same base_entry_id ...
             assert eid1 == eid2
-            # ... and same NODE_CONTENT_HASH_COL — the two are inseparable.
-            p1 = node1._build_entry_id_preimage(tag, data)
-            p2 = node2._build_entry_id_preimage(tag, data)
-            nch1 = p1.column(constants.NODE_CONTENT_HASH_COL)[0].as_py()
-            nch2 = p2.column(constants.NODE_CONTENT_HASH_COL)[0].as_py()
-            assert nch1 == nch2, (
-                "NODE_CONTENT_HASH_COL must be identical when base_entry_id is identical."
+            # ... and node content_hash values are also equal — the two are inseparable.
+            # (NODE_CONTENT_HASH_COL is no longer in the preimage after ITL-533;
+            # node.content_hash() is the canonical way to verify this invariant.)
+            assert node1.content_hash() == node2.content_hash(), (
+                "node content_hash must be identical when base_entry_id is identical."
             )
 
 

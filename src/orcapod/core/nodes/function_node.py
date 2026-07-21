@@ -80,6 +80,31 @@ _PIPELINE_BASE_ENTRY_ID_COL = "__pipeline_base_entry_id"
 # 0 for the first computation, N+1 for each miss-triggered recompute.
 _PIPELINE_RECOMPUTATION_INDEX_COL = "__pipeline_recomputation_index"
 
+
+def _build_record_id_preimage(
+    tag: "TagProtocol",
+    input_data: "DataProtocol",
+) -> "pa.Table":
+    """Build the Arrow preimage table for record_id / base_entry_id computation.
+
+    Combines the tag's system-tag columns with the binary input data hash into a
+    single-row Arrow table.  ``NODE_CONTENT_HASH_COL`` is intentionally excluded —
+    it is redundant (fully determined by the table path + system tags).
+
+    Args:
+        tag: The tag datagram for the input row.
+        input_data: The data datagram for the input row.
+
+    Returns:
+        A single-row ``pa.Table`` with system-tag columns and
+        ``INPUT_DATA_HASH_COL`` (``large_binary``).
+    """
+    return tag.as_table(columns={"system_tags": True}).append_column(
+        constants.INPUT_DATA_HASH_COL,
+        pa.array([input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()),
+    )
+
+
 # Private meta-column name stamped into tags routed to the compute channel.
 # Carries the correlation key (bytes) that links an execution result back to
 # its original (tag, input_data) pair. Stripped from output tags in
@@ -1563,28 +1588,20 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> pa.Table:
         """Builds the shared Arrow preimage used by both entry-ID methods.
 
-        Combines the tag's system columns with the input data hash and
-        node content hash into a single-row Arrow table.
+        Delegates to the module-level ``_build_record_id_preimage()`` helper.
+        The preimage contains system-tag columns and ``INPUT_DATA_HASH_COL``
+        (``large_binary``).  ``NODE_CONTENT_HASH_COL`` is excluded — it is
+        redundant and fully determined by the table path and system tags.
 
         Args:
             tag: The tag datagram for the input row.
             input_data: The data datagram for the input row.
 
         Returns:
-            A single-row ``pa.Table`` with system-tag columns,
-            ``INPUT_DATA_HASH_COL``, and ``NODE_CONTENT_HASH_COL``.
+            A single-row ``pa.Table`` with system-tag columns and
+            ``INPUT_DATA_HASH_COL``.
         """
-        return (
-            tag.as_table(columns={"system_tags": True})
-            .append_column(
-                constants.INPUT_DATA_HASH_COL,
-                pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                constants.NODE_CONTENT_HASH_COL,
-                pa.array([self.content_hash().to_string()], type=pa.large_string()),
-            )
-        )
+        return _build_record_id_preimage(tag, input_data)
 
     def compute_base_entry_id(
         self,
@@ -1593,10 +1610,9 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> bytes:
         """Computes the stable (recomputation-index-free) entry ID for a (tag, data) pair.
 
-        This value is identical to the pre-ITL-508 ``compute_pipeline_entry_id`` output:
-        it hashes the tag's system columns plus ``INPUT_DATA_HASH_COL`` and
-        ``NODE_CONTENT_HASH_COL``. Because it excludes the recomputation index it is
-        stable across all recomputation attempts for the same logical input.
+        Hashes the tag's system-tag columns plus ``INPUT_DATA_HASH_COL`` (binary).
+        Because it excludes the recomputation index it is stable across all
+        recomputation attempts for the same logical input.
 
         The base entry ID is stored in ``_PIPELINE_BASE_ENTRY_ID_COL`` and will be
         used as the in-memory cache key and Phase 1 filter in subsequent tasks.
@@ -1630,8 +1646,7 @@ class FunctionJobNode(FunctionNodeBase):
         Existing pipeline DB records are implicitly invalidated — acceptable
         because the project is pre-v0.1.0.
 
-        ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
-        identical inputs each get a distinct entry ID, regardless of table scope.
+        The preimage is ``system_tags + INPUT_DATA_HASH_COL + recomputation_index``.
 
         Args:
             tag: The tag datagram for the input row.
