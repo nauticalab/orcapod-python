@@ -167,3 +167,52 @@ topology suffix, encoding the full join lineage into each column name.
 > join-awareness in the entry ID computation itself.
 
 ---
+
+## 3. Pipeline DB Entry Keys
+
+`FunctionJobNode` uses two related Arrow-based hashes as database primary keys. Both are
+computed by `StarfixArrowHasher` over a single-row preimage table.
+
+The **base entry ID** (site 7) is stable across all recomputation attempts for the same
+logical input — it is used as an in-memory cache key and for Phase 1 DB lookups. The
+**pipeline entry ID** (site 8) adds a `recomputation_index` column and is the actual
+primary key stored in the pipeline DB.
+
+The preimage for both sites is built by `_build_record_id_preimage(tag, input_data)`:
+
+```
+preimage = tag.as_table(columns={"system_tags": True})
+         .append_column(INPUT_DATA_HASH_COL,
+                        pa.array([input_data.content_hash().to_prefixed_digest()],
+                                 type=pa.large_binary()))
+```
+
+Because `tag.as_table(columns={"system_tags": True})` includes all chained system tag
+columns (see §2, site 6), the preimage implicitly captures the full join provenance of
+the row.
+
+---
+
+### Site 7 — `compute_base_entry_id()`
+
+| Field | Value |
+|---|---|
+| **Inputs** | All system tag columns from `tag.as_table(columns={"system_tags": True})` (including join-chained columns) + `INPUT_DATA_HASH_COL` (`input_data.content_hash().to_prefixed_digest()` as `pa.large_binary()`) |
+| **Algorithm** | `StarfixArrowHasher.hash_table(preimage).to_prefixed_digest()` — single-row Arrow table hash |
+| **Output format** | `bytes` in `b"{method}:{digest}"` format |
+| **Uniqueness guarantee** | Unique per `(node, tag lineage, input_data content)` across all recomputation attempts; used as the in-memory cache key and Phase 1 DB filter |
+| **Known exclusions** | `NODE_CONTENT_HASH_COL` excluded — the node's content hash is fully determined by the pipeline DB table path (scoped by `pipeline_hash()`). Recomputation index excluded by design — use site 8 for a versioned key. |
+
+---
+
+### Site 8 — `compute_pipeline_entry_id()`
+
+| Field | Value |
+|---|---|
+| **Inputs** | Same preimage as site 7 + `_PIPELINE_RECOMPUTATION_INDEX_COL` (value: `recomputation_index`, type `pa.int32()`; default `0`) |
+| **Algorithm** | `StarfixArrowHasher.hash_table(preimage).to_prefixed_digest()` |
+| **Output format** | `bytes` in `b"{method}:{digest}"` format |
+| **Uniqueness guarantee** | Unique per `(node, tag lineage, input_data content, recomputation attempt)` — the primary key for all rows in the pipeline DB |
+| **Known exclusions** | At `recomputation_index=0` this produces a hash that differs from the pre-ITL-508 implementation (the index column is now part of the preimage); existing pipeline DB records were intentionally invalidated when ITL-508 landed |
+
+---
