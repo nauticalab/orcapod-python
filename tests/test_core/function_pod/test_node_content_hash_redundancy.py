@@ -516,3 +516,73 @@ class TestLockstepPropertyRandomized:
             f"  second key: {violations[0][2]!r}"
         )
 
+
+# ---------------------------------------------------------------------------
+# tdb versioning: SideEffectJobNode must use TRACKING_DB_SCHEMA_VERSION suffix
+# ---------------------------------------------------------------------------
+
+
+class TestTdbVersioning:
+    """``SideEffectJobNode.attach_databases()`` must write to the tdb_v1 path."""
+
+    def test_tdb_v1_path_used_after_attach(self):
+        """After attaching a DB, ``_table_path`` ends with ``TRACKING_DB_SCHEMA_VERSION``."""
+        import pyarrow as pa
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.databases import InMemoryArrowDatabase
+        from orcapod.side_effects import SideEffectJobNode, SideEffectPod
+        from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
+
+        table = pa.table({"x": pa.array([1], type=pa.int64())})
+        source = ArrowTableSource(table=table, tag_columns=[], infer_nullable=True)
+
+        def noop(x: int, ctx=None) -> None:
+            pass
+
+        pod = SideEffectPod(fn=noop, ctx_arg_name="ctx")
+        node = SideEffectJobNode(side_effect_pod=pod, input_stream=source)
+        db = InMemoryArrowDatabase()
+        node.attach_databases(db)
+
+        assert node._table_path is not None
+        assert node._table_path[-1] == TRACKING_DB_SCHEMA_VERSION, (
+            f"Expected _table_path to end with {TRACKING_DB_SCHEMA_VERSION!r}; "
+            f"got: {node._table_path!r}"
+        )
+
+    def test_tdb_v0_entries_not_visible_to_new_code(self):
+        """Entries written at the bare (tdb_v0) path are not seen by the new code.
+
+        ``SideEffectJobNode`` now reads/writes at ``...(tdb_v1,)`` — any entries
+        at the old bare path are orphaned and cause no error.
+        """
+        import pyarrow as pa
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.databases import InMemoryArrowDatabase
+        from orcapod.side_effects import SideEffectJobNode, SideEffectPod
+
+        table = pa.table({"x": pa.array([1], type=pa.int64())})
+        source = ArrowTableSource(table=table, tag_columns=[], infer_nullable=True)
+
+        def noop(x: int, ctx=None) -> None:
+            pass
+
+        pod = SideEffectPod(fn=noop, ctx_arg_name="ctx")
+        node = SideEffectJobNode(side_effect_pod=pod, input_stream=source)
+        db = InMemoryArrowDatabase()
+
+        # Write a fake "completed" entry at the OLD bare path (tdb_v0 location).
+        old_path = node.node_uri + (f"schema:{node.pipeline_hash().to_string()}",)
+        fake_record_id = b"\xde\xad" * 8
+        fake_row = pa.table({"record_id_hash": pa.array(["old_hash"], type=pa.large_string())})
+        db.add_record(old_path, fake_record_id, fake_row)
+
+        # Attach — the new code uses the tdb_v1 path, not old_path.
+        node.attach_databases(db)
+
+        # The new _table_path is different from old_path → old entry is orphaned.
+        assert node._table_path != old_path, (
+            "New _table_path must differ from tdb_v0 bare path; old entries are orphaned."
+        )
+        # No error raised — orphaned entries are silently ignored.
+
