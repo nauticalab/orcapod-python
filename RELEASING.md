@@ -53,9 +53,11 @@ workflow.
 
 1. **Trigger the release workflow** — go to
    **[Actions → Release → Run workflow](https://github.com/nauticalab/orcapod-python/actions/workflows/release.yml)**
-2. Set **Version** to `0.1.1`
-3. Set **Branch** to `hotfix/0.1.x`
-4. Click **Run workflow**
+2. In the **Use workflow from** dropdown, keep `main` selected (so the workflow version
+   includes the `Branch` field — do not select `hotfix/0.1.x` here)
+3. Set **Version** to `0.1.1`
+4. Set **Branch** to `hotfix/0.1.x`
+5. Click **Run workflow**
 
 The workflow will confirm the branch exists, run tests against it, create the `v0.1.1`
 tag at its tip, and publish to PyPI — identical to a normal release.
