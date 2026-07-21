@@ -1,11 +1,18 @@
 """Tests proving NODE_CONTENT_HASH_COL is redundant in the record_id preimage.
 
-Includes a randomised lockstep suite (≥100 examples) that empirically verifies:
+Includes a randomised lockstep suite (≥100 examples) that empirically verifies the
+two invariants that matter for correctness (within the default
+``table_scope='pipeline_hash'`` configuration):
 
-  1. Forward:  same (pipeline_hash, system_tags) → same node_content_hash.
-  2. Backward: different node_content_hash       → different (pipeline_hash, system_tags).
+  1. node_content_hash changes → record_id (pipeline_hash, system_tags) changes.
+  2. record_id unchanged        → node_content_hash unchanged (contrapositive of 1).
 
-These two directions together confirm that NODE_CONTENT_HASH_COL is fully determined
+Note that the converse does NOT hold in general: the record_id preimage is more
+sensitive than node_content_hash, so a record_id can change without the
+node_content_hash changing (e.g. when a different table_scope is used).  These
+tests stay within the default ``table_scope='pipeline_hash'``.
+
+Together, properties 1 and 2 confirm that NODE_CONTENT_HASH_COL is fully determined
 by information already present in every stored record and is therefore redundant.
 
 This module is an investigation artefact for ITL-533. It demonstrates two
@@ -393,10 +400,12 @@ class TestFilterByContentHashIsNoOp:
 # ---------------------------------------------------------------------------
 # Randomised lockstep suite (≥100 examples)
 #
-# Empirically verifies the bidirectional lockstep property:
+# Empirically verifies the two invariants within table_scope='pipeline_hash':
 #
-#   1. Forward:  same (pipeline_hash, system_tags) → same node_content_hash.
-#   2. Backward: different node_content_hash       → different (pipeline_hash, system_tags).
+#   1. same (pipeline_hash, system_tags)  → same node_content_hash.
+#      (contrapositive: node_content_hash changes → record_id key changes)
+#   2. different node_content_hash        → different (pipeline_hash, system_tags).
+#      (contrapositive: same record_id key → same node_content_hash)
 #
 # "pipeline_hash" is proxied by node.node_identity_path (a tuple of strings
 # derived from the pipeline hash — identical for nodes that share function
@@ -406,11 +415,18 @@ class TestFilterByContentHashIsNoOp:
 # from the first row emitted by the source (all rows from the same source
 # share the same system-tag values, since they share the same content-addressed
 # source_id / table_hash).
+#
+# All nodes are created with the default table_scope='pipeline_hash'.
 # ---------------------------------------------------------------------------
 
 
 class TestLockstepPropertyRandomized:
-    """≥100 random (function, source) pairs prove the bidirectional lockstep."""
+    """≥100 random (function, source) pairs prove the two critical lockstep invariants.
+
+    Within ``table_scope='pipeline_hash'``:
+    - node_content_hash changes  → (pipeline_hash, system_tags) key changes.
+    - (pipeline_hash, system_tags) key unchanged → node_content_hash unchanged.
+    """
 
     # 5 functions × 25 sources = 125 examples (well over the required 100).
     _N_SOURCES = 25
@@ -612,3 +628,4 @@ class TestLockstepPropertyRandomized:
             f"  first  key: {violations[0][1]!r}\n"
             f"  second key: {violations[0][2]!r}"
         )
+
