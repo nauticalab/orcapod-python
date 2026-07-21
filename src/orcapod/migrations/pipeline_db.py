@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 _RECORD_ID_COL = "__record_id"
 
 # pdb columns whose values are ContentHash strings in v0 and must become binary in v1.
-# NODE_CONTENT_HASH_COL is intentionally excluded — it is dropped during migration.
 _PDB_HASH_COLS = frozenset({
+    constants.NODE_CONTENT_HASH_COL,
     constants.INPUT_DATA_HASH_COL,
     constants.OUTPUT_DATA_HASH_COL,
 })
@@ -43,9 +43,10 @@ def migrate_pipeline_v0_to_v1(
     """Migrate a pipeline DB table from v0 schema to v1 schema.
 
     Reads records from ``pipeline_path`` (v0, no suffix), converts
-    ContentHash columns (``__input_data_hash``, ``__output_data_hash``) from
-    ``large_string`` to ``large_binary``, drops ``__node_content_hash`` (not
-    stored in v1), and writes the transformed rows to ``pipeline_path + ("pdb_v1",)``.
+    ContentHash columns (``__node_content_hash``, ``__input_data_hash``,
+    ``__output_data_hash``) from ``large_string`` to ``large_binary``,
+    and writes the transformed rows to ``pipeline_path + ("pdb_v1",)``.
+    ``__node_content_hash`` is retained in v1 rows for per-node isolation.
 
     **Backfill strategy for ``__input_data_hash``:** when the column value is
     ``None`` in the pdb row (older writes may lack it), the migration falls
@@ -202,7 +203,8 @@ def _transform_pdb_batch(
 
     Per-row transformations (applied in order):
 
-    1. Drop ``__node_content_hash`` — not stored in v1.
+    1. Convert ``__node_content_hash`` from ``large_string`` → ``large_binary``
+       (no rdb fallback; retained in v1 for per-node isolation).
     2. Convert ``__input_data_hash`` from ``large_string`` → ``large_binary``
        (falls back to rdb index when the pdb value is ``None``).
     3. Convert ``__output_data_hash`` from ``large_string`` → ``large_binary``
@@ -235,8 +237,10 @@ def _transform_pdb_batch(
     for row in rows:
         new_row = dict(row)
 
-        # 1. Drop __node_content_hash — not stored in v1.
-        new_row.pop(node_hash_col, None)
+        # 1. Convert __node_content_hash from string → binary (no rdb fallback).
+        val = new_row.get(node_hash_col)
+        if val is not None and isinstance(val, str):
+            new_row[node_hash_col] = ContentHash.from_string(val).to_prefixed_digest()
 
         # 2. Convert __input_data_hash from string → binary.
         val = new_row.get(input_hash_col)
@@ -291,10 +295,10 @@ def _transform_pdb_batch(
 def _v1_pdb_schema(v0_batch: pa.Table) -> pa.Schema:
     """Derive the v1 pdb Arrow schema from a v0 batch.
 
-    Drops ``__node_content_hash`` (removed in pdb_v1) and replaces the two
-    remaining ContentHash columns (``__input_data_hash``, ``__output_data_hash``)
-    with ``large_binary`` equivalents.  All other columns retain their original
-    types.
+    Replaces all ContentHash columns (``__node_content_hash``,
+    ``__input_data_hash``, ``__output_data_hash``) with ``large_binary``
+    equivalents.  ``__node_content_hash`` is retained in v1 for per-node
+    isolation (not dropped).  All other columns retain their original types.
 
     Args:
         v0_batch: A v0 pdb Arrow table (used to read non-hash column types).
@@ -302,11 +306,8 @@ def _v1_pdb_schema(v0_batch: pa.Table) -> pa.Schema:
     Returns:
         Arrow schema for the v1 pdb table.
     """
-    node_hash_col = constants.NODE_CONTENT_HASH_COL
     fields = []
     for field in v0_batch.schema:
-        if field.name == node_hash_col:
-            continue  # Drop __node_content_hash from v1.
         if field.name in _PDB_HASH_COLS:
             fields.append(pa.field(field.name, pa.large_binary(), nullable=True))
         else:

@@ -1,5 +1,16 @@
 """Tests proving NODE_CONTENT_HASH_COL is redundant in the record_id preimage.
 
+Design note (post-ITL-533):
+  ``__node_content_hash`` IS stored in pdb_v1 rows for per-node isolation —
+  ``_fetch_joined_records()`` filters rows by this column when
+  ``table_scope='pipeline_hash'`` to prevent cross-node contamination.
+  However, it is NOT included in the ``record_id`` preimage (the hash
+  computation for ``record_id``): the preimage uses only
+  ``system_tags + INPUT_DATA_HASH_COL``.  This is safe because
+  ``NODE_CONTENT_HASH_COL`` is fully determined by information already present
+  in every stored record (see lockstep tests below).
+
+
 Includes a randomised lockstep suite (≥100 examples) that empirically verifies the
 two invariants that matter for correctness (within the default
 ``table_scope='pipeline_hash'`` configuration):
@@ -207,34 +218,6 @@ class TestPreimageShape:
         assert constants.NODE_CONTENT_HASH_COL not in preimage.column_names, (
             "NODE_CONTENT_HASH_COL must NOT be in the preimage after ITL-533. "
             "This test fails until the implementation is updated."
-        )
-
-    def test_add_pipeline_record_does_not_store_node_content_hash(self, double_pf):
-        """``add_pipeline_record()`` must not write ``NODE_CONTENT_HASH_COL`` to the DB.
-
-        After ITL-533, the pdb_v1 schema excludes ``__node_content_hash``.
-        """
-        import uuid
-        from orcapod.databases import InMemoryArrowDatabase
-
-        db = InMemoryArrowDatabase()
-        src = _make_source_stream([42])
-        node = FunctionJobNode(
-            function_pod=FunctionPod(data_function=double_pf),
-            input_stream=src,
-            pipeline_database=db,
-        )
-        tag, data = next(iter(src.iter_data()))
-        node.add_pipeline_record(
-            tag=tag,
-            input_data=data,
-            data_record_id=uuid.uuid4(),
-            computed=True,
-        )
-        table = db.get_all_records(node._versioned_pipeline_path)
-        assert table is not None, "Pipeline record was not written."
-        assert constants.NODE_CONTENT_HASH_COL not in table.column_names, (
-            f"``{constants.NODE_CONTENT_HASH_COL}`` must not be stored in pdb_v1 rows."
         )
 
     def test_node_content_hash_lockstep_with_base_entry_id(self, double_pf):

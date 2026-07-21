@@ -1717,6 +1717,9 @@ class FunctionJobNode(FunctionNodeBase):
                 constants.DATA_RECORD_ID: pa.array(
                     [data_record_id.bytes], type=pa.large_binary()
                 ),
+                constants.NODE_CONTENT_HASH_COL: pa.array(
+                    [self.content_hash().to_prefixed_digest()], type=pa.large_binary()
+                ),
                 constants.INPUT_DATA_HASH_COL: pa.array(
                     [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
                 ),
@@ -1769,9 +1772,12 @@ class FunctionJobNode(FunctionNodeBase):
 
         Calls ``_fetch_joined_records`` to obtain the raw joined table, then
         applies ``ColumnConfig``-driven column dropping to produce a
-        user-facing result. ``_PIPELINE_ENTRY_ID_COL``, ``_PIPELINE_BASE_ENTRY_ID_COL``, and
-        ``_PIPELINE_RECOMPUTATION_INDEX_COL`` are always dropped — they are
-        internal discriminator columns, not user-facing data.
+        user-facing result. ``NODE_CONTENT_HASH_COL``, ``_PIPELINE_ENTRY_ID_COL``,
+        ``_PIPELINE_BASE_ENTRY_ID_COL``, and ``_PIPELINE_RECOMPUTATION_INDEX_COL``
+        are always dropped — they are internal discriminator columns, not
+        user-facing data. ``NODE_CONTENT_HASH_COL`` in particular does not start
+        with ``META_PREFIX`` so it must be listed explicitly to ensure it is
+        dropped even when ``all_info=True``.
 
         Does NOT populate the in-memory cache — see ``get_cached_results``
         for that.
@@ -1799,7 +1805,10 @@ class FunctionJobNode(FunctionNodeBase):
         # the meta drop in the default case, but must be listed explicitly
         # here so it is also dropped when all_info=True (which skips the
         # meta-prefix sweep).
+        # NODE_CONTENT_HASH_COL does NOT start with META_PREFIX, so it must
+        # always be listed explicitly here to ensure it is dropped.
         drop_columns = [
+            constants.NODE_CONTENT_HASH_COL,
             _PIPELINE_ENTRY_ID_COL,
             _PIPELINE_BASE_ENTRY_ID_COL,
             _PIPELINE_RECOMPUTATION_INDEX_COL,
@@ -1902,6 +1911,17 @@ class FunctionJobNode(FunctionNodeBase):
 
         is_ephemeral_col = constants.IS_EPHEMERAL_COL
         taginfo_df = pl.DataFrame(taginfo)
+
+        # Per-node isolation: when sharing a pipeline table in pipeline_hash scope,
+        # filter to rows written by this node to prevent cross-node contamination.
+        if (
+            self._table_scope == "pipeline_hash"
+            and constants.NODE_CONTENT_HASH_COL in taginfo.column_names
+        ):
+            own_hash = self.content_hash().to_prefixed_digest()
+            taginfo_df = taginfo_df.filter(
+                pl.col(constants.NODE_CONTENT_HASH_COL) == own_hash
+            )
 
         # Partition by IS_EPHEMERAL_COL (backward-compat: missing col → all persistent)
         if is_ephemeral_col in taginfo.column_names:

@@ -132,9 +132,7 @@ class TestMigratePipelineV0ToV1:
         v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
         v1_table = db.get_all_records(v1_path)
         assert v1_table is not None
-        assert constants.NODE_CONTENT_HASH_COL not in v1_table.schema.names, (
-            "__node_content_hash must be dropped from pdb_v1 rows."
-        )
+        assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary()
         assert v1_table.schema.field(constants.INPUT_DATA_HASH_COL).type == pa.large_binary()
         assert v1_table.schema.field(constants.OUTPUT_DATA_HASH_COL).type == pa.large_binary()
 
@@ -151,9 +149,7 @@ class TestMigratePipelineV0ToV1:
         v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
         v1_table = db.get_all_records(v1_path)
         row_dict = v1_table.to_pylist()[0]
-        assert constants.NODE_CONTENT_HASH_COL not in row_dict, (
-            "__node_content_hash must be absent from migrated v1 rows."
-        )
+        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.NODE_CONTENT_HASH_COL])) == _NODE_HASH
         assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.INPUT_DATA_HASH_COL])) == _INPUT_HASH
         assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.OUTPUT_DATA_HASH_COL])) == _OUTPUT_HASH
 
@@ -230,8 +226,8 @@ class TestMigratePipelineV0ToV1:
 class TestMigratePipelineV0ToV1Extended:
     """Tests for the ITL-533 extensions to migrate_pipeline_v0_to_v1."""
 
-    def test_migrate_v0_to_v1_drops_node_content_hash(self):
-        """Migrated v1 rows must not contain ``__node_content_hash``."""
+    def test_migrate_v0_to_v1_keeps_node_content_hash(self):
+        """Migrated v1 rows MUST retain ``__node_content_hash`` as ``large_binary``."""
         db = InMemoryArrowDatabase()
         pdb_path = ("pipeline",)
         rdb_path = ("results",)
@@ -243,8 +239,11 @@ class TestMigratePipelineV0ToV1Extended:
         v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
         v1_table = db.get_all_records(v1_path)
         assert v1_table is not None
-        assert constants.NODE_CONTENT_HASH_COL not in v1_table.schema.names, (
-            "``__node_content_hash`` must be dropped from pdb_v1 rows."
+        assert constants.NODE_CONTENT_HASH_COL in v1_table.schema.names, (
+            "``__node_content_hash`` must be preserved in pdb_v1 rows for per-node isolation."
+        )
+        assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary(), (
+            "``__node_content_hash`` must be converted to large_binary in pdb_v1."
         )
 
     def test_migrate_v0_to_v1_recomputes_base_entry_id(self):
