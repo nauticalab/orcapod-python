@@ -50,3 +50,5 @@ nav:
     - Nodes: api/nodes.md
     - Pipeline: api/pipeline.md
     - Types: api/types.md
+  - Reference:
+    - Hashing: reference/hashing.md
