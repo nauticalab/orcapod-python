@@ -387,7 +387,7 @@ the pod function as an idempotency key via `InvocationContext.invocation_hash`.
 
 | Field | Value |
 |---|---|
-| **Inputs** | `pipeline_hash_ch` — the `SideEffectPodStream`'s `pipeline_hash()` as `ContentHash` + `record_id_hash_ch` — the `ContentHash` from site 9 |
+| **Inputs** | `pipeline_hash_ch` — the pod's own `pipeline_hash()` as `ContentHash` + `record_id_hash_ch` — the `ContentHash` from site 9 |
 | **Algorithm** | `f"{serialize(pipeline_hash_ch)}::{serialize(record_id_hash_ch)}"` where each component is serialised as `f"{method}:{hex_or_base64_digest}"` via `InvocationHashConfig` (default: hex, full digest) |
 | **Output format** | `str` of the form `"{method}:{digest}::{method}:{digest}"` |
 | **Uniqueness guarantee** | Unique per `(pod topology, tag lineage, input_data content)`; exposed to pod functions as an idempotency key. Pod-version scoping is provided by the `pipeline_hash()`-derived table path, not by the preimage. |

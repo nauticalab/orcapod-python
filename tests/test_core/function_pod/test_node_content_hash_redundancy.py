@@ -217,6 +217,43 @@ class TestPreimageShape:
             "NODE_CONTENT_HASH_COL must NOT be in the preimage after ITL-533."
         )
 
+    def test_invocation_context_preimage_excludes_node_content_hash(self):
+        """Regression: _build_invocation_context preimage = system_tags + INPUT_DATA_HASH_COL only.
+
+        NODE_CONTENT_HASH_COL must be absent from the ctx-aware FunctionPod invocation
+        preimage, consistent with ITL-533 removing it from FunctionJobNode and SideEffectPod.
+        INPUT_DATA_HASH_COL must use large_binary (to_prefixed_digest), not large_string.
+        """
+        from orcapod.side_effects import InvocationContext
+        from orcapod.core.nodes.function_node import _build_record_id_preimage
+
+        def ctx_fn(x: int, ctx: InvocationContext) -> int:
+            return x * 2
+
+        ctx_pf = PythonDataFunction(ctx_fn, output_keys=["result"])
+        pod = FunctionPod(data_function=ctx_pf, ctx_arg_name="ctx")
+        src = _make_source_stream([10])
+        tag, data = next(iter(src.iter_data()))
+
+        # Invoke _build_invocation_context and verify the returned hash is well-formed.
+        inv_ctx = pod._build_invocation_context(tag, data)
+        assert inv_ctx.invocation_hash
+        assert "::" in inv_ctx.invocation_hash
+
+        # Verify the preimage shape by calling the shared helper directly.
+        base_preimage = _build_record_id_preimage(tag, data)
+
+        assert constants.INPUT_DATA_HASH_COL in base_preimage.column_names, (
+            "INPUT_DATA_HASH_COL must be in the invocation context preimage."
+        )
+        assert constants.NODE_CONTENT_HASH_COL not in base_preimage.column_names, (
+            "NODE_CONTENT_HASH_COL must NOT be in the invocation context preimage."
+        )
+        # INPUT_DATA_HASH_COL must be large_binary (to_prefixed_digest), not large_string.
+        assert base_preimage.schema.field(constants.INPUT_DATA_HASH_COL).type == pa.large_binary(), (
+            "INPUT_DATA_HASH_COL in the preimage must be large_binary."
+        )
+
     def test_node_content_hash_lockstep_with_base_entry_id(self, double_pf):
         """node_content_hash is always in lockstep with base_entry_id.
 
