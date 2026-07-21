@@ -252,3 +252,71 @@ the pod function as an idempotency key via `InvocationContext.invocation_hash`.
 | **Known exclusions** | When `track_completion=True` (default): `run_id` is **excluded** — hash is run-independent for idempotency. When `track_completion=False` **and** `pipeline_run_id` is set: `run_id` is appended as a third `::` component so that each run produces a distinct hash. |
 
 ---
+
+## 5. Data Function URI Hash
+
+`DataFunctionBase.uri` is a tuple used as the canonical identity of a data function:
+
+```
+uri = (canonical_function_name, output_schema_hash, major_version, data_function_type_id)
+```
+
+The `output_schema_hash` component (site 11) is the only hash in the URI; the other
+components are plain strings.
+
+---
+
+### Site 11 — Output schema hash
+
+| Field | Value |
+|---|---|
+| **Inputs** | `output_data_schema` — a `Schema` mapping output column names to Python types |
+| **Algorithm** | `SemanticAwarePythonHasher.hash_object(output_data_schema).to_string()` |
+| **Output format** | `str` (ContentHash string representation including method prefix, e.g. `"object_v0.1:abcd1234..."`) |
+| **Uniqueness guarantee** | Unique per output schema definition; changing any output column name or type changes this hash and therefore the function's entire URI, `content_hash`, and `pipeline_hash` |
+| **Known exclusions** | Input schema not included (changing input schema alone does not change the URI); function code not included (tracked separately via `major_version`); `data_function_type_id` not included (plain string component) |
+
+---
+
+## 6. Pipeline Run Identity
+
+`PipelineJob.run()` generates three identifiers at execution time. None of these are used
+in any data-level preimage; they serve logging, observability, and result inspection.
+
+---
+
+### Site 12 — `run_id`
+
+| Field | Value |
+|---|---|
+| **Inputs** | None (random) |
+| **Algorithm** | `uuid.uuid4().hex[:16]` |
+| **Output format** | 16-char hex `str` |
+| **Uniqueness guarantee** | Non-deterministic; unique per execution with overwhelming probability |
+| **Known exclusions** | Does not reflect pipeline structure, data content, or any input. Two runs with identical pipelines and data produce different `run_id` values. |
+
+---
+
+### Site 13 — `snapshot_hash`
+
+| Field | Value |
+|---|---|
+| **Inputs** | Sorted `content_hash().to_string()` values of all DAG **leaf** nodes (nodes with no downstream successors in the execution DAG) |
+| **Algorithm** | `hashlib.sha256("\n".join(sorted_leaf_hashes).encode()).hexdigest()[:16]` |
+| **Output format** | 16-char hex `str`; embedded in `pipeline_uri` as `{pipeline_name}@{snapshot_hash}` |
+| **Uniqueness guarantee** | Unique per `(leaf node topology + data state)` at run time; changes if any leaf node's schema, function code, or source data changes |
+| **Known exclusions** | Covers only leaf (sink) nodes — intermediate nodes not included. Truncated to 16 chars (collision-resistant in practice but not cryptographically guaranteed at this length). |
+
+---
+
+### Site 14 — `datagram_uuid`
+
+| Field | Value |
+|---|---|
+| **Inputs** | Current wall-clock time (monotonic within a process) |
+| **Algorithm** | `uuid_utils.uuid7()` normalised to `stdlib uuid.UUID` via `uuid.UUID(bytes=uuid7().bytes)` |
+| **Output format** | `uuid.UUID` |
+| **Uniqueness guarantee** | Unique per datagram instance; time-ordered (monotonically increasing within a process) |
+| **Known exclusions** | **Not a content hash.** Two datagrams with identical content have different UUIDs. Not used in any hash preimage. Serves as an object identity token, not a content fingerprint. |
+
+---
