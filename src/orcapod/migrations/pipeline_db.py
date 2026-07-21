@@ -43,9 +43,9 @@ def migrate_pipeline_v0_to_v1(
     """Migrate a pipeline DB table from v0 schema to v1 schema.
 
     Reads records from ``pipeline_path`` (v0, no suffix), converts
-    ContentHash columns (``__node_content_hash``, ``__input_data_hash``,
-    ``__output_data_hash``) from ``large_string`` to ``large_binary``,
-    and writes the transformed rows to ``pipeline_path + ("pdb_v1",)``.
+    ContentHash columns (``__input_data_hash``, ``__output_data_hash``) from
+    ``large_string`` to ``large_binary``, drops ``__node_content_hash`` (not
+    stored in v1), and writes the transformed rows to ``pipeline_path + ("pdb_v1",)``.
 
     **Backfill strategy for ``__input_data_hash``:** when the column value is
     ``None`` in the pdb row (older writes may lack it), the migration falls
@@ -209,9 +209,9 @@ def _transform_pdb_batch(
        (no rdb fallback; ``None`` stays ``null``).
     4. Recompute ``__pipeline_base_entry_id`` and ``__record_id`` using the new
        preimage (``system_tag_cols + INPUT_DATA_HASH_COL``, without
-       ``NODE_CONTENT_HASH_COL``).  Rows where ``__input_data_hash`` cannot be
-       resolved are counted as unresolvable and their hash columns are left
-       ``null``.
+       ``NODE_CONTENT_HASH_COL``).  For rows where ``__input_data_hash`` cannot be
+       resolved, step 4 is skipped entirely, and those rows retain their original
+       v0 values for ``__pipeline_base_entry_id`` and ``__record_id``.
 
     Args:
         batch: Arrow table slice of v0 pdb rows (with ``_RECORD_ID_COL`` as first
