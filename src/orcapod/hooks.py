@@ -14,6 +14,8 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Literal
 
+from orcapod.invocation import InvocationContext
+
 if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 
@@ -82,6 +84,12 @@ class PostRunPayload:
         output: The output data; ``None`` if the function filtered the row out or raised.
         stats: Timing and status bundle.
         pod: Identity of the pod that produced this result.
+        invocation_context: Deterministic invocation identity for this row.
+            Carries ``invocation_hash`` (input-keyed, encoding-configurable),
+            ``format_id(config)`` for custom serialization, and
+            ``pipeline_run_id``. ``None`` only when ``PostRunPayload`` is
+            constructed directly without providing this argument (e.g. in
+            tests); always populated when built by the pod itself.
     """
 
     record_id_hash: str | None
@@ -90,6 +98,7 @@ class PostRunPayload:
     output: DataProtocol | None
     stats: RunStats
     pod: PodContext
+    invocation_context: InvocationContext | None = None
 
 
 PostRunHookFn = Callable[["PostRunPayload"], None]

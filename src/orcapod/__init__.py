@@ -10,9 +10,11 @@ from .core.function_pod import (
     function_pod,
     side_effect_function_pod,
 )
-from .side_effects import (
+from .invocation import (
     InvocationContext,
     InvocationHashConfig,
+)
+from .side_effects import (
     SideEffectPod,
     SideEffectPodConfig,
     side_effect_pod,

@@ -223,7 +223,8 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
-            run_id: Pipeline run identifier (unused in cached path).
+            run_id: Pipeline run identifier forwarded to
+                ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -250,7 +251,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
                     tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc,
+                    InvocationStatus.ERROR, exc, run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -259,6 +260,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         self._fire_post_run_hooks(
             self._build_post_run_payload(
                 tag, data, output_data, started_at, finished_at, status, None,
+                run_id=run_id,
             )
         )
         return out_tag, output_data
@@ -280,7 +282,8 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
-            run_id: Pipeline run identifier (unused in cached path).
+            run_id: Pipeline run identifier forwarded to
+                ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -309,7 +312,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
                     tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc,
+                    InvocationStatus.ERROR, exc, run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -318,6 +321,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         self._fire_post_run_hooks(
             self._build_post_run_payload(
                 tag, data, output_data, started_at, finished_at, status, None,
+                run_id=run_id,
             )
         )
         return out_tag, output_data

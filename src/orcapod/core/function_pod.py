@@ -185,11 +185,8 @@ class _FunctionPodBase(TraceableBase):
         """
         import pyarrow as pa
         from orcapod.core.nodes.function_node import _build_record_id_preimage
-        from orcapod.side_effects import (
-            InvocationContext,
-            InvocationHashConfig,
-            _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
-        )
+        from orcapod.invocation import InvocationContext, InvocationHashConfig
+        from orcapod.side_effects import _SIDE_EFFECT_RECOMPUTATION_INDEX_COL
 
         preimage = _build_record_id_preimage(tag, data).append_column(
             _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
@@ -350,6 +347,7 @@ class _FunctionPodBase(TraceableBase):
         finished_at: datetime,
         status: InvocationStatus,
         exc: Exception | None,
+        run_id: str | None = None,
     ) -> PostRunPayload:
         """Build a ``PostRunPayload`` from invocation results.
 
@@ -361,6 +359,8 @@ class _FunctionPodBase(TraceableBase):
             finished_at: UTC timestamp when compute-or-lookup completed.
             status: Invocation status (``COMPUTED``, ``HIT``, or ``ERROR``).
             exc: The exception raised, if ``status == ERROR``; ``None`` otherwise.
+            run_id: Pipeline run identifier, or ``None`` in standalone mode.
+                Forwarded to ``InvocationContext.pipeline_run_id``.
 
         Returns:
             A ``PostRunPayload`` ready to pass to registered hooks.
@@ -368,6 +368,7 @@ class _FunctionPodBase(TraceableBase):
         record_id = (
             str(output_data.datagram_uuid) if output_data is not None else None
         )
+        invocation_context = self._build_invocation_context(tag, data, run_id=run_id)
         return PostRunPayload(
             record_id_hash=record_id,
             tag=tag,
@@ -384,6 +385,7 @@ class _FunctionPodBase(TraceableBase):
                 label=self.label,
                 pod_hash=self.content_hash().to_string(),
             ),
+            invocation_context=invocation_context,
         )
 
     def _invoke_with_hooks(
@@ -404,7 +406,8 @@ class _FunctionPodBase(TraceableBase):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger forwarded to ``process_data``.
-            run_id: Pipeline run identifier forwarded to ``process_data``.
+            run_id: Pipeline run identifier forwarded to ``process_data`` and
+                ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -423,7 +426,7 @@ class _FunctionPodBase(TraceableBase):
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
                     tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc,
+                    InvocationStatus.ERROR, exc, run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -432,7 +435,7 @@ class _FunctionPodBase(TraceableBase):
         self._fire_post_run_hooks(
             self._build_post_run_payload(
                 tag, data, output_data, started_at, finished_at,
-                InvocationStatus.COMPUTED, None,
+                InvocationStatus.COMPUTED, None, run_id=run_id,
             )
         )
         return out_tag, output_data
@@ -455,7 +458,8 @@ class _FunctionPodBase(TraceableBase):
             data: The input data to process.
             logger: Optional data execution logger forwarded to
                 ``async_process_data``.
-            run_id: Pipeline run identifier forwarded to ``async_process_data``.
+            run_id: Pipeline run identifier forwarded to ``async_process_data``
+                and ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -476,7 +480,7 @@ class _FunctionPodBase(TraceableBase):
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
                     tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc,
+                    InvocationStatus.ERROR, exc, run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -485,7 +489,7 @@ class _FunctionPodBase(TraceableBase):
         self._fire_post_run_hooks(
             self._build_post_run_payload(
                 tag, data, output_data, started_at, finished_at,
-                InvocationStatus.COMPUTED, None,
+                InvocationStatus.COMPUTED, None, run_id=run_id,
             )
         )
         return out_tag, output_data
