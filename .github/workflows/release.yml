@@ -61,6 +61,8 @@ jobs:
   license-check:
     needs: [validate-branch]
     uses: ./.github/workflows/_license-check.yml
+    with:
+      branch: ${{ inputs.branch }}
 
   build:
     name: Build distribution
