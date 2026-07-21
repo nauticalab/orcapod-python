@@ -169,9 +169,11 @@ class _FunctionPodBase(TraceableBase):
     ) -> Any:
         """Build a per-row ``InvocationContext`` for ctx-aware pods.
 
-        Uses the same preimage as ``_execute_side_effect_row``: system-tag columns
-        + ``INPUT_DATA_HASH_COL`` + ``NODE_CONTENT_HASH_COL`` +
-        recomputation index 0.
+        Uses the same preimage as ``SideEffectPod._execute_side_effect_row`` and
+        ``FunctionJobNode._build_entry_id_preimage``: system-tag columns +
+        ``INPUT_DATA_HASH_COL`` (``large_binary``) + recomputation index 0.
+        ``NODE_CONTENT_HASH_COL`` is intentionally excluded — it is redundant,
+        fully determined by the table path (``pipeline_hash()``) plus system tags.
 
         Args:
             tag: The input tag for this row.
@@ -182,26 +184,16 @@ class _FunctionPodBase(TraceableBase):
             An ``InvocationContext`` instance.
         """
         import pyarrow as pa
+        from orcapod.core.nodes.function_node import _build_record_id_preimage
         from orcapod.side_effects import (
             InvocationContext,
             InvocationHashConfig,
             _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
         )
 
-        preimage = (
-            tag.as_table(columns={"system_tags": True})
-            .append_column(
-                constants.INPUT_DATA_HASH_COL,
-                pa.array([data.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                constants.NODE_CONTENT_HASH_COL,
-                pa.array([self.content_hash().to_string()], type=pa.large_string()),
-            )
-            .append_column(
-                _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
-                pa.array([0], type=pa.int32()),
-            )
+        preimage = _build_record_id_preimage(tag, data).append_column(
+            _SIDE_EFFECT_RECOMPUTATION_INDEX_COL,
+            pa.array([0], type=pa.int32()),
         )
         record_id_hash = self.data_context.arrow_hasher.hash_table(preimage)
 
