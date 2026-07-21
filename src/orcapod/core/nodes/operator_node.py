@@ -1115,9 +1115,13 @@ class OperatorJobNode(OperatorNodeBase):
                 if c.startswith(constants.SYSTEM_TAG_PREFIX)
             )
         if drop_columns:
-            results = results.drop(
-                [c for c in drop_columns if c in results.column_names]
+            # Deduplicate: NODE_CONTENT_HASH_COL now starts with META_PREFIX so it
+            # can appear in both the explicit list and the meta-prefix sweep above.
+            unique_drop = list(
+                dict.fromkeys(c for c in drop_columns if c in results.column_names)
             )
+            if unique_drop:
+                results = results.drop(unique_drop)
 
         return results if results.num_rows > 0 else None
 

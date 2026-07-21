@@ -46,6 +46,12 @@ def _write_v0_rdb_row(
     db.flush()
 
 
+# v0 pdb rows used DATAGRAM_PREFIX for NODE_CONTENT_HASH_COL, producing the column
+# name "_node_content_hash".  The migration renames this to "__node_content_hash"
+# (SYSTEM_COLUMN_PREFIX) as part of the v0→v1 conversion.
+_V0_NODE_HASH_COL = "_node_content_hash"
+
+
 def _write_v0_pdb_row(
     db: InMemoryArrowDatabase, pdb_path: tuple, data_id: bytes, pdb_record_id: bytes
 ) -> None:
@@ -53,10 +59,12 @@ def _write_v0_pdb_row(
 
     ``data_id`` is stored as the ``DATA_RECORD_ID`` column (the result UUID).
     ``pdb_record_id`` is the internal DB record ID for this pipeline entry.
+    Uses the v0 column name ``_node_content_hash`` (with ``DATAGRAM_PREFIX``)
+    to simulate a true pre-migration pdb row.
     """
     row = pa.table({
         constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
-        constants.NODE_CONTENT_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
+        _V0_NODE_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
         constants.INPUT_DATA_HASH_COL: pa.array([_INPUT_HASH.to_string()], type=pa.large_string()),
         constants.OUTPUT_DATA_HASH_COL: pa.array([_OUTPUT_HASH.to_string()], type=pa.large_string()),
         f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(["ctx"], type=pa.large_string()),
@@ -83,11 +91,13 @@ def _write_v0_pdb_row_with_system_tags(
 
     Used to test that the extended migration correctly identifies system-tag
     columns and includes them in the recomputed preimage.
+    Uses the v0 column name ``_node_content_hash`` (with ``DATAGRAM_PREFIX``)
+    to simulate a true pre-migration pdb row.
     """
     row = pa.table({
         _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
         constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
-        constants.NODE_CONTENT_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
+        _V0_NODE_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
         constants.INPUT_DATA_HASH_COL: pa.array([_INPUT_HASH.to_string()], type=pa.large_string()),
         constants.OUTPUT_DATA_HASH_COL: pa.array([_OUTPUT_HASH.to_string()], type=pa.large_string()),
         f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(["ctx"], type=pa.large_string()),
@@ -240,10 +250,10 @@ class TestMigratePipelineV0ToV1Extended:
         v1_table = db.get_all_records(v1_path)
         assert v1_table is not None
         assert constants.NODE_CONTENT_HASH_COL in v1_table.schema.names, (
-            "``__node_content_hash`` must be preserved in pdb_v1 rows for per-node isolation."
+            f"``{constants.NODE_CONTENT_HASH_COL}`` must be preserved in pdb_v1 rows for per-node isolation."
         )
         assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary(), (
-            "``__node_content_hash`` must be converted to large_binary in pdb_v1."
+            f"``{constants.NODE_CONTENT_HASH_COL}`` must be converted to large_binary in pdb_v1."
         )
 
     def test_migrate_v0_to_v1_recomputes_base_entry_id(self):

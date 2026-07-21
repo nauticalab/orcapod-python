@@ -1775,9 +1775,8 @@ class FunctionJobNode(FunctionNodeBase):
         user-facing result. ``NODE_CONTENT_HASH_COL``, ``_PIPELINE_ENTRY_ID_COL``,
         ``_PIPELINE_BASE_ENTRY_ID_COL``, and ``_PIPELINE_RECOMPUTATION_INDEX_COL``
         are always dropped — they are internal discriminator columns, not
-        user-facing data. ``NODE_CONTENT_HASH_COL`` in particular does not start
-        with ``META_PREFIX`` so it must be listed explicitly to ensure it is
-        dropped even when ``all_info=True``.
+        user-facing data. These columns are listed explicitly to ensure they are
+        dropped even when ``all_info=True`` (which skips the meta-prefix sweep).
 
         Does NOT populate the in-memory cache — see ``get_cached_results``
         for that.
@@ -1801,12 +1800,8 @@ class FunctionJobNode(FunctionNodeBase):
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
         # Always drop internal discriminator columns regardless of column_config.
-        # _PIPELINE_ENTRY_ID_COL starts with META_PREFIX so it is covered by
-        # the meta drop in the default case, but must be listed explicitly
-        # here so it is also dropped when all_info=True (which skips the
-        # meta-prefix sweep).
-        # NODE_CONTENT_HASH_COL does NOT start with META_PREFIX, so it must
-        # always be listed explicitly here to ensure it is dropped.
+        # Listing them explicitly ensures they are dropped even when all_info=True,
+        # which skips the meta-prefix sweep.
         drop_columns = [
             constants.NODE_CONTENT_HASH_COL,
             _PIPELINE_ENTRY_ID_COL,
@@ -1914,10 +1909,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         # Per-node isolation: when sharing a pipeline table in pipeline_hash scope,
         # filter to rows written by this node to prevent cross-node contamination.
-        if (
-            self._table_scope == "pipeline_hash"
-            and constants.NODE_CONTENT_HASH_COL in taginfo.column_names
-        ):
+        if self._table_scope == "pipeline_hash":
             own_hash = self.content_hash().to_prefixed_digest()
             taginfo_df = taginfo_df.filter(
                 pl.col(constants.NODE_CONTENT_HASH_COL) == own_hash

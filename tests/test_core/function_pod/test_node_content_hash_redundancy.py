@@ -186,22 +186,20 @@ class TestBaseEntryIdUniqueness:
 
 
 # ---------------------------------------------------------------------------
-# Property 2 (forward-looking): preimage shape after ITL-533
+# Property 2: preimage shape after ITL-533
 #
-# Documents the intended preimage structure after the fix lands.
-# The test is expected to FAIL until the implementation is updated.
+# Regression tests confirming the post-ITL-533 preimage structure.
 # ---------------------------------------------------------------------------
 
 
 class TestPreimageShape:
-    """Preimage column membership — documents the post-ITL-533 target state."""
+    """Preimage column membership — confirms the post-ITL-533 state."""
 
     def test_node_content_hash_col_not_in_preimage_keys(self, double_pf):
-        """After ITL-533: preimage = system_tags + INPUT_DATA_HASH_COL only.
+        """Regression: preimage = system_tags + INPUT_DATA_HASH_COL only.
 
-        NODE_CONTENT_HASH_COL must be absent.  This test currently FAILS
-        (confirming the pre-condition) and will pass once the implementation
-        is updated.
+        NODE_CONTENT_HASH_COL must be absent from the record_id preimage
+        after ITL-533.
         """
         src = _make_source_stream([10])
         node = FunctionJobNode(
@@ -216,8 +214,7 @@ class TestPreimageShape:
             "INPUT_DATA_HASH_COL must be in the preimage."
         )
         assert constants.NODE_CONTENT_HASH_COL not in preimage.column_names, (
-            "NODE_CONTENT_HASH_COL must NOT be in the preimage after ITL-533. "
-            "This test fails until the implementation is updated."
+            "NODE_CONTENT_HASH_COL must NOT be in the preimage after ITL-533."
         )
 
     def test_node_content_hash_lockstep_with_base_entry_id(self, double_pf):

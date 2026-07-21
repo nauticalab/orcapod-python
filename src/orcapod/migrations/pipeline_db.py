@@ -21,7 +21,14 @@ logger = logging.getLogger(__name__)
 # Column name used to expose the internal record ID when reading from the DB.
 _RECORD_ID_COL = "__record_id"
 
+# v0 pdb rows used DATAGRAM_PREFIX ("_") for NODE_CONTENT_HASH_COL, giving the column
+# name "_node_content_hash".  The fix to ITL-533 changed the prefix to SYSTEM_COLUMN_PREFIX
+# ("__"), so v1 rows use "__node_content_hash".  The migration must rename the column as
+# it converts the string value to binary.
+_V0_NODE_HASH_COL = "_node_content_hash"
+
 # pdb columns whose values are ContentHash strings in v0 and must become binary in v1.
+# NODE_CONTENT_HASH_COL here refers to the v1 name ("__node_content_hash").
 _PDB_HASH_COLS = frozenset({
     constants.NODE_CONTENT_HASH_COL,
     constants.INPUT_DATA_HASH_COL,
@@ -203,8 +210,10 @@ def _transform_pdb_batch(
 
     Per-row transformations (applied in order):
 
-    1. Convert ``__node_content_hash`` from ``large_string`` → ``large_binary``
-       (no rdb fallback; retained in v1 for per-node isolation).
+    1. Rename ``_node_content_hash`` (v0, ``DATAGRAM_PREFIX``) to
+       ``__node_content_hash`` (v1, ``SYSTEM_COLUMN_PREFIX``) and convert from
+       ``large_string`` → ``large_binary`` (no rdb fallback; retained in v1 for
+       per-node isolation).
     2. Convert ``__input_data_hash`` from ``large_string`` → ``large_binary``
        (falls back to rdb index when the pdb value is ``None``).
     3. Convert ``__output_data_hash`` from ``large_string`` → ``large_binary``
@@ -237,10 +246,17 @@ def _transform_pdb_batch(
     for row in rows:
         new_row = dict(row)
 
-        # 1. Convert __node_content_hash from string → binary (no rdb fallback).
-        val = new_row.get(node_hash_col)
+        # 1. Convert node_content_hash from string → binary and rename from v0
+        #    column name (_node_content_hash) to v1 column name (__node_content_hash).
+        #    Pop the old v0 name; fall back to the new name for idempotent re-runs.
+        val = new_row.pop(_V0_NODE_HASH_COL, None)
+        if val is None:
+            val = new_row.get(node_hash_col)
         if val is not None and isinstance(val, str):
             new_row[node_hash_col] = ContentHash.from_string(val).to_prefixed_digest()
+        elif val is not None:
+            # Already binary (e.g. idempotent re-run on a partially migrated row).
+            new_row[node_hash_col] = val
 
         # 2. Convert __input_data_hash from string → binary.
         val = new_row.get(input_hash_col)
@@ -295,10 +311,11 @@ def _transform_pdb_batch(
 def _v1_pdb_schema(v0_batch: pa.Table) -> pa.Schema:
     """Derive the v1 pdb Arrow schema from a v0 batch.
 
-    Replaces all ContentHash columns (``__node_content_hash``,
-    ``__input_data_hash``, ``__output_data_hash``) with ``large_binary``
-    equivalents.  ``__node_content_hash`` is retained in v1 for per-node
-    isolation (not dropped).  All other columns retain their original types.
+    Replaces all ContentHash columns with ``large_binary`` equivalents and
+    renames ``_node_content_hash`` (v0 ``DATAGRAM_PREFIX`` name) to
+    ``__node_content_hash`` (v1 ``SYSTEM_COLUMN_PREFIX`` name).
+    ``__node_content_hash`` is retained in v1 for per-node isolation (not
+    dropped).  All other columns retain their original types.
 
     Args:
         v0_batch: A v0 pdb Arrow table (used to read non-hash column types).
@@ -308,11 +325,14 @@ def _v1_pdb_schema(v0_batch: pa.Table) -> pa.Schema:
     """
     fields = []
     for field in v0_batch.schema:
+        if field.name == _V0_NODE_HASH_COL:
+            # Renamed in v1: skip here; the v1 name is added via _PDB_HASH_COLS below.
+            continue
         if field.name in _PDB_HASH_COLS:
             fields.append(pa.field(field.name, pa.large_binary(), nullable=True))
         else:
             fields.append(field)
-    # Ensure the remaining hash columns exist even if absent in v0.
+    # Ensure all hash columns (using v1 names) exist in the schema.
     existing_names = {f.name for f in fields}
     for col in _PDB_HASH_COLS:
         if col not in existing_names:

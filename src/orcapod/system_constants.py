@@ -79,7 +79,7 @@ class SystemConstant:
 
     @property
     def NODE_CONTENT_HASH_COL(self) -> str:
-        return f"{self._global_prefix}{DATAGRAM_PREFIX}{NODE_CONTENT_HASH_COL}"
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{NODE_CONTENT_HASH_COL}"
 
     @property
     def SYSTEM_TAG_PREFIX(self) -> str:

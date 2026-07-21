@@ -69,14 +69,23 @@ __pipeline_recomputation_index   (int32)
 ```
 
 This spec defines the changes required to remove `NODE_CONTENT_HASH_COL` from (a) the
-hash preimage, (b) the stored pipeline DB row, and (c) the `_filter_by_content_hash()`
-filtering mechanism that depended on it.
+hash preimage and (b) the `_filter_by_content_hash()` filtering mechanism that depended
+on it.
+
+**Note (post-implementation update):** the column is **retained** in stored pdb_v1 rows
+for per-node isolation — `_fetch_joined_records()` filters rows by
+`NODE_CONTENT_HASH_COL` when `table_scope='pipeline_hash'` to prevent cross-node
+contamination in shared pipeline DB tables.  What changed is only its role in the
+`record_id` preimage (removed) and its column-name prefix (from `DATAGRAM_PREFIX` `_`
+to `SYSTEM_COLUMN_PREFIX` `__`, so `_node_content_hash` → `__node_content_hash`).
+The pdb v0→v1 migration handles the rename and type conversion accordingly.
 
 All schema changes in this project ship together in the upcoming v0.1.0 minor release.
 The three DB types each get a single v0 → v1 migration step. ITL-533's pdb changes are
-folded into **pdb v1** (not a new v2), making the removal of `__node_content_hash`
-part of the definitive pdb_v1 column layout. ITL-533 also introduces **tdb v1**, the
-first formally versioned schema for the side-effect tracking DB.
+folded into **pdb v1** (not a new v2). The definitive pdb_v1 column layout retains
+`__node_content_hash` (binary) for per-node isolation but excludes it from the record_id
+preimage. ITL-533 also introduces **tdb v1**, the first formally versioned schema for the
+side-effect tracking DB.
 
 ---
 
@@ -85,23 +94,27 @@ first formally versioned schema for the side-effect tracking DB.
 * `_build_entry_id_preimage()` returns only `system_tags + INPUT_DATA_HASH_COL`.
 * `_execute_side_effect_row()` builds the same preimage shape (plus
   `__pipeline_recomputation_index`); the `node_content_hash_str` parameter is removed.
-* `add_pipeline_record()` no longer writes `__node_content_hash` to the DB.
-* `_filter_by_content_hash()` is deleted; its single call site in
-  `_fetch_joined_records()` is removed.
-* `get_all_records()` and `get_cached_results()` no longer reference
-  `__node_content_hash`.
+* `add_pipeline_record()` writes `__node_content_hash` to the DB for per-node isolation
+  but does NOT include it in the `record_id` preimage.
+* `_filter_by_content_hash()` is deleted; `_fetch_joined_records()` performs per-node
+  isolation inline via Polars filter on `NODE_CONTENT_HASH_COL` when
+  `table_scope='pipeline_hash'`.
+* `get_all_records()` always drops `NODE_CONTENT_HASH_COL` from the user-facing table
+  (it is an internal discriminator column, not user data).
 * A shared private helper `_build_record_id_preimage(tag, data) -> pa.Table` unifies
   the preimage construction for `FunctionJobNode` and `SideEffectPod`.
+* `NODE_CONTENT_HASH_COL` uses `SYSTEM_COLUMN_PREFIX` (`__`), giving column name
+  `__node_content_hash`; v0→v1 migration renames `_node_content_hash` → `__node_content_hash`
+  and converts the string value to binary.
 * `PIPELINE_DB_SCHEMA_VERSION` in `system_constants.py` remains `"pdb_v1"`; pdb writes
   continue to go to `node_identity_path + ("pdb_v1",)`. The v0→v1 migration is extended
-  to also drop `__node_content_hash` and recompute the preimage-based hashes.
+  to rename+convert `__node_content_hash` and recompute the preimage-based hashes.
 * `TRACKING_DB_SCHEMA_VERSION = "tdb_v1"` added to `system_constants.py`; tracking DB
   writes go to `table_path + ("tdb_v1",)`. Presence of a tdb_v0 table at the old path
   is silently ignored (old log entries become orphaned; side effects re-deliver once).
 * No tdb migration utility — tdb_v0 entries cannot be remapped (record_id preimage
   components are not stored in the log); orphaning is the intended behaviour.
-* All existing tests pass; `test_node_content_hash_col_not_in_preimage_keys` (currently
-  an intentional fail) passes after the change.
+* All existing tests pass; `test_node_content_hash_col_not_in_preimage_keys` passes.
 * No backward-compatibility shims.
 
 ---
