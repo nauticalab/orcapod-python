@@ -30,6 +30,147 @@ documented in the sections that follow.
 
 ---
 
+## 7. Worked Example
+
+The pipeline below exercises all 14 hash sites. `source_id` values are set explicitly so
+every content hash is reproducible across runs. Run the script to regenerate the values
+in this section:
+
+```
+uv run python superpowers/scripts/hash_audit_example.py
+```
+
+### Example pipeline
+
+```python
+from orcapod.core.function_pod import function_pod
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.operators.join import Join
+from orcapod.core.sources.dict_source import DictSource
+from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+from orcapod.side_effects import SideEffectPod, InvocationContext
+
+scores = DictSource(
+    [{"student": "alice", "math": 90}, {"student": "bob", "math": 75}],
+    tag_columns=["student"],
+    source_id="scores_v1",
+)
+attendance = DictSource(
+    [{"student": "alice", "days": 180}, {"student": "bob", "days": 160}],
+    tag_columns=["student"],
+    source_id="attendance_v1",
+)
+
+joined = Join()(scores, attendance)      # sites 3–6
+
+@function_pod(output_keys="grade")
+def grade(math: int, days: int) -> float:
+    return math * 0.7 + days / 180.0 * 30.0
+
+pod  = grade.pod
+node = FunctionJobNode(pod, joined, pipeline_database=InMemoryArrowDatabase())
+
+captured: list[InvocationContext] = []
+
+def _log_fn(ctx: InvocationContext, **kwargs) -> None:
+    captured.append(ctx)
+
+side_pod = SideEffectPod(_log_fn, ctx_arg_name="ctx")
+```
+
+### Concrete hash values
+
+#### §1 — Framework Object Identity
+
+| Object | `content_hash()` | `pipeline_hash()` |
+|--------|-----------------|-------------------|
+| `scores` | `semantic_v0.1:d8e191c5df8ff50457dd90406e3ac864c529bc5fca56df732b431a7ad782662c` | `semantic_v0.1:43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb` |
+| `attendance` | `semantic_v0.1:0fec51648c526f6e2c3a4adf6fac82a0d7994a3bb044f6d55bd02a0c9bbccda3` | `semantic_v0.1:9e1bfae16816bc68bdc5f1ab79a3f94a1604f314ace3feadbeb4894c17b0e7cd` |
+| `joined` | `semantic_v0.1:c2ac84fed5108af40500e7581c4ec596627d7ce767630a3dead48144c29bc16d` | `semantic_v0.1:beaeba6e85f92932b21beebd6389ddacd804e7e43ced0af704c2b007208cf4cc` |
+| `pod` | `semantic_v0.1:02e1c1becdbcca36e978a7edcc052c85858dd6e3c4bfbb21805bc5858e88f0f4` | `semantic_v0.1:02e1c1becdbcca36e978a7edcc052c85858dd6e3c4bfbb21805bc5858e88f0f4` |
+| `node` | `semantic_v0.1:d8ca22587cb8bf09ca1a73db6ad24f96f4f21c01d4dc834f6f133262eae7746d` | `semantic_v0.1:a8cf2c871e0a6524c7d6b29a2a74ebfd6ef3e7e0255042b99bdb36166431a1b6` |
+
+> `pod.content_hash() == pod.pipeline_hash()` because `grade` has no `ctx_arg_name`, so
+> `identity_structure()` and `pipeline_identity_structure()` return the same value.
+>
+> `scores.pipeline_hash() ≠ attendance.pipeline_hash()` even though both sources have
+> `tag_columns=["student"]` — their data schemas differ (`{math: int}` vs `{days: int}`).
+
+#### §2 — Source Provenance & System Tags
+
+| Site | Item | Value |
+|------|------|-------|
+| 3 | Schema hash (scores) | `43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb` |
+| 4 | `scores.source_id` | `"scores_v1"` (explicit; no Arrow hash computed) |
+| 5 | `alice` `record_id` bytes (hex) | `e2d15e48e9f05f0f81e25d8e9f120b0a` |
+| 5 | `bob` `record_id` bytes (hex) | `0d565e02049f5913bf45a5711e71ff52` |
+
+System tag column names on `scores` (sites 3 + 5):
+
+```
+_tag_source_id::43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb
+_tag_record_id::43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb
+```
+
+Post-join system tag column names (site 6):
+
+```
+_tag_source_id::43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb::43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb:0
+_tag_record_id::43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb::43733ff397db1413d574830fb6b2e45891b31a49f5fa11237836713a8b24eebb:0
+_tag_source_id::9e1bfae16816bc68bdc5f1ab79a3f94a1604f314ace3feadbeb4894c17b0e7cd::9e1bfae16816bc68bdc5f1ab79a3f94a1604f314ace3feadbeb4894c17b0e7cd:1
+_tag_record_id::9e1bfae16816bc68bdc5f1ab79a3f94a1604f314ace3feadbeb4894c17b0e7cd::9e1bfae16816bc68bdc5f1ab79a3f94a1604f314ace3feadbeb4894c17b0e7cd:1
+```
+
+The suffix `::43733ff...:0` on `scores` columns encodes the canonical join position (`0`); the
+suffix `::9e1bfae...:1` on `attendance` columns encodes position `1`. The pipeline hash in
+each suffix is the stream's `pipeline_hash()` (sites 1b and 6).
+
+#### §3 — Pipeline DB Entry Keys
+
+| Site | Row | Value (hex) |
+|------|-----|-------------|
+| 7 | `alice` `base_entry_id` | `6172726f775f76302e313a00000113f967f1187ac2982e65b6afbf324d264d50a6efe3357a35f09b8a2b32454d61` |
+| 7 | `bob` `base_entry_id` | `6172726f775f76302e313a000001b6162a6faa76b5e065e89849acc09f41edfb5bb1a7c7ea626fd2920de6046586` |
+| 8 | `alice` `pipeline_entry_id` (idx=0) | `6172726f775f76302e313a0000016d7853d1b6b3dc62063d3982911c3f18b8a719e63cfd41429fff970137c52d9c` |
+| 8 | `bob` `pipeline_entry_id` (idx=0) | `6172726f775f76302e313a000001244dc0d59c23ec5d4a19b972a2a98f410054da09f839115841cefdf7f4851f63` |
+
+> The hex prefix `6172726f775f76302e31` decodes to the ASCII string `arrow_v0.1` — the
+> `method` portion of the `b"{method}:{digest}"` format described in §3.
+
+#### §4 — Side-Effect Record ID & Invocation Hash
+
+| Site | Row | Value |
+|------|-----|-------|
+| 10 | `alice` `invocation_hash` | `semantic_v0.1:1f71386f47538f7b5ca97554104469650b8ec5103a824cbe811a7b776913da91::arrow_v0.1:0000016d7853d1b6b3dc62063d3982911c3f18b8a719e63cfd41429fff970137c52d9c` |
+| 10 | `bob` `invocation_hash` | `semantic_v0.1:1f71386f47538f7b5ca97554104469650b8ec5103a824cbe811a7b776913da91::arrow_v0.1:000001244dc0d59c23ec5d4a19b972a2a98f410054da09f839115841cefdf7f4851f63` |
+
+> Both rows share the same `semantic_v0.1:1f71386f...` component — this is the
+> `SideEffectPodStream.pipeline_hash()`, which depends only on the pod and its upstream
+> topology, not on row content. The `arrow_v0.1:...` component is the per-row `record_id`
+> from site 9, which differs per row.
+
+#### §5 — Data Function URI Hash
+
+| Site | Item | Value |
+|------|------|-------|
+| 11 | `data_function.uri` | `('grade', 'semantic_v0.1:e44414c648e8997ded6bface49d8ea3ac790182641cc78c034f113097fec751f', 'v0', 'python.function.v0')` |
+| 11 | `output_schema_hash` (uri[1]) | `semantic_v0.1:e44414c648e8997ded6bface49d8ea3ac790182641cc78c034f113097fec751f` |
+
+#### §6 — Pipeline Run Identity
+
+| Site | Item | Value |
+|------|------|-------|
+| 12 | `run_id` | *(non-deterministic — changes each run)* |
+| 13 | `snapshot_hash` | `14782ba90632f2df` |
+| 14 | `datagram_uuid` | *(time-ordered UUID v7 — changes each run)* |
+
+> `snapshot_hash = "14782ba90632f2df"` is deterministic: the pipeline has one leaf node whose
+> `content_hash().to_string()` is
+> `"semantic_v0.1:ecaf448623d79be4ac3186d7fcc19cf52d66223ceb8d77884c3036462a5a127f"`.
+> `hashlib.sha256(leaf_hash.encode()).hexdigest()[:16]` = `"14782ba90632f2df"`.
+
+---
+
 ## 1. Framework Object Identity
 
 Every class that inherits from `TraceableBase` carries both a `content_hash()` and a
