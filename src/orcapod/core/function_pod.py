@@ -406,7 +406,8 @@ class _FunctionPodBase(TraceableBase):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger forwarded to ``process_data``.
-            run_id: Pipeline run identifier forwarded to ``process_data``.
+            run_id: Pipeline run identifier forwarded to ``process_data`` and
+                ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -457,7 +458,8 @@ class _FunctionPodBase(TraceableBase):
             data: The input data to process.
             logger: Optional data execution logger forwarded to
                 ``async_process_data``.
-            run_id: Pipeline run identifier forwarded to ``async_process_data``.
+            run_id: Pipeline run identifier forwarded to ``async_process_data``
+                and ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.

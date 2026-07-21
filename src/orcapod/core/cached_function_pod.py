@@ -223,7 +223,8 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
-            run_id: Pipeline run identifier (unused in cached path).
+            run_id: Pipeline run identifier forwarded to
+                ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
@@ -281,7 +282,8 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
-            run_id: Pipeline run identifier (unused in cached path).
+            run_id: Pipeline run identifier forwarded to
+                ``PostRunPayload.invocation_context``.
 
         Returns:
             A ``(tag, output_data)`` tuple.
