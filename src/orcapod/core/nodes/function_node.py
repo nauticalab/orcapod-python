@@ -1585,7 +1585,7 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         tag: TagProtocol,
         input_data: DataProtocol,
-    ) -> pa.Table:
+    ) -> "pa.Table":
         """Builds the shared Arrow preimage used by both entry-ID methods.
 
         Delegates to the module-level ``_build_record_id_preimage()`` helper.
