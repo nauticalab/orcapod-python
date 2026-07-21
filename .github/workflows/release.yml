@@ -22,8 +22,8 @@ jobs:
       - name: Check branch exists on origin
         env:
           GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
         run: |
-          BRANCH="${{ inputs.branch }}"
           if ! gh api "repos/${{ github.repository }}/branches/${BRANCH}" --silent 2>/dev/null; then
             echo "::error::Branch '${BRANCH}' does not exist. Check for typos."
             exit 1
