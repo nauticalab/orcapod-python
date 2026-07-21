@@ -1742,9 +1742,6 @@ class FunctionJobNode(FunctionNodeBase):
                 constants.DATA_RECORD_ID: pa.array(
                     [data_record_id.bytes], type=pa.large_binary()
                 ),
-                constants.NODE_CONTENT_HASH_COL: pa.array(
-                    [self.content_hash().to_prefixed_digest()], type=pa.large_binary()
-                ),
                 constants.INPUT_DATA_HASH_COL: pa.array(
                     [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
                 ),

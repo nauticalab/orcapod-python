@@ -214,6 +214,34 @@ class TestPreimageShape:
             "This test fails until the implementation is updated."
         )
 
+    def test_add_pipeline_record_does_not_store_node_content_hash(self, double_pf):
+        """``add_pipeline_record()`` must not write ``NODE_CONTENT_HASH_COL`` to the DB.
+
+        After ITL-533, the pdb_v1 schema excludes ``__node_content_hash``.
+        """
+        import uuid
+        from orcapod.databases import InMemoryArrowDatabase
+
+        db = InMemoryArrowDatabase()
+        src = _make_source_stream([42])
+        node = FunctionJobNode(
+            function_pod=FunctionPod(data_function=double_pf),
+            input_stream=src,
+            pipeline_database=db,
+        )
+        tag, data = next(iter(src.iter_data()))
+        node.add_pipeline_record(
+            tag=tag,
+            input_data=data,
+            data_record_id=uuid.uuid4(),
+            computed=True,
+        )
+        table = db.get_all_records(node._versioned_pipeline_path)
+        assert table is not None, "Pipeline record was not written."
+        assert constants.NODE_CONTENT_HASH_COL not in table.column_names, (
+            f"``{constants.NODE_CONTENT_HASH_COL}`` must not be stored in pdb_v1 rows."
+        )
+
     def test_node_content_hash_lockstep_with_base_entry_id(self, double_pf):
         """node_content_hash is always in lockstep with base_entry_id.
 
