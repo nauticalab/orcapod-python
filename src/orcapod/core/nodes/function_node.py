@@ -61,10 +61,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    import pyarrow.compute as pc
 else:
     pa = LazyModule("pyarrow")
-    pc = LazyModule("pyarrow.compute")
     pl = LazyModule("polars")
 
 # Pipeline entry ID column name used when fetching records from the pipeline
@@ -1044,11 +1042,9 @@ class FunctionJobNode(FunctionNodeBase):
 
         # FunctionNodeBase descriptor fields (normally set by __init__)
         node._load_status = LoadStatus.UNAVAILABLE
-        # Use the live (data-inclusive) content hash when available — it must
-        # match the _node_content_hash column written to the DB at run time.
-        # The blueprint hash stored in descriptor["content_hash"] is computed
-        # from schema-only upstreams and differs from the live hash, causing
-        # _filter_by_content_hash() to return zero rows in get_all_records().
+        # Restore the live content hash from the serialised descriptor so that
+        # ``content_hash()`` on the deserialised node matches the hash that was
+        # computed when the original node ran.
         node._stored_content_hash = (
             job_content_hash if job_content_hash is not None
             else descriptor.get("content_hash")
@@ -1165,27 +1161,6 @@ class FunctionJobNode(FunctionNodeBase):
                 "Either construct the pipeline with a pipeline_database argument, "
                 "or supply one via Pipeline.load(..., pipeline_database=<db>)."
             )
-
-    def _filter_by_content_hash(self, table: "pa.Table") -> "pa.Table":
-        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
-
-        Only applied when ``table_scope="pipeline_hash"`` because in that mode
-        multiple runs share the same DB table and must be disambiguated at read
-        time.  In ``"content_hash"`` mode every run has its own table so no
-        filtering is needed.
-        """
-        if self._table_scope != "pipeline_hash":
-            return table
-        col_name = constants.NODE_CONTENT_HASH_COL
-        if col_name not in table.column_names:
-            raise ValueError(
-                f"Cannot isolate records for table_scope='pipeline_hash': "
-                f"required column {col_name!r} is missing from the stored table. "
-                "This may indicate records written by an older version of the code."
-            )
-        own_hash = self.content_hash().to_prefixed_digest()
-        mask = pc.equal(table.column(col_name), own_hash)
-        return table.filter(mask)
 
     # ------------------------------------------------------------------
     # as_node — return the lightweight FunctionNode equivalent
@@ -1794,9 +1769,9 @@ class FunctionJobNode(FunctionNodeBase):
 
         Calls ``_fetch_joined_records`` to obtain the raw joined table, then
         applies ``ColumnConfig``-driven column dropping to produce a
-        user-facing result. ``_PIPELINE_ENTRY_ID_COL`` and
-        ``NODE_CONTENT_HASH_COL`` are always dropped — they are internal
-        discriminator columns, not user-facing data.
+        user-facing result. ``_PIPELINE_ENTRY_ID_COL``, ``_PIPELINE_BASE_ENTRY_ID_COL``, and
+        ``_PIPELINE_RECOMPUTATION_INDEX_COL`` are always dropped — they are
+        internal discriminator columns, not user-facing data.
 
         Does NOT populate the in-memory cache — see ``get_cached_results``
         for that.
@@ -1825,7 +1800,6 @@ class FunctionJobNode(FunctionNodeBase):
         # here so it is also dropped when all_info=True (which skips the
         # meta-prefix sweep).
         drop_columns = [
-            constants.NODE_CONTENT_HASH_COL,
             _PIPELINE_ENTRY_ID_COL,
             _PIPELINE_BASE_ENTRY_ID_COL,
             _PIPELINE_RECOMPUTATION_INDEX_COL,
@@ -1924,7 +1898,6 @@ class FunctionJobNode(FunctionNodeBase):
             return None
 
         taginfo_columns = tuple(taginfo.column_names)
-        taginfo = self._filter_by_content_hash(taginfo)
         taginfo_schema = taginfo.schema
 
         is_ephemeral_col = constants.IS_EPHEMERAL_COL

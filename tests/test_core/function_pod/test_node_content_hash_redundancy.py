@@ -50,8 +50,6 @@ sufficient for unique record identification.
 from __future__ import annotations
 
 import random
-from typing import cast
-from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
@@ -62,9 +60,6 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.system_constants import constants
-
-from ..conftest import make_int_stream
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -286,147 +281,6 @@ class TestPreimageShape:
             # node.content_hash() is the canonical way to verify this invariant.)
             assert node1.content_hash() == node2.content_hash(), (
                 "node content_hash must be identical when base_entry_id is identical."
-            )
-
-
-# ---------------------------------------------------------------------------
-# Property 3: _filter_by_content_hash() is a correctness no-op
-#
-# Disabling the filter (making it a pass-through) leaves pipeline results
-# identical — same call counts, same output values.  This proves that
-# base_entry_id filtering already provides all necessary isolation.
-# ---------------------------------------------------------------------------
-
-
-class TestFilterByContentHashIsNoOp:
-    """_filter_by_content_hash() does not affect correctness — removing it is safe."""
-
-    def _run_two_node_scenario(self, double_pf, patch_filter: bool) -> tuple[int, list[int]]:
-        """Run node1 (n=3) then node2 (n=5, superset) sharing a pipeline DB.
-
-        Returns (total_function_calls, sorted_node2_results).
-        """
-        call_count = 0
-
-        def counting_double(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
-
-        pf = PythonDataFunction(counting_double, output_keys="result")
-        db = InMemoryArrowDatabase()
-
-        src1 = _make_source_stream(list(range(3)))  # rows x=0,1,2
-        src2 = _make_source_stream(list(range(5)))  # rows x=0,1,2,3,4 (same source)
-
-        node1 = FunctionJobNode(
-            function_pod=FunctionPod(data_function=pf),
-            input_stream=src1,
-            pipeline_database=db,
-        )
-        node2 = FunctionJobNode(
-            function_pod=FunctionPod(data_function=pf),
-            input_stream=src2,
-            pipeline_database=db,
-        )
-
-        if patch_filter:
-            # Disable _filter_by_content_hash: always return the table unchanged.
-            with patch.object(
-                FunctionJobNode,
-                "_filter_by_content_hash",
-                lambda self, table: table,
-            ):
-                node1.run()
-                node2.run()
-                results = sorted(
-                    cast(int, p["result"]) for _, p in node2.iter_data()
-                )
-        else:
-            node1.run()
-            node2.run()
-            results = sorted(
-                cast(int, p["result"]) for _, p in node2.iter_data()
-            )
-
-        return call_count, results
-
-    def test_filter_disabled_same_call_count(self, double_pf):
-        """Disabling _filter_by_content_hash does not change the total function call count.
-
-        With the filter enabled (current code):
-          - node1 processes rows x={0,1,2}: 3 calls.
-          - node2 Phase-1 finds no records (content_hash mismatch) → Phase-2 runs
-            all 5; result cache hits for x={0,1,2}, new calls for x={3,4}: 2 more calls.
-          - Total: 5 calls.
-
-        With the filter disabled (proposed code):
-          - node1 processes rows x={0,1,2}: 3 calls.
-          - node2 Phase-1 finds node1's 3 records via matching base_entry_id →
-            replays them directly; Phase-2 only runs x={3,4}: 2 more calls.
-          - Total: 5 calls.
-
-        Same total either way — the filter is a no-op for call count.
-        """
-        calls_with_filter, _ = self._run_two_node_scenario(double_pf, patch_filter=False)
-        calls_without_filter, _ = self._run_two_node_scenario(double_pf, patch_filter=True)
-        assert calls_with_filter == calls_without_filter, (
-            f"Expected identical call counts; "
-            f"with filter={calls_with_filter}, without={calls_without_filter}."
-        )
-
-    def test_filter_disabled_same_output_values(self, double_pf):
-        """Disabling _filter_by_content_hash produces identical output values."""
-        _, results_with = self._run_two_node_scenario(double_pf, patch_filter=False)
-        _, results_without = self._run_two_node_scenario(double_pf, patch_filter=True)
-        assert results_with == results_without, (
-            f"Output values differ: with filter={results_with}, without={results_without}."
-        )
-
-    def test_filter_disabled_zero_recomputation_when_all_cached(self, double_pf):
-        """When all inputs are already cached by node1, disabling the filter still
-        yields zero additional function calls for node2.
-
-        With filter enabled: node2 Phase-1 skips everything → Phase-2 runs 3,
-        all result-cache hits → 0 new calls.
-        With filter disabled: node2 Phase-1 finds all 3 records from node1 →
-        replays directly → 0 new calls.
-        """
-        call_count = 0
-
-        def counting_double(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
-
-        pf = PythonDataFunction(counting_double, output_keys="result")
-        db = InMemoryArrowDatabase()
-
-        src = _make_source_stream(list(range(3)))  # shared source — same source_id
-
-        node1 = FunctionJobNode(
-            function_pod=FunctionPod(data_function=pf),
-            input_stream=src,
-            pipeline_database=db,
-        )
-        node2 = FunctionJobNode(
-            function_pod=FunctionPod(data_function=pf),
-            input_stream=src,
-            pipeline_database=db,
-        )
-
-        with patch.object(
-            FunctionJobNode,
-            "_filter_by_content_hash",
-            lambda self, table: table,
-        ):
-            node1.run()
-            calls_after_node1 = call_count
-
-            node2.run()
-            assert call_count == calls_after_node1, (
-                "With filter disabled, node2 must still produce zero additional "
-                "function calls when all inputs were already computed by node1."
             )
 
 
