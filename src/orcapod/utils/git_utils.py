@@ -60,6 +60,9 @@ def get_git_info(path):
             "repo_root": repo.working_dir,
         }
 
+    #!? Bare `except:` catches KeyboardInterrupt/SystemExit too — use `except Exception:` (or a
+    #!? specific git exception). Also swallowing all errors → git info silently becomes None, which
+    #!? feeds the observational git-hash provenance (Area 2 fine-grained-match feature, I-16).
     except:  # TODO: specify exception
         return None
 

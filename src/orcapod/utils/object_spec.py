@@ -2,6 +2,11 @@ import importlib
 from typing import Any
 
 
+#!? TRUST BOUNDARY: this resolves `{"_class": "module.Cls", "_config": {...}}` specs by importing
+#!? arbitrary modules and instantiating arbitrary classes (importlib + getattr + cls(**config)).
+#!? That's effectively arbitrary-code-execution if a spec ever comes from an untrusted source.
+#!? Used to build DataContext from JSON — fine if those JSONs are user-owned/trusted, but this
+#!? must NEVER parse untrusted input. Worth a docstring warning + confirming the trust model.
 def parse_objectspec(
     obj_spec: Any,
     ref_lut: dict[str, Any] | None = None,

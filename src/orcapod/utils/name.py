@@ -5,6 +5,7 @@ Utility functions for handling names
 import re
 
 
+#!? Stale TODO: these functions ARE already in utils/. Remove.
 # TODO: move these functions to util
 def escape_with_postfix(field: str, postfix=None, separator="_") -> str:
     """
@@ -33,7 +34,14 @@ def escape_with_postfix(field: str, postfix=None, separator="_") -> str:
         >>> escape_with_postfix("no_separators", "end")
         'no__separators_end'
     """
-
+    #!? BUG (verified): the postfix delimiter is hardcoded to "_" (`f"_{postfix}"`), NOT `separator`.
+    #!? So docstring examples with separator="-" are WRONG: escape("data-info","temp","-") actually
+    #!? returns 'data--info_temp' (not 'data--info-temp'), and unescape can't recover the postfix.
+    #!? Worse, latent corruption when separator != "_" and a field contains "_":
+    #!? unescape("field1--field2-meta", separator="-") → ('field1-field2-meta', None), not (...,'meta').
+    #!? Fix: use `separator` for the postfix delimiter too (f"{separator}{postfix}"), or fix the docs
+    #!? to state postfix is always "_"-delimited. Also the Returns line ("empty string if postfix is
+    #!? None") is wrong — it returns the escaped field.
     return field.replace(separator, separator * 2) + (f"_{postfix}" if postfix else "")
 
 

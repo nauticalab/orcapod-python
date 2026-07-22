@@ -59,7 +59,7 @@ Everything downstream imports these. Establish the vocabulary first.
 - [x] `errors.py` — exception taxonomy; note the *absence* of execution/OOM error types (Area 3) → I-6…I-9
 - [x] `types.py` — Schema, ColumnConfig, ContentHash, config dataclasses; **2 verified bugs** (unhashable Schema, `__eq__` raises) + dead exec config (X3) + missing retry fields (Area 3) → I-10…I-14
 - [x] `config.py` — 2nd (global/TOML) config system; dead+broken merge; heavy duplication → I-17…I-19
-- [ ] `utils/lazy_module.py`, `utils/name.py`, `utils/git_utils.py`, `utils/function_info.py`, `utils/object_spec.py`
+- [x] `utils/lazy_module.py`, `utils/name.py`, `utils/git_utils.py`, `utils/function_info.py`, `utils/object_spec.py` → I-21…I-27  **(Leg 0 COMPLETE)**
 
 ## Leg 1 — Type system & semantic conversion (Python ↔ Arrow)
 - [ ] `semantic_types/` — `type_inference.py`, `universal_converter.py`, `precomputed_converters.py`, `pydata_utils.py`
@@ -152,6 +152,13 @@ Everything downstream imports these. Establish the vocabulary first.
 | I-18 | config.py:37 (_SectionConfig.merge), 137 | `OrcapodConfig.merge`/`_SectionConfig.merge` **dead** (no external callers) AND can't express "reset to default". **Reviewer: consolidate config-merge logic across modules; clean up + fully document the inheritance hierarchy.** | _accepted → I-20_ | dead-code |
 | I-19 | config.py:162 (from_dict), 236 (load_config) | ~150 lines of duplicated per-section parse/warn/filter; `load_config` reimplements `from_dict`; Mapping-vs-dict inconsistency; hardcoded section set ×3. **Reviewer: confirmed — targeted refactor issue(s); also add optional env-var config override (low priority).** | _accepted_ | DRY |
 | **I-20** | config.py + types.py (design) | **Config-system unification design spike (reviewer-requested).** Evaluate: (a) two categories = global-lib-config vs object-config, with maximally-similar interfaces; (b) single consolidated merge; (c) **co-locating object-specific config WITH the object it configures**; (d) optional env-var overrides. Needs a spike before refactor. | _accepted (design spike)_ | design |
+| **I-21** | types.py:597 (ColumnInfo) | **BLOCKING BUG (verified): `@dataclass(frozen=True, slot=True)` — `slot` should be `slots`; raised `TypeError` at import → `import orcapod` broken.** Slipped into commit 6e8a3181. **FIXED in place** (slots=True). | _fixed in place_ | new bug |
+| **I-22** | utils/name.py:37,68 | **BUG (verified): postfix delimiter hardcoded `_`, ignores `separator` arg** → docstring non-`_` examples wrong + latent data corruption when separator≠`_` and field contains `_`. Also wrong "returns empty string" doc; stale "move to util" TODO; dead commented `get_function_signature` block. | _pending (correctness)_ | new bug |
+| I-23 | utils/git_utils.py:63 | Bare `except:` (catches KeyboardInterrupt/SystemExit) → git info silently None; feeds observational git-hash provenance (I-16 fine-grained match). Use `except Exception`. | _pending_ | robustness |
+| I-24 | utils/function_info.py:144, 6 | `use_ast_parsing` is a **dead param** (AST path commented out; only string fallback runs). `_is_in_string` is a fragile comment-detector (no triple-quote/multiline handling) on the function-identity-hash path (Area 2). | _pending_ | dead-code / robustness |
+| I-25 | utils/object_spec.py:5 | **Trust boundary:** `parse_objectspec` imports+instantiates arbitrary classes from a spec (RCE if input untrusted). Used for DataContext-from-JSON. Add docstring warning + confirm trust model; dead commented block; `_validate_config_for_class` swallows all exceptions. | _pending (security-awareness)_ | security |
+| I-26 | utils/lazy_module.py:44 | `_`-prefixed `__getattr__` guard also blocks lazy access to module dunders (`__version__`/`__all__`). Minor; `Optional`/`str|None` typing inconsistency. | _pending (minor)_ | minor |
+| I-27 | name.py, function_info.py, object_spec.py | Recurring **dead commented-out code** blocks (old `get_function_signature`, AST docstring-removal methods, old `parse_objectspec`). Sweep/remove. | _pending_ | cleanup |
 | I-12 | types.py:330-331 | Dead `PipelineConfig.execution_engine`/`execution_engine_opts` w/ misleading docstring (`with_options` never called) | _pending_ | X3, Area 2 |
 | I-13 | types.py:335-366 | No retry/memory config fields on any config (Area 3); PodConfig-vs-NodeConfig axis undocumented; only NodeConfig has merge() | _pending_ | Area 3 |
 | I-14 | types.py:474 (ColumnConfig) | Docstring Attributes omits real fields `content_hash`, `sort_by_tags` | _pending_ | doc-drift |

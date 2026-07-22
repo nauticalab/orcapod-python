@@ -3,6 +3,11 @@ import inspect
 from collections.abc import Callable
 
 
+#!? This module produces the function-identity components consumed by data_function.py's
+#!? `_function_content_hash` / signature hash (Area 2, Leg 7). Comment-stripping accuracy here
+#!? affects that hash. `_is_in_string` below is a self-described "simplified check" — it does NOT
+#!? handle triple-quoted strings or `#` inside multiline strings, so comment removal can mis-fire
+#!? and change the hashed source. Low-probability but it's on the identity path — worth hardening.
 def _is_in_string(line: str, pos: int) -> bool:
     """Helper to check if a position in a line is inside a string literal."""
     # This is a simplified check - would need proper parsing for robust handling
@@ -141,7 +146,8 @@ def get_function_components(
     include_closure_info: bool = True,
     include_decorators: bool = True,
     include_extended_code_props: bool = True,
-    use_ast_parsing: bool = True,
+    use_ast_parsing: bool = True,  #!? DEAD PARAM: the AST path is commented out below (only the
+    #!? string-fallback runs), so this flag does nothing. Either restore the AST path or drop the param.
     skip_source_for_performance: bool = False,
 ) -> list[str]:
     """

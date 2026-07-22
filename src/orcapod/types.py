@@ -594,7 +594,7 @@ class ColumnConfig:
 
         return column_config
 
-@dataclass(frozen=True, slot=True)
+@dataclass(frozen=True, slots=True)
 class ColumnInfo:
     """Metadata for a single relational database column with its Arrow-mapped type.
 

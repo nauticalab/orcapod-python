@@ -42,6 +42,10 @@ class LazyModule:
     def __getattr__(self, name: str) -> Any:
         """Get attribute from the wrapped module, loading it if necessary."""
         if name.startswith("_"):
+            #!? Side effect: this also blocks lazily accessing legitimate module dunders like
+            #!? `pa.__version__` / `mod.__all__` (they raise AttributeError instead of loading).
+            #!? Fine for the current pyarrow/polars/git usage, but a lurking gotcha. Consider
+            #!? special-casing known module dunders, or documenting the limitation.
             # Avoid infinite recursion for internal attributes
             raise AttributeError(
                 f"'{self.__class__.__name__}' object has no attribute '{name}'"
