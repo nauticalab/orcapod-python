@@ -132,8 +132,9 @@ class Join(NonZeroInputOperator):
         table = stream.as_table(
             columns={"source": True, "system_tags": True, "meta": True}
         )
-        # trick to get cartesian product
-        table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table)))
+        # trick to get cartesian product; use int8 explicitly so that zero-row
+        # tables don't produce a null-typed column that Polars rejects on join
+        table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table), type=pa.int8()))
         table = arrow_utils.append_to_system_tags(
             table,
             f"{stream.pipeline_hash().to_hex(n_char)}:0",
@@ -151,7 +152,7 @@ class Join(NonZeroInputOperator):
             # trick to ensure that there will always be at least one shared key
             # this ensure that no overlap in keys lead to full caretesian product
             next_table = next_table.add_column(
-                0, COMMON_JOIN_KEY, pa.array([0] * len(next_table))
+                0, COMMON_JOIN_KEY, pa.array([0] * len(next_table), type=pa.int8())
             )
 
             # Rename any non-key columns in next_table that would collide with

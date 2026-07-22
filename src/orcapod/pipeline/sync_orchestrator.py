@@ -179,16 +179,14 @@ class SyncPipelineOrchestrator:
         pa = LazyModule("pyarrow")
 
         if not buf:
-            # Build an empty stream with the correct schema from the upstream node
+            # Build an empty stream preserving declared field nullability.
             tag_schema, data_schema = upstream_node.output_schema(
                 columns={"system_tags": True, "source": True}
             )
             type_converter = upstream_node.data_context.type_converter
-            empty_fields = {}
-            for name, py_type in {**tag_schema, **data_schema}.items():
-                arrow_type = type_converter.python_type_to_arrow_type(py_type)
-                empty_fields[name] = pa.array([], type=arrow_type)
-            empty_table = pa.table(empty_fields)
+            empty_table = arrow_utils.make_empty_table(
+                {**tag_schema, **data_schema}, type_converter
+            )
             tag_keys = upstream_node.keys()[0]
             return ArrowTableStream(
                 empty_table,
