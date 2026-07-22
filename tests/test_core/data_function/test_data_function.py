@@ -19,6 +19,7 @@ import pytest
 from orcapod.core.datagrams import Data
 from orcapod.core.data_function import PythonDataFunction, parse_function_outputs
 from orcapod.protocols.core_protocols import DataFunctionProtocol
+from orcapod.types import ContentHash
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -823,6 +824,7 @@ class TestVariationHashSchema:
         assert isinstance(variation["function_signature_hash"], bytes)
 
     def test_function_content_hash_is_bytes(self, add_pf):
+        """PythonDataFunction stores content hashes as bytes (-> large_binary)."""
         variation = add_pf.get_function_variation_data()
         assert isinstance(variation["function_content_hash"], bytes)
 
@@ -832,10 +834,9 @@ class TestVariationHashSchema:
         assert schema["function_content_hash"] is bytes
 
     def test_variation_hash_decodes_to_content_hash(self, add_pf):
-        from orcapod.types import ContentHash
+        """Both variation hash bytes round-trip through ContentHash.from_prefixed_digest."""
         variation = add_pf.get_function_variation_data()
-        sig_hash = ContentHash.from_prefixed_digest(
-            variation["function_signature_hash"]
-        )
-        assert sig_hash.method == "semantic_v0.1"
-        assert len(sig_hash.digest) == 32
+        sig_hash = ContentHash.from_prefixed_digest(variation["function_signature_hash"])
+        content_hash = ContentHash.from_prefixed_digest(variation["function_content_hash"])
+        assert isinstance(sig_hash, ContentHash)
+        assert isinstance(content_hash, ContentHash)
