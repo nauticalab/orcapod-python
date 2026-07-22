@@ -27,6 +27,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
+from orcapod.system_constants import constants
 from orcapod.types import CacheMode
 
 
@@ -453,9 +454,6 @@ class TestOperatorNodeRepr:
 class TestOperatorNodeHashColumnType:
     def test_node_content_hash_col_is_large_binary(self, simple_stream):
         """NODE_CONTENT_HASH_COL must be stored as large_binary in the pipeline DB."""
-        import pyarrow as pa
-        from orcapod.system_constants import constants
-
         db = InMemoryArrowDatabase()
         op = MapData({"x": "renamed_x"})
         node = OperatorJobNode(
