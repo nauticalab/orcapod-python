@@ -11,6 +11,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.pipeline.result import OrchestratorResult
+from orcapod.utils import arrow_utils
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
@@ -173,7 +174,6 @@ class SyncPipelineOrchestrator:
             An ArrowTableStream.
         """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-        from orcapod.utils import arrow_utils
         from orcapod.utils.lazy_module import LazyModule
 
         pa = LazyModule("pyarrow")
