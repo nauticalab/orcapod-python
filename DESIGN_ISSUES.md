@@ -31,17 +31,12 @@ Sites: `sync_orchestrator.py:_materialize_as_stream`, `operator_node.py:_make_em
 `side_effects.py:SideEffectJobFunctionStream.as_table`,
 `derived_source.py:DerivedSource._get_stream`.
 
-**Fix:** Extract `arrow_utils.make_empty_table(python_schema, type_converter)` using
-`python_schema_to_arrow_schema` + `pa.Table.from_batches([], schema=...)` and replace all
-five sites.
-
-**Fix:** Extracted ``arrow_utils.make_empty_table(python_schema, type_converter)`` using
-``python_schema_to_arrow_schema`` + ``pa.Table.from_batches([], schema=...)``. Replaced all
-five buggy sites: ``sync_orchestrator._materialize_as_stream``,
-``operator_node._make_empty_table``, ``SideEffectPodStream.as_table``,
-``SideEffectNode.as_table``, and ``DerivedSource._get_stream``. Also fixed a latent
-null-typed array bug in ``Join.static_process``. Added unit tests, integration test for the
-exact bug topology, and per-site regression tests. PR: ITL-563.
+**Fix:** Extracted `arrow_utils.make_empty_table(python_schema, type_converter)` using
+`python_schema_to_arrow_schema` + `pa.Table.from_batches([], schema=...)`. Replaced all five
+buggy sites: `sync_orchestrator._materialize_as_stream`, `operator_node._make_empty_table`,
+`SideEffectPodStream.as_table`, `SideEffectNode.as_table`, and `DerivedSource._get_stream`.
+Also fixed a latent null-typed array bug in `Join.static_process`. Added unit tests,
+integration test for the exact bug topology, and per-site regression tests. PR: ITL-563.
 
 ---
 
