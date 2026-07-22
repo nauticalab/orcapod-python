@@ -47,6 +47,7 @@ class LazyModule:
             #!? Fine for the current pyarrow/polars/git usage, but a lurking gotcha. Consider
             #!? special-casing known module dunders, or documenting the limitation.
             # Avoid infinite recursion for internal attributes
+            #! Yes this should be checked/revisited for an improved logic
             raise AttributeError(
                 f"'{self.__class__.__name__}' object has no attribute '{name}'"
             )

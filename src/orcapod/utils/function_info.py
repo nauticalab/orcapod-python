@@ -2,6 +2,7 @@ import ast
 import inspect
 from collections.abc import Callable
 
+#! How comprehensively this is these functions are tested should be fully assessed
 
 def _is_in_string(line: str, pos: int) -> bool:
     """Helper to check if a position in a line is inside a string literal."""
@@ -19,6 +20,7 @@ def _is_in_string(line: str, pos: int) -> bool:
 class SourceProcessor:
     """Handles AST-based and fallback source code processing."""
 
+    #! What's the use of this section? Why do we only have *_fallback version that's in use?
     # @staticmethod
     # def remove_docstrings_and_comments_ast(
     #     source: str, remove_docstrings: bool = True, remove_comments: bool = True
