@@ -169,7 +169,7 @@ class TestIterDatasReadOnly:
 
 
 def test_as_table_empty_schema_matches_non_empty_schema():
-    """as_table() empty table has the same set of columns as the populated table."""
+    """as_table() empty table has the same columns and nullability as the populated table."""
     db = InMemoryArrowDatabase()
     node_after = _make_node(db=db)
     node_after.run()
@@ -181,5 +181,10 @@ def test_as_table_empty_schema_matches_non_empty_schema():
     assert empty_table.num_rows == 0
     assert full_table.num_rows > 0
     assert set(empty_table.column_names) == set(full_table.column_names)
+    # Nullability must match — this fails before the fix
+    assert all(
+        empty_table.schema.field(n).nullable == full_table.schema.field(n).nullable
+        for n in empty_table.column_names
+    )
 
 

@@ -23,6 +23,7 @@ from orcapod.invocation import (
     InvocationHashConfig,
 )
 from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -154,7 +155,6 @@ class SideEffectPodStream(StreamBase):
         all_info: bool = False,
     ) -> pa.Table:
         from orcapod.types import ColumnConfig as _ColumnConfig
-        from orcapod.utils import arrow_utils
 
         column_config = _ColumnConfig.handle_config(columns, all_info=all_info)
         tag_tables = []
@@ -163,17 +163,14 @@ class SideEffectPodStream(StreamBase):
             tag_tables.append(tag.as_table(columns=column_config))
             data_tables.append(data.as_table(columns=column_config))
         if not tag_tables:
-            # Return an empty table with the correct schema
+            # Return an empty table preserving declared field nullability.
             tag_schema, data_schema = self.output_schema(
                 columns=column_config
             )
             tc = self._pod.data_context.type_converter
-            fields = {}
-            for name, py_type in {**tag_schema, **data_schema}.items():
-                fields[name] = pa.array(
-                    [], type=tc.python_type_to_arrow_type(py_type)
-                )
-            return pa.table(fields)
+            return arrow_utils.make_empty_table(
+                {**tag_schema, **data_schema}, tc
+            )
         combined_tags = pa.concat_tables(tag_tables)
         combined_data = pa.concat_tables(data_tables)
         return arrow_utils.hstack_tables(combined_tags, combined_data)
@@ -717,7 +714,6 @@ class SideEffectNode(StreamBase):
     ) -> pa.Table:
         """Collect all rows from ``iter_data()`` into an Arrow table."""
         from orcapod.types import ColumnConfig as _ColumnConfig
-        from orcapod.utils import arrow_utils
 
         column_config = _ColumnConfig.handle_config(columns, all_info=all_info)
         tag_tables = []
@@ -726,14 +722,12 @@ class SideEffectNode(StreamBase):
             tag_tables.append(tag.as_table(columns=column_config))
             data_tables.append(data.as_table(columns=column_config))
         if not tag_tables:
+            # Return an empty table preserving declared field nullability.
             tag_schema, data_schema = self.output_schema(columns=column_config)
             tc = self._pod.data_context.type_converter
-            fields = {}
-            for name, py_type in {**tag_schema, **data_schema}.items():
-                fields[name] = pa.array(
-                    [], type=tc.python_type_to_arrow_type(py_type)
-                )
-            return pa.table(fields)
+            return arrow_utils.make_empty_table(
+                {**tag_schema, **data_schema}, tc
+            )
         return arrow_utils.hstack_tables(
             pa.concat_tables(tag_tables),
             pa.concat_tables(data_tables),

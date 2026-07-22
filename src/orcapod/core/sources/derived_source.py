@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.types import ColumnConfig, Schema
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -76,23 +77,13 @@ class DerivedSource(RootSource):
         if self._cached_table is None:
             records = self._origin.get_all_records()
             if records is None:
-                # Build empty table with correct schema
+                # Build empty table preserving declared field nullability.
                 tag_schema, data_schema = self._origin.output_schema()
                 tag_keys = self._origin.keys()[0]
                 tc = self.data_context.type_converter
-                fields = [
-                    pa.field(k, tc.python_type_to_arrow_type(tag_schema[k]))
-                    for k in tag_keys
-                ]
-                fields += [
-                    pa.field(k, tc.python_type_to_arrow_type(v))
-                    for k, v in data_schema.items()
-                ]
-                arrow_schema = pa.schema(fields)
-                self._cached_table = pa.table(
-                    {f.name: pa.array([], type=f.type) for f in arrow_schema},
-                    schema=arrow_schema,
-                )
+                python_schema = {k: tag_schema[k] for k in tag_keys}
+                python_schema.update(data_schema)
+                self._cached_table = arrow_utils.make_empty_table(python_schema, tc)
             else:
                 self._cached_table = records
         tag_keys = self._origin.keys()[0]

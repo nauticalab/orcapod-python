@@ -399,6 +399,45 @@ class TestSideEffectFunctionPodDecorator:
         assert pod.__name__ == "my_fn"
 
 
+class TestSideEffectEmptyTableNullability:
+    """Regression for ITL-563: empty as_table() must preserve field nullability."""
+
+    def test_empty_stream_schema_preserves_required_fields(self):
+        """SideEffectPodStream.as_table() with no rows preserves nullable=False."""
+        from orcapod.side_effects import SideEffectPod, SideEffectPodStream
+
+        def my_fn(value: int, ctx: InvocationContext) -> None:
+            pass
+
+        pod = SideEffectPod(my_fn, ctx_arg_name="ctx")
+        stream = _make_stream(n=0)  # empty input → empty output
+
+        se_stream = SideEffectPodStream(side_effect_pod=pod, input_stream=stream)
+        table = se_stream.as_table()
+
+        assert table.num_rows == 0
+        # "id" and "value" are declared non-nullable — must not become nullable
+        assert table.schema.field("id").nullable is False
+        assert table.schema.field("value").nullable is False
+
+    def test_empty_node_schema_preserves_required_fields(self):
+        """SideEffectNode.as_table() with no rows preserves nullable=False."""
+        from orcapod.side_effects import SideEffectPod, SideEffectNode
+
+        def my_fn(value: int, ctx: InvocationContext) -> None:
+            pass
+
+        pod = SideEffectPod(my_fn, ctx_arg_name="ctx")
+        stream = _make_stream(n=0)  # empty input → empty output
+
+        node = SideEffectNode(side_effect_pod=pod, input_stream=stream)
+        table = node.as_table()
+
+        assert table.num_rows == 0
+        # "id" is declared non-nullable (int) — must not become nullable
+        assert table.schema.field("id").nullable is False
+
+
 class TestSideEffectCtxCollision:
     """Tests for ctx_arg_name collision with data columns in SideEffectPod."""
 

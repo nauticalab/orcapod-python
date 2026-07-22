@@ -10,8 +10,28 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 else:
     pa = LazyModule("pyarrow")
+
+
+def make_empty_table(python_schema: "Mapping[str, Any]", type_converter: "TypeConverterProtocol") -> "pa.Table":
+    """Return a zero-row PyArrow table whose field nullability matches ``python_schema``.
+
+    Uses ``python_schema_to_arrow_schema`` so that plain types (``str``, ``int``, …)
+    produce ``nullable=False`` fields and Optional types (``str | None``) produce
+    ``nullable=True`` fields. This preserves the bidirectional round-trip through
+    ``ArrowTableStream.output_schema()``.
+
+    Args:
+        python_schema: Mapping of field name to Python type annotation.
+        type_converter: A ``UniversalTypeConverter`` instance.
+
+    Returns:
+        A zero-row ``pa.Table`` with the correct Arrow schema.
+    """
+    arrow_schema = type_converter.python_schema_to_arrow_schema(python_schema)
+    return pa.Table.from_batches([], schema=arrow_schema)
 
 
 def schema_select(

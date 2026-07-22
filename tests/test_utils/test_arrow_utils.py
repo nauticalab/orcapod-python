@@ -731,3 +731,64 @@ class TestNormalizeExtensionColumns:
         # Data values correct for both
         assert result.column("i").to_pylist() == [1, 2]
         assert result.column("b").to_pylist() == [b"x", b"y"]
+
+
+# ---------------------------------------------------------------------------
+# make_empty_table — ITL-563
+# ---------------------------------------------------------------------------
+
+
+class TestMakeEmptyTable:
+    """make_empty_table preserves field nullability from python_schema."""
+
+    def _converter(self):
+        from orcapod.contexts import get_default_type_converter
+        return get_default_type_converter()
+
+    def test_required_fields_are_non_nullable(self):
+        """Plain types produce nullable=False Arrow fields."""
+        from orcapod.utils.arrow_utils import make_empty_table
+
+        schema = {"name": str, "count": int}
+        table = make_empty_table(schema, self._converter())
+
+        assert table.num_rows == 0
+        assert table.schema.field("name").nullable is False
+        assert table.schema.field("count").nullable is False
+
+    def test_optional_fields_are_nullable(self):
+        """Optional types produce nullable=True Arrow fields."""
+        from orcapod.utils.arrow_utils import make_empty_table
+
+        schema = {"name": str | None, "count": int | None}
+        table = make_empty_table(schema, self._converter())
+
+        assert table.num_rows == 0
+        assert table.schema.field("name").nullable is True
+        assert table.schema.field("count").nullable is True
+
+    def test_mixed_nullability_per_field(self):
+        """Mixed schema: required field non-nullable, optional field nullable."""
+        from orcapod.utils.arrow_utils import make_empty_table
+
+        schema = {"subject": str, "score": int | None}
+        table = make_empty_table(schema, self._converter())
+
+        assert table.num_rows == 0
+        assert table.schema.field("subject").nullable is False
+        assert table.schema.field("score").nullable is True
+
+    def test_round_trips_through_arrow_table_stream(self):
+        """Python schema → make_empty_table → ArrowTableStream.output_schema() is identity."""
+        from orcapod.utils.arrow_utils import make_empty_table
+        from orcapod.core.streams import ArrowTableStream
+
+        converter = self._converter()
+        python_schema = {"subject": str, "score": int | None}
+        table = make_empty_table(python_schema, converter)
+
+        # ArrowTableStream requires at least one data column; tag=subject, data=score
+        stream = ArrowTableStream(table, tag_columns=["subject"])
+        _, data_schema = stream.output_schema()
+
+        assert data_schema["score"] == (int | None)
