@@ -10,11 +10,12 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 else:
     pa = LazyModule("pyarrow")
 
 
-def make_empty_table(python_schema: "Mapping[str, Any]", type_converter: Any) -> "pa.Table":
+def make_empty_table(python_schema: "Mapping[str, Any]", type_converter: "TypeConverterProtocol") -> "pa.Table":
     """Return a zero-row PyArrow table whose field nullability matches ``python_schema``.
 
     Uses ``python_schema_to_arrow_schema`` so that plain types (``str``, ``int``, …)
