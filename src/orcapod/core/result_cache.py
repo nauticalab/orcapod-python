@@ -16,7 +16,6 @@ from orcapod.errors import SchemaVersionError
 from orcapod.protocols.core_protocols import DataProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants, RESULT_DB_SCHEMA_VERSION
-from orcapod.types import ContentHash
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -27,20 +26,6 @@ else:
     pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
-
-
-def _hash_val_to_binary(val: "str | bytes | memoryview | None") -> "bytes | None":
-    """Convert a ContentHash value to its prefixed binary digest.
-
-    Tolerates both ``str`` (v0 format, passed through ``ContentHash.from_string``)
-    and ``bytes``/``memoryview`` (already binary v1 format, returned as-is).
-    Returns ``None`` for ``None`` inputs.
-    """
-    if val is None:
-        return None
-    if isinstance(val, (bytes, memoryview)):
-        return bytes(val)
-    return ContentHash.from_string(val).to_prefixed_digest()
 
 
 # Process-level cache of v1 result DB paths that have already been checked for
@@ -169,7 +154,7 @@ class ResultCache:
     def lookup(
         self,
         input_data: DataProtocol,
-        additional_constraints: dict[str, str] | None = None,
+        additional_constraints: dict[str, bytes] | None = None,
     ) -> DataProtocol | None:
         """Look up a cached output data for *input_data*.
 
@@ -281,22 +266,6 @@ class ResultCache:
                 exec_table.column(name),
             )
             col_idx += 1
-
-        # Convert ContentHash variation columns to large_binary (v1 schema).
-        # Tolerates both str (v0 format) and bytes/memoryview (already binary — pass through).
-        _HASH_VAR_COLS = {
-            f"{constants.PF_VARIATION_PREFIX}function_signature_hash",
-            f"{constants.PF_VARIATION_PREFIX}function_content_hash",
-        }
-        for col_name in _HASH_VAR_COLS:
-            if col_name in data_table.column_names:
-                col_idx = data_table.column_names.index(col_name)
-                raw_vals = data_table.column(col_name).to_pylist()
-                binary_vals = pa.array(
-                    [_hash_val_to_binary(v) for v in raw_vals],
-                    type=pa.large_binary(),
-                )
-                data_table = data_table.set_column(col_idx, col_name, binary_vals)
 
         # Add input data hash as large_binary at position 0 (v1 schema).
         data_table = data_table.add_column(
