@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import WrappedFunctionPod
 from orcapod.core.result_cache import ResultCache
+from orcapod.hooks import InvocationStatus
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataProtocol,
@@ -61,8 +63,43 @@ class CachedFunctionPod(WrappedFunctionPod):
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """Return the path to the cached records in the result store."""
+        """Return the path to the cached records in the result store (versioned)."""
         return self._cache.record_path
+
+    def set_ignore_schema(self, ignore_schema: tuple[str, ...] | None) -> None:
+        """Propagate ``ignore_schema`` setting to the underlying ``ResultCache``.
+
+        Args:
+            ignore_schema: Tuple of schema version strings to tolerate (e.g.
+                ``("v0",)``), or ``None`` to use the default (raise on any
+                old schema).
+        """
+        self._cache.set_ignore_schema(ignore_schema)
+
+    def lookup_cached_data(self, data: DataProtocol) -> DataProtocol | None:
+        """Look up a cached result for ``data`` without triggering computation.
+
+        Uses the input data content hash as the cache key (same as
+        ``process_data``). When a cached result is found, it is tagged with
+        ``RESULT_COMPUTED_FLAG=False`` before being returned, exactly as
+        ``process_data`` does on a cache hit.
+
+        This method is the correct entry point for callers that need a
+        cache-only probe — for example, when processing an ``EmptyData``
+        token where computation cannot proceed because the upstream result
+        is missing.
+
+        Args:
+            data: The input data whose content hash is used as the cache key.
+
+        Returns:
+            The cached output ``Data`` (with ``RESULT_COMPUTED_FLAG=False``
+            appended), or ``None`` if no cached result exists for this input.
+        """
+        cached = self._cache.lookup(data)
+        if cached is None:
+            return None
+        return cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
 
     def process_data(
         self,
@@ -70,6 +107,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Process a data with pod-level caching.
 
@@ -82,6 +120,9 @@ class CachedFunctionPod(WrappedFunctionPod):
             tag: The tag associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
+            run_id: Pipeline run identifier forwarded to the inner pod's
+                ``process_data``. Used to populate ``InvocationContext.pipeline_run_id``
+                for ctx-aware pods.
 
         Returns:
             A ``(tag, output_data)`` tuple; output_data is ``None``
@@ -93,7 +134,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
             return tag, cached
 
-        tag, output = self._function_pod.process_data(tag, data, logger=logger)
+        tag, output = self._function_pod.process_data(tag, data, logger=logger, run_id=run_id)
         if output is not None:
             pf = self._function_pod.data_function
             var_dg = Datagram(
@@ -116,12 +157,25 @@ class CachedFunctionPod(WrappedFunctionPod):
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
     ) -> tuple[TagProtocol, DataProtocol | None]:
         """Async counterpart of ``process_data``.
 
         DB lookup and store are synchronous (DB protocol is sync), but the
         actual computation uses the inner pod's ``async_process_data``
         for true async execution.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+            run_id: Pipeline run identifier forwarded to the inner pod's
+                ``async_process_data``. Used to populate ``InvocationContext.pipeline_run_id``
+                for ctx-aware pods.
+
+        Returns:
+            A ``(tag, output_data)`` tuple; output_data is ``None``
+            if the inner function filters the data out.
         """
         cached = self._cache.lookup(data)
         if cached is not None:
@@ -130,7 +184,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             return tag, cached
 
         tag, output = await self._function_pod.async_process_data(
-            tag, data, logger=logger
+            tag, data, logger=logger, run_id=run_id
         )
         if output is not None:
             pf = self._function_pod.data_function
@@ -147,6 +201,130 @@ class CachedFunctionPod(WrappedFunctionPod):
             self._cache.store(data, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
+
+    def _invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Override to detect cache hit status from ``RESULT_COMPUTED_FLAG`` meta.
+
+        When ``_post_run_hooks`` is empty, delegates directly to
+        ``process_data`` with zero overhead. Otherwise calls
+        ``self.process_data()`` (which owns all cache lookup and store logic),
+        reads ``RESULT_COMPUTED_FLAG`` from the output data meta to determine
+        ``InvocationStatus.HIT`` vs ``InvocationStatus.COMPUTED``, and fires
+        registered hooks.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+            run_id: Pipeline run identifier forwarded to
+                ``PostRunPayload.invocation_context``.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        if not self._post_run_hooks:
+            return self.process_data(tag, data, logger=logger, run_id=run_id)
+
+        started_at = datetime.now(timezone.utc)
+        out_tag = tag
+        output_data: DataProtocol | None = None
+
+        try:
+            out_tag, output_data = self.process_data(tag, data, logger=logger, run_id=run_id)
+            if output_data is not None:
+                status = (
+                    InvocationStatus.HIT
+                    if output_data.get_meta_value(self.RESULT_COMPUTED_FLAG) is False
+                    else InvocationStatus.COMPUTED
+                )
+            else:
+                status = InvocationStatus.COMPUTED
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            self._fire_post_run_hooks(
+                self._build_post_run_payload(
+                    tag, data, None, started_at, finished_at,
+                    InvocationStatus.ERROR, exc, run_id=run_id,
+                )
+            )
+            raise  # bare raise — preserves the original traceback exactly
+
+        finished_at = datetime.now(timezone.utc)
+        self._fire_post_run_hooks(
+            self._build_post_run_payload(
+                tag, data, output_data, started_at, finished_at, status, None,
+                run_id=run_id,
+            )
+        )
+        return out_tag, output_data
+
+    async def _async_invoke_with_hooks(
+        self,
+        tag: TagProtocol,
+        data: DataProtocol,
+        *,
+        logger: DataExecutionLoggerProtocol | None = None,
+        run_id: str | None = None,
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        """Async counterpart of ``_invoke_with_hooks`` for ``CachedFunctionPod``.
+
+        When ``_post_run_hooks`` is empty, delegates directly to
+        ``async_process_data`` with zero overhead.
+
+        Args:
+            tag: The tag associated with the data.
+            data: The input data to process.
+            logger: Optional data execution logger.
+            run_id: Pipeline run identifier forwarded to
+                ``PostRunPayload.invocation_context``.
+
+        Returns:
+            A ``(tag, output_data)`` tuple.
+        """
+        if not self._post_run_hooks:
+            return await self.async_process_data(tag, data, logger=logger, run_id=run_id)
+
+        started_at = datetime.now(timezone.utc)
+        out_tag = tag
+        output_data: DataProtocol | None = None
+
+        try:
+            out_tag, output_data = await self.async_process_data(
+                tag, data, logger=logger, run_id=run_id
+            )
+            if output_data is not None:
+                status = (
+                    InvocationStatus.HIT
+                    if output_data.get_meta_value(self.RESULT_COMPUTED_FLAG) is False
+                    else InvocationStatus.COMPUTED
+                )
+            else:
+                status = InvocationStatus.COMPUTED
+        except Exception as exc:
+            finished_at = datetime.now(timezone.utc)
+            self._fire_post_run_hooks(
+                self._build_post_run_payload(
+                    tag, data, None, started_at, finished_at,
+                    InvocationStatus.ERROR, exc, run_id=run_id,
+                )
+            )
+            raise  # bare raise — preserves the original traceback exactly
+
+        finished_at = datetime.now(timezone.utc)
+        self._fire_post_run_hooks(
+            self._build_post_run_payload(
+                tag, data, output_data, started_at, finished_at, status, None,
+                run_id=run_id,
+            )
+        )
+        return out_tag, output_data
 
     def get_all_cached_outputs(
         self, include_system_columns: bool = False

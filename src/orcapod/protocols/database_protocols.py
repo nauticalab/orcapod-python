@@ -100,6 +100,22 @@ class ArrowDatabaseProtocol(Protocol):
         """
         ...
 
+    def table_exists(self, record_path: tuple[str, ...]) -> bool:
+        """Return ``True`` if a table exists at ``record_path``, ``False`` otherwise.
+
+        This is a cheap existence check that does NOT load any records.
+        Used by schema detection logic to determine whether a versioned table
+        path already exists before checking for legacy paths.
+
+        Args:
+            record_path: Path components identifying the table, relative to
+                ``self.base_path``.
+
+        Returns:
+            ``True`` if a table exists at the given path, ``False`` otherwise.
+        """
+        ...
+
     def to_config(self) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict.
 

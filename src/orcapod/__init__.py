@@ -8,6 +8,18 @@ from .config import (
 from .core.function_pod import (
     FunctionPod,
     function_pod,
+    side_effect_function_pod,
+)
+from .invocation import (
+    InvocationContext,
+    InvocationHashConfig,
+)
+from .side_effects import (
+    SideEffectPod,
+    SideEffectPodConfig,
+    side_effect_pod,
+    sink_pod,
+    tap_pod,
 )
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
@@ -37,6 +49,17 @@ from orcapod.extension_types.directory_type import Directory
 # Extension registration API (ITL-473)
 from .extensions import OrcapodExtension, register_extension
 
+# Post-run hook types (ITL-523)
+from .hooks import (
+    HookConfig,
+    InvocationStatus,
+    PodContext,
+    PostRunHook,
+    PostRunHookFn,
+    PostRunPayload,
+    RunStats,
+)
+
 __all__ = [
     "DEFAULT_CONFIG",
     "DisplayConfig",
@@ -45,6 +68,14 @@ __all__ = [
     "load_config",
     "FunctionPod",
     "function_pod",
+    "InvocationContext",
+    "InvocationHashConfig",
+    "SideEffectPod",
+    "SideEffectPodConfig",
+    "side_effect_pod",
+    "sink_pod",
+    "tap_pod",
+    "side_effect_function_pod",
     "Pipeline",
     "PipelineJob",
     "SourceNode",
@@ -63,6 +94,14 @@ __all__ = [
     # Extension registration API (ITL-473)
     "OrcapodExtension",
     "register_extension",
+    # Post-run hook types (ITL-523)
+    "HookConfig",
+    "InvocationStatus",
+    "PodContext",
+    "PostRunHook",
+    "PostRunHookFn",
+    "PostRunPayload",
+    "RunStats",
 ]
 
 

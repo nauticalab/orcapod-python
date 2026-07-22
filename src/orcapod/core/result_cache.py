@@ -10,11 +10,12 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from orcapod.errors import SchemaVersionError
 from orcapod.protocols.core_protocols import DataProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.system_constants import constants
+from orcapod.system_constants import constants, RESULT_DB_SCHEMA_VERSION
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -25,6 +26,12 @@ else:
     pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
+
+
+# Process-level cache of v1 result DB paths that have already been checked for
+# legacy v0 schema. Populated on first access; prevents repeated table_exists
+# calls for the same path within a single process.
+_checked_rdb_paths: set[tuple[str, ...]] = set()
 
 
 class ResultCache:
@@ -57,6 +64,7 @@ class ResultCache:
         self._result_database = result_database
         self._record_path = record_path
         self._auto_flush = auto_flush
+        self._ignore_schema: tuple[str, ...] | None = None
 
     @property
     def result_database(self) -> ArrowDatabaseProtocol:
@@ -64,18 +72,89 @@ class ResultCache:
         return self._result_database
 
     @property
-    def record_path(self) -> tuple[str, ...]:
-        """The record path for scoping records in the database."""
+    def base_record_path(self) -> tuple[str, ...]:
+        """The unversioned base record path (v0 path), without schema version suffix.
+
+        Used by migration utilities that need to reference the legacy v0 table
+        path. The public ``record_path`` property returns the versioned v1 path.
+        """
         return self._record_path
+
+    @property
+    def record_path(self) -> tuple[str, ...]:
+        """The versioned path where records are stored.
+
+        Returns ``_record_path + (RESULT_DB_SCHEMA_VERSION,)`` — the actual
+        storage location of result records in the v1 schema.  Use
+        ``base_record_path`` to access the unversioned path.
+        """
+        return self._versioned_record_path
+
+    @property
+    def _versioned_record_path(self) -> tuple[str, ...]:
+        """Result DB path with the current schema version suffix appended."""
+        return self._record_path + (RESULT_DB_SCHEMA_VERSION,)
 
     def set_auto_flush(self, on: bool = True) -> None:
         """Set auto-flush behavior."""
         self._auto_flush = on
 
+    def set_ignore_schema(self, ignore_schema: tuple[str, ...] | None) -> None:
+        """Set which old schema versions to tolerate without raising ``SchemaVersionError``.
+
+        Args:
+            ignore_schema: Tuple of schema version strings to tolerate (e.g.
+                ``("v0",)``), or ``None`` to use the default (raise on any
+                old schema).
+        """
+        self._ignore_schema = ignore_schema
+
+    def _ensure_rdb_schema(self) -> None:
+        """Check for a legacy v0 result DB on first access per path.
+
+        Detection flow (runs at most once per v1 path per process):
+
+        1. If the v1 path is already in ``_checked_rdb_paths`` → return immediately.
+        2. If the v1 table exists → mark checked and return.
+        3. If the v0 path (bare ``_record_path``) has a table:
+           - ``"v0"`` in ``_ignore_schema`` → log info, continue.
+           - Otherwise → raise ``SchemaVersionError``.
+        4. Neither path exists → fresh database, continue.
+        5. Mark v1 path as checked.
+
+        Raises:
+            SchemaVersionError: If a v0 table is detected and not ignored.
+        """
+        v1_path = self._versioned_record_path
+        if v1_path in _checked_rdb_paths:
+            return
+        if self._result_database.table_exists(v1_path):
+            _checked_rdb_paths.add(v1_path)
+            return
+        v0_path = self._record_path
+        if self._result_database.table_exists(v0_path):
+            ignore = self._ignore_schema or ()
+            if "v0" not in ignore:
+                raise SchemaVersionError(
+                    f"Result DB rows found at v0 schema path {'/'.join(v0_path)!r}.\n"
+                    "Run migration first:\n"
+                    f"  orcapod migrate result-db <DB_PATH> {'/'.join(v0_path)}\n"
+                    "To suppress this error and recompute all results instead, set:\n"
+                    '  node.node_config = NodeConfig(ignore_schema=("v0",))'
+                )
+            logger.info(
+                "Result DB v0 schema detected at %r — proceeding because "
+                "ignore_schema=%r",
+                v0_path,
+                ignore,
+            )
+        # Only cache as checked after the raise-or-ignore decision passes.
+        _checked_rdb_paths.add(v1_path)
+
     def lookup(
         self,
         input_data: DataProtocol,
-        additional_constraints: dict[str, str] | None = None,
+        additional_constraints: dict[str, Any] | None = None,
     ) -> DataProtocol | None:
         """Look up a cached output data for *input_data*.
 
@@ -89,7 +168,9 @@ class ResultCache:
             input_data: The input data whose content hash is the
                 primary lookup key.
             additional_constraints: Optional extra column-value pairs to
-                include in the lookup query.
+                include in the lookup query. Values may be ``bytes`` (for
+                binary hash columns) or other scalar types (e.g. ``str``
+                for ``function_name``).
 
         Returns:
             The cached output data with ``RESULT_COMPUTED_FLAG: False``
@@ -97,16 +178,18 @@ class ResultCache:
         """
         from orcapod.core.datagrams import Data
 
+        self._ensure_rdb_schema()
+
         RECORD_ID_COL = "_record_id"
 
-        constraints: dict[str, str] = {
-            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_string(),
+        constraints: dict[str, Any] = {
+            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_prefixed_digest(),
         }
         if additional_constraints:
             constraints.update(additional_constraints)
 
         result_table = self._result_database.get_records_with_column_value(
-            self._record_path,
+            self._versioned_record_path,
             constraints,
             record_id_column=RECORD_ID_COL,
         )
@@ -161,6 +244,8 @@ class ResultCache:
             skip_duplicates: If True, silently skip if a record with the
                 same ID already exists.
         """
+        self._ensure_rdb_schema()
+
         data_table = output_data.as_table(columns={"source": True, "context": True})
 
         # Add variation and execution columns with prefixes.
@@ -184,11 +269,13 @@ class ResultCache:
             )
             col_idx += 1
 
-        # Add input data hash (position 0)
+        # Add input data hash as large_binary at position 0 (v1 schema).
         data_table = data_table.add_column(
             0,
             constants.INPUT_DATA_HASH_COL,
-            pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
+            pa.array(
+                [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
+            ),
         )
 
         data_table = data_table.append_column(
@@ -197,7 +284,7 @@ class ResultCache:
         )
 
         self._result_database.add_record(
-            self._record_path,
+            self._versioned_record_path,
             output_data.datagram_uuid.bytes,
             data_table,
             skip_duplicates=skip_duplicates,
@@ -218,11 +305,13 @@ class ResultCache:
         Returns:
             A PyArrow table of cached results, or ``None`` if empty.
         """
+        self._ensure_rdb_schema()
+
         record_id_column = (
             constants.DATA_RECORD_ID if include_system_columns else None
         )
         result_table = self._result_database.get_all_records(
-            self._record_path, record_id_column=record_id_column
+            self._versioned_record_path, record_id_column=record_id_column
         )
         if result_table is None or result_table.num_rows == 0:
             return None

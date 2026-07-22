@@ -273,17 +273,23 @@ grouping. It should be co-located with `function_pod` or moved to the protocols 
 **Status:** open
 **Severity:** high
 
-`_validate_input_schema()` (line ~162) raises a generic `ValueError` when the data schema
-is incompatible:
+`_validate_input_schema()` in `_FunctionPodBase` raises a generic `ValueError` when the
+incoming data schema is incompatible with the function's expected input schema:
 ```python
 # TODO: use custom exception type for better error handling
+raise ValueError(
+    f"Incoming data data type {input_schema} is not compatible with ..."
+)
 ```
 
-The codebase already has `InputValidationError` (in `errors.py`) which is the correct exception
-for this case. Using `ValueError` means callers cannot distinguish schema incompatibility from
-other value errors without string-matching the message.
+Using `ValueError` means callers cannot distinguish schema incompatibility from other value
+errors without string-matching the message.
 
-Fix: change `ValueError` to `InputValidationError`.
+Fix: define a new `SchemaCompatibilityError` (subclass of `InputValidationError`) in
+`errors.py` and raise it from `_validate_input_schema()`. The existing
+`SchemaInconsistencyError` covers batch/polling-source schema drift; this new type covers
+function-pod input schema mismatch. Name the exception to reflect the cause:
+incompatible upstream stream schema vs. function's expected input schema.
 
 ---
 
@@ -1288,3 +1294,22 @@ across this version range.
 
 **Ongoing:** pyspiral releases frequently. See PLT-1785 for the tracking issue
 covering routine version bumps.
+
+---
+
+## `src/orcapod/core/nodes/operator_node.py`
+
+### ON1 — OperatorJobNode has no v0→v1 schema migration for `NODE_CONTENT_HASH_COL`
+**Status:** open
+**Severity:** high
+**Issue:** ITL-539
+
+`OperatorJobNode` stores `NODE_CONTENT_HASH_COL` as `large_binary` (changed in ITL-539),
+but unlike `FunctionJobNode` and `ResultCache`, it has no `_ensure_schema()` guard and no
+v0→v1 migration utility. Any existing pipeline DB written by the old code that stored
+`NODE_CONTENT_HASH_COL` as `large_string` will fail with an Arrow schema mismatch on the
+next write attempt. This is accepted as a breaking change for a pre-v0.1.0 project; users
+must drop and recreate the affected pipeline DB tables manually.
+
+A proper migration utility (analogous to `migrate_pipeline_v0_to_v1`) should be implemented
+before v0.1.0 ship.

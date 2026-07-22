@@ -211,7 +211,7 @@ class TestFunctionJobNodeAsyncExecuteDB:
         """add_pipeline_record is called once per cache miss → one row per item."""
         node, pipeline_db, _ = _make_db_node(3)
         await _run_node(node)
-        records = pipeline_db.get_all_records(node.node_identity_path)
+        records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert records is not None
         assert records.num_rows == 3
 
@@ -441,7 +441,7 @@ class TestFunctionJobNodeAsyncExecuteEphemeral:
         results = await _run_node(node)
         assert len(results) == 2
 
-        records = pipeline_db.get_all_records(node.node_identity_path)
+        records = pipeline_db.get_all_records(node._versioned_pipeline_path)
         assert records is not None
         assert records.num_rows == 2
         # All rows should have is_ephemeral=True

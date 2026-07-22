@@ -107,3 +107,91 @@ class PipelineJobRequiredError(RuntimeError):
     references.  Wrap the containing ``Pipeline`` in a ``PipelineJob`` to
     obtain executable ``FunctionJobNode`` / ``OperatorJobNode`` variants.
     """
+
+
+class EmptyDataAccessError(Exception):
+    """Raised when a payload-access method is called on an ``EmptyData`` instance.
+
+    ``EmptyData`` carries no data payload. Any method that would access the
+    underlying columns (``as_dict``, ``as_table``, ``keys``, ``schema``,
+    ``arrow_schema``, ``identity_structure``) raises this exception instead of
+    returning empty or ``None`` results.
+
+    Attributes:
+        empty_data: The ``EmptyData`` instance on which the method was called.
+        method_name: The name of the method that was called.
+    """
+
+    def __init__(self, empty_data: object, method_name: str) -> None:
+        self.empty_data = empty_data
+        self.method_name = method_name
+        super().__init__(
+            f"Cannot call {method_name!r} on EmptyData — "
+            "this instance carries no data payload. "
+            "Check isinstance(data, EmptyData) before accessing the payload."
+        )
+
+
+class EmptyDataHashMissingError(Exception):
+    """Raised when ``content_hash()`` is called on an ``EmptyData`` that has no cached hash.
+
+    An ``EmptyData`` constructed without a ``cached_content_hash`` is in degraded
+    mode (old pipeline DB row lacking the hash column). Any code path that tries
+    to use the hash fails loudly here.
+
+    Attributes:
+        empty_data: The ``EmptyData`` instance on which ``content_hash()`` was called.
+    """
+
+    def __init__(self, empty_data: object) -> None:
+        self.empty_data = empty_data
+        super().__init__(
+            "content_hash() called on EmptyData with no cached_content_hash. "
+            "The pipeline DB row that produced this token is missing the stored "
+            "hash column (OUTPUT_DATA_HASH_COL or INPUT_DATA_HASH_COL). "
+            "Flow-through is unavailable for this row."
+        )
+
+
+class SchemaVersionError(Exception):
+    """Raised when an old schema version is detected at a database path.
+
+    Occurs when a table exists at the unversioned (v0) path but not at the
+    expected versioned path, and the node has not opted in to tolerating
+    the old schema via ``NodeConfig.ignore_schema``.
+
+    To suppress this error, set ``node.node_config = NodeConfig(ignore_schema=("v0",))``
+    and re-run. The node will recompute all results from scratch rather than
+    reading from the v0 cache.
+    """
+
+
+class EphemeralResultMissingError(Exception):
+    """Raised when a downstream pod has a cache miss for an ``EmptyData`` input.
+
+    Indicates that the upstream ephemeral result is gone AND the downstream pod
+    has not yet computed a result for the same input content hash. No recovery
+    is possible — the information has been lost.
+
+    Attributes:
+        tag: The tag associated with the missing input.
+        cached_content_hash: The cached content hash from the ``EmptyData``, or
+            ``None`` if the ``EmptyData`` itself lacked a hash.
+        node_identity_path: Identity path of the downstream node raising this error.
+    """
+
+    def __init__(
+        self,
+        tag: object,
+        cached_content_hash: object,
+        node_identity_path: tuple[str, ...],
+        message: str,
+    ) -> None:
+        self.tag = tag
+        self.cached_content_hash = cached_content_hash
+        self.node_identity_path = node_identity_path
+        super().__init__(
+            f"{message} "
+            f"node={node_identity_path!r} "
+            f"cached_content_hash={cached_content_hash!r}"
+        )

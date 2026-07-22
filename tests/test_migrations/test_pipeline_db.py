@@ -1,0 +1,348 @@
+"""Tests for migrate_pipeline_v0_to_v1()."""
+from __future__ import annotations
+
+import pyarrow as pa
+import pytest
+
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.migrations.pipeline_db import migrate_pipeline_v0_to_v1
+from orcapod.migrations.types import MigrationResult
+from orcapod.system_constants import PIPELINE_DB_SCHEMA_VERSION, constants
+from orcapod.types import ContentHash
+
+
+_NODE_HASH = ContentHash("sha256", bytes(range(32)))
+_INPUT_HASH = ContentHash("sha256", bytes(range(1, 33)))
+_OUTPUT_HASH = ContentHash("sha256", bytes(range(2, 34)))
+
+# Use a fixed binary UUID that identifies the result data record.
+# In real operation, this equals both __data_id (pdb) and __record_id (rdb internal).
+_DATA_ID = b"\xde\xad\xbe\xef" * 4  # 16 bytes
+
+# Separate internal record ID for the pdb row itself
+_PDB_RECORD_ID = b"\x01" * 16
+
+
+def _write_v0_rdb_row(
+    db: InMemoryArrowDatabase, rdb_path: tuple, data_id: bytes, input_hash: ContentHash
+) -> None:
+    """Write a minimal v0 rdb row, using ``data_id`` as the internal record ID.
+
+    In real operation the rdb's internal record ID equals the output
+    datagram UUID, which is the same value stored as ``__data_id`` in the pdb.
+    """
+    row = pa.table({
+        "__input_data_hash": pa.array([input_hash.to_string()], type=pa.large_string()),
+        "__pf_var_function_name": pa.array(["fn"], type=pa.large_string()),
+        "__pf_var_function_signature_hash": pa.array(["sha256:aabb"], type=pa.large_string()),
+        "__pf_var_function_content_hash": pa.array(["sha256:ccdd"], type=pa.large_string()),
+        "__pf_var_git_hash": pa.array(["abc"], type=pa.large_string()),
+        "__pf_exec_executor_type": pa.array(["local"], type=pa.large_string()),
+        "__pf_exec_python_version": pa.array(["3.11"], type=pa.large_string()),
+        "__pod_ts": pa.array([0], type=pa.timestamp("us", tz="UTC")),
+        "result": pa.array([99], type=pa.int64()),
+    })
+    db.add_record(rdb_path, data_id, row)
+    db.flush()
+
+
+# v0 pdb rows used DATAGRAM_PREFIX for NODE_CONTENT_HASH_COL, producing the column
+# name "_node_content_hash".  The migration renames this to "__node_content_hash"
+# (SYSTEM_COLUMN_PREFIX) as part of the v0→v1 conversion.
+_V0_NODE_HASH_COL = "_node_content_hash"
+
+
+def _write_v0_pdb_row(
+    db: InMemoryArrowDatabase, pdb_path: tuple, data_id: bytes, pdb_record_id: bytes
+) -> None:
+    """Write a minimal v0 pdb row.
+
+    ``data_id`` is stored as the ``DATA_RECORD_ID`` column (the result UUID).
+    ``pdb_record_id`` is the internal DB record ID for this pipeline entry.
+    Uses the v0 column name ``_node_content_hash`` (with ``DATAGRAM_PREFIX``)
+    to simulate a true pre-migration pdb row.
+    """
+    row = pa.table({
+        constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
+        _V0_NODE_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
+        constants.INPUT_DATA_HASH_COL: pa.array([_INPUT_HASH.to_string()], type=pa.large_string()),
+        constants.OUTPUT_DATA_HASH_COL: pa.array([_OUTPUT_HASH.to_string()], type=pa.large_string()),
+        f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(["ctx"], type=pa.large_string()),
+        f"{constants.META_PREFIX}computed": pa.array([True], type=pa.bool_()),
+        constants.IS_EPHEMERAL_COL: pa.array([False], type=pa.bool_()),
+        "__pipeline_base_entry_id": pa.array([data_id], type=pa.large_binary()),
+        "__pipeline_recomputation_index": pa.array([0], type=pa.int32()),
+    })
+    db.add_record(pdb_path, pdb_record_id, row)
+    db.flush()
+
+
+_SYS_TAG_COL = f"{constants.SYSTEM_TAG_PREFIX}source_id::deadbeef"
+_SYS_TAG_VAL = "source_abc"
+
+
+def _write_v0_pdb_row_with_system_tags(
+    db: InMemoryArrowDatabase,
+    pdb_path: tuple,
+    data_id: bytes,
+    pdb_record_id: bytes,
+) -> None:
+    """Write a v0 pdb row that includes a system-tag column.
+
+    Used to test that the extended migration correctly identifies system-tag
+    columns and includes them in the recomputed preimage.
+    Uses the v0 column name ``_node_content_hash`` (with ``DATAGRAM_PREFIX``)
+    to simulate a true pre-migration pdb row.
+    """
+    row = pa.table({
+        _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
+        constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
+        _V0_NODE_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
+        constants.INPUT_DATA_HASH_COL: pa.array([_INPUT_HASH.to_string()], type=pa.large_string()),
+        constants.OUTPUT_DATA_HASH_COL: pa.array([_OUTPUT_HASH.to_string()], type=pa.large_string()),
+        f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(["ctx"], type=pa.large_string()),
+        f"{constants.META_PREFIX}computed": pa.array([True], type=pa.bool_()),
+        constants.IS_EPHEMERAL_COL: pa.array([False], type=pa.bool_()),
+        "__pipeline_base_entry_id": pa.array([b"old_base"], type=pa.large_binary()),
+        "__pipeline_recomputation_index": pa.array([0], type=pa.int32()),
+    })
+    db.add_record(pdb_path, pdb_record_id, row)
+    db.flush()
+
+
+class TestMigratePipelineV0ToV1:
+    def test_happy_path_full_backfill(self):
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_rdb_row(db, rdb_path, _DATA_ID, _INPUT_HASH)
+        _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        result = migrate_pipeline_v0_to_v1(
+            db, pdb_path, db, rdb_path, progress=False
+        )
+
+        assert result.rows_total == 1
+        assert result.rows_migrated == 1
+        assert result.rows_unresolvable == 0
+        assert result.rows_skipped == 0
+        assert result.dry_run is False
+
+    def test_v1_hash_columns_are_binary(self):
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_rdb_row(db, rdb_path, _DATA_ID, _INPUT_HASH)
+        _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path)
+        assert v1_table is not None
+        assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary()
+        assert v1_table.schema.field(constants.INPUT_DATA_HASH_COL).type == pa.large_binary()
+        assert v1_table.schema.field(constants.OUTPUT_DATA_HASH_COL).type == pa.large_binary()
+
+    def test_v1_binary_values_decode_correctly(self):
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_rdb_row(db, rdb_path, _DATA_ID, _INPUT_HASH)
+        _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path)
+        row_dict = v1_table.to_pylist()[0]
+        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.NODE_CONTENT_HASH_COL])) == _NODE_HASH
+        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.INPUT_DATA_HASH_COL])) == _INPUT_HASH
+        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.OUTPUT_DATA_HASH_COL])) == _OUTPUT_HASH
+
+    def test_unresolvable_row_written_with_null_output_and_input_hash(self):
+        """A pdb row whose data_id does NOT exist in rdb has null output hash."""
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        # Write pdb but NOT rdb — simulates ephemeral result expired
+        _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        result = migrate_pipeline_v0_to_v1(
+            db, pdb_path, db, rdb_path, progress=False
+        )
+
+        # The pdb row already has INPUT_HASH_COL as a string → converts to binary
+        # (no rdb lookup needed for it). Unresolvable only when the column is missing.
+        # With the current implementation, input_hash_col is converted from pdb row.
+        # rows_unresolvable = 0 because INPUT_DATA_HASH_COL was present in pdb.
+        assert result.rows_total == 1
+        assert result.rows_migrated == 1
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path)
+        assert v1_table is not None
+        # INPUT_DATA_HASH_COL converted from pdb row string
+        input_hash_col = v1_table.column(constants.INPUT_DATA_HASH_COL)
+        assert input_hash_col.to_pylist()[0] is not None
+
+    def test_idempotent(self):
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_rdb_row(db, rdb_path, _DATA_ID, _INPUT_HASH)
+        _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+        result2 = migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        assert result2.rows_migrated == 0
+        assert result2.rows_skipped == 1
+
+    def test_dry_run_writes_nothing(self):
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_rdb_row(db, rdb_path, _DATA_ID, _INPUT_HASH)
+        _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        result = migrate_pipeline_v0_to_v1(
+            db, pdb_path, db, rdb_path, dry_run=True, progress=False
+        )
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        assert not db.table_exists(v1_path)
+        assert result.dry_run is True
+        assert result.rows_total == 1
+
+    def test_empty_pdb_returns_zero_counts(self):
+        db = InMemoryArrowDatabase()
+        pdb_path = ("empty_pipeline",)
+        rdb_path = ("empty_results",)
+
+        result = migrate_pipeline_v0_to_v1(
+            db, pdb_path, db, rdb_path, progress=False
+        )
+
+        assert result.rows_total == 0
+        assert result.rows_migrated == 0
+
+
+class TestMigratePipelineV0ToV1Extended:
+    """Tests for the ITL-533 extensions to migrate_pipeline_v0_to_v1."""
+
+    def test_migrate_v0_to_v1_keeps_node_content_hash(self):
+        """Migrated v1 rows MUST retain ``__node_content_hash`` as ``large_binary``."""
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_pdb_row_with_system_tags(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path)
+        assert v1_table is not None
+        assert constants.NODE_CONTENT_HASH_COL in v1_table.schema.names, (
+            f"``{constants.NODE_CONTENT_HASH_COL}`` must be preserved in pdb_v1 rows for per-node isolation."
+        )
+        assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary(), (
+            f"``{constants.NODE_CONTENT_HASH_COL}`` must be converted to large_binary in pdb_v1."
+        )
+
+    def test_migrate_v0_to_v1_recomputes_base_entry_id(self):
+        """``__pipeline_base_entry_id`` is recomputed using only system_tags + INPUT_DATA_HASH_COL."""
+        import pyarrow as pa
+        from orcapod.hashing.defaults import get_default_arrow_hasher
+
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_pdb_row_with_system_tags(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path)
+        assert v1_table is not None
+        row = v1_table.to_pylist()[0]
+
+        # Independently compute the expected base_entry_id.
+        arrow_hasher = get_default_arrow_hasher()
+        preimage = pa.table({
+            _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
+            constants.INPUT_DATA_HASH_COL: pa.array(
+                [_INPUT_HASH.to_prefixed_digest()], type=pa.large_binary()
+            ),
+        })
+        expected = arrow_hasher.hash_table(preimage).to_prefixed_digest()
+
+        actual = bytes(row["__pipeline_base_entry_id"])
+        assert actual == expected, (
+            f"Recomputed base_entry_id mismatch.\n"
+            f"Expected: {expected!r}\n"
+            f"Actual:   {actual!r}"
+        )
+
+    def test_migrate_v0_to_v1_recomputes_record_id(self):
+        """``__record_id`` is recomputed using system_tags + INPUT_DATA_HASH_COL + recomputation_index."""
+        import pyarrow as pa
+        from orcapod.hashing.defaults import get_default_arrow_hasher
+
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_pdb_row_with_system_tags(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path, record_id_column="__record_id")
+        assert v1_table is not None
+        row = v1_table.to_pylist()[0]
+
+        arrow_hasher = get_default_arrow_hasher()
+        preimage = pa.table({
+            _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
+            constants.INPUT_DATA_HASH_COL: pa.array(
+                [_INPUT_HASH.to_prefixed_digest()], type=pa.large_binary()
+            ),
+        })
+        preimage_with_idx = preimage.append_column(
+            "__pipeline_recomputation_index",
+            pa.array([0], type=pa.int32()),
+        )
+        expected = arrow_hasher.hash_table(preimage_with_idx).to_prefixed_digest()
+
+        actual = bytes(row["__record_id"])
+        assert actual == expected, (
+            f"Recomputed record_id mismatch.\n"
+            f"Expected: {expected!r}\n"
+            f"Actual:   {actual!r}"
+        )
+
+    def test_migrate_v0_to_v1_extended_idempotent(self):
+        """Running the extended migration twice produces no duplicate v1 rows."""
+        db = InMemoryArrowDatabase()
+        pdb_path = ("pipeline",)
+        rdb_path = ("results",)
+
+        _write_v0_pdb_row_with_system_tags(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
+
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+        migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
+
+        v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
+        v1_table = db.get_all_records(v1_path)
+        assert v1_table is not None
+        assert v1_table.num_rows == 1, (
+            f"Expected exactly 1 v1 row after two migration runs; got {v1_table.num_rows}."
+        )

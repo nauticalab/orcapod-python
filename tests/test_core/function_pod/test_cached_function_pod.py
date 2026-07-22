@@ -10,6 +10,7 @@ from orcapod.core.function_pod import FunctionPod, function_pod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.hooks import InvocationStatus, PostRunPayload
 
 
 # ---------------------------------------------------------------------------
@@ -63,11 +64,15 @@ def cached_pod(double_pod, cache_db):
 
 
 class TestConstruction:
-    def test_record_path_ends_with_inner_uri(self, cached_pod, double_pod):
-        assert cached_pod.record_path[-len(double_pod.uri) :] == double_pod.uri
+    def test_record_path_ends_with_schema_version(self, cached_pod):
+        """record_path ends with the schema version suffix (v1 schema)."""
+        from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+        assert cached_pod.record_path[-1] == RESULT_DB_SCHEMA_VERSION
 
-    def test_record_path_equals_inner_uri(self, cached_pod, double_pod):
-        assert cached_pod.record_path == double_pod.uri
+    def test_record_path_contains_inner_uri(self, cached_pod, double_pod):
+        """record_path is inner_pod.uri + (RESULT_DB_SCHEMA_VERSION,)."""
+        from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+        assert cached_pod.record_path == double_pod.uri + (RESULT_DB_SCHEMA_VERSION,)
 
     def test_record_path_prefix_param_removed(self, double_pod, cache_db):
         """record_path_prefix was removed — passing it must raise TypeError."""
@@ -240,6 +245,84 @@ class TestOutputSchema:
         expected = double_pod.output_schema(stream)
         actual = cached_pod.output_schema(stream)
         assert actual == expected
+
+
+# ---------------------------------------------------------------------------
+# Async hook path — _async_invoke_with_hooks
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncInvokeWithHooks:
+    """Cover ``_async_invoke_with_hooks`` when post-run hooks are registered.
+
+    Without hooks the method delegates directly to ``async_process_data``
+    (fast path, already exercised elsewhere).  These tests force the slow
+    path (lines 260-292) where hooks are present and must be fired.
+    """
+
+    @pytest.mark.asyncio
+    async def test_hook_fires_on_cache_miss_with_computed_status(self, double_pod, cache_db):
+        """Hook receives COMPUTED status on a cache miss."""
+        cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
+
+        payloads: list[PostRunPayload] = []
+        cached_pod.add_post_run_hook(payloads.append)
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        tag, data = next(iter(stream.iter_data()))
+
+        out_tag, out_data = await cached_pod._async_invoke_with_hooks(tag, data)
+
+        assert out_data is not None
+        assert out_data.as_dict()["result"] == 20
+        assert len(payloads) == 1
+        assert payloads[0].stats.status == InvocationStatus.COMPUTED
+
+    @pytest.mark.asyncio
+    async def test_hook_fires_on_cache_hit_with_hit_status(self, double_pod, cache_db):
+        """Hook receives HIT status when the result is already cached."""
+        cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
+
+        payloads: list[PostRunPayload] = []
+        cached_pod.add_post_run_hook(payloads.append)
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        tag, data = next(iter(stream.iter_data()))
+
+        # First call: cache miss
+        await cached_pod._async_invoke_with_hooks(tag, data)
+        payloads.clear()
+
+        # Second call: cache hit
+        out_tag, out_data = await cached_pod._async_invoke_with_hooks(tag, data)
+
+        assert out_data is not None
+        assert len(payloads) == 1
+        assert payloads[0].stats.status == InvocationStatus.HIT
+
+    @pytest.mark.asyncio
+    async def test_hook_fires_on_exception_with_error_status(self, cache_db):
+        """Hook receives ERROR status and the exception is re-raised."""
+
+        def failing_fn(x: int) -> int:
+            raise ValueError("deliberate failure")
+
+        failing_pf = PythonDataFunction(failing_fn, output_keys="result")
+        failing_pod = FunctionPod(failing_pf)
+        cached_pod = CachedFunctionPod(failing_pod, result_database=cache_db)
+
+        payloads: list[PostRunPayload] = []
+        cached_pod.add_post_run_hook(payloads.append)
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        tag, data = next(iter(stream.iter_data()))
+
+        with pytest.raises(Exception):
+            await cached_pod._async_invoke_with_hooks(tag, data)
+
+        assert len(payloads) == 1
+        assert payloads[0].stats.status == InvocationStatus.ERROR
+        assert payloads[0].stats.error is not None
 
 
 # ---------------------------------------------------------------------------

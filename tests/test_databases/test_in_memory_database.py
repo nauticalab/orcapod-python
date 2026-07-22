@@ -399,3 +399,32 @@ class TestAtMethod:
     def test_at_rejects_empty_component(self, db):
         with pytest.raises(ValueError):
             db.at("")
+
+
+# ---------------------------------------------------------------------------
+# N. table_exists
+# ---------------------------------------------------------------------------
+
+
+class TestTableExists:
+    def test_returns_false_when_path_absent(self, db):
+        assert db.table_exists(("a", "b")) is False
+
+    def test_returns_true_after_adding_record(self, db):
+        record = make_table(val=[1])
+        db.add_record(("mypath",), b"id1", record)
+        assert db.table_exists(("mypath",)) is True
+
+    def test_returns_true_before_flush(self, db):
+        """Pending (pre-flush) writes count as existing."""
+        record = make_table(val=[1])
+        db.add_record(("pending_path",), b"id1", record)
+        assert db.table_exists(("pending_path",)) is True
+
+    def test_scoped_db_sees_correct_path(self, db):
+        scoped = db.at("scope")
+        record = make_table(val=[1])
+        scoped.add_record(("sub",), b"id1", record)
+        assert scoped.table_exists(("sub",)) is True
+        assert db.table_exists(("scope", "sub")) is True
+        assert db.table_exists(("sub",)) is False

@@ -83,17 +83,21 @@ class TestConstruction:
     def test_record_path_is_tuple(self, cached_pf, inner_pf):
         assert isinstance(cached_pf.record_path, tuple)
 
-    def test_record_path_ends_with_inner_uri(self, cached_pf, inner_pf):
-        assert cached_pf.record_path[-len(inner_pf.uri) :] == inner_pf.uri
+    def test_record_path_ends_with_schema_version(self, cached_pf):
+        from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+        assert cached_pf.record_path[-1] == RESULT_DB_SCHEMA_VERSION
 
-    def test_record_path_prefix_empty_by_default(self, cached_pf, inner_pf):
-        assert cached_pf.record_path == inner_pf.uri
+    def test_record_path_contains_inner_uri(self, cached_pf, inner_pf):
+        """record_path is inner_pf.uri + (RESULT_DB_SCHEMA_VERSION,)."""
+        from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+        assert cached_pf.record_path == inner_pf.uri + (RESULT_DB_SCHEMA_VERSION,)
 
     def test_record_path_prefix_prepended(self, inner_pf, db):
+        from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
         cpf = CachedDataFunction(
             inner_pf, result_database=db, record_path_prefix=("org", "project")
         )
-        assert cpf.record_path == ("org", "project") + inner_pf.uri
+        assert cpf.record_path == ("org", "project") + inner_pf.uri + (RESULT_DB_SCHEMA_VERSION,)
 
     def test_auto_flush_true_by_default(self, cached_pf):
         assert cached_pf._cache._auto_flush is True
@@ -429,10 +433,11 @@ class TestRecordDataColumns:
         assert constants.INPUT_DATA_HASH_COL in table.column_names
 
     def test_input_data_hash_value_matches(self, cached_pf, input_data, db):
+        """Hash column now stores binary (v1 schema: to_prefixed_digest())."""
         cached_pf.call(input_data)
         table = db.get_all_records(cached_pf.record_path)
         stored_hash = table.column(constants.INPUT_DATA_HASH_COL).to_pylist()[0]
-        assert stored_hash == input_data.content_hash().to_string()
+        assert stored_hash == input_data.content_hash().to_prefixed_digest()
 
     def test_variation_columns_present(self, cached_pf, input_data, db):
         cached_pf.call(input_data)
