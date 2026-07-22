@@ -441,3 +441,21 @@ class TestDerivedSourceId:
             source_id="custom_id",
         )
         assert src.source_id == "custom_id"
+
+
+def test_derived_source_empty_cache_preserves_nullability():
+    """DerivedSource._get_stream() empty table preserves nullable=False for required fields.
+
+    Regression for ITL-563: pa.field() without nullable=False defaulted to True.
+    """
+    # _make_node() builds a FunctionJobNode with data output "result: int" (required).
+    node = _make_node()
+    source = node.as_source()  # DerivedSource backed by unrun node → empty cache
+
+    # as_table() triggers _get_stream() which hits the empty-cache branch
+    table = source.as_table()
+
+    assert table.num_rows == 0
+    # "result" is int (required), must not become int | None
+    result_field = table.schema.field("result")
+    assert result_field.nullable is False
