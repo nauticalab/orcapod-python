@@ -835,18 +835,20 @@ class OperatorJobNode(OperatorNodeBase):
     def _make_empty_table(self) -> "pa.Table":
         """Build a zero-row PyArrow table matching this node's full output schema.
 
-        Uses ``output_schema()`` for column names/types and
-        ``data_context.type_converter`` for the Python → Arrow type mapping.
+        Uses ``arrow_utils.make_empty_table`` so field nullability is preserved:
+        plain types produce ``nullable=False`` fields and ``T | None`` types
+        produce ``nullable=True`` fields.
+
         Requires ``self._operator is not None`` (pre-existing limitation shared
         with ``_replay_from_cache``).
         """
+        from orcapod.utils.arrow_utils import make_empty_table
+
         tag_schema, data_schema = self.output_schema()
-        type_converter = self.data_context.type_converter
-        empty_fields: dict = {}
-        for name, py_type in {**tag_schema, **data_schema}.items():
-            arrow_type = type_converter.python_type_to_arrow_type(py_type)
-            empty_fields[name] = pa.array([], type=arrow_type)
-        return pa.table(empty_fields)
+        return make_empty_table(
+            {**tag_schema, **data_schema},
+            self.data_context.type_converter,
+        )
 
     def _load_cached_stream_from_db(self) -> "ArrowTableStream | None":
         """Read from DB in CacheMode.REPLAY only, without modifying node state.
