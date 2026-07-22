@@ -406,10 +406,8 @@ class TestSideEffectEmptyTableNullability:
         """SideEffectPodStream.as_table() with no rows preserves nullable=False."""
         from orcapod.side_effects import SideEffectPod, SideEffectPodStream
 
-        calls = []
-
         def my_fn(value: int, ctx: InvocationContext) -> None:
-            calls.append(value)
+            return str(value)
 
         pod = SideEffectPod(my_fn, ctx_arg_name="ctx")
         stream = _make_stream(n=0)  # empty input → empty output
@@ -421,6 +419,23 @@ class TestSideEffectEmptyTableNullability:
         # "id" and "value" are declared non-nullable — must not become nullable
         assert table.schema.field("id").nullable is False
         assert table.schema.field("value").nullable is False
+
+    def test_empty_node_schema_preserves_required_fields(self):
+        """SideEffectNode.as_table() with no rows preserves nullable=False."""
+        from orcapod.side_effects import SideEffectPod, SideEffectNode
+
+        def my_fn(value: int, ctx: InvocationContext) -> None:
+            return str(value)
+
+        pod = SideEffectPod(my_fn, ctx_arg_name="ctx")
+        stream = _make_stream(n=0)  # empty input → empty output
+
+        node = SideEffectNode(side_effect_pod=pod, input_stream=stream)
+        table = node.as_table()
+
+        assert table.num_rows == 0
+        # "id" is declared non-nullable (int) — must not become nullable
+        assert table.schema.field("id").nullable is False
 
 
 class TestSideEffectCtxCollision:
