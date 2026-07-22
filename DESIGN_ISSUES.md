@@ -27,8 +27,8 @@ When a failing function's empty output is fed into a `Join`, the mismatched sche
 `InputValidationError` that bypasses `error_policy="continue"` and aborts orchestration.
 
 Sites: `sync_orchestrator.py:_materialize_as_stream`, `operator_node.py:_make_empty_table`,
-`side_effects.py:SideEffectFunctionStream.as_table`,
-`side_effects.py:SideEffectJobFunctionStream.as_table`,
+`side_effects.py:SideEffectPodStream.as_table`,
+`side_effects.py:SideEffectNode.as_table`,
 `derived_source.py:DerivedSource._get_stream`.
 
 **Fix:** Extracted `arrow_utils.make_empty_table(python_schema, type_converter)` using

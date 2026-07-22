@@ -407,7 +407,7 @@ class TestSideEffectEmptyTableNullability:
         from orcapod.side_effects import SideEffectPod, SideEffectPodStream
 
         def my_fn(value: int, ctx: InvocationContext) -> None:
-            return str(value)
+            pass
 
         pod = SideEffectPod(my_fn, ctx_arg_name="ctx")
         stream = _make_stream(n=0)  # empty input → empty output
@@ -425,7 +425,7 @@ class TestSideEffectEmptyTableNullability:
         from orcapod.side_effects import SideEffectPod, SideEffectNode
 
         def my_fn(value: int, ctx: InvocationContext) -> None:
-            return str(value)
+            pass
 
         pod = SideEffectPod(my_fn, ctx_arg_name="ctx")
         stream = _make_stream(n=0)  # empty input → empty output
