@@ -742,3 +742,55 @@ class TestSideEffectPodCtxArgName:
         stream = _make_stream(1)
         with pytest.raises(ValueError, match="collides"):
             list(pod.process(stream).iter_data())
+
+
+class TestSideEffectInvocationLogHashType:
+    def test_record_id_hash_is_large_binary(self):
+        """_write_invocation_row stores record_id_hash as large_binary."""
+        import pyarrow as pa
+        from orcapod.databases import InMemoryArrowDatabase
+        from orcapod.side_effects import _write_invocation_row
+
+        db = InMemoryArrowDatabase()
+        table_path = ("test", "invocation_log")
+        record_id = b"\xab" * 16
+        record_id_hash_bytes = b"\x00sha256:" + bytes(range(32))  # arbitrary bytes
+
+        _write_invocation_row(
+            pipeline_database=db,
+            table_path=table_path,
+            record_id=record_id,
+            record_id_hash_bytes=record_id_hash_bytes,
+            run_id=None,
+        )
+
+        records = db.get_all_records(table_path)
+        assert records is not None
+        assert records.schema.field("record_id_hash").type == pa.large_binary()
+
+    def test_record_id_hash_bytes_stored_correctly(self):
+        """The actual bytes are stored and retrievable unchanged."""
+        import pyarrow as pa
+        from orcapod.databases import InMemoryArrowDatabase
+        from orcapod.side_effects import _write_invocation_row
+        from orcapod.types import ContentHash
+
+        db = InMemoryArrowDatabase()
+        table_path = ("test", "invocation_log2")
+        record_id = b"\xcd" * 16
+        ch = ContentHash("sha256", bytes(range(32)))
+        record_id_hash_bytes = ch.to_prefixed_digest()
+
+        _write_invocation_row(
+            pipeline_database=db,
+            table_path=table_path,
+            record_id=record_id,
+            record_id_hash_bytes=record_id_hash_bytes,
+            run_id="run-42",
+        )
+
+        records = db.get_all_records(table_path)
+        assert records is not None
+        stored = records.column("record_id_hash")[0].as_py()
+        assert isinstance(stored, bytes)
+        assert ContentHash.from_prefixed_digest(stored) == ch
