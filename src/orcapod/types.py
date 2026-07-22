@@ -9,6 +9,9 @@ throughout the OrcaPod framework, including:
       a raw digest, with convenience conversions to hex, int, UUID, and base64.
 """
 
+#! The docstring is out of date but generally this module has grown too big
+#! Consider turning it into a subpackage and split into smaller modules
+
 from __future__ import annotations
 
 import logging
@@ -20,6 +23,7 @@ from datetime import date, datetime
 from enum import Enum
 from types import UnionType
 from typing import TYPE_CHECKING, Any, Generic, Self, TypeAlias, TypeVar
+
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -33,11 +37,13 @@ else:
 logger = logging.getLogger(__name__)
 
 # TODO: revisit and consider a way to incorporate older Union type
+#! Turn this into an actionable issue
 DataType: TypeAlias = type | UnionType  # | type[Union]
 """A Python type or union of types used to describe the data type of a single
 field within a ``Schema``."""
 
 # TODO: accomodate other Path-like objects
+#! Consider expanding this to include UPath - should be a spike issue inclusive of evaluation
 PathLike: TypeAlias = str | os.PathLike
 """Convenience alias for any filesystem-path-like object (``str`` or
 ``os.PathLike``)."""
@@ -47,18 +53,27 @@ TagValue: TypeAlias = int | str | date | datetime | None | Collection["TagValue"
 arbitrarily nested collection thereof. Tags are used to label and organise
 data and datagrams."""
 
+#! Usage of all these type alias should be analyzed -- if any of them are not used anywehre in the codebase
+#! we should consider removing them
 PathSet: TypeAlias = PathLike | Collection[PathLike | None]
 """A single path or an arbitrarily nested collection of paths (with optional
 ``None`` entries). Used when operations need to address multiple files at
 once, e.g. batch hashing."""
 
+#! This should ideally be more tightly linked to the definition of the support native types and how
+#! it relates to arrow data types -- consider moving this along with related arrow-related definitions
+#! into their own module
 SupportedNativePythonData: TypeAlias = str | int | float | bool | bytes | date | datetime
 """The simple Python scalar types that have a direct Arrow / Polars
 correspondence, including temporal types (date and datetime)."""
 
+#! Utility of this extension is questionable -- subject to usage analyses and simplification
 ExtendedSupportedPythonData: TypeAlias = SupportedNativePythonData | PathSet
 """Native scalar types extended with filesystem paths."""
 
+#! Consider drastically simplifying this definition or at least try to make this capable of
+#! working with arbitrary Python types as we now support arbitrary classes through the extension
+#! system.
 DataValue: TypeAlias = ExtendedSupportedPythonData | Collection["DataValue"] | None
 """The universe of values that can appear in a data column -- scalars,
 paths, arbitrarily nested collections, or ``None``."""
@@ -73,12 +88,23 @@ Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
 _T = TypeVar("_T")
 
+#! this should be moved into its own module for clarity
 class Schema(Mapping[str, DataType]):
     """Immutable schema representing a mapping of field names to Python types.
 
     Serves as the canonical internal schema representation in OrcaPod,
-    with interop to/from Arrow schemas. Hashable and suitable for use
+    with interop to/from Arrow schemas. Semantic hasher hashable and suitable for use
     in content-addressable contexts.
+    #! This should be fixed such that __hash__ is correctly implemented to yield
+    #! properly hashable data type -- till that is achieved, however, we should
+    #! actively raise an error whenever someone (system) tries to use this in hashable
+    #! context. Till this is implemented, adding qualifier that this is semantic hasher
+    #! hashable
+    #!? BUG: NOT hashable. `__eq__` is overridden below without a `__hash__`, so Python set
+    #!? `Schema.__hash__ = None` → `hash(Schema(...))`, `{schema}`, dict-keying all raise TypeError
+    #!? (verified). Either add `__hash__` (safe — Schema is effectively immutable: hash on
+    #!? (frozenset(self._data.items()), self._optional)) or correct this docstring. If "hashable"
+    #!? here means "content-hashable via semantic hashers" (not Python hash()), say that explicitly.
 
     Args:
         fields: An optional mapping of field names to their data types.
@@ -138,6 +164,12 @@ class Schema(Mapping[str, DataType]):
             return self._data == other._data and self._optional == other._optional
         if isinstance(other, Mapping):
             return self._data == dict(other)
+        #!? BUG: should `return NotImplemented` (the singleton), NOT raise. Raising means
+        #!? `schema == 5` throws instead of being False, and `schema != 5` throws too (verified).
+        #!? Breaks `in` checks, unittest/pytest equality, and any generic comparison. One-line fix.
+        #! Is it more proper to return NotImplemented? Since I want to signify that this is not available
+        #! for use in context where one triest to hash it, I felt it would be appropriate to raise an error
+        #! actively
         raise NotImplementedError(
             f"Equality check is not implemented for object of type {type(other)}"
         )
@@ -288,6 +320,7 @@ class Schema(Mapping[str, DataType]):
         return cls({})
 
 
+#! Is this even used anymore?
 class OrchestratorType(Enum):
     """Pipeline orchestrator selection.
 
@@ -324,6 +357,15 @@ class PipelineConfig:
             via ``with_options()`` (e.g. ``{"num_cpus": 4}``).
     """
 
+    #!? DEAD CONFIG (X3): `execution_engine` / `execution_engine_opts` are read NOWHERE and
+    #!? `with_options()` is never called from any path. This docstring describes behavior that
+    #!? doesn't happen — pipeline-level executor selection is currently non-functional. Wire it
+    #!? (thread into node execution) or remove both fields + the docstring claims.
+    #!? ALSO (Area 3 / ITL-557): none of PipelineConfig/PodConfig/NodeConfig carry retry or
+    #!? memory-scaling fields (max_retries, mem_mb baseline, scaling factor, ceiling). This is
+    #!? where the Snakemake-style config surface will need to land.
+    #! While fields related to retry would be added, any field that's currently completely unused
+    #! should be removed
     orchestrator: OrchestratorType = OrchestratorType.SYNCHRONOUS
     channel_buffer_size: int = 64
     default_max_concurrency: int | None = None
@@ -341,6 +383,13 @@ class PodConfig:
             ``1`` means sequential (rate-limited APIs, preserves ordering).
     """
 
+    #!? The PodConfig-vs-NodeConfig axis is undocumented and confusing: why is `max_concurrency`
+    #!? on PodConfig but `is_result_ephemeral`/`ignore_schema` on NodeConfig? (Presumably: PodConfig
+    #!? = reusable pod object, NodeConfig = pod-placed-in-a-pipeline.) Document the split explicitly.
+    #!? Also asymmetric: NodeConfig has merge() + resolve_concurrency reads PodConfig, but there is
+    #!? no equivalent resolve for NodeConfig-vs-PipelineConfig. Consider unifying or documenting.
+    #! I agree that having max-concurrency in both PodConfig and NodeConfig is confusing and thus they should
+    #! be clearly named to be different things rather than necessitating explanation of a confusing name collision
     max_concurrency: int | None = None
 
 
@@ -365,6 +414,9 @@ class NodeConfig:
     is_result_ephemeral: bool | None = None
     ignore_schema: tuple[str, ...] | None = None
 
+    #! It doesn't make much sense that this is only available on NodeConfig -- rather we should consider
+    #! having some kind of base class that offers utility methods like this for all configs
+    #! Also all config related types should be grouped into its own module for clarity
     def merge(self, other: "NodeConfig") -> "NodeConfig":
         """Return a new ``NodeConfig`` with ``other``'s non-``None`` fields overriding self.
 
@@ -398,6 +450,8 @@ class NodeConfig:
         )
 
 
+#! The existence of this suggests that concurrency config is unnecessary distributed or that there
+#! are really more than one kind of concurrency that we are talking about
 def resolve_concurrency(
     pod_config: PodConfig, pipeline_config: PipelineConfig
 ) -> int | None:
@@ -418,6 +472,9 @@ def resolve_concurrency(
     return result
 
 
+#! Should this be renamed to something more specific -- it'd be fine for it to be generic name
+#! like what we have if it's used in multiple places but in that case the docstring
+#! should be updated to be NOT specific to operator pod
 class CacheMode(Enum):
     """Controls operator pod caching behaviour.
 
@@ -471,6 +528,9 @@ class ColumnConfig:
         >>> {"meta": True, "source": True}
     """
 
+    #!? Docstring Attributes list is stale: it documents meta/context/source/system_tags/all_info
+    #!? but omits `content_hash` and `sort_by_tags` (both real fields below). Update the docstring.
+    #! Docstring must be updated to correctly reflect the actual set of fields that matter
     meta: bool | Collection[str] = False
     context: bool = False
     source: bool = False  # Only relevant for DataProtocol
@@ -498,6 +558,8 @@ class ColumnConfig:
         return cls()
 
     # TODO: consider renaming this to something more intuitive
+    #! Agreed that this is not sensible name -- consider renaming to something like
+    #! `from` which is a common name for factory method in Rust (though may not be suitable for Python)
     @classmethod
     def handle_config(
         cls, config: Self | dict[str, Any] | None, all_info: bool = False
@@ -515,6 +577,8 @@ class ColumnConfig:
         if all_info:
             return cls.all()
         # TODO: properly handle non-boolean values when using all_info
+        #! Not clear what's meant by "properly handle" -- In Python, we generally do not do runtime type check
+        #! Unless its vital
 
         if config is None:
             column_config = cls()
@@ -530,8 +594,7 @@ class ColumnConfig:
 
         return column_config
 
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slot=True)
 class ColumnInfo:
     """Metadata for a single relational database column with its Arrow-mapped type.
 
@@ -550,7 +613,7 @@ class ColumnInfo:
     arrow_type: pa.DataType
     nullable: bool = True
 
-
+#! move this to its own module
 @dataclass(frozen=True, slots=True)
 class ContentHash:
     """Content-addressable hash pairing a hashing method with a raw digest.
@@ -569,7 +632,8 @@ class ContentHash:
     method: str
     digest: bytes
 
-    # TODO: make the default char count configurable
+    #! TODO: make the default char count configurable but this must be really carefully assessed
+    #! as this directly controls what gets written to the database
     def to_hex(self, char_count: int | None = None) -> str:
         """Convert the digest to a hexadecimal string.
 
@@ -706,7 +770,7 @@ class ContentHash:
         return f"{self.method}:{self.to_hex(length)}"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class Cursor(Generic[_T]):
     """Marks the current position in a DynamicSource's data stream.
 
@@ -788,5 +852,3 @@ class PollingConfig:
                 f"PollingConfig.error_backoff_base must be > 0, "
                 f"got {self.error_backoff_base}"
             )
-
-
