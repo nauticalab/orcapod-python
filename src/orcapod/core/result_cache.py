@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from orcapod.errors import SchemaVersionError
 from orcapod.protocols.core_protocols import DataProtocol
@@ -154,7 +154,7 @@ class ResultCache:
     def lookup(
         self,
         input_data: DataProtocol,
-        additional_constraints: dict[str, bytes] | None = None,
+        additional_constraints: dict[str, Any] | None = None,
     ) -> DataProtocol | None:
         """Look up a cached output data for *input_data*.
 
@@ -168,7 +168,9 @@ class ResultCache:
             input_data: The input data whose content hash is the
                 primary lookup key.
             additional_constraints: Optional extra column-value pairs to
-                include in the lookup query.
+                include in the lookup query. Values may be ``bytes`` (for
+                binary hash columns) or other scalar types (e.g. ``str``
+                for ``function_name``).
 
         Returns:
             The cached output data with ``RESULT_COMPUTED_FLAG: False``
@@ -180,7 +182,7 @@ class ResultCache:
 
         RECORD_ID_COL = "_record_id"
 
-        constraints: dict[str, bytes] = {
+        constraints: dict[str, Any] = {
             constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_prefixed_digest(),
         }
         if additional_constraints:
