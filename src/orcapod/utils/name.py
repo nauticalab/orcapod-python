@@ -5,8 +5,6 @@ Utility functions for handling names
 import re
 
 
-#!? Stale TODO: these functions ARE already in utils/. Remove.
-# TODO: move these functions to util
 def escape_with_postfix(field: str, postfix=None, separator="_") -> str:
     """
     Escape the field string by doubling separators and optionally append a postfix.
@@ -20,8 +18,9 @@ def escape_with_postfix(field: str, postfix=None, separator="_") -> str:
         separator (str, optional): The separator character to escape and use for
                                  prefixing the postfix. Defaults to "_".
     Returns:
-        str: The escaped string with optional postfix. Returns empty string if
-             fields is provided but postfix is None.
+        str: The escaped string with ``postfix`` appended after a single
+             ``separator`` when ``postfix`` is given, or just the escaped
+             string when ``postfix`` is None.
     Examples:
         >>> escape_with_postfix("field1_field2", "suffix")
         'field1__field2_suffix'
@@ -42,7 +41,9 @@ def escape_with_postfix(field: str, postfix=None, separator="_") -> str:
     #!? Fix: use `separator` for the postfix delimiter too (f"{separator}{postfix}"), or fix the docs
     #!? to state postfix is always "_"-delimited. Also the Returns line ("empty string if postfix is
     #!? None") is wrong — it returns the escaped field.
-    return field.replace(separator, separator * 2) + (f"_{postfix}" if postfix else "")
+    return field.replace(separator, separator * 2) + (
+        f"{separator}{postfix}" if postfix else ""
+    )
 
 
 def unescape_with_postfix(field: str, separator="_") -> tuple[str, str | None]:
@@ -73,7 +74,7 @@ def unescape_with_postfix(field: str, separator="_") -> tuple[str, str | None]:
     """
 
     parts = field.split(separator * 2)
-    parts[-1], *meta = parts[-1].split("_", 1)
+    parts[-1], *meta = parts[-1].split(separator, 1)
     return separator.join(parts), meta[0] if meta else None
 
 
