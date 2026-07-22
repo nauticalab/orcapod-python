@@ -384,6 +384,36 @@ which column groups (meta, source, system_tags) are returned.
 
 ---
 
+### F15 — `FunctionPod` has no pod-level error policy; sync and async paths are inconsistent
+**Status:** open
+**Severity:** high
+**Issue:** ITL-527
+
+`FunctionPod` has no `on_error` configuration. The two execution paths behave differently:
+
+- **Sync path** (`FunctionPodStream._iter_data_*`): no exception handling at all — exceptions
+  propagate unconditionally out of the iterator.
+- **Async path** (`_FunctionPodBase.async_execute()`): exceptions are caught, the observer is
+  notified via `on_data_crash()`, and the item is **silently dropped from output** with no
+  indication to the caller and no way to configure this behaviour.
+
+The node-level `FunctionJobNode.execute()` adds `error_policy: Literal["continue", "fail_fast"]`,
+but this is only available for DB-backed execution and uses different vocabulary from the rest
+of the framework.
+
+`SinkPod` and `TapPod` (ITL-524/ITL-525) introduced a clean `on_error: Literal["raise", "log"]`
+vocabulary at the pod level. `FunctionPod` should adopt the same model: pod-level `on_error`
+config, consistent behaviour between sync and async paths, and the same `"raise"` / `"log"`
+vocabulary.
+
+**Fix needed:** Add `on_error: Literal["raise", "log"] = "raise"` to `FunctionPodConfig` (or
+equivalent). In the async path, replace the unconditional silent-drop with the configured
+behaviour: `"raise"` propagates the exception; `"log"` logs at `WARNING` and drops the item
+(current behaviour, but now explicit and configurable). Align `FunctionJobNode.error_policy`
+to use the same vocabulary.
+
+---
+
 ## `src/orcapod/core/cached_function_pod.py` / `src/orcapod/core/data_function.py`
 
 ### CFP1 — Extract shared result caching logic from CachedDataFunction and CachedFunctionPod
@@ -1291,3 +1321,22 @@ across this version range.
 
 **Ongoing:** pyspiral releases frequently. See PLT-1785 for the tracking issue
 covering routine version bumps.
+
+---
+
+## `src/orcapod/core/nodes/operator_node.py`
+
+### ON1 — OperatorJobNode has no v0→v1 schema migration for `NODE_CONTENT_HASH_COL`
+**Status:** open
+**Severity:** high
+**Issue:** ITL-539
+
+`OperatorJobNode` stores `NODE_CONTENT_HASH_COL` as `large_binary` (changed in ITL-539),
+but unlike `FunctionJobNode` and `ResultCache`, it has no `_ensure_schema()` guard and no
+v0→v1 migration utility. Any existing pipeline DB written by the old code that stored
+`NODE_CONTENT_HASH_COL` as `large_string` will fail with an Arrow schema mismatch on the
+next write attempt. This is accepted as a breaking change for a pre-v0.1.0 project; users
+must drop and recreate the affected pipeline DB tables manually.
+
+A proper migration utility (analogous to `migrate_pipeline_v0_to_v1`) should be implemented
+before v0.1.0 ship.

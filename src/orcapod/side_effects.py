@@ -264,7 +264,7 @@ def _execute_side_effect_row(
                 pipeline_database=pipeline_database,
                 table_path=table_path,
                 record_id=record_id,
-                record_id_hash_str=record_id_hash.to_string(),
+                record_id_hash_bytes=record_id_hash.to_prefixed_digest(),
                 run_id=run_id,
             )
         return (tag, data)
@@ -284,7 +284,7 @@ def _write_invocation_row(
     pipeline_database: ArrowDatabaseProtocol,
     table_path: tuple[str, ...],
     record_id: bytes,
-    record_id_hash_str: str,
+    record_id_hash_bytes: bytes,
     run_id: str | None,
 ) -> None:
     """Write one success row to the side-effect invocation log table.
@@ -298,15 +298,15 @@ def _write_invocation_row(
         table_path: Path tuple for the invocation log table.
         record_id: Deterministic bytes key for this ``(input, pod version)``
             pair — the prefixed digest of the unified preimage hash.
-        record_id_hash_str: String form of the record-ID hash (stored for
-            human inspection).
+        record_id_hash_bytes: Binary prefixed digest of the record-ID hash
+            (stored for human inspection via ``ContentHash.from_prefixed_digest``).
         run_id: Pipeline run identifier (or ``None`` for standalone mode).
     """
     executed_at = datetime.datetime.now(datetime.timezone.utc)
     record = pa.table(
         {
             "record_id_hash": pa.array(
-                [record_id_hash_str], type=pa.large_string()
+                [record_id_hash_bytes], type=pa.large_binary()
             ),
             "pipeline_run_id": pa.array(
                 [run_id], type=pa.large_string()
