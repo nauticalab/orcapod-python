@@ -40,6 +40,7 @@ from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import CacheMode, ColumnConfig, ContentHash, Schema
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -842,10 +843,8 @@ class OperatorJobNode(OperatorNodeBase):
         Requires ``self._operator is not None`` (pre-existing limitation shared
         with ``_replay_from_cache``).
         """
-        from orcapod.utils.arrow_utils import make_empty_table
-
         tag_schema, data_schema = self.output_schema()
-        return make_empty_table(
+        return arrow_utils.make_empty_table(
             {**tag_schema, **data_schema},
             self.data_context.type_converter,
         )
