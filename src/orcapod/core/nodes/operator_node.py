@@ -775,7 +775,16 @@ class OperatorJobNode(OperatorNodeBase):
                 f"required column {col_name!r} is missing from the stored table. "
                 "This may indicate records written by an older version of the code."
             )
-        own_hash = self.content_hash().to_string()
+        col_type = table.schema.field(col_name).type
+        if col_type != pa.large_binary():
+            raise ValueError(
+                f"Cannot isolate records for table_scope='pipeline_hash': "
+                f"column {col_name!r} has type {col_type!r}, expected large_binary. "
+                "This table was written by an older version of the code that stored "
+                "this column as large_string. Drop and recreate the affected pipeline "
+                "DB tables (see DESIGN_ISSUES.md ON1)."
+            )
+        own_hash = self.content_hash().to_prefixed_digest()
         mask = pc.equal(table.column(col_name), own_hash)
         return table.filter(mask)
 
@@ -801,7 +810,10 @@ class OperatorJobNode(OperatorNodeBase):
         n_rows = output_table.num_rows
         output_table = output_table.append_column(
             constants.NODE_CONTENT_HASH_COL,
-            pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
+            pa.array(
+                [self.content_hash().to_prefixed_digest()] * n_rows,
+                type=pa.large_binary(),
+            ),
         )
 
         # Per-row record hashes for dedup: hash(tag + data + system_tags + node_content_hash).

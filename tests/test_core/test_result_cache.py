@@ -397,3 +397,45 @@ class TestLookupViaEmptyData:
         result = cache.lookup(empty_data)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Hash column types
+# ---------------------------------------------------------------------------
+
+
+class TestStoreHashColumnTypes:
+    def test_variation_signature_hash_is_large_binary(self):
+        cache, db = _make_cache()
+        pf = _make_pf()
+        _compute_and_store(cache, pf, Data({"x": 10}))
+
+        records = db.get_all_records(cache.record_path)
+        assert records is not None
+        sig_col = f"{constants.PF_VARIATION_PREFIX}function_signature_hash"
+        assert sig_col in records.column_names
+        assert records.schema.field(sig_col).type == pa.large_binary()
+
+    def test_variation_content_hash_is_large_binary(self):
+        cache, db = _make_cache()
+        pf = _make_pf()
+        _compute_and_store(cache, pf, Data({"x": 10}))
+
+        records = db.get_all_records(cache.record_path)
+        assert records is not None
+        content_col = f"{constants.PF_VARIATION_PREFIX}function_content_hash"
+        assert content_col in records.column_names
+        assert records.schema.field(content_col).type == pa.large_binary()
+
+    def test_variation_hash_bytes_decode_to_content_hash(self):
+        cache, db = _make_cache()
+        pf = _make_pf()
+        _compute_and_store(cache, pf, Data({"x": 10}))
+
+        records = db.get_all_records(cache.record_path)
+        assert records is not None
+        sig_col = f"{constants.PF_VARIATION_PREFIX}function_signature_hash"
+        raw_bytes = records.column(sig_col)[0].as_py()
+        assert isinstance(raw_bytes, bytes)
+        ch = ContentHash.from_prefixed_digest(raw_bytes)
+        assert isinstance(ch, ContentHash)

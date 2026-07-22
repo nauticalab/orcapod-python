@@ -19,6 +19,7 @@ import pytest
 from orcapod.core.datagrams import Data
 from orcapod.core.data_function import PythonDataFunction, parse_function_outputs
 from orcapod.protocols.core_protocols import DataFunctionProtocol
+from orcapod.types import ContentHash
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -365,10 +366,10 @@ class TestGetFunctionVariationData:
             "git_hash",
         }
 
-    def test_all_values_are_strings(self, add_pf):
+    def test_non_hash_values_are_strings(self, add_pf):
         data = add_pf.get_function_variation_data()
-        for k, v in data.items():
-            assert isinstance(v, str), f"Value for '{k}' is not a string: {v!r}"
+        assert isinstance(data["function_name"], str)
+        assert isinstance(data["git_hash"], str)
 
     def test_function_name_matches_canonical(self, add_pf):
         data = add_pf.get_function_variation_data()
@@ -814,3 +815,28 @@ class TestSignatureHashUnionOrderIndependence:
         h2 = self._sig_hash(foo)
 
         assert h1 != h2
+
+
+class TestVariationHashSchema:
+    def test_function_signature_hash_is_bytes(self, add_pf):
+        """PythonDataFunction stores variation hashes as bytes (-> large_binary)."""
+        variation = add_pf.get_function_variation_data()
+        assert isinstance(variation["function_signature_hash"], bytes)
+
+    def test_function_content_hash_is_bytes(self, add_pf):
+        """PythonDataFunction stores content hashes as bytes (-> large_binary)."""
+        variation = add_pf.get_function_variation_data()
+        assert isinstance(variation["function_content_hash"], bytes)
+
+    def test_variation_schema_has_bytes_types(self, add_pf):
+        schema = add_pf.get_function_variation_data_schema()
+        assert schema["function_signature_hash"] is bytes
+        assert schema["function_content_hash"] is bytes
+
+    def test_variation_hash_decodes_to_content_hash(self, add_pf):
+        """Both variation hash bytes round-trip through ContentHash.from_prefixed_digest."""
+        variation = add_pf.get_function_variation_data()
+        sig_hash = ContentHash.from_prefixed_digest(variation["function_signature_hash"])
+        content_hash = ContentHash.from_prefixed_digest(variation["function_content_hash"])
+        assert isinstance(sig_hash, ContentHash)
+        assert isinstance(content_hash, ContentHash)
