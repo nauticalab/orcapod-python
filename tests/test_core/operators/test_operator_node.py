@@ -443,3 +443,46 @@ class TestOperatorNodeRepr:
         node = _make_node(op, (simple_stream,))
         r = repr(node)
         assert "OperatorJobNode" in r
+
+
+# ---------------------------------------------------------------------------
+# Hash column type
+# ---------------------------------------------------------------------------
+
+
+class TestOperatorNodeHashColumnType:
+    def test_node_content_hash_col_is_large_binary(self, simple_stream):
+        """NODE_CONTENT_HASH_COL must be stored as large_binary in the pipeline DB."""
+        import pyarrow as pa
+        from orcapod.system_constants import constants
+
+        db = InMemoryArrowDatabase()
+        op = MapData({"x": "renamed_x"})
+        node = OperatorJobNode(
+            operator=op,
+            input_streams=(simple_stream,),
+            pipeline_database=db,
+            cache_mode=CacheMode.LOG,
+        )
+        node.run()
+
+        all_records = db.get_all_records(node.node_identity_path)
+        assert all_records is not None
+        col_name = constants.NODE_CONTENT_HASH_COL
+        assert col_name in all_records.column_names
+        assert all_records.schema.field(col_name).type == pa.large_binary()
+
+    def test_filter_by_content_hash_works_with_binary(self, simple_stream):
+        """After storing, iter_data() returns only rows for this node's hash."""
+        db = InMemoryArrowDatabase()
+        op = MapData({"x": "renamed_x"})
+        node = OperatorJobNode(
+            operator=op,
+            input_streams=(simple_stream,),
+            pipeline_database=db,
+            cache_mode=CacheMode.LOG,
+        )
+        node.run()
+
+        rows = list(node.iter_data())
+        assert len(rows) == 3  # simple_stream has 3 rows

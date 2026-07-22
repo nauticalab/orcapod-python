@@ -775,7 +775,7 @@ class OperatorJobNode(OperatorNodeBase):
                 f"required column {col_name!r} is missing from the stored table. "
                 "This may indicate records written by an older version of the code."
             )
-        own_hash = self.content_hash().to_string()
+        own_hash = self.content_hash().to_prefixed_digest()
         mask = pc.equal(table.column(col_name), own_hash)
         return table.filter(mask)
 
@@ -801,7 +801,10 @@ class OperatorJobNode(OperatorNodeBase):
         n_rows = output_table.num_rows
         output_table = output_table.append_column(
             constants.NODE_CONTENT_HASH_COL,
-            pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
+            pa.array(
+                [self.content_hash().to_prefixed_digest()] * n_rows,
+                type=pa.large_binary(),
+            ),
         )
 
         # Per-row record hashes for dedup: hash(tag + data + system_tags + node_content_hash).
