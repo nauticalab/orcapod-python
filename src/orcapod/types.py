@@ -93,18 +93,10 @@ class Schema(Mapping[str, DataType]):
     """Immutable schema representing a mapping of field names to Python types.
 
     Serves as the canonical internal schema representation in OrcaPod,
-    with interop to/from Arrow schemas. Semantic hasher hashable and suitable for use
-    in content-addressable contexts.
-    #! This should be fixed such that __hash__ is correctly implemented to yield
-    #! properly hashable data type -- till that is achieved, however, we should
-    #! actively raise an error whenever someone (system) tries to use this in hashable
-    #! context. Till this is implemented, adding qualifier that this is semantic hasher
-    #! hashable
-    #!? BUG: NOT hashable. `__eq__` is overridden below without a `__hash__`, so Python set
-    #!? `Schema.__hash__ = None` → `hash(Schema(...))`, `{schema}`, dict-keying all raise TypeError
-    #!? (verified). Either add `__hash__` (safe — Schema is effectively immutable: hash on
-    #!? (frozenset(self._data.items()), self._optional)) or correct this docstring. If "hashable"
-    #!? here means "content-hashable via semantic hashers" (not Python hash()), say that explicitly.
+    with interop to/from Arrow schemas. Not hashable via Python's built-in
+    ``hash()`` — ``__hash__`` raises an informative ``TypeError``; identity is
+    established through the semantic hasher (``content_hash``) instead. A
+    value-based ``__hash__`` may be added later (review finding I-10).
 
     Args:
         fields: An optional mapping of field names to their data types.
@@ -168,6 +160,18 @@ class Schema(Mapping[str, DataType]):
         # falls back to identity (``schema == 5`` -> False, ``schema != 5`` -> True)
         # instead of raising. Hashability is a separate concern (see finding I-10).
         return NotImplemented
+
+    def __hash__(self) -> int:
+        # Schema deliberately opts out of Python's built-in hashing. Its identity is
+        # established through the semantic hasher (content_hash), not hash(). Raising
+        # an explicit, informative TypeError here — instead of leaving __hash__ = None,
+        # which yields only a bare "unhashable type: 'Schema'" — makes the intent clear.
+        # A value-based __hash__ may be added later (finding I-10).
+        raise TypeError(
+            "Schema is not hashable via hash() and cannot be used as a dict key or "
+            "set member. Its identity is established through the semantic hasher "
+            "(content_hash), not Python's built-in hash()."
+        )
 
     # ==================== Optionality ====================
 
