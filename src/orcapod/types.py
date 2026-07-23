@@ -164,15 +164,10 @@ class Schema(Mapping[str, DataType]):
             return self._data == other._data and self._optional == other._optional
         if isinstance(other, Mapping):
             return self._data == dict(other)
-        #!? BUG: should `return NotImplemented` (the singleton), NOT raise. Raising means
-        #!? `schema == 5` throws instead of being False, and `schema != 5` throws too (verified).
-        #!? Breaks `in` checks, unittest/pytest equality, and any generic comparison. One-line fix.
-        #! Is it more proper to return NotImplemented? Since I want to signify that this is not available
-        #! for use in context where one triest to hash it, I felt it would be appropriate to raise an error
-        #! actively
-        raise NotImplementedError(
-            f"Equality check is not implemented for object of type {type(other)}"
-        )
+        # Not comparable with this type: return the NotImplemented singleton so Python
+        # falls back to identity (``schema == 5`` -> False, ``schema != 5`` -> True)
+        # instead of raising. Hashability is a separate concern (see finding I-10).
+        return NotImplemented
 
     # ==================== Optionality ====================
 

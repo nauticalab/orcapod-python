@@ -54,7 +54,7 @@ class ReadableChannel(Protocol[T_co]):
     async def __anext__(self) -> T_co: ...
 
     async def collect(self) -> Sequence[T_co]:
-        """Drain all remaining items into a list."""
+        """Drain all remaining items into a sequence."""
         ...
 
 

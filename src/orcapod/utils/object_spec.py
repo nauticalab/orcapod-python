@@ -2,8 +2,8 @@ import importlib
 from typing import Any
 
 
-#! Indeed this has trust_boundary issue that should actually 1) clearly documented and 2) have a way to reject
-#! auto imports for modules not found within whiltelisted modules. This should be done in a dedicated issue.
+#! Trust-boundary issue: this should (1) be clearly documented and (2) reject auto-imports of
+#! modules that are not on an allowlist. Track as a dedicated issue.
 #!? TRUST BOUNDARY: this resolves `{"_class": "module.Cls", "_config": {...}}` specs by importing
 #!? arbitrary modules and instantiating arbitrary classes (importlib + getattr + cls(**config)).
 #!? That's effectively arbitrary-code-execution if a spec ever comes from an untrusted source.

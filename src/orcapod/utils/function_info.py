@@ -2,7 +2,7 @@ import ast
 import inspect
 from collections.abc import Callable
 
-#! How comprehensively this is these functions are tested should be fully assessed
+#! Test coverage of these functions should be fully assessed.
 
 def _is_in_string(line: str, pos: int) -> bool:
     """Helper to check if a position in a line is inside a string literal."""
