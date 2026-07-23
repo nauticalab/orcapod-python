@@ -7,7 +7,7 @@ and fan-out (broadcast) support.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
@@ -41,7 +41,6 @@ class ChannelClosed(Exception):
 # Protocol types
 # ---------------------------------------------------------------------------
 
-
 @runtime_checkable
 class ReadableChannel(Protocol[T_co]):
     """Consumer side of a channel."""
@@ -54,8 +53,8 @@ class ReadableChannel(Protocol[T_co]):
 
     async def __anext__(self) -> T_co: ...
 
-    async def collect(self) -> list[T_co]:
-        """Drain all remaining items into a list."""
+    async def collect(self) -> Sequence[T_co]:
+        """Drain all remaining items into a sequence."""
         ...
 
 

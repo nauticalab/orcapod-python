@@ -1,4 +1,18 @@
 # config.py
+#!? SECOND config system: OrcapodConfig (hashing/display/datetime, TOML-loaded, global) is entirely
+#!? separate from the execution configs in types.py (PipelineConfig/PodConfig/NodeConfig). The two
+#!? even use DIFFERENT merge semantics — here "non-DEFAULT value in other overrides"; NodeConfig uses
+#!? "non-NONE in other overrides". A reader must know which convention applies where. Consider
+#!? documenting the split (library/global vs per-execution) and unifying the merge philosophy.
+#! There are legitimately two types of "config" although their interfaces should be as intuitively similar as possible
+#! Namely one set of configs are what would be passed into configure target objects such as Pod, Node, etc. You'd expect
+#! to create these configs and then pass them in. On the other than, there is the second category of config(s) which is
+#! the configuration of Orcapod itself, largely globally. A lot of top level system in Orcapod can optionally take in an
+#! instance of OrcapodConfig to override the default config set globally but canonical usage would be to configure
+#! the entire library globally. We should remove unnecessary duplication/divergence such as disagreeing implementation of
+#! merge but otherwise, we should make it very clear when something is about configuring Orcapod itself, whereas other is
+#! about configuring specific objects/system within Orcapod library. We should consider actually have object-specific config
+#! to reside *together* with the object it is meant to configure. This needs design spike for evaluation.
 from __future__ import annotations
 
 import logging
@@ -10,7 +24,7 @@ from typing import Any, Literal, Self
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _SectionConfig:
     """Base class for frozen leaf config section dataclasses.
 
@@ -22,6 +36,16 @@ class _SectionConfig:
     so that ``type(self)()`` produces a valid defaults instance.
     """
 
+    #!? DEAD + subtly broken. `_SectionConfig.merge` is only reached via `OrcapodConfig.merge`,
+    #!? which itself has NO external callers (verified) — `load_config` deliberately avoids it.
+    #!? WHY it's avoided: "non-default overrides" cannot express "reset a field back to its default"
+    #!? (a default in `other` reads as "unset"), which is exactly what `load_config` needs for a
+    #!? higher-precedence file to win. So merge() cannot do the one job the module actually requires.
+    #!? Decide: remove the merge() chain, or redesign it with an explicit "unset" sentinel and route
+    #!? load_config through it (killing the duplication below).
+    #! This provides confusing diverging implementation to merge logic found in some config object found in types.py
+    #! The implementations and inheritance hierarchy (if there is to be any) should be clearned up and
+    #! fully documented to avoid confusion
     def merge(self, other: Self) -> Self:
         """Return a new instance with non-default fields from ``other`` applied.
 
@@ -47,7 +71,7 @@ class _SectionConfig:
         return replace(self, **updates)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DatetimeConfig(_SectionConfig):
     """Datetime handling policy settings.
 
@@ -69,7 +93,7 @@ class DatetimeConfig(_SectionConfig):
     timezone_policy: Literal["strict", "coerce_utc"] = "strict"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HashingConfig(_SectionConfig):
     """Hash length settings for system-tag column names, schema hashes, and path scoping.
 
@@ -122,6 +146,8 @@ class OrcapodConfig:
         """
         return replace(self, **kwargs)
 
+    #! yet another implementation of merge that should be avoided
+    #! as mentioned above, we should consolidate config merging logic
     def merge(self, other: "OrcapodConfig") -> "OrcapodConfig":
         """Merge with another ``OrcapodConfig``; other takes precedence for non-default values.
 
@@ -169,6 +195,14 @@ class OrcapodConfig:
             ``OrcapodConfig`` populated from ``data``; missing sections and fields
             fall back to built-in defaults.
         """
+        #! Indeed this is non-sense duplication -- there ought to be targetted issue(s) to address/refactor
+        #! duplication
+        #!? MASSIVE duplication: the unknown-section-warn + unknown-field-warn + filter block is
+        #!? copy-pasted 3× here (hashing/display/datetime) AND re-implemented again in load_config()
+        #!? below (~150 lines total). Extract one helper `_parse_section(name, raw, cls, path_str)`
+        #!? and have BOTH from_dict and load_config call it. Also: from_dict checks isinstance(...,
+        #!? Mapping) while load_config checks isinstance(..., dict) — pick one. The known-sections set
+        #!? {"hashing","display","datetime"} is hardcoded in 3 places; derive from the dataclass fields.
         known_sections = {"hashing", "display", "datetime"}
         path_str = f" in {source_path}" if source_path is not None else ""
 
@@ -261,6 +295,12 @@ def load_config(
     """
     import tomllib
 
+    #! indeed this should make use of existing methods rather than providing bare implementation again
+    #! furthermore, config should optionally support getting values set through env vars (low priority)
+    #!? Reimplements from_dict()'s per-section parsing instead of reusing it. The "apply only keys
+    #!? explicitly present so a higher-precedence file can reset to default" trick (below) is the real
+    #!? reason merge() is bypassed — see the note on _SectionConfig.merge. If a shared _parse_section
+    #!? helper returned the explicit-keys dict, load_config could layer files via replace() cleanly.
     _user_path = (
         Path(user_config_path)
         if user_config_path is not None

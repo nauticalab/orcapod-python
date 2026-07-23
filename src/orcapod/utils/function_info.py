@@ -2,6 +2,7 @@ import ast
 import inspect
 from collections.abc import Callable
 
+#! Test coverage of these functions should be fully assessed.
 
 def _is_in_string(line: str, pos: int) -> bool:
     """Helper to check if a position in a line is inside a string literal."""
@@ -19,6 +20,7 @@ def _is_in_string(line: str, pos: int) -> bool:
 class SourceProcessor:
     """Handles AST-based and fallback source code processing."""
 
+    #! What's the use of this section? Why do we only have *_fallback version that's in use?
     # @staticmethod
     # def remove_docstrings_and_comments_ast(
     #     source: str, remove_docstrings: bool = True, remove_comments: bool = True
@@ -141,7 +143,6 @@ def get_function_components(
     include_closure_info: bool = True,
     include_decorators: bool = True,
     include_extended_code_props: bool = True,
-    use_ast_parsing: bool = True,
     skip_source_for_performance: bool = False,
 ) -> list[str]:
     """
@@ -163,7 +164,6 @@ def get_function_components(
         include_closure_info: Whether to include closure variable information
         include_decorators: Whether to include decorator information
         include_extended_code_props: Whether to include extended code properties
-        use_ast_parsing: Whether to use AST-based parsing for robust processing
         skip_source_for_performance: Skip expensive source code operations
 
     Returns:
@@ -208,13 +208,6 @@ def get_function_components(
 
             # Process docstrings and comments
             if not include_docstring or not include_comments:
-                # if use_ast_parsing:
-                #     source = SourceProcessor.remove_docstrings_and_comments_ast(
-                #         source,
-                #         remove_docstrings=not include_docstring,
-                #         remove_comments=not include_comments,
-                #     )
-                # else:
                 source = SourceProcessor._remove_docstrings_and_comments_fallback(
                     source,
                     remove_docstrings=not include_docstring,

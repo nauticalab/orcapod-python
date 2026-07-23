@@ -1,3 +1,14 @@
+#!? No common base class. The 14 errors here inherit from a mix of Exception(7)/ValueError(3)/
+#!? RuntimeError(3)/LookupError(1) — a caller cannot `except OrcapodError`. Consider a single
+#!? `OrcapodError(Exception)` root (builtin-semantic subclasses can still multiply-inherit if wanted).
+#!? Also: error classes are NOT all here — ContextValidationError/ContextResolutionError live in
+#!? contexts/core.py, SemanticHashingError in hashing/visitors.py. Decide whether errors.py is the
+#!? single registry (re-export at least) or accept scatter. Not re-exported from top-level __init__.
+#!? MISSING (Area 3 / ITL-557): no execution-failure taxonomy at all — no PodExecutionError / OOM /
+#!? Transient / Retryable types. This is the groundwork the retry+memory-scaling work needs, and the
+#!? reason InvocationStatus (hooks.py) has only a single undifferentiated ERROR bucket.
+#! All errors defined should ultimately inherit from OrcapodError(Exception) and also all exception/error
+#! classes must be present/collected in this module. We do want to add execution-failure taxonomy
 class InputValidationError(Exception):
     """
     Exception raised when the inputs are not valid.
@@ -64,6 +75,8 @@ class SourceSpecMismatchError(ValueError):
 
     The class name ``SourceSpecMismatchError`` is preserved for compatibility
     with any code that catches it by name.
+    #!? "preserved for compatibility" — this project is pre-v0.1 greenfield (CLAUDE.md: no
+    #!? back-compat shims). If nothing external depends on the old name, drop this note / rename freely.
 
     Contains the slot name and a description of the incompatible field(s).
     Raised at ``bind()`` time — schema mismatches are rejected before execution.
@@ -148,7 +161,10 @@ class EmptyDataHashMissingError(Exception):
         super().__init__(
             "content_hash() called on EmptyData with no cached_content_hash. "
             "The pipeline DB row that produced this token is missing the stored "
-            "hash column (OUTPUT_DATA_HASH_COL or INPUT_DATA_HASH_COL). "
+            "hash column (OUTPUT_DATA_HASH_COL). "
+            #!? Misleading: flow-through keys ONLY off OUTPUT_DATA_HASH_COL (function_node.py:2009);
+            #!? INPUT_DATA_HASH_COL is written but never read for flow-through (dead — Area 4 finding).
+            #!? Drop the INPUT reference from this message.
             "Flow-through is unavailable for this row."
         )
 

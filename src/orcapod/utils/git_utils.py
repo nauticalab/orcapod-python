@@ -1,31 +1,47 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, TYPE_CHECKING
+from pathlib import Path
+from typing import TypedDict
 from orcapod.utils.lazy_module import LazyModule
 
-git = LazyModule("git")
+if TYPE_CHECKING:
+    import git
+else:
+    git =  LazyModule("git")
 
+#! Generally need better documentation and some of the items are only weakly typed
+#! largely stemming from some of the properties as found in git package is only
+#! partially typed. This module needs thorough testing against a real git repo
 
-def is_git_repo(path):
+def is_git_repo(path: str | Path) -> bool:
     """Check if path is a git repository"""
     try:
         git.Repo(path, search_parent_directories=True)
         return True
-    except git.exc.InvalidGitRepositoryError:
+    except git.InvalidGitRepositoryError:
         return False
 
 
-def get_root_git_dir(path):
+def get_root_git_dir(path: str | Path) -> str | None:
     """Get the root .git directory for a path"""
     try:
         repo = git.Repo(path, search_parent_directories=True)
         return repo.git.rev_parse("--show-toplevel")
-    except git.exc.InvalidGitRepositoryError:
+    except git.InvalidGitRepositoryError:
         return None
 
+class GitRepoInfo(TypedDict):
+    is_repo: bool
+    commit_hash: str
+    short_hash: str
+    is_dirty: bool
+    has_untracked_files: bool
+    branch: str
+    repo_root: str
 
-def get_git_info(path):
+def get_git_info(path: str | Path) -> GitRepoInfo | None:
     """Get comprehensive git information for a path"""
     try:
         # This will search parent directories for .git
@@ -50,17 +66,20 @@ def get_git_info(path):
         # covers staged/unstaged changes to tracked files).
         has_untracked_files = len(repo.untracked_files) > 0
 
-        return {
+        return GitRepoInfo({
             "is_repo": True,
             "commit_hash": commit_hash,
             "short_hash": short_hash,
             "is_dirty": is_dirty,
             "has_untracked_files": has_untracked_files,
             "branch": branch_name,
-            "repo_root": repo.working_dir,
-        }
+            "repo_root": str(repo.working_dir),
+        })
 
-    except:  # TODO: specify exception
+    except Exception:
+        # Not a git repo, git not installed, or a git call failed — no git info
+        # available. Kept broad on purpose (git backends raise varied errors), but
+        # scoped to Exception so KeyboardInterrupt/SystemExit propagate.
         return None
 
 
@@ -77,9 +96,9 @@ def get_git_info_for_python_object(python_object, try_cwd:bool=False) -> dict[st
 
             if git_info is None:
                 return None
-        
+
             git_source = "cwd"
-            
+
         env_info = {}
         env_info["git_commit_hash"] = git_info.get("commit_hash")
         env_info["git_repo_status"] = "dirty" if git_info.get("is_dirty") else "clean"
