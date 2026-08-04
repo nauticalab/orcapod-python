@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
-from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
+from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type, _canonical_storage
 
 
 # ---------------------------------------------------------------------------
@@ -636,3 +636,187 @@ def test_registry_does_not_expose_ensure_methods():
     registry = LogicalTypeRegistry()
     assert not hasattr(registry, "ensure_logical_type_for_python_class")
     assert not hasattr(registry, "ensure_extension_type")
+
+
+# ---------------------------------------------------------------------------
+# _canonical_storage helper
+# ---------------------------------------------------------------------------
+
+class TestCanonicalStorage:
+    """Unit tests for the _canonical_storage helper."""
+
+    def test_string_maps_to_large_string(self):
+        assert _canonical_storage(pa.string()) == pa.large_string()
+
+    def test_utf8_maps_to_large_string(self):
+        # pa.utf8() is an alias for pa.string()
+        assert _canonical_storage(pa.utf8()) == pa.large_string()
+
+    def test_string_view_maps_to_large_string(self):
+        assert _canonical_storage(pa.string_view()) == pa.large_string()
+
+    def test_large_string_is_identity(self):
+        assert _canonical_storage(pa.large_string()) == pa.large_string()
+
+    def test_binary_maps_to_large_binary(self):
+        assert _canonical_storage(pa.binary()) == pa.large_binary()
+
+    def test_binary_view_maps_to_large_binary(self):
+        assert _canonical_storage(pa.binary_view()) == pa.large_binary()
+
+    def test_large_binary_is_identity(self):
+        assert _canonical_storage(pa.large_binary()) == pa.large_binary()
+
+    def test_int64_is_identity(self):
+        assert _canonical_storage(pa.int64()) == pa.int64()
+
+    def test_fixed_binary_is_identity(self):
+        assert _canonical_storage(pa.binary(16)) == pa.binary(16)
+
+
+# ---------------------------------------------------------------------------
+# __arrow_ext_deserialize__ storage-family tolerance (ITL-602)
+# ---------------------------------------------------------------------------
+
+def _make_large_string_ext(name: str) -> pa.ExtensionType:
+    """Return an extension type instance backed by large_string."""
+    cls = make_arrow_extension_type(name, pa.large_string())
+    return cls()
+
+
+def _make_large_binary_ext(name: str) -> pa.ExtensionType:
+    """Return an extension type instance backed by large_binary."""
+    cls = make_arrow_extension_type(name, pa.large_binary())
+    return cls()
+
+
+class TestDeserializeStorageFamilyTolerance:
+    """Extension deserializer accepts equivalent string/binary layouts (ITL-602).
+
+    Each test builds a minimal extension type registered with large_string or
+    large_binary, then calls __arrow_ext_deserialize__ directly with a
+    physically-different-but-logically-equivalent storage type and asserts the
+    result is the canonical extension type instance.
+
+    Cross-family mismatches must still raise ValueError.
+    """
+
+    def test_deserialize_accepts_string_for_large_string(self):
+        """string physical type is accepted when large_string is registered."""
+        name = _unique_name()
+        ext = _make_large_string_ext(name)
+        result = ext.__arrow_ext_deserialize__(pa.string(), b"")
+        assert result.extension_name == name
+        assert result.storage_type == pa.large_string()
+
+    def test_deserialize_accepts_large_string_for_large_string(self):
+        """large_string physical type (normal path) still works."""
+        name = _unique_name()
+        ext = _make_large_string_ext(name)
+        result = ext.__arrow_ext_deserialize__(pa.large_string(), b"")
+        assert result.extension_name == name
+        assert result.storage_type == pa.large_string()
+
+    def test_deserialize_accepts_string_view_for_large_string(self):
+        """string_view physical type is accepted when large_string is registered."""
+        name = _unique_name()
+        ext = _make_large_string_ext(name)
+        result = ext.__arrow_ext_deserialize__(pa.string_view(), b"")
+        assert result.extension_name == name
+        assert result.storage_type == pa.large_string()
+
+    def test_deserialize_accepts_binary_for_large_binary(self):
+        """binary physical type is accepted when large_binary is registered."""
+        name = _unique_name()
+        ext = _make_large_binary_ext(name)
+        result = ext.__arrow_ext_deserialize__(pa.binary(), b"")
+        assert result.extension_name == name
+        assert result.storage_type == pa.large_binary()
+
+    def test_deserialize_accepts_binary_view_for_large_binary(self):
+        """binary_view physical type is accepted when large_binary is registered."""
+        name = _unique_name()
+        ext = _make_large_binary_ext(name)
+        result = ext.__arrow_ext_deserialize__(pa.binary_view(), b"")
+        assert result.extension_name == name
+        assert result.storage_type == pa.large_binary()
+
+    def test_deserialize_rejects_binary_for_large_string(self):
+        """binary is rejected when large_string is registered (cross-family)."""
+        name = _unique_name()
+        ext = _make_large_string_ext(name)
+        with pytest.raises(ValueError, match="expected storage_type"):
+            ext.__arrow_ext_deserialize__(pa.binary(), b"")
+
+    def test_deserialize_rejects_string_for_large_binary(self):
+        """string is rejected when large_binary is registered (cross-family)."""
+        name = _unique_name()
+        ext = _make_large_binary_ext(name)
+        with pytest.raises(ValueError, match="expected storage_type"):
+            ext.__arrow_ext_deserialize__(pa.string(), b"")
+
+    def test_metadata_mismatch_raises_even_when_storage_family_matches(self):
+        """Metadata check stays strict regardless of storage compatibility."""
+        name = _unique_name()
+        cls = make_arrow_extension_type(name, pa.large_string(), metadata=b"expected")
+        ext = cls()
+        with pytest.raises(ValueError, match="expected metadata"):
+            ext.__arrow_ext_deserialize__(pa.string(), b"wrong")
+
+    def test_metadata_mismatch_raises_for_canonical_storage_too(self):
+        """Metadata check raises even when storage_type matches exactly."""
+        name = _unique_name()
+        cls = make_arrow_extension_type(name, pa.large_string(), metadata=b"expected")
+        ext = cls()
+        with pytest.raises(ValueError, match="expected metadata"):
+            ext.__arrow_ext_deserialize__(pa.large_string(), b"wrong")
+
+
+# ---------------------------------------------------------------------------
+# Parquet roundtrip with non-canonical physical storage (ITL-602)
+# ---------------------------------------------------------------------------
+
+def _write_string_backed_parquet(path: str, ext_name: str) -> None:
+    """Write a parquet file where the physical type is string but extension metadata
+    records ext_name.  Simulates the output of delta-rs optimize.compact().
+    """
+    write_cls = make_arrow_extension_type(ext_name, pa.string())
+    write_ext = write_cls()
+    arr = pa.ExtensionArray.from_storage(write_ext, pa.array(["hello", "world"], type=pa.string()))
+    pq.write_table(pa.table({"col": arr}), path)
+    # Unregister write-side type so the read-side (large_string) handler takes over.
+    try:
+        pa.unregister_extension_type(ext_name)
+    except Exception:
+        pass
+
+
+class TestParquetRoundtripNonCanonicalStorage:
+    """Parquet files with string physical type + extension metadata read correctly
+    after the ITL-602 fix.
+    """
+
+    def test_string_physical_reads_as_large_string_extension(self, tmp_path):
+        """Parquet with string physical type + extension metadata deserialises to
+        large_string storage without raising."""
+        name = _unique_name()
+        path = str(tmp_path / "test.parquet")
+        _write_string_backed_parquet(path, name)
+
+        # Register the canonical (large_string) handler — this is what orcapod does at startup.
+        read_cls = make_arrow_extension_type(name, pa.large_string())
+        pa.register_extension_type(read_cls())
+
+        try:
+            result = pq.read_table(path)
+            col = result.column("col")
+            chunk = col.chunk(0)
+            assert chunk.storage.type == pa.large_string(), (
+                f"Expected large_string storage after widening, got {chunk.storage.type}"
+            )
+            assert chunk.to_pylist() == ["hello", "world"]
+        finally:
+            try:
+                pa.unregister_extension_type(name)
+            except Exception:
+                pass

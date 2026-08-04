@@ -33,6 +33,27 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
+def _canonical_storage(t: pa.DataType) -> pa.DataType:
+    """Return the canonical large-variant for string/binary families; identity elsewhere.
+
+    Maps:
+      ``string`` / ``string_view``  → ``large_string``
+      ``binary`` / ``binary_view``  → ``large_binary``
+      ``large_string`` / ``large_binary`` → unchanged (already canonical)
+      anything else → unchanged
+
+    Used in ``__arrow_ext_deserialize__`` to accept physically-equivalent but
+    layout-different string/binary variants that Delta Lake or other compaction
+    tools may write (e.g. delta-rs ``optimize.compact()`` normalises
+    ``large_string`` columns to plain ``string`` in the rewritten Parquet files).
+    """
+    if pa.types.is_string(t) or pa.types.is_string_view(t):
+        return pa.large_string()
+    if pa.types.is_binary(t) or pa.types.is_binary_view(t):
+        return pa.large_binary()
+    return t
+
+
 def make_arrow_extension_type(
     extension_name: str,
     storage_type: pa.DataType,
@@ -80,7 +101,17 @@ def make_arrow_extension_type(
         # incoming storage_type and serialized bytes against the expected values so
         # that reading a file where the same extension name was written with different
         # parameters raises immediately rather than silently producing wrong data.
-        if storage_type != _storage:
+        #
+        # Storage-family tolerance: accept any member of the same string/binary
+        # family as the registered _storage type.  Delta Lake and other compaction
+        # tools (e.g. delta-rs optimize.compact()) normalise large_string columns
+        # to plain string in rewritten Parquet files, so _deserialize can receive
+        # storage_type=string even though _storage=large_string.  Returning cls()
+        # (whose storage is _storage) causes PyArrow to widen the physical data to
+        # the canonical large variant automatically — verified empirically with
+        # pyarrow 25.0.0.  Cross-family mismatches (string where large_binary was
+        # registered, or vice-versa) are genuine semantic errors and still raise.
+        if _canonical_storage(storage_type) != _storage:
             raise ValueError(
                 f"Arrow extension type '{_name}': expected storage_type "
                 f"{_storage!r} but got {storage_type!r}."
