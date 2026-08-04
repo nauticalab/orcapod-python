@@ -755,6 +755,33 @@ class TestDeserializeStorageFamilyTolerance:
         with pytest.raises(ValueError, match="expected storage_type"):
             ext.__arrow_ext_deserialize__(pa.string(), b"")
 
+    def test_non_canonical_storage_accepts_exact_match(self):
+        """Extension registered with plain string (non-canonical) still reads its own data.
+
+        Regression test for the Copilot review finding: the previous check
+        _canonical_storage(storage_type) != _storage would map string → large_string and
+        then compare large_string != string, incorrectly raising for a type that should
+        read back cleanly.
+        """
+        name = _unique_name()
+        cls = make_arrow_extension_type(name, pa.string())  # non-canonical storage
+        ext = cls()
+        result = ext.__arrow_ext_deserialize__(pa.string(), b"")
+        assert result.extension_name == name
+        assert result.storage_type == pa.string()
+
+    def test_non_canonical_storage_rejects_large_variant(self):
+        """Extension registered with plain string rejects large_string physical data.
+
+        Accepting large_string → string would require silent offset narrowing (64-bit →
+        32-bit), which can overflow for values > 2 GB. The strict check prevents this.
+        """
+        name = _unique_name()
+        cls = make_arrow_extension_type(name, pa.string())  # non-canonical storage
+        ext = cls()
+        with pytest.raises(ValueError, match="expected storage_type"):
+            ext.__arrow_ext_deserialize__(pa.large_string(), b"")
+
     def test_metadata_mismatch_raises_even_when_storage_family_matches(self):
         """Metadata check stays strict regardless of storage compatibility."""
         name = _unique_name()
