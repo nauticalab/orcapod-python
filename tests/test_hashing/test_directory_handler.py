@@ -182,6 +182,30 @@ class TestBasicDirectoryHasher:
         hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
 
+    def test_relative_path_pattern_scopes_to_subdirectory(self, tmp_path):
+        """Pattern 'sub/*.pyc' must exclude .pyc files in sub/ but not in other/."""
+        base = tmp_path / "base"
+        base.mkdir()
+        (base / "sub").mkdir()
+        (base / "other").mkdir()
+        (base / "sub" / "app.py").write_bytes(b"code")
+        (base / "sub" / "app.pyc").write_bytes(b"compiled in sub")
+        (base / "other" / "app.py").write_bytes(b"code")
+
+        # reference: same tree but with sub/app.pyc physically absent
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "sub").mkdir()
+        (ref / "other").mkdir()
+        (ref / "sub" / "app.py").write_bytes(b"code")
+        (ref / "other" / "app.py").write_bytes(b"code")
+
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
+        # "sub/*.pyc" should exclude sub/app.pyc → same hash as ref
+        assert hasher.hash_directory(base, ignore=["sub/*.pyc"]) == hasher.hash_directory(ref)
+        # "other/*.pyc" should not match sub/app.pyc → different hash from ref
+        assert hasher.hash_directory(base, ignore=["other/*.pyc"]) != hasher.hash_directory(ref)
+
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="mkfifo not available on this platform")
     def test_special_files_skipped(self, tmp_path):
         """Named pipes (FIFOs) and other special files are silently skipped."""
