@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import PurePosixPath
 
 from upath import UPath
@@ -17,15 +17,17 @@ logger = logging.getLogger(__name__)
 
 
 def _compile_ignore(
-    ignore: Callable[[PurePosixPath], bool] | list[str] | None,
+    ignore: Callable[[PurePosixPath], bool] | Iterable[str] | None,
 ) -> Callable[[PurePosixPath], bool] | None:
     """Convert an ignore spec to a single callable filter.
 
     Args:
-        ignore: ``None`` (no filtering), a list of glob patterns matched against
+        ignore: ``None`` (no filtering), an iterable of glob patterns matched against
             the POSIX relative path from the root via ``pathlib.PurePosixPath.match()``
             (right-anchored: ``"*.pyc"`` matches at any depth; ``"sub/*.pyc"`` matches
-            only inside ``sub/``), or a callable ``(PurePosixPath) -> bool``.
+            any entry named ``sub/*.pyc`` at any depth — to anchor to the root, prefix
+            with ``"/"`` on Python 3.12+ or use a full relative path from the root),
+            or a callable ``(PurePosixPath) -> bool``.
 
     Returns:
         A callable ``(PurePosixPath) -> bool`` returning ``True`` to exclude an entry,
@@ -57,7 +59,9 @@ def _hash_dir(
         root: The top-level directory passed to ``BasicDirectoryHasher.hash_directory``.
             Used to compute POSIX relative paths for filter evaluation.
         filter_fn: Optional filter callable; receives the POSIX relative path from
-            ``root`` and returns ``True`` to exclude the entry.
+            ``root`` and returns ``True`` to exclude the entry. Excluding a directory
+            entry also implicitly excludes its entire subtree (the recursive call is
+            skipped for excluded directories).
         algorithm: Hash algorithm name used for structural (entry and node) hashing.
         file_hasher: Hasher used to compute ``ContentHash`` for each file leaf.
 
@@ -67,7 +71,12 @@ def _hash_dir(
     entries: list[tuple[bytes, bytes]] = []
 
     for child in path.iterdir():
-        relative = PurePosixPath(child.relative_to(root))
+        try:
+            relative = PurePosixPath(child.relative_to(root))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"BasicDirectoryHasher: child path {child!r} is not relative to root {root!r}"
+            ) from exc
         if filter_fn is not None and filter_fn(relative):
             continue
 
@@ -142,22 +151,24 @@ class BasicDirectoryHasher:
     def hash_directory(
         self,
         directory_path: PathLike,
-        ignore: Callable[[PurePosixPath], bool] | list[str] | None = None,
+        ignore: Callable[[PurePosixPath], bool] | Iterable[str] | None = None,
     ) -> ContentHash:
         """Compute the recursive Merkle hash of a directory tree.
 
         Args:
             directory_path: Path to the directory to hash.
-            ignore: Optional filter. A list of glob patterns matched against the
+            ignore: Optional filter. An iterable of glob patterns matched against the
                 **POSIX relative path from the root** via ``pathlib.PurePosixPath.match()``
                 (right-anchored: ``"*.pyc"`` matches any ``.pyc`` at any depth;
-                ``"sub/*.pyc"`` matches only ``.pyc`` files directly inside ``sub/``),
+                ``"sub/*.pyc"`` matches ``.pyc`` files in any directory named ``sub/``
+                at any depth — right-anchored, not root-anchored),
                 or a callable ``(pathlib.PurePosixPath) -> bool`` returning ``True``
                 to exclude an entry. Applied at every level of recursion.
 
                 Hash invariant: excluded entries are invisible to the hash. The result
                 is identical to those entries never existing. The pattern string itself
-                is not input to the hash.
+                is not input to the hash. Excluding a directory entry also excludes its
+                entire subtree.
 
         Returns:
             A ``ContentHash`` with ``method="merkle_{algorithm}"``.
