@@ -1874,9 +1874,21 @@ class FunctionJobNode(FunctionNodeBase):
             df: DataFrame of unmatched pipeline DB rows (each row is a miss).
             empty_data_tokens: Dict to populate with ``base_entry_id -> EmptyData``.
             empty_taginfo_rows: Dict to populate with ``base_entry_id -> raw row dict``.
+
+        Note:
+            ``OUTPUT_DATA_HASH_COL`` is used (not ``INPUT_DATA_HASH_COL``) because
+            the downstream result cache is keyed by the input to the downstream node,
+            which equals the *output* of this node.  ``INPUT_DATA_HASH_COL`` carries
+            the hash of this node's own input (i.e., the upstream's output) and must
+            NOT be used as a fallback — doing so would silently cause cache misses in
+            all downstream nodes.
         """
         for row in df.iter_rows(named=True):
             base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
+            # OUTPUT_DATA_HASH_COL is the hash that the downstream result cache
+            # uses to look up entries.  INPUT_DATA_HASH_COL is deliberately NOT
+            # used here — it holds this node's input hash, not its output hash,
+            # and would silently cause cache misses in every downstream node.
             raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL)
             if raw_hash is None:
                 logger.warning(
@@ -1906,9 +1918,17 @@ class FunctionJobNode(FunctionNodeBase):
         independent inner joins (one per store), merges with persistent priority
         via an anti-join, and returns the combined result.
 
-        Persistent miss rows (tag entry with no matching result DB row) emit a
-        WARNING-level log. Ephemeral miss rows (cross-session miss) are silently
-        dropped.
+        Persistent miss rows (tag entry with no matching result DB row) are
+        handled according to ``missing_cache_policy``:
+
+        * ``"recompute"`` (default) — WARNING log; the row falls through to
+          Phase 2 for recomputation.
+        * ``"strict"`` — ERROR log; ``CacheMissError`` is raised immediately.
+        * ``"as_empty"`` — WARNING log; the row is emitted as ``EmptyData``
+          so downstream nodes can attempt to serve from their own cache.
+
+        Ephemeral miss rows (cross-session miss) are always emitted as
+        ``EmptyData`` regardless of policy.
 
         If ``base_entry_ids`` is provided, the result is filtered to matching
         ``_PIPELINE_BASE_ENTRY_ID_COL`` values before conversion to Arrow.

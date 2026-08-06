@@ -56,6 +56,7 @@ def _wipe_result_db(result_db: InMemoryArrowDatabase) -> None:
     """Simulate data loss by clearing the result store."""
     result_db._tables.clear()
     result_db._pending_batches.clear()
+    result_db._pending_record_ids.clear()
 
 
 # ---------------------------------------------------------------------------
