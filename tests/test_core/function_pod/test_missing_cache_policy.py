@@ -678,3 +678,69 @@ class TestAsEmptyEndToEnd:
         assert b2_data_out.as_dict()["tripled"] == 60, (
             "B should serve 60 from its cache given EmptyData with the correct hash"
         )
+
+
+class TestRecomputeRegression:
+    """Default 'recompute' mode preserves all existing behaviour exactly."""
+
+    def test_default_nonephemeral_miss_still_recomputes(self):
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf), input_stream=stream,
+            pipeline_database=pipeline_db, result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        _wipe_result_db(result_db)
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2), input_stream=stream,
+            pipeline_database=pipeline_db, result_database=result_db,
+        )
+        # No missing_cache_policy set — defaults to "recompute"
+        results = node2.execute(stream)
+        assert call_count["n"] == 2, "default mode must recompute on miss"
+        assert len(results) == 1
+        assert not isinstance(results[0][1], EmptyData)
+        assert results[0][1].as_dict()["result"] == 20
+
+    def test_explicit_recompute_policy_same_as_default(self):
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf), input_stream=stream,
+            pipeline_database=pipeline_db, result_database=result_db,
+        )
+        node1.execute(stream)
+        _wipe_result_db(result_db)
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2), input_stream=stream,
+            pipeline_database=pipeline_db, result_database=result_db,
+        )
+        node2.node_config = NodeConfig(missing_cache_policy="recompute")
+        results = node2.execute(stream)
+        assert call_count["n"] == 2
+        assert not isinstance(results[0][1], EmptyData)
