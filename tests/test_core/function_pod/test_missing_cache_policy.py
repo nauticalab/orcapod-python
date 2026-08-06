@@ -448,3 +448,81 @@ class TestAsyncExecutePolicy:
         assert call_count["n"] == 1, "function must not be called again in as_empty mode"
         assert len(results) == 1
         assert isinstance(results[0][1], EmptyData)
+
+
+# ---------------------------------------------------------------------------
+# Task 6: CACHE_ONLY mode respects missing_cache_policy
+# ---------------------------------------------------------------------------
+
+
+class TestCacheOnlyPolicy:
+    """CACHE_ONLY mode respects missing_cache_policy."""
+
+    def _make_cache_only_node(
+        self,
+        stream: ArrowTableStream,
+        pipeline_db: InMemoryArrowDatabase,
+        result_db: InMemoryArrowDatabase,
+        missing_cache_policy: str | None = None,
+    ) -> FunctionJobNode:
+        """Build a FunctionJobNode in CACHE_ONLY mode."""
+        from orcapod.pipeline.serialization import LoadStatus
+
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(pf)
+        node = FunctionJobNode(
+            function_pod=pod,
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        # Force CACHE_ONLY status — same as what from_descriptor() does
+        # when the upstream stream has load_status == UNAVAILABLE.
+        node._load_status = LoadStatus.CACHE_ONLY
+        if missing_cache_policy is not None:
+            node.node_config = NodeConfig(missing_cache_policy=missing_cache_policy)
+        return node
+
+    def test_strict_raises_in_cache_only_mode(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Session 1: compute normally
+        _make_node(stream, pipeline_db, result_db).execute(stream)
+        _wipe_result_db(result_db)
+
+        # CACHE_ONLY + strict → must raise on iter_data()
+        node = self._make_cache_only_node(
+            stream, pipeline_db, result_db, missing_cache_policy="strict"
+        )
+        with pytest.raises(CacheMissError):
+            list(node.iter_data())
+
+    def test_as_empty_forwards_empty_data_in_cache_only_mode(self):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        _make_node(stream, pipeline_db, result_db).execute(stream)
+        _wipe_result_db(result_db)
+
+        node = self._make_cache_only_node(
+            stream, pipeline_db, result_db, missing_cache_policy="as_empty"
+        )
+        results = list(node.iter_data())
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData)
+
+    def test_recompute_omits_missing_entry_in_cache_only_mode(self):
+        """Default 'recompute' mode: CACHE_ONLY can't recompute, so entry is just absent."""
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        _make_node(stream, pipeline_db, result_db).execute(stream)
+        _wipe_result_db(result_db)
+
+        node = self._make_cache_only_node(stream, pipeline_db, result_db)
+        results = list(node.iter_data())
+        assert results == [], "missing entry should be silently omitted in recompute+CACHE_ONLY"
