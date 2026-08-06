@@ -48,7 +48,7 @@ class Directory(ProxyUPath):
         ignore: Optional filter for excluding entries from the content hash.
             Accepts an iterable of glob patterns matched against the **POSIX
             relative path from the directory root** via
-            ``pathlib.PurePath.match()`` (right-anchored: ``"*.pyc"`` matches
+            ``pathlib.PurePosixPath.match()`` (right-anchored: ``"*.pyc"`` matches
             any ``.pyc`` at any depth; ``"sub/*.pyc"`` matches any ``.pyc`` in
             any directory named ``sub/`` at any depth — right-anchored, not
             root-anchored), or a callable
