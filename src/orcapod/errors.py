@@ -195,3 +195,14 @@ class EphemeralResultMissingError(Exception):
             f"node={node_identity_path!r} "
             f"cached_content_hash={cached_content_hash!r}"
         )
+
+
+class CacheMissError(Exception):
+    """Raised when a persistent (non-ephemeral) result-store entry is absent
+    and ``NodeConfig.missing_cache_policy`` is ``"strict"``.
+
+    A missing durable result indicates data loss or corruption. Set
+    ``missing_cache_policy="recompute"`` (the default) to fall back to
+    recomputation, or ``"as_empty"`` to propagate an ``EmptyData`` token
+    downstream instead of raising.
+    """
