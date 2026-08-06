@@ -181,3 +181,148 @@ class TestStrictPolicy:
         # Should NOT raise — ephemeral misses degrade gracefully
         results = node2.execute(stream)
         assert len(results) == 1  # recomputed
+
+
+class TestAsEmptyPolicy:
+    """missing_cache_policy="as_empty" emits EmptyData instead of recomputing."""
+
+    def test_as_empty_nonephemeral_miss_emits_empty_data_not_recompute(self):
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Session 1: compute once (call_count = 1)
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        _wipe_result_db(result_db)
+
+        # Session 2: as_empty — function must NOT be called again
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node2.node_config = NodeConfig(missing_cache_policy="as_empty")
+        results = node2.execute(stream)
+
+        assert call_count["n"] == 1, "function must not be called again in as_empty mode"
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData)
+
+    def test_as_empty_nonephemeral_miss_logs_warning(self, caplog):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        _make_node(stream, pipeline_db, result_db).execute(stream)
+        _wipe_result_db(result_db)
+
+        node = _make_node(stream, pipeline_db, result_db, missing_cache_policy="as_empty")
+        with caplog.at_level(logging.WARNING, logger="orcapod.core.nodes.function_node"):
+            node.execute(stream)
+
+        assert any("treating as Empty data" in msg for msg in caplog.messages)
+
+    def test_as_empty_honoured_across_multiple_execute_calls(self):
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        _wipe_result_db(result_db)
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node2.node_config = NodeConfig(missing_cache_policy="as_empty")
+        node2.execute(stream)
+        node2._cached_output_datas.clear()
+        node2.execute(stream)  # second call — must still emit EmptyData, not recompute
+
+        assert call_count["n"] == 1, "policy must be honoured on every call, not just the first"
+
+
+class TestEphemeralInfoLog:
+    """Ephemeral misses log at INFO level (never WARNING)."""
+
+    def test_ephemeral_miss_logs_info_not_warning(self, caplog):
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        ephemeral_db = InMemoryArrowDatabase()
+
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(PythonDataFunction(_double, output_keys="result")),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node1.node_config = NodeConfig(is_result_ephemeral=True)
+        node1.execute(stream)
+
+        # Wipe ephemeral store
+        ephemeral_db._tables.clear()
+        ephemeral_db._pending_batches.clear()
+        ephemeral_db._pending_record_ids.clear()
+
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(PythonDataFunction(_double, output_keys="result")),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node2.node_config = NodeConfig(is_result_ephemeral=True)
+
+        with caplog.at_level(logging.DEBUG, logger="orcapod.core.nodes.function_node"):
+            node2.execute(stream)
+
+        # Assert INFO log was emitted for ephemeral miss
+        info_msgs = [
+            r.message for r in caplog.records
+            if r.levelno == logging.INFO and "ephemeral result DB" in r.message
+        ]
+        assert info_msgs, "expected INFO log for ephemeral miss"
+
+        # Assert NO WARNING log about ephemeral miss
+        warning_msgs = [
+            r.message for r in caplog.records
+            if r.levelno == logging.WARNING and "ephemeral result DB" in r.message
+        ]
+        assert not warning_msgs, f"unexpected WARNING for ephemeral miss: {warning_msgs}"

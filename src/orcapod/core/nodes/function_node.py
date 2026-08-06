@@ -2102,6 +2102,12 @@ class FunctionJobNode(FunctionNodeBase):
             else:
                 # No ephemeral store or empty store — all ephemeral rows are misses.
                 unmatched_df = ephemeral_taginfo_df
+            if unmatched_df.height > 0:
+                logger.info(
+                    "%d pipeline DB entries have no match in ephemeral result DB "
+                    "— expected after cross-session store clear. Propagating as EmptyData.",
+                    unmatched_df.height,
+                )
             # Use the shared helper — same EmptyData creation logic for
             # ephemeral misses and permissive persistent misses.
             self._populate_empty_data_tokens(
