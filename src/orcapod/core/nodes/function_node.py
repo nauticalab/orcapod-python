@@ -1260,39 +1260,45 @@ class FunctionJobNode(FunctionNodeBase):
         self.get_cached_results(base_entry_ids=base_entry_ids)
 
         output: list[tuple[TagProtocol, DataProtocol]] = []
+        policy = self._node_config.missing_cache_policy or "recompute"
         for tag, data, base_entry_id in upstream_entries:
             ctx_obs.on_data_start(node_label, tag, data)
 
-            if base_entry_id in self._cached_output_datas and not isinstance(
-                self._cached_output_datas[base_entry_id][1], EmptyData
-            ):
-                tag_out, result = self._cached_output_datas[base_entry_id]
-                ctx_obs.on_data_end(node_label, tag, data, result, cached=True)
+            if base_entry_id in self._cached_output_datas:
+                tag_out, cached_pkt = self._cached_output_datas[base_entry_id]
+                if isinstance(cached_pkt, EmptyData) and policy == "recompute":
+                    # "recompute" mode: EmptyData is a sentinel — fall through to compute.
+                    pass
+                else:
+                    # Real data cache hit, OR opportunistic EmptyData emission (as_empty/strict).
+                    ctx_obs.on_data_end(node_label, tag, data, cached_pkt, cached=True)
+                    if cached_pkt is not None:
+                        output.append((tag_out, cached_pkt))
+                    continue
+
+            # Compute path: not in cache, or EmptyData sentinel in "recompute" mode.
+            pkt_logger = ctx_obs.create_data_logger(tag, data)
+            try:
+                tag_out, result = self._process_data_internal(
+                    tag, data, logger=pkt_logger, run_id=run_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Data execution failed in %s: %s",
+                    node_label,
+                    exc,
+                    exc_info=True,
+                )
+                ctx_obs.on_data_crash(node_label, tag, data, exc)
+                if error_policy == "fail_fast":
+                    ctx_obs.on_node_end(node_label, node_hash)
+                    raise
+            else:
+                ctx_obs.on_data_end(
+                    node_label, tag, data, result, cached=False
+                )
                 if result is not None:
                     output.append((tag_out, result))
-            else:
-                pkt_logger = ctx_obs.create_data_logger(tag, data)
-                try:
-                    tag_out, result = self._process_data_internal(
-                        tag, data, logger=pkt_logger, run_id=run_id
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Data execution failed in %s: %s",
-                        node_label,
-                        exc,
-                        exc_info=True,
-                    )
-                    ctx_obs.on_data_crash(node_label, tag, data, exc)
-                    if error_policy == "fail_fast":
-                        ctx_obs.on_node_end(node_label, node_hash)
-                        raise
-                else:
-                    ctx_obs.on_data_end(
-                        node_label, tag, data, result, cached=False
-                    )
-                    if result is not None:
-                        output.append((tag_out, result))
 
         ctx_obs.on_node_end(node_label, node_hash)
         # Mark this node as freshly computed so subsequent iter_data() calls
