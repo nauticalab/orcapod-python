@@ -24,10 +24,10 @@ def _compile_ignore(
     Args:
         ignore: ``None`` (no filtering), an iterable of glob patterns matched against
             the POSIX relative path from the root via ``pathlib.PurePosixPath.match()``
-            (right-anchored: ``"*.pyc"`` matches at any depth; ``"sub/*.pyc"`` matches
-            any entry named ``sub/*.pyc`` at any depth — to anchor to the root, prefix
-            with ``"/"`` on Python 3.12+ or use a full relative path from the root),
-            or a callable ``(PurePosixPath) -> bool``.
+            (right-anchored: ``"*.pyc"`` matches any ``.pyc`` at any depth;
+            ``"sub/*.pyc"`` matches any ``.pyc`` in any directory named ``sub/`` at
+            any depth, not just at the root level), or a callable
+            ``(PurePosixPath) -> bool``.
 
     Returns:
         A callable ``(PurePosixPath) -> bool`` returning ``True`` to exclude an entry,
@@ -37,6 +37,11 @@ def _compile_ignore(
         return None
     if callable(ignore):
         return ignore
+    if isinstance(ignore, str):
+        raise TypeError(
+            f"ignore= expects an iterable of pattern strings, not a bare string. "
+            f"Pass a list instead: ignore=[{ignore!r}]"
+        )
     patterns = list(ignore)
 
     def _glob_filter(relative: PurePosixPath) -> bool:
@@ -72,7 +77,7 @@ def _hash_dir(
 
     for child in path.iterdir():
         try:
-            relative = PurePosixPath(child.relative_to(root))
+            relative = PurePosixPath(child.relative_to(root).as_posix())
         except ValueError as exc:
             raise RuntimeError(
                 f"BasicDirectoryHasher: child path {child!r} is not relative to root {root!r}"
@@ -160,8 +165,8 @@ class BasicDirectoryHasher:
             ignore: Optional filter. An iterable of glob patterns matched against the
                 **POSIX relative path from the root** via ``pathlib.PurePosixPath.match()``
                 (right-anchored: ``"*.pyc"`` matches any ``.pyc`` at any depth;
-                ``"sub/*.pyc"`` matches ``.pyc`` files in any directory named ``sub/``
-                at any depth — right-anchored, not root-anchored),
+                ``"sub/*.pyc"`` matches any ``.pyc`` in any directory named ``sub/``
+                at any depth, not just at the root level),
                 or a callable ``(pathlib.PurePosixPath) -> bool`` returning ``True``
                 to exclude an entry. Applied at every level of recursion.
 
