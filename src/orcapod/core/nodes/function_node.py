@@ -31,7 +31,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.core.datagrams.tag_data import EmptyData, Tag
-from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError, SchemaVersionError
+from orcapod.errors import CacheMissError, EphemeralResultMissingError, PipelineJobRequiredError, SchemaVersionError
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -1859,6 +1859,42 @@ class FunctionJobNode(FunctionNodeBase):
     # Cache-only helpers (PLT-1156)
     # ------------------------------------------------------------------
 
+    def _populate_empty_data_tokens(
+        self,
+        df: "pl.DataFrame",
+        empty_data_tokens: "dict[bytes, EmptyData]",
+        empty_taginfo_rows: "dict[bytes, dict]",
+    ) -> None:
+        """Populate ``empty_data_tokens`` and ``empty_taginfo_rows`` for rows in ``df``.
+
+        Shared by the ephemeral miss path and the non-ephemeral permissive
+        (``missing_cache_policy="as_empty"``) path in ``_fetch_joined_records``.
+
+        Args:
+            df: DataFrame of unmatched pipeline DB rows (each row is a miss).
+            empty_data_tokens: Dict to populate with ``base_entry_id -> EmptyData``.
+            empty_taginfo_rows: Dict to populate with ``base_entry_id -> raw row dict``.
+        """
+        for row in df.iter_rows(named=True):
+            base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
+            raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL)
+            if raw_hash is None:
+                logger.warning(
+                    "Pipeline DB row missing %r column — EmptyData will have "
+                    "no cached hash; flow-through unavailable for this row. "
+                    "base_entry_id: %r",
+                    constants.OUTPUT_DATA_HASH_COL,
+                    base_eid,
+                )
+                cached_hash = None
+            else:
+                cached_hash = ContentHash.from_prefixed_digest(raw_hash)
+            empty_data_tokens[base_eid] = EmptyData(
+                cached_content_hash=cached_hash,
+                data_context=self.data_context,
+            )
+            empty_taginfo_rows[base_eid] = row
+
     def _fetch_joined_records(
         self,
         base_entry_ids: list[bytes] | None = None,
@@ -1930,8 +1966,11 @@ class FunctionJobNode(FunctionNodeBase):
         # ------------------------------------------------------------------
         # Persistent join
         # ------------------------------------------------------------------
+        policy = self._node_config.missing_cache_policy or "recompute"
         results_schema = None
         persistent_df = pl.DataFrame()
+        empty_data_tokens: dict[bytes, EmptyData] = {}
+        empty_taginfo_rows: dict[bytes, dict] = {}
         if persistent_taginfo_df.height > 0:
             results = self._cached_function_pod.result_database.get_all_records(
                 self._cached_function_pod.record_path,
@@ -1939,12 +1978,34 @@ class FunctionJobNode(FunctionNodeBase):
             )
             if results is None:
                 # Tag table has persistent entries but result DB is empty — data loss
-                logger.warning(
-                    "%d pipeline DB entries have no match in persistent result DB "
-                    "— data may have been deleted externally. "
-                    "These inputs will be recomputed.",
-                    persistent_taginfo_df.height,
-                )
+                count = persistent_taginfo_df.height
+                if policy == "strict":
+                    logger.error(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— raising CacheMissError (missing_cache_policy='strict').",
+                        count,
+                    )
+                    raise CacheMissError(
+                        f"{count} pipeline DB entries have no match in persistent result DB "
+                        "— data may have been deleted externally."
+                    )
+                elif policy == "as_empty":
+                    logger.warning(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— treating as Empty data (missing_cache_policy='as_empty'). "
+                        "Downstream nodes will attempt to serve from their own cache.",
+                        count,
+                    )
+                    self._populate_empty_data_tokens(
+                        persistent_taginfo_df, empty_data_tokens, empty_taginfo_rows
+                    )
+                else:
+                    logger.warning(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— data may have been deleted externally. "
+                        "These inputs will be recomputed.",
+                        count,
+                    )
             else:
                 results_schema = results.schema
                 full_persistent_df = persistent_taginfo_df.join(
@@ -1955,20 +2016,44 @@ class FunctionJobNode(FunctionNodeBase):
                 # Warn about persistent tag rows that found no match in the result DB
                 missing_count = persistent_taginfo_df.height - full_persistent_df.height
                 if missing_count > 0:
-                    logger.warning(
-                        "%d pipeline DB entries have no match in persistent result DB "
-                        "— data may have been deleted externally. "
-                        "These inputs will be recomputed.",
-                        missing_count,
-                    )
+                    if policy == "strict":
+                        logger.error(
+                            "%d pipeline DB entries have no match in persistent result DB "
+                            "— raising CacheMissError (missing_cache_policy='strict').",
+                            missing_count,
+                        )
+                        raise CacheMissError(
+                            f"{missing_count} pipeline DB entries have no match in "
+                            "persistent result DB — data may have been deleted externally."
+                        )
+                    elif policy == "as_empty":
+                        logger.warning(
+                            "%d pipeline DB entries have no match in persistent result DB "
+                            "— treating as Empty data (missing_cache_policy='as_empty'). "
+                            "Downstream nodes will attempt to serve from their own cache.",
+                            missing_count,
+                        )
+                        unmatched_persistent_df = persistent_taginfo_df.join(
+                            pl.DataFrame(results),
+                            on=constants.DATA_RECORD_ID,
+                            how="anti",
+                        )
+                        self._populate_empty_data_tokens(
+                            unmatched_persistent_df, empty_data_tokens, empty_taginfo_rows
+                        )
+                    else:
+                        logger.warning(
+                            "%d pipeline DB entries have no match in persistent result DB "
+                            "— data may have been deleted externally. "
+                            "These inputs will be recomputed.",
+                            missing_count,
+                        )
                 persistent_df = full_persistent_df
 
         # ------------------------------------------------------------------
         # Ephemeral join
         # ------------------------------------------------------------------
         ephemeral_df = pl.DataFrame()
-        empty_data_tokens: dict[bytes, EmptyData] = {}
-        empty_taginfo_rows: dict[bytes, dict] = {}
 
         if ephemeral_taginfo_df.height > 0:
             eph_results = None
@@ -1997,32 +2082,11 @@ class FunctionJobNode(FunctionNodeBase):
             else:
                 # No ephemeral store or empty store — all ephemeral rows are misses.
                 unmatched_df = ephemeral_taginfo_df
-            for row in unmatched_df.iter_rows(named=True):
-                base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
-                # Use OUTPUT_DATA_HASH_COL so that the downstream result cache
-                # lookup in _process_data_internal finds the correct entry.
-                # The downstream's result cache is keyed by the INPUT to the
-                # downstream (= the OUTPUT of this ephemeral node), so we must
-                # use the output hash. INPUT_DATA_HASH_COL is deliberately not
-                # used as a fallback — it carries the wrong hash (the upstream's
-                # input, not its output) and would silently cause cache misses.
-                raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL)
-                if raw_hash is None:
-                    logger.warning(
-                        "Pipeline DB row missing %r column — EmptyData will have "
-                        "no cached hash; flow-through unavailable for this row. "
-                        "base_entry_id: %r",
-                        constants.OUTPUT_DATA_HASH_COL,
-                        base_eid,
-                    )
-                    cached_hash = None
-                else:
-                    cached_hash = ContentHash.from_prefixed_digest(raw_hash)
-                empty_data_tokens[base_eid] = EmptyData(
-                    cached_content_hash=cached_hash,
-                    data_context=self.data_context,
-                )
-                empty_taginfo_rows[base_eid] = row
+            # Use the shared helper — same EmptyData creation logic for
+            # ephemeral misses and permissive persistent misses.
+            self._populate_empty_data_tokens(
+                unmatched_df, empty_data_tokens, empty_taginfo_rows
+            )
 
         # ------------------------------------------------------------------
         # Merge with persistent priority (anti-join + concat)
