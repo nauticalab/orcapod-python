@@ -2455,16 +2455,27 @@ class FunctionJobNode(FunctionNodeBase):
 
                 async def route_inputs() -> None:
                     """Stage 1: send cache hits to output; stamp misses for computation."""
+                    policy = self._node_config.missing_cache_policy or "recompute"
                     try:
                         async for tag, data in input_channel:
                             base_entry_id = self.compute_base_entry_id(tag, data)
                             if base_entry_id in cached_by_base_entry_id:
                                 cached_tag, cached_data = cached_by_base_entry_id[base_entry_id]
-                                ctx_obs.on_data_start(node_label, tag, data)
-                                ctx_obs.on_data_end(
-                                    node_label, tag, data, cached_data, cached=True
-                                )
-                                await output.send((cached_tag, cached_data))
+                                if isinstance(cached_data, EmptyData) and policy == "recompute":
+                                    # "recompute" policy: EmptyData sentinel → recompute.
+                                    correlation_key = uuid.uuid4().bytes
+                                    input_store[correlation_key] = (tag, data)
+                                    stamped_tag = tag.with_meta_columns(
+                                        **{_TAG_NODE_INPUT_REF: correlation_key}
+                                    )
+                                    await compute_channel.writer.send((stamped_tag, data))
+                                else:
+                                    # Real data hit, or EmptyData in as_empty/strict mode.
+                                    ctx_obs.on_data_start(node_label, tag, data)
+                                    ctx_obs.on_data_end(
+                                        node_label, tag, data, cached_data, cached=True
+                                    )
+                                    await output.send((cached_tag, cached_data))
                             else:
                                 correlation_key = uuid.uuid4().bytes
                                 input_store[correlation_key] = (tag, data)

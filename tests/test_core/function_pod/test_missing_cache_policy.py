@@ -1,11 +1,13 @@
 """Tests for NodeConfig.missing_cache_policy — ITL-604."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import pyarrow as pa
 import pytest
 
+from orcapod.channels import Channel
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.datagrams.tag_data import EmptyData
 from orcapod.core.function_pod import FunctionPod
@@ -326,3 +328,123 @@ class TestEphemeralInfoLog:
             if r.levelno == logging.WARNING and "ephemeral result DB" in r.message
         ]
         assert not warning_msgs, f"unexpected WARNING for ephemeral miss: {warning_msgs}"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: async_execute() route_inputs respects missing_cache_policy
+# ---------------------------------------------------------------------------
+
+
+async def _feed_stream(stream: ArrowTableStream, ch: Channel) -> None:
+    """Feed all (tag, data) pairs from stream into channel, then close."""
+    for tag, data in stream.iter_data():
+        await ch.writer.send((tag, data))
+    await ch.writer.close()
+
+
+class TestAsyncExecutePolicy:
+    """async_execute() route_inputs respects missing_cache_policy."""
+
+    def test_async_recompute_mode_does_not_forward_empty_data(self):
+        """In 'recompute' mode, an ephemeral miss in async_execute triggers recompute."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        ephemeral_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node1.node_config = NodeConfig(is_result_ephemeral=True)
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        # Wipe ephemeral store
+        ephemeral_db._tables.clear()
+        ephemeral_db._pending_batches.clear()
+        ephemeral_db._pending_record_ids.clear()
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node2.node_config = NodeConfig(is_result_ephemeral=True)  # recompute (default)
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=16)
+            output_ch: Channel = Channel(buffer_size=16)
+            await _feed_stream(stream, input_ch)
+            await node2.async_execute(input_ch.reader, output_ch.writer)
+            return await output_ch.reader.collect()
+
+        results = asyncio.run(run())
+        # In recompute mode, the function is called again
+        assert call_count["n"] == 2
+        assert len(results) == 1
+        assert not isinstance(results[0][1], EmptyData)
+
+    def test_async_as_empty_mode_forwards_empty_data_without_recompute(self):
+        """In 'as_empty' mode, an ephemeral miss forwards EmptyData without recompute."""
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        ephemeral_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node1.node_config = NodeConfig(is_result_ephemeral=True)
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        ephemeral_db._tables.clear()
+        ephemeral_db._pending_batches.clear()
+        ephemeral_db._pending_record_ids.clear()
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node2.node_config = NodeConfig(is_result_ephemeral=True, missing_cache_policy="as_empty")
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=16)
+            output_ch: Channel = Channel(buffer_size=16)
+            await _feed_stream(stream, input_ch)
+            await node2.async_execute(input_ch.reader, output_ch.writer)
+            return await output_ch.reader.collect()
+
+        results = asyncio.run(run())
+        assert call_count["n"] == 1, "function must not be called again in as_empty mode"
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData)
