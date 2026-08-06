@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 def _compile_ignore(
-    ignore: Callable[[PurePosixPath], bool] | Iterable[str] | None,
-) -> Callable[[PurePosixPath], bool] | None:
+    ignore: Callable[[UPath], bool] | Iterable[str] | None,
+) -> Callable[[UPath], bool] | None:
     """Convert an ignore spec to a single callable filter.
 
     Args:
@@ -27,10 +27,10 @@ def _compile_ignore(
             (right-anchored: ``"*.pyc"`` matches any ``.pyc`` at any depth;
             ``"sub/*.pyc"`` matches any ``.pyc`` in any directory named ``sub/`` at
             any depth, not just at the root level), or a callable
-            ``(PurePosixPath) -> bool``.
+            ``(UPath) -> bool`` receiving the relative path from the root.
 
     Returns:
-        A callable ``(PurePosixPath) -> bool`` returning ``True`` to exclude an entry,
+        A callable ``(UPath) -> bool`` returning ``True`` to exclude an entry,
         or ``None`` if no filtering is needed.
     """
     if ignore is None:
@@ -44,8 +44,8 @@ def _compile_ignore(
         )
     patterns = list(ignore)
 
-    def _glob_filter(relative: PurePosixPath) -> bool:
-        return any(relative.match(pat) for pat in patterns)
+    def _glob_filter(relative: UPath) -> bool:
+        return any(PurePosixPath(relative.as_posix()).match(pat) for pat in patterns)
 
     return _glob_filter
 
@@ -53,7 +53,7 @@ def _compile_ignore(
 def _hash_dir(
     path: UPath,
     root: UPath,
-    filter_fn: Callable[[PurePosixPath], bool] | None,
+    filter_fn: Callable[[UPath], bool] | None,
     algorithm: str,
     file_hasher: FileContentHasherProtocol,
 ) -> bytes:
@@ -62,8 +62,8 @@ def _hash_dir(
     Args:
         path: The directory to hash (current recursion node).
         root: The top-level directory passed to ``BasicDirectoryHasher.hash_directory``.
-            Used to compute POSIX relative paths for filter evaluation.
-        filter_fn: Optional filter callable; receives the POSIX relative path from
+            Used to compute relative paths for filter evaluation.
+        filter_fn: Optional filter callable; receives the relative ``UPath`` from
             ``root`` and returns ``True`` to exclude the entry. Excluding a directory
             entry also implicitly excludes its entire subtree (the recursive call is
             skipped for excluded directories).
@@ -77,7 +77,7 @@ def _hash_dir(
 
     for child in path.iterdir():
         try:
-            relative = PurePosixPath(child.relative_to(root).as_posix())
+            relative = child.relative_to(root)
         except ValueError as exc:
             raise RuntimeError(
                 f"BasicDirectoryHasher: child path {child!r} is not relative to root {root!r}"
@@ -156,7 +156,7 @@ class BasicDirectoryHasher:
     def hash_directory(
         self,
         directory_path: PathLike,
-        ignore: Callable[[PurePosixPath], bool] | Iterable[str] | None = None,
+        ignore: Callable[[UPath], bool] | Iterable[str] | None = None,
     ) -> ContentHash:
         """Compute the recursive Merkle hash of a directory tree.
 
@@ -167,8 +167,9 @@ class BasicDirectoryHasher:
                 (right-anchored: ``"*.pyc"`` matches any ``.pyc`` at any depth;
                 ``"sub/*.pyc"`` matches any ``.pyc`` in any directory named ``sub/``
                 at any depth, not just at the root level),
-                or a callable ``(pathlib.PurePosixPath) -> bool`` returning ``True``
-                to exclude an entry. Applied at every level of recursion.
+                or a callable ``(UPath) -> bool`` receiving the relative path from the
+                root and returning ``True`` to exclude an entry. Applied at every level
+                of recursion.
 
                 Hash invariant: excluded entries are invisible to the hash. The result
                 is identical to those entries never existing. The pattern string itself
@@ -193,7 +194,7 @@ class BasicDirectoryHasher:
             >>> result = hasher.hash_directory("/tmp/mydir", ignore=["*.pyc"])
             >>> # Exclude .pyc only inside build/
             >>> result = hasher.hash_directory("/tmp/mydir", ignore=["build/*.pyc"])
-            >>> # Custom callable filter (receives PurePosixPath relative to root)
+            >>> # Custom callable filter (receives relative UPath from root)
             >>> result = hasher.hash_directory("/tmp/mydir", ignore=lambda p: p.name.startswith("."))
         """
         path = UPath(directory_path)

@@ -16,7 +16,6 @@ import json
 import os
 import warnings
 from collections.abc import Callable, Iterable
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Self
 
 import polars as pl
@@ -52,7 +51,7 @@ class Directory(ProxyUPath):
             any ``.pyc`` at any depth; ``"sub/*.pyc"`` matches any ``.pyc`` in
             any directory named ``sub/`` at any depth — right-anchored, not
             root-anchored), or a callable
-            ``(pathlib.PurePosixPath) -> bool`` receiving the relative path
+            ``(UPath) -> bool`` receiving the relative path from the root
             and returning ``True`` to exclude an entry. Excluding a directory
             also excludes its entire subtree. Applied at every level of
             recursion during hashing.
@@ -77,7 +76,7 @@ class Directory(ProxyUPath):
         >>> d = Directory("/tmp/mydata", ignore=["*.pyc", "__pycache__"])
         >>> # Exclude files only inside a specific subdirectory
         >>> d = Directory("/tmp/mydata", ignore=["build/*.o"])
-        >>> # Custom callable filter: exclude hidden files (receives PurePosixPath)
+        >>> # Custom callable filter: exclude hidden files (receives relative UPath)
         >>> d = Directory("/tmp/mydata", ignore=lambda p: p.name.startswith("."))
         >>> Directory("/tmp/nonexistent")
         FileNotFoundError: ...
@@ -86,7 +85,7 @@ class Directory(ProxyUPath):
     def __init__(
         self,
         *args: Any,
-        ignore: Callable[[PurePosixPath], bool] | Iterable[str] | None = None,
+        ignore: Callable[[UPath], bool] | Iterable[str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
