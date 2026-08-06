@@ -449,6 +449,38 @@ class TestAsyncExecutePolicy:
         assert len(results) == 1
         assert isinstance(results[0][1], EmptyData)
 
+    def test_async_strict_raises_on_nonephemeral_miss(self):
+        """In 'strict' mode, async_execute raises CacheMissError on non-ephemeral miss."""
+        import asyncio
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Session 1: compute normally
+        _make_node(stream, pipeline_db, result_db).execute(stream)
+
+        # Wipe result DB
+        _wipe_result_db(result_db)
+
+        # Session 2: strict mode in async_execute should raise CacheMissError
+        node = _make_node(stream, pipeline_db, result_db, missing_cache_policy="strict")
+
+        async def run():
+            in_ch = Channel(buffer_size=16)
+            out_ch = Channel(buffer_size=16)
+            async def feed():
+                for tag, data in stream.iter_data():
+                    await in_ch.writer.send((tag, data))
+                await in_ch.writer.close()
+            await asyncio.gather(
+                feed(),
+                node.async_execute(in_ch.reader, out_ch.writer),
+            )
+
+        with pytest.raises(CacheMissError):
+            asyncio.run(run())
+
 
 # ---------------------------------------------------------------------------
 # Task 6: CACHE_ONLY mode respects missing_cache_policy
