@@ -526,3 +526,155 @@ class TestCacheOnlyPolicy:
         node = self._make_cache_only_node(stream, pipeline_db, result_db)
         results = list(node.iter_data())
         assert results == [], "missing entry should be silently omitted in recompute+CACHE_ONLY"
+
+
+# ---------------------------------------------------------------------------
+# Task 7: End-to-end — "as_empty" downstream cache hit
+# ---------------------------------------------------------------------------
+
+
+class TestAsEmptyEndToEnd:
+    """End-to-end: upstream as_empty miss -> downstream serves from its own cache."""
+
+    def test_downstream_raises_ephemeral_result_missing_when_it_has_no_cache(self):
+        """When EmptyData propagates to a node that never computed the result,
+        EphemeralResultMissingError is raised (ITL-605 boundary).
+        """
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        node = _make_node(stream, pipeline_db, result_db)
+        node.execute(stream)
+        _wipe_result_db(result_db)
+
+        node2 = _make_node(stream, pipeline_db, result_db, missing_cache_policy="as_empty")
+        results = node2.execute(stream)
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData)
+
+        empty_tag, empty_data = results[0]
+
+        # A downstream node that has never computed the result raises EphemeralResultMissingError.
+        # Build a stream whose schema matches the downstream function's input (result: int).
+        import pyarrow as pa
+
+        downstream_stream = ArrowTableStream(
+            pa.table(
+                {"id": pa.array([0], type=pa.int64()), "result": pa.array([20], type=pa.int64())},
+                schema=pa.schema([
+                    pa.field("id", pa.int64(), nullable=False),
+                    pa.field("result", pa.int64(), nullable=False),
+                ]),
+            ),
+            tag_columns=["id"],
+        )
+        downstream_pipeline_db = InMemoryArrowDatabase()
+        downstream_result_db = InMemoryArrowDatabase()
+
+        def _increment(result: int) -> int:
+            return result + 1
+
+        pf_down = PythonDataFunction(_increment, output_keys="incremented")
+        node_down = FunctionJobNode(
+            function_pod=FunctionPod(pf_down),
+            input_stream=downstream_stream,
+            pipeline_database=downstream_pipeline_db,
+            result_database=downstream_result_db,
+        )
+
+        with pytest.raises(EphemeralResultMissingError):
+            node_down._process_data_internal(empty_tag, empty_data)
+
+    def test_downstream_serves_from_cache_when_upstream_emits_empty_data(self):
+        """Two-node pipeline: Node A (as_empty miss) -> Node B (persistent).
+
+        Session 1: A computes x*2, B computes result*3.
+        Session 2: A's result wiped, A emits EmptyData. B serves 60 from its own
+        cache using EmptyData.cached_content_hash.
+        """
+        import pyarrow as pa
+
+        def double(x: int) -> int:
+            return x * 2
+
+        def triple(result: int) -> int:
+            return result * 3
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+
+        pipeline_db_a = InMemoryArrowDatabase()
+        result_db_a = InMemoryArrowDatabase()
+        pipeline_db_b = InMemoryArrowDatabase()
+        result_db_b = InMemoryArrowDatabase()
+
+        # Session 1: compute A, then build B's stream from A's output, compute B
+        pf_a = PythonDataFunction(double, output_keys="result")
+        node_a1 = FunctionJobNode(
+            function_pod=FunctionPod(pf_a),
+            input_stream=stream,
+            pipeline_database=pipeline_db_a,
+            result_database=result_db_a,
+        )
+        results_a = node_a1.execute(stream)
+        assert len(results_a) == 1
+        assert results_a[0][1].as_dict()["result"] == 20
+
+        # Build B's stream from A's output (result=20 row)
+        b_table = pa.table(
+            {"id": pa.array([0], type=pa.int64()), "result": pa.array([20], type=pa.int64())},
+            schema=pa.schema([
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("result", pa.int64(), nullable=False),
+            ]),
+        )
+        stream_b = ArrowTableStream(b_table, tag_columns=["id"])
+
+        pf_b = PythonDataFunction(triple, output_keys="tripled")
+        node_b1 = FunctionJobNode(
+            function_pod=FunctionPod(pf_b),
+            input_stream=stream_b,
+            pipeline_database=pipeline_db_b,
+            result_database=result_db_b,
+        )
+        results_b = node_b1.execute(stream_b)
+        assert len(results_b) == 1
+        assert results_b[0][1].as_dict()["tripled"] == 60
+
+        # Session 2: wipe A's result; A emits EmptyData
+        _wipe_result_db(result_db_a)
+
+        pf_a2 = PythonDataFunction(double, output_keys="result")
+        node_a2 = FunctionJobNode(
+            function_pod=FunctionPod(pf_a2),
+            input_stream=stream,
+            pipeline_database=pipeline_db_a,
+            result_database=result_db_a,
+        )
+        from orcapod.types import NodeConfig
+        node_a2.node_config = NodeConfig(missing_cache_policy="as_empty")
+        results_a2 = node_a2.execute(stream)
+        assert len(results_a2) == 1
+        empty_tag, empty_data = results_a2[0]
+        assert isinstance(empty_data, EmptyData)
+
+        # Verify EmptyData carries the correct hash (A's output hash = B's input hash)
+        assert empty_data.cached_content_hash is not None, (
+            "EmptyData must carry the upstream output hash so downstream can look up its cache"
+        )
+
+        # Feed EmptyData to B: B serves from its own cache via _process_data_internal.
+        # EmptyData.content_hash() returns cached_content_hash (= A's output hash = B's input hash),
+        # so CachedFunctionPod.lookup_cached_data(empty_data) finds B's cached result.
+        pf_b2 = PythonDataFunction(triple, output_keys="tripled")
+        node_b2 = FunctionJobNode(
+            function_pod=FunctionPod(pf_b2),
+            input_stream=stream_b,
+            pipeline_database=pipeline_db_b,
+            result_database=result_db_b,
+        )
+        b2_tag_out, b2_data_out = node_b2._process_data_internal(empty_tag, empty_data)
+        assert b2_data_out is not None, "B should return a cached result"
+        assert b2_data_out.as_dict()["tripled"] == 60, (
+            "B should serve 60 from its cache given EmptyData with the correct hash"
+        )
