@@ -8,10 +8,10 @@ Tag and Data — datagram subclasses with system-tags and source-info support.
     requested via ``ColumnConfig(system_tags=True)``.
 
 ``Data``
-    Extends ``Datagram`` with *source information*: provenance tokens (strings or None)
-    keyed by data-column name.  Source-info keys are stored without the
-    ``constants.SOURCE_PREFIX`` internally and added back when serialising via
-    ``as_dict()`` / ``as_table()``.
+    Extends ``Datagram`` with *source information*: provenance tokens (strings,
+    None, or lists of tokens) keyed by data-column name.  Source-info keys are
+    stored without the ``constants.SOURCE_PREFIX`` internally and added back when
+    serialising via ``as_dict()`` / ``as_table()``.
 """
 
 from __future__ import annotations
@@ -237,11 +237,58 @@ class Tag(Datagram):
 # ---------------------------------------------------------------------------
 
 
+# A provenance token is a string, an unknown (None), or -- for many->one
+# operators such as GroupBy and MergeJoin -- a list of tokens, one per member.
+SourceInfoValue = str | None | list["SourceInfoValue"]
+
+
+def _source_info_arrow_type(value: "SourceInfoValue") -> "pa.DataType":
+    """Derive the Arrow type for a single source-info value.
+
+    Scalars and unknowns map to ``large_string``; lists map to ``large_list``
+    of their element type, recursively.  An empty list defaults to
+    ``large_list(large_string)``.
+
+    Args:
+        value: The stored provenance token.
+
+    Returns:
+        The Arrow type to declare for this value.
+    """
+    import pyarrow as _pa
+
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return _pa.large_list(_pa.large_string())
+        return _pa.large_list(_source_info_arrow_type(value[0]))
+    return _pa.large_string()
+
+
+def _source_info_python_type(value: "SourceInfoValue") -> type:
+    """Derive the Python type for a single source-info value.
+
+    Mirrors ``_source_info_arrow_type`` for the ``Schema`` representation.
+
+    Args:
+        value: The stored provenance token.
+
+    Returns:
+        ``str`` for scalars and unknowns, ``list[...]`` for lists.
+    """
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return list[str]
+        return list[_source_info_python_type(value[0])]  # type: ignore[misc]
+    return str
+
+
 class Data(Datagram):
     """
     Datagram with source-information tracking.
 
-    Source info maps each data-column name to a provenance token (``str | None``).
+    Source info maps each data-column name to a provenance token
+    (``SourceInfoValue``: a string, ``None``, or -- for many->one operators -- a
+    list of tokens, one per aggregated member).
     Keys in ``_source_info`` are stored **without** the ``SOURCE_PREFIX``; the
     prefix is added transparently when serialising to dict or Arrow table.
 
@@ -254,7 +301,7 @@ class Data(Datagram):
         self,
         data: "Mapping[str, DataValue] | pa.Table | pa.RecordBatch",
         meta_info: "Mapping[str, DataValue] | None" = None,
-        source_info: "Mapping[str, str | None] | None" = None,
+        source_info: "Mapping[str, SourceInfoValue] | None" = None,
         python_schema: "SchemaLike | None" = None,
         data_context: "str | contexts.DataContext | None" = None,
         record_uuid: "uuid.UUID | None" = None,
@@ -293,7 +340,7 @@ class Data(Datagram):
             )
             si_table = prefixed_tables[constants.SOURCE_PREFIX]
             if si_table.num_columns > 0 and si_table.num_rows > 0:
-                self._source_info: dict[str, str | None] = {
+                self._source_info: dict[str, SourceInfoValue] = {
                     k.removeprefix(constants.SOURCE_PREFIX): v
                     for k, v in si_table.to_pylist()[0].items()
                 }
@@ -306,7 +353,7 @@ class Data(Datagram):
                 for k, v in data.items()
                 if not k.startswith(constants.SOURCE_PREFIX)
             }
-            contained_source_info: dict[str, str | None] = {
+            contained_source_info: dict[str, SourceInfoValue] = {
                 k.removeprefix(constants.SOURCE_PREFIX): v  # type: ignore[misc]
                 for k, v in data.items()
                 if k.startswith(constants.SOURCE_PREFIX)
@@ -337,7 +384,10 @@ class Data(Datagram):
                     for k, v in self._source_info.items()
                 }
                 schema = _pa.schema(
-                    [_pa.field(k, _pa.large_string()) for k in prefixed]
+                    [
+                        _pa.field(k, _source_info_arrow_type(v))
+                        for k, v in prefixed.items()
+                    ]
                 )
                 self._source_info_table = _pa.Table.from_pylist(
                     [prefixed], schema=schema
@@ -350,11 +400,11 @@ class Data(Datagram):
     # Source-info API
     # ------------------------------------------------------------------
 
-    def source_info(self) -> "dict[str, str | None]":
+    def source_info(self) -> "dict[str, SourceInfoValue]":
         """Return source info for all data-column keys (None for unknown)."""
         return {k: self._source_info.get(k) for k in self.keys()}
 
-    def with_source_info(self, **source_info: "str | None") -> Self:
+    def with_source_info(self, **source_info: "SourceInfoValue") -> Self:
         """Create a copy with updated source-information entries."""
         current = dict(self._source_info)
         for key, value in source_info.items():
@@ -391,7 +441,9 @@ class Data(Datagram):
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         if column_config.source:
             for key in super().keys():
-                schema[f"{constants.SOURCE_PREFIX}{key}"] = str
+                schema[f"{constants.SOURCE_PREFIX}{key}"] = _source_info_python_type(
+                    self._source_info.get(key)
+                )
         return Schema(schema)
 
     def arrow_schema(
