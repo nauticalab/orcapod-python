@@ -433,6 +433,48 @@ class TestBatchBehavior:
         with pytest.raises(ValueError, match="non-negative"):
             Batch(batch_size=-1)
 
+    def test_batch_system_tags_are_scalar(self):
+        """System tags must stay scalar -- record identity hashes them directly."""
+        from orcapod.core.sources import ArrowTableSource
+        from orcapod.system_constants import constants
+
+        table = pa.table(
+            {
+                "animal": ["cat", "dog"],
+                "weight": [4.0, 12.0],
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["animal"], infer_nullable=True)
+        out = Batch(batch_size=0).process(source)
+        result = out.as_table(columns={"source": True, "system_tags": True})
+
+        sys_cols = [
+            c for c in result.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        ]
+        assert sys_cols, "expected system tag columns on the batched output"
+        for col in sys_cols:
+            assert not pa.types.is_list(result.schema.field(col).type)
+            assert not pa.types.is_large_list(result.schema.field(col).type)
+
+    def test_batch_source_columns_are_lists(self):
+        """Provenance stays per-member rather than collapsing."""
+        from orcapod.core.sources import ArrowTableSource
+        from orcapod.system_constants import constants
+
+        table = pa.table(
+            {
+                "animal": ["cat", "dog"],
+                "weight": [4.0, 12.0],
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["animal"], infer_nullable=True)
+        out = Batch(batch_size=0).process(source)
+        result = out.as_table(columns={"source": True, "system_tags": True})
+
+        src_col = f"{constants.SOURCE_PREFIX}weight"
+        assert src_col in result.column_names
+        assert len(result.column(src_col).to_pylist()[0]) == 2
+
 
 class TestJoinBehavior:
     def test_join_combines_streams_on_shared_tags(self, simple_stream, disjoint_stream):

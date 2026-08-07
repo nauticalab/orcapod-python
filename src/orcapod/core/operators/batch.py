@@ -7,7 +7,9 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
+from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -41,44 +43,73 @@ class Batch(UnaryOperator):
         return None
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        """
-        This method should be implemented by subclasses to define the specific behavior of the binary operator.
-        It takes two streams as input and returns a new stream as output.
+        """Group rows into fixed-size batches, list-wrapping their values.
+
+        Tag and data columns become list-valued.  Source-info columns become
+        list-valued too, one element per batch member.  System-tag columns are
+        folded to a scalar instead -- record identity hashes them directly, so
+        they must not become lists.
+
+        Args:
+            stream: The upstream stream.
+
+        Returns:
+            A stream with one row per batch.
         """
         table = stream.as_table(columns={"source": True, "system_tags": True})
 
-        tag_columns, data_columns = stream.keys()
+        tag_columns, _ = stream.keys()
+
+        system_tag_columns = tuple(
+            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        )
+        member_columns = tuple(
+            c for c in table.column_names if c not in system_tag_columns
+        )
 
         data_list = table.to_pylist()
 
-        batched_data = []
+        batches: list[list[dict[str, Any]]] = []
+        next_batch: list[dict[str, Any]] = []
 
-        next_batch = {}
-
-        i = 0
         for entry in data_list:
-            i += 1
-            for c in entry:
-                next_batch.setdefault(c, []).append(entry[c])
+            next_batch.append(entry)
+            if self.batch_size > 0 and len(next_batch) >= self.batch_size:
+                batches.append(next_batch)
+                next_batch = []
 
-            if self.batch_size > 0 and i >= self.batch_size:
-                batched_data.append(next_batch)
-                next_batch = {}
-                i = 0
+        if next_batch and not self.drop_partial_batch:
+            batches.append(next_batch)
 
-        if i > 0 and not self.drop_partial_batch:
-            batched_data.append(next_batch)
+        batched_data = [
+            {
+                **{c: [m[c] for m in members] for c in member_columns},
+                **{
+                    c: arrow_utils.fold_system_tag_values(c, [m[c] for m in members])
+                    for c in system_tag_columns
+                },
+            }
+            for members in batches
+        ]
 
-        # Build the target schema upfront: each field becomes list<T>, nullable=False.
-        # Passing schema= directly avoids a second table construction.
+        input_fields = {f.name: f for f in table.schema}
         batched_schema = pa.schema([
-            pa.field(f.name, pa.list_(f.type), nullable=False)
-            for f in table.schema
+            pa.field(c, pa.list_(input_fields[c].type), nullable=False)
+            if c in member_columns
+            else input_fields[c]
+            for c in table.column_names
         ])
         batched_table = pa.Table.from_pylist(batched_data, schema=batched_schema)
+
+        n_char = self.orcapod_config.hashing.system_tag_n_char
+        batched_table = arrow_utils.append_to_system_tags(
+            batched_table, stream.pipeline_hash().to_hex(n_char)
+        )
+
         return ArrowTableStream(
             batched_table,
             tag_columns=tag_columns,
+            data_context=stream.data_context,
         )
 
     def unary_output_schema(
@@ -88,17 +119,35 @@ class Batch(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
+        """Predict the batched output schemas without batching.
+
+        Every user tag, data, and source column becomes ``list[T]``.  System
+        tag columns keep their scalar type and gain a ``::{pipeline_hash}``
+        name suffix.
+
+        Args:
+            stream: The upstream stream.
+            columns: Column inclusion config.
+            all_info: Include all info columns.
+
+        Returns:
+            A ``(tag_schema, data_schema)`` tuple.
         """
-        This method should be implemented by subclasses to return the schemas of the input and output streams.
-        It takes two streams as input and returns a tuple of schemas.
-        """
-        tag_types, data_types = stream.output_schema(
-            columns=columns, all_info=all_info
-        )
-        batched_tag_types = {k: list[v] for k, v in tag_types.items()}
+        tag_types, data_types = stream.output_schema(columns=columns, all_info=all_info)
+        n_char = self.orcapod_config.hashing.system_tag_n_char
+        suffix = stream.pipeline_hash().to_hex(n_char)
+
+        batched_tag_types: dict[str, Any] = {}
+        for name, col_type in tag_types.items():
+            if name.startswith(constants.SYSTEM_TAG_PREFIX):
+                batched_tag_types[f"{name}{constants.BLOCK_SEPARATOR}{suffix}"] = (
+                    col_type
+                )
+            else:
+                batched_tag_types[name] = list[col_type]
+
         batched_data_types = {k: list[v] for k, v in data_types.items()}
 
-        # TODO: check if this is really necessary
         return Schema(batched_tag_types), Schema(batched_data_types)
 
     async def async_execute(
