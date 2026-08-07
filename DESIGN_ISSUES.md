@@ -1055,15 +1055,36 @@ The `normalize_extension_columns` utility landed in ITL-432.
 ## `src/orcapod/utils/`
 
 ### U1 — Source-info column type hard-coded to `large_string`
-**Status:** open
+**Status:** in progress (`tag_data.py` half), open (`arrow_utils.py` half)
 **Severity:** critical
 
-In `add_source_info_to_table()` (`arrow_utils.py:604`), when source info is a collection it is
-unconditionally cast to `pa.list_(pa.large_string())`:
+Two sibling call sites assume source-info values are always scalar strings.
+
+**`Data._ensure_source_info_table()` (`core/datagrams/tag_data.py:330`)** builds the Arrow schema
+as `pa.field(k, pa.large_string())` for every key, and `Data.schema()` (line ~384) reports `str`
+for every `_source_*` column. Any operator that produces list-valued source info therefore fails
+inside `job.run()`:
+
+```
+pyarrow.lib.ArrowTypeError: Expected bytes, got a 'list' object
+  core/datagrams/tag_data.py:342  _ensure_source_info_table
+```
+
+Two operators hit this: `MergeJoin`, which carries source columns along as parallel lists when
+merging colliding data columns (`merge_join.py:262`), and `Batch`, which list-wraps every column.
+Both were reproduced against `966d759a`.
+
+**Fix (NPIPE-204):** derive the Arrow and Python types from the stored value instead of
+hard-coding them — `str`/`None` → `large_string`, list → `large_list(<elem>)` recursively. No
+pipeline-DB schema bump: a node's source-column type is fixed by its own output schema, so
+existing nodes keep `large_string`. See
+`superpowers/specs/2026-08-07-npipe-204-batch-group-by-design.md`.
+
+**Still open:** in `add_source_info_to_table()` (`arrow_utils.py:604`), when source info is a
+collection it is unconditionally cast to `pa.list_(pa.large_string())`:
 ```python
 # TODO: this won't work other data types!!!
 ```
-
 Any non-string collection values will fail or silently corrupt data. The logic also has an
 unclear nested isinstance check (line ~602: `# TODO: clean up the logic here`).
 
