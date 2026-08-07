@@ -132,6 +132,7 @@ class TestStrictPolicy:
             # Keep only the second row
             result_db._tables[table_path] = tbl.slice(1)
         result_db._pending_batches.clear()
+        result_db._pending_record_ids.clear()
 
         node = _make_node(stream, pipeline_db, result_db, missing_cache_policy="strict")
         with pytest.raises(CacheMissError):
@@ -171,6 +172,7 @@ class TestStrictPolicy:
         # Wipe ephemeral store only
         ephemeral_db._tables.clear()
         ephemeral_db._pending_batches.clear()
+        ephemeral_db._pending_record_ids.clear()
 
         node2 = FunctionJobNode(
             function_pod=FunctionPod(PythonDataFunction(_double, output_keys="result")),
@@ -180,9 +182,14 @@ class TestStrictPolicy:
             ephemeral_database=ephemeral_db,
         )
         node2.node_config = NodeConfig(is_result_ephemeral=True, missing_cache_policy="strict")
-        # Should NOT raise — ephemeral misses degrade gracefully
+        # Should NOT raise — ephemeral misses degrade gracefully to EmptyData emission.
+        # execute() sees policy=="strict" and EmptyData in cache → emits EmptyData directly
+        # (the EmptyData-as-recompute-sentinel logic only applies to policy=="recompute").
         results = node2.execute(stream)
-        assert len(results) == 1  # recomputed
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData), (
+            "strict policy emits EmptyData for ephemeral miss; recompute is not triggered"
+        )
 
 
 class TestAsEmptyPolicy:
