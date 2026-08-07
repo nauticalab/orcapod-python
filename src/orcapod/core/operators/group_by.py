@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Collection
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_origin
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
@@ -19,8 +18,6 @@ if TYPE_CHECKING:
     import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
-
-logger = logging.getLogger(__name__)
 
 
 class GroupBy(UnaryOperator):
@@ -38,29 +35,45 @@ class GroupBy(UnaryOperator):
     * ``probe`` becomes a list-valued **data** column, so a consumer can tell
       which member each list element came from
     * ``path`` becomes list-valued
-    * ``_source_*`` columns become list-valued, one element per member
+    * the ``_source_*`` column of each original data column becomes
+      list-valued, one element per member.  A promoted tag column such as
+      ``probe`` had no provenance token to begin with, so its ``_source_probe``
+      is the scalar null the stream fills in, not a list.
     * system-tag columns fold to a scalar digest and gain a
       ``::{pipeline_hash}`` name suffix
 
-    Members are sorted by their non-group-key tag values, so the emitted lists
-    are stable across runs.  This matters because orcapod hashes those lists to
-    build the cache key -- an unsorted list would make an identical member set
-    hash differently and trigger a spurious recompute.  Groups themselves are
-    emitted in group-key order for the same reason: a reordered input must
-    produce an identical output.
+    Members are sorted by their non-group-key tag values, with ``record_id``
+    appended as a final tiebreaker, so the emitted lists are stable across
+    runs.  This matters because orcapod hashes those lists to build the cache
+    key -- an unsorted list would make an identical member set hash differently
+    and trigger a spurious recompute.  Groups themselves are emitted in
+    group-key order for the same reason: a reordered input must produce an
+    identical output.
+
+    Tag tuples are expected to be unique within a stream, but nothing enforces
+    that.  If the input does contain duplicate tag tuples, the members sharing
+    a tuple are separated only by ``record_id``, which is fixed when the source
+    is materialized -- so their order is stable for a given source table, but
+    undefined if the source table itself is permuted.
 
     Contrast with ``Batch``, which partitions by row count for throughput and
     keeps its tag columns as list-valued tags.
 
     Args:
-        by: Tag column names to group on.  Must be non-empty and must all be
-            tag columns of the input stream.
+        by: Tag column names to group on.  Must be non-empty, free of
+            duplicates, and must all be scalar tag columns of the input stream.
     """
 
     def __init__(self, by: Collection[str], **kwargs: Any) -> None:
         by_tuple = tuple(by)
         if not by_tuple:
             raise ValueError("GroupBy requires at least one column in `by`.")
+        duplicates = sorted({c for c in by_tuple if by_tuple.count(c) > 1})
+        if duplicates:
+            raise ValueError(
+                f"GroupBy `by` contains duplicate column names: {duplicates}. "
+                f"Got {list(by_tuple)}."
+            )
         self.by = by_tuple
         super().__init__(**kwargs)
 
@@ -86,13 +99,14 @@ class GroupBy(UnaryOperator):
     # ------------------------------------------------------------------
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
-        """Verify every grouping column is a tag column of the input.
+        """Verify every grouping column is a scalar tag column of the input.
 
         Args:
             stream: The upstream stream to validate.
 
         Raises:
-            InputValidationError: If any name in ``by`` is not a tag column.
+            InputValidationError: If any name in ``by`` is not a tag column, or
+                names a list-valued tag column.
         """
         tag_columns, data_columns = stream.keys()
         missing = [c for c in self.by if c not in tag_columns]
@@ -101,6 +115,22 @@ class GroupBy(UnaryOperator):
                 f"GroupBy: {missing} are not tag columns of the input stream. "
                 f"Available tag columns: {list(tag_columns)}. "
                 f"(Data columns cannot be grouping keys: {list(data_columns)})"
+            )
+
+        # A list-valued tag -- what `Batch` produces -- is unhashable, so it
+        # cannot key a group.  Check the schema rather than hashing a value so
+        # the error names the operator and column instead of surfacing a bare
+        # `TypeError: unhashable type: 'list'` from the grouping loop.
+        tag_types, _ = stream.output_schema()
+        non_scalar = {
+            c: tag_types.get(c) for c in self.by if get_origin(tag_types.get(c)) is list
+        }
+        if non_scalar:
+            raise InputValidationError(
+                f"GroupBy: {list(non_scalar)} are list-valued tag columns and "
+                f"cannot be grouping keys. Column types: {non_scalar}. "
+                "A list-valued tag usually means the stream came from `Batch`; "
+                "group before batching rather than after."
             )
 
     # ------------------------------------------------------------------
@@ -127,8 +157,13 @@ class GroupBy(UnaryOperator):
             for c in table.column_names
             if c not in self.by and c not in system_tag_columns
         )
-        # Non-key user tags give a total order within a group: tags are unique
-        # within a stream.  When `by` covers every tag, fall back to record_id.
+        # Non-key user tags order the members of a group.  `record_id` is
+        # appended as a final tiebreaker: tag tuples are supposed to be unique
+        # within a stream, but nothing enforces that, and without the
+        # tiebreaker duplicate tuples would fall back to emission order --
+        # which Ray scheduling and DB fetch order make nondeterministic.
+        # `record_id` is fixed when the source is materialized, so it is immune
+        # to that shuffling.
         sort_columns = tuple(c for c in tag_columns if c not in self.by)
         record_id_column = next(
             (
@@ -138,6 +173,8 @@ class GroupBy(UnaryOperator):
             ),
             None,
         )
+        if record_id_column is not None:
+            sort_columns += (record_id_column,)
 
         groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for row in table.to_pylist():
@@ -155,8 +192,6 @@ class GroupBy(UnaryOperator):
                 members.sort(
                     key=lambda r: tuple((r[c] is None, r[c]) for c in sort_columns)
                 )
-            elif record_id_column is not None:
-                members.sort(key=lambda r: r[record_id_column] or b"")
 
             grouped_rows.append({
                 **dict(zip(self.by, key)),
@@ -210,7 +245,6 @@ class GroupBy(UnaryOperator):
             the tag schema; promoted non-key tags and list-wrapped data columns
             land in the data schema.
         """
-        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         tag_types, data_types = stream.output_schema(columns=columns, all_info=all_info)
         n_char = self.orcapod_config.hashing.system_tag_n_char
         suffix = stream.pipeline_hash().to_hex(n_char)
@@ -224,12 +258,11 @@ class GroupBy(UnaryOperator):
             elif name in self.by:
                 out_tag_types[name] = col_type
             else:
-                # Promoted to a list-valued data column.
+                # Promoted to a list-valued data column.  No `_source_*` entry
+                # is emitted: `ArrowTableStream.output_schema` returns the data
+                # schema unconditionally, so `columns.source` is a no-op at the
+                # schema level even though `as_table` does add those columns.
                 out_data_types[name] = list[col_type]
-                if column_config.source:
-                    # Promoted columns carry no provenance token; the stream
-                    # fills in a scalar null.
-                    out_data_types[f"{constants.SOURCE_PREFIX}{name}"] = str
 
         for name, col_type in data_types.items():
             out_data_types[name] = list[col_type]

@@ -5,8 +5,9 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.operators import GroupBy
+from orcapod.core.operators import Batch, GroupBy
 from orcapod.core.sources import ArrowTableSource
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.system_constants import constants
 
@@ -92,12 +93,26 @@ class TestGroupByOrdering:
         assert run(session_table).equals(run(shuffled))
 
     def test_falls_back_to_record_id_when_key_covers_all_tags(self):
-        """by covering every tag leaves no non-key tag to sort on."""
+        """by covering every tag leaves no non-key tag to sort on.
+
+        record_id is a uuid5 of source content, so the order it imposes is not
+        human-predictable but IS stable across processes.  Asserted exactly --
+        sorting the result before comparing would make this blind to the very
+        ordering it exists to pin down.
+        """
         table = pa.table({"subject": ["G", "G"], "path": ["b", "a"]})
         src = ArrowTableSource(table, tag_columns=["subject"], infer_nullable=True)
         out = GroupBy(by=["subject"]).process(src)
         assert len(out.as_table()) == 1
-        assert sorted(out.as_table().column("path").to_pylist()[0]) == ["a", "b"]
+        assert out.as_table().column("path").to_pylist()[0] == ["a", "b"]
+
+    def test_record_id_breaks_ties_between_duplicate_tags(self):
+        """Duplicate tag tuples must not fall back to raw emission order."""
+        table = pa.table({"s": ["G", "G"], "p": [1, 1], "path": ["z", "a"]})
+        src = ArrowTableSource(table, tag_columns=["s", "p"], infer_nullable=True)
+        out = GroupBy(by=["s"]).process(src)
+        # Emission order would give ["z", "a"]; record_id imposes ["a", "z"].
+        assert out.as_table().column("path").to_pylist()[0] == ["a", "z"]
 
 
 class TestGroupByValidation:
@@ -116,6 +131,23 @@ class TestGroupByValidation:
         with pytest.raises(InputValidationError, match="path"):
             op.process(session_source)
 
+    def test_duplicate_by_raises(self):
+        with pytest.raises(ValueError, match="duplicate"):
+            GroupBy(by=["subject", "subject"])
+
+    def test_list_valued_tag_as_key_raises(self):
+        """Batch list-wraps its tags; those are unhashable and cannot key a group.
+
+        Without an explicit check this surfaced as a bare
+        ``TypeError: unhashable type: 'list'`` naming neither operator nor column.
+        """
+        table = pa.table({"s": ["G", "G"], "v": [1, 2]})
+        src = ArrowTableSource(table, tag_columns=["s"], infer_nullable=True)
+        batched = Batch(batch_size=2).process(src)
+
+        with pytest.raises(InputValidationError, match="list-valued"):
+            GroupBy(by=["s"]).process(batched)
+
 
 class TestGroupByEmptyInput:
     def test_empty_input_yields_zero_groups(self):
@@ -123,11 +155,50 @@ class TestGroupByEmptyInput:
             "subject": pa.array([], pa.large_string()),
             "path": pa.array([], pa.large_string()),
         })
-        from orcapod.core.streams import ArrowTableStream
-
         stream = ArrowTableStream(table, tag_columns=["subject"])
         out = GroupBy(by=["subject"]).process(stream)
         assert len(out.as_table()) == 0
+
+
+class TestGroupByOutputSchema:
+    """The predicted schema must match what grouping actually produces.
+
+    Compared against the materialized ``ArrowTableStream`` from
+    ``unary_static_process``, never against ``process(...)``: a
+    ``DynamicPodStream.output_schema`` delegates straight back to the pod, so
+    that comparison is circular and passes no matter how wrong the prediction is.
+    """
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {},
+            {"source": True},
+            {"system_tags": True},
+            {"source": True, "system_tags": True},
+        ],
+        ids=["plain", "source", "system_tags", "source+system_tags"],
+    )
+    def test_predicted_schema_matches_materialized(self, session_source, config):
+        op = GroupBy(by=["subject", "date"])
+
+        pred_tag, pred_data = op.unary_output_schema(session_source, columns=config)
+        actual = op.unary_static_process(session_source)
+        act_tag, act_data = actual.output_schema(columns=config)
+
+        def diff(label, predicted, actual_schema):
+            predicted, actual_schema = dict(predicted), dict(actual_schema)
+            only_pred = set(predicted) - set(actual_schema)
+            only_act = set(actual_schema) - set(predicted)
+            assert predicted == actual_schema, (
+                f"{label} schema mismatch for columns={config}: "
+                f"predicted-only={sorted(only_pred)}, "
+                f"actual-only={sorted(only_act)}, "
+                f"predicted={predicted}, actual={actual_schema}"
+            )
+
+        diff("tag", pred_tag, act_tag)
+        diff("data", pred_data, act_data)
 
 
 class TestGroupByIdentity:
