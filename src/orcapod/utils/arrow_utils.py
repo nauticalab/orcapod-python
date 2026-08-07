@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from collections import defaultdict
-from collections.abc import Mapping, Collection
+from collections.abc import Mapping, Collection, Sequence
 from typing import Any, TYPE_CHECKING
 
+from orcapod.hashing.hash_utils import combine_hashes
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
@@ -1175,6 +1177,51 @@ def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
         for c in table.column_names
     }
     return table.rename_columns(column_name_map)
+
+
+# Fixed namespace for aggregated record IDs produced by many->one operators.
+# Mirrors _SOURCE_RECORD_ID_NAMESPACE in core/sources/stream_builder.py.
+# Computed value: uuid.UUID('96411bfc-d3ba-5395-ba6f-5bb5726f18ad')
+_AGGREGATED_RECORD_ID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL,
+    "https://orcapod.org/namespaces/aggregated-record-id",
+)
+
+
+def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | bytes:
+    """Fold a group's system-tag values into one scalar of the same type.
+
+    Many->one operators must emit scalar system tags, because
+    ``_build_record_id_preimage`` (``core/nodes/function_node.py``) hashes
+    those columns directly to derive a record's identity.  Each column folds
+    independently over its own ordered member values.
+
+    Both digests are SHA-based and therefore stable across processes.  Never
+    substitute ``hash()`` or a set-based construction: orcapod uses the result
+    as a cache key, so a per-process digest would miss the cache on every new
+    driver run while looking correct in a single-process test.
+
+    Member order is significant -- it matches the order of the list-valued
+    data columns the folded tag accompanies.
+
+    Args:
+        column_name: The system-tag column name, used to select the fold.
+            Names starting with ``constants.SYSTEM_TAG_RECORD_ID_PREFIX`` fold
+            to ``binary(16)``; everything else folds to a hex string.
+        values: The group's member values, in emission order.
+
+    Returns:
+        16 raw bytes for a record_id column, a 64-character hex string
+        otherwise.
+    """
+    if column_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
+        name = constants.BLOCK_SEPARATOR.join(
+            "" if v is None else v.hex() for v in values
+        )
+        return uuid.uuid5(_AGGREGATED_RECORD_ID_NAMESPACE, name).bytes
+    return combine_hashes(
+        *["" if v is None else str(v) for v in values], order=False
+    )
 
 
 def _parse_system_tag_column(
