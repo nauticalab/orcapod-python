@@ -698,6 +698,36 @@ Three categories of improvement are planned:
 overrides in the future but require careful handling of Polars expression evaluation and
 system-tag evolution respectively.
 
+`GroupBy` (NPIPE-204) is barrier-only by construction and is not a candidate for either category:
+no group can be emitted before the input channel closes, because any row not yet seen could belong
+to a group already started. Emitting early would require a guarantee that input arrives clustered
+by group key, which orcapod streams do not carry.
+
+---
+
+### O2 — Operators silently discard a non-default `_context_key`
+**Status:** open
+**Severity:** medium
+
+Every operator reads its input with
+`stream.as_table(columns={"source": True, "system_tags": True})` — `batch.py:48`,
+`merge_join.py:168`, `semijoin.py:60`, `column_selection.py:524`. That column set excludes
+`_context_key`, so no operator ever sees the input's data context. `ArrowTableStream.__init__`
+then finds no context column on the result and substitutes
+`contexts.get_default_context_key()`.
+
+Consequence: a stream carrying a non-default context key reverts to the default at the first
+operator it crosses, with no warning. Function pods are unaffected — only the operator layer.
+
+This is pre-existing and layer-wide rather than specific to any one operator. It may also be
+intended (operators produce output in the ambient context rather than inheriting an input's), in
+which case the fix is to document the rule rather than change behavior. Logged while working
+NPIPE-204; deliberately not addressed there.
+
+Fix: decide whether operator output should inherit the input context. If yes, request
+`context: True` and propagate it, erroring when inputs disagree. If no, document the reset
+explicitly on `StaticOutputPod`.
+
 ---
 
 ## `src/orcapod/core/` — AddResult pod and Pod Groups
@@ -1079,6 +1109,11 @@ hard-coding them — `str`/`None` → `large_string`, list → `large_list(<elem
 pipeline-DB schema bump: a node's source-column type is fixed by its own output schema, so
 existing nodes keep `large_string`. See
 `superpowers/specs/2026-08-07-npipe-204-batch-group-by-design.md`.
+
+A third site, `polars_data_utils.add_source_info` (line 119), forces `dtype=pl.String()`. It is
+dead code — nothing in `src/` calls it, and the tests importing `add_source_info` import it from
+`arrow_utils` — and it carries a latent shadowing bug where `source_column` is rebound to a
+`pl.Series` inside the per-column loop. NPIPE-204 deletes it rather than fixing it.
 
 **Still open:** in `add_source_info_to_table()` (`arrow_utils.py:604`), when source info is a
 collection it is unconditionally cast to `pa.list_(pa.large_string())`:
