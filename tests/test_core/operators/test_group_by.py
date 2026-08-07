@@ -220,3 +220,32 @@ class TestGroupByIdentity:
         import json
 
         json.dumps(GroupBy(by=["subject", "date"]).to_config()["config"])
+
+
+class TestGroupByRegistration:
+    def test_in_operator_registry(self):
+        from orcapod.pipeline.serialization import _build_operator_registry
+
+        assert _build_operator_registry()["GroupBy"] is GroupBy
+
+    def test_stream_fluent_method(self, session_source):
+        out = session_source.group_by(["subject", "date"])
+        assert len(out.as_table()) == 2
+
+
+class TestGroupByAsyncIsBarrier:
+    """GroupBy must NOT override async_execute.
+
+    ``UnaryOperator.async_execute`` (``core/operators/base.py:71``) already
+    collects the full input before calling ``static_process``, which is exactly
+    the barrier GroupBy needs: no group can be emitted before the input channel
+    closes, because any row not yet seen could belong to a group already
+    started.  Adding an override would duplicate that logic and risk drifting
+    from it.
+    """
+
+    def test_does_not_override_async_execute(self):
+        from orcapod.core.operators.base import UnaryOperator
+
+        assert "async_execute" not in GroupBy.__dict__
+        assert GroupBy.async_execute is UnaryOperator.async_execute
