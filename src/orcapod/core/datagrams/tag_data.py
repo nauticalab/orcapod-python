@@ -25,7 +25,15 @@ from orcapod import contexts
 from orcapod.core.datagrams.datagram import Datagram
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, ContentHash, DataValue, Schema, SchemaLike
+from orcapod.types import (
+    ColumnConfig,
+    ContentHash,
+    DataType,
+    DataValue,
+    Schema,
+    SchemaLike,
+    SourceInfoValue,
+)
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -237,11 +245,6 @@ class Tag(Datagram):
 # ---------------------------------------------------------------------------
 
 
-# A provenance token is a string, an unknown (None), or -- for many->one
-# operators such as GroupBy and MergeJoin -- a list of tokens, one per member.
-SourceInfoValue = str | None | list["SourceInfoValue"]
-
-
 def _source_info_arrow_type(value: "SourceInfoValue") -> "pa.DataType":
     """Derive the Arrow type for a single source-info value.
 
@@ -257,14 +260,14 @@ def _source_info_arrow_type(value: "SourceInfoValue") -> "pa.DataType":
     """
     import pyarrow as _pa
 
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list):
         if not value:
             return _pa.large_list(_pa.large_string())
         return _pa.large_list(_source_info_arrow_type(value[0]))
     return _pa.large_string()
 
 
-def _source_info_python_type(value: "SourceInfoValue") -> type:
+def _source_info_python_type(value: "SourceInfoValue") -> DataType:
     """Derive the Python type for a single source-info value.
 
     Mirrors ``_source_info_arrow_type`` for the ``Schema`` representation.
@@ -275,7 +278,7 @@ def _source_info_python_type(value: "SourceInfoValue") -> type:
     Returns:
         ``str`` for scalars and unknowns, ``list[...]`` for lists.
     """
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list):
         if not value:
             return list[str]
         return list[_source_info_python_type(value[0])]  # type: ignore[misc]

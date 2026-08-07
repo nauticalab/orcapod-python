@@ -51,6 +51,20 @@ class TestListValuedSourceInfo:
             pa.large_string()
         )
 
+    def test_nested_list_token_recurses(self):
+        """Type derivation descends into nested lists rather than flattening.
+
+        A single level of list-wrapping would be satisfied by returning
+        ``large_list(large_string)`` unconditionally; this pins the recursion.
+        """
+        data = Data({"path": ["a", "b"]}, source_info={"path": [["s0"], ["s1"]]})
+        assert data.schema(columns={"source": True})["_source_path"] == list[list[str]]
+        table = data.as_table(columns={"source": True})
+        assert table.schema.field("_source_path").type == pa.large_list(
+            pa.large_list(pa.large_string())
+        )
+        assert table.column("_source_path").to_pylist() == [[["s0"], ["s1"]]]
+
     def test_scalar_token_unchanged(self):
         """Existing scalar behavior must not regress."""
         data = Data({"path": "a"}, source_info={"path": "src::row_0::path"})
