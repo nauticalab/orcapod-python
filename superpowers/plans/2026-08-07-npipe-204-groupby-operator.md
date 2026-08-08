@@ -1248,7 +1248,7 @@ Append to `tests/test_core/operators/test_group_by.py`:
 
 ```python
 class TestGroupBySchemaMirror:
-    """unary_output_schema must match what as_table actually produces."""
+    """unary_output_schema must match what the produced stream reports."""
 
     @pytest.mark.parametrize(
         "config",
@@ -1260,18 +1260,25 @@ class TestGroupBySchemaMirror:
         ],
         ids=["bare", "source", "system_tags", "source+system_tags"],
     )
-    def test_predicted_schema_matches_table(self, session_source, config):
+    def test_predicted_schema_matches_produced_stream(self, session_source, config):
         op = GroupBy(by=["subject", "date"])
-        out = op.process(session_source)
 
-        tag_schema, data_schema = op.output_schema(session_source, columns=config)
-        predicted = set(tag_schema) | set(data_schema)
-        actual = set(out.as_table(columns=config).column_names)
-
-        assert predicted == actual, (
-            f"predicted-only: {predicted - actual}, actual-only: {actual - predicted}"
+        predicted_tags, predicted_data = op.unary_output_schema(
+            session_source, columns=config
         )
+        produced = op.unary_static_process(session_source)
+        actual_tags, actual_data = produced.output_schema(columns=config)
+
+        assert dict(predicted_tags) == dict(actual_tags)
+        assert dict(predicted_data) == dict(actual_data)
 ```
+
+**Two comparisons that look right and are not.** Both were tried during review and both silently pass:
+
+- **Against `op.process(...)`** — `DynamicPodStream.output_schema` (`static_output_pod.py:321-332`) delegates straight back to the pod, so this compares the prediction against itself and can never fail.
+- **Against `as_table(columns=config).column_names`** — `output_schema` and `as_table` legitimately disagree. `ArrowTableStream.output_schema` (`arrow_table_stream.py:183-204`) returns `self._data_schema` unconditionally, so `columns.source` is a documented no-op there (`source_node.py:178-180` states this). `_source_*`, `_content_hash`, and `_context_key` appear in the table but never in the schema. The same gap exists on a plain un-batched `ArrowTableSource`, so it is a property of the schema layer, not of any operator.
+
+Compare the prediction against the materialized `ArrowTableStream` from `unary_static_process`. That is the contract that actually binds.
 
 - [ ] **Step 2: Run the test**
 

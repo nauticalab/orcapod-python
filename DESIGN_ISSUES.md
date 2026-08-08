@@ -730,6 +730,67 @@ explicitly on `StaticOutputPod`.
 
 ---
 
+### O3 — `_materialize_to_stream` broadcasts row 0's provenance to every row
+**Status:** open
+**Severity:** high
+
+`StaticOutputOperatorPod._materialize_to_stream` (`core/operators/static_output_pod.py:223`)
+reads the source info of the *first* row and applies it to the whole concatenated table:
+
+```python
+# Preserve actual source_info provenance from the first row
+# (all rows share the same data columns and source tokens).
+source_info = rows[0][1].source_info()
+```
+
+The comment is half right. All rows do share the same data *column names*, but not the same
+*tokens* — a provenance token embeds a per-row identifier (`...::row_0::value` versus
+`...::row_1::value`, built by `_make_provenance_token` in `core/sources/stream_builder.py`).
+So every row from index 1 onward is attributed to row 0. `sync_orchestrator.py:207,222`
+repeats the pattern.
+
+Observed directly in a `MergeJoin` round-trip: row 1 of the output carried `row_0` tokens.
+
+This predates NPIPE-204 and is equally wrong for scalar tokens, so nothing in that change
+caused it. NPIPE-204 did make it **more visible**: previously the list-valued case crashed at
+`as_table` (see U1), so a broken operator never got far enough to mis-attribute provenance.
+That crash is now fixed, which converts a loud failure into a quiet wrong answer.
+
+Fix: build the source-info mapping per row rather than once from row 0, or push the
+provenance into the concatenated table before constructing the stream.
+
+---
+
+### O4 — `GroupBy` member order is undefined for duplicate tag tuples
+**Status:** open
+**Severity:** medium
+
+`GroupBy` sorts a group's members by their non-group-key tag values so the emitted lists are
+stable across runs — orcapod hashes those lists to build the cache key, so an unstable order
+causes spurious recomputes.
+
+When `by` covers *every* tag column there is no non-key tag left to sort on, and the operator
+falls back to the system `record_id`. That is a UUID v5 over the source id and a per-row
+provenance token, so it encodes source *row position*. Permuting the source table therefore
+changes member order, changes the list hash, and triggers a recompute. Measured: 79 distinct
+member orders across all 120 permutations of a 5-row duplicate-tag input.
+
+The branch is reachable with more than one member only when the input contains **duplicate tag
+tuples** — `sort_columns` is empty exactly when the group key is the full tag tuple, so a
+multi-member group requires duplicates.
+
+This is not fixable inside `GroupBy`. The only remaining ordering signal is data content, and
+the operator / function pod boundary forbids an operator from inspecting data.
+
+The real root cause is upstream: `DuplicateTagError` (`errors.py:23`) is defined but **never
+raised anywhere** in `src/` or `tests/`, so duplicate tag tuples are not prevented in the first
+place. Tag uniqueness is assumed throughout the operator layer and enforced nowhere.
+
+Fix: enforce tag uniqueness at stream construction (raising `DuplicateTagError`), which makes
+this branch unreachable with more than one member.
+
+---
+
 ## `src/orcapod/core/` — AddResult pod and Pod Groups
 
 ### G1 — `AddResult`: a first-class pod type for data enrichment
@@ -1085,7 +1146,7 @@ The `normalize_extension_columns` utility landed in ITL-432.
 ## `src/orcapod/utils/`
 
 ### U1 — Source-info column type hard-coded to `large_string`
-**Status:** in progress (`tag_data.py` half), open (`arrow_utils.py` half)
+**Status:** resolved (`tag_data.py` half), open (`arrow_utils.py` half)
 **Severity:** critical
 
 Two sibling call sites assume source-info values are always scalar strings.
@@ -1104,10 +1165,14 @@ Two operators hit this: `MergeJoin`, which carries source columns along as paral
 merging colliding data columns (`merge_join.py:262`), and `Batch`, which list-wraps every column.
 Both were reproduced against `966d759a`.
 
-**Fix (NPIPE-204):** derive the Arrow and Python types from the stored value instead of
-hard-coding them — `str`/`None` → `large_string`, list → `large_list(<elem>)` recursively. No
-pipeline-DB schema bump: a node's source-column type is fixed by its own output schema, so
-existing nodes keep `large_string`. See
+**Fix:** landed in NPIPE-204 (`1b570e68`, `1ed22ee4`). `_source_info_arrow_type` and
+`_source_info_python_type` in `core/datagrams/tag_data.py` derive the Arrow and Python types
+from the stored value — `str`/`None` → `large_string`, list → `large_list(<elem>)`
+recursively. The `SourceInfoValue` alias lives in `types.py` next to `TagValue`/`DataValue`,
+which lets `DataProtocol` and `ArrowTableStream` reference it without inverting the
+`protocols/` → `core/` layering. No pipeline-DB schema bump: a node's source-column type is
+fixed by its own output schema, so existing nodes keep `large_string`. Job-level regression
+coverage is in `tests/test_pipeline/test_aggregation_job.py`. See
 `superpowers/specs/2026-08-07-npipe-204-batch-group-by-design.md`.
 
 A third site, `polars_data_utils.add_source_info` (line 119), forces `dtype=pl.String()`. It is
