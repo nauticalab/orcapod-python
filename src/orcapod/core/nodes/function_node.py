@@ -1252,12 +1252,12 @@ class FunctionJobNode(FunctionNodeBase):
         base_entry_ids = [eid for _, _, eid in upstream_entries]
 
         # Hot-load any already-computed results from DB into _cached_output_datas.
-        # get_cached_results() is called for its side effect (populating the
+        # load_cached_results() is called for its side effect (populating the
         # in-memory cache); the returned dict is intentionally discarded here so
         # that the per-data cache-hit check below uses _cached_output_datas
         # directly — which includes None-output entries (function returned None)
         # and prevents spurious recomputation of already-processed data.
-        self.get_cached_results(base_entry_ids=base_entry_ids)
+        self.load_cached_results(base_entry_ids=base_entry_ids)
 
         output: list[tuple[TagProtocol, DataProtocol]] = []
         policy = self._node_config.missing_cache_policy or "recompute"
@@ -1427,10 +1427,10 @@ class FunctionJobNode(FunctionNodeBase):
 
         return tag_out, output_data
 
-    def get_cached_results(
+    def load_cached_results(
         self, base_entry_ids: list[bytes]
     ) -> dict[bytes, tuple[TagProtocol, DataProtocol]]:
-        """Public cache façade: return already-computed results for the given base entry IDs.
+        """Load already-computed results for the given base entry IDs into the in-memory cache.
 
         Serves hits directly from the in-memory cache (``_cached_output_datas``).
         For IDs not yet cached, delegates to ``_load_cached_entries`` which calls
@@ -1784,7 +1784,7 @@ class FunctionJobNode(FunctionNodeBase):
         user-facing data. These columns are listed explicitly to ensure they are
         dropped even when ``all_info=True`` (which skips the meta-prefix sweep).
 
-        Does NOT populate the in-memory cache — see ``get_cached_results``
+        Does NOT populate the in-memory cache — see ``load_cached_results``
         for that.
 
         Args:
@@ -2377,6 +2377,7 @@ class FunctionJobNode(FunctionNodeBase):
         *,
         observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
+        channel_buffer_size: int = 16,
     ) -> None:
         """Streaming async execution for FunctionJobNode.
 
@@ -2394,6 +2395,10 @@ class FunctionJobNode(FunctionNodeBase):
             observer: Optional execution observer for hooks.
             run_id: Optional pipeline run identifier threaded through to
                 ``InvocationContext.pipeline_run_id``.
+            channel_buffer_size: Capacity of the internal ``compute_channel``
+                and ``result_channel`` used for backpressure between concurrent
+                stages.  Increase for higher throughput at the cost of memory;
+                decrease to tighten backpressure.  Defaults to 16.
         """
         from orcapod.pipeline.serialization import LoadStatus
 
@@ -2447,8 +2452,8 @@ class FunctionJobNode(FunctionNodeBase):
                 cached_by_base_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
 
                 # Intermediate channels (bounded for backpressure).
-                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
-                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
+                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=channel_buffer_size)
+                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=channel_buffer_size)
 
                 # Local dict: correlation_key → (original_tag, original_input_data)
                 input_store: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
