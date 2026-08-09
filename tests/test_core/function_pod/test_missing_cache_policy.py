@@ -285,6 +285,61 @@ class TestAsEmptyPolicy:
 
         assert call_count["n"] == 1, "policy must be honoured on every call, not just the first"
 
+    def test_as_empty_partial_gap_emits_empty_data_for_missing_row(self):
+        """Branch B (sync): result DB has some rows but one entry is absent.
+
+        The matched row should return its real result; the unmatched row should
+        become EmptyData via the anti-join path in ``_fetch_joined_records``.
+        No recomputation should occur.
+        """
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        rows = [{"id": 0, "x": 10}, {"id": 1, "x": 20}]
+        stream = _make_stream(rows)
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 2
+
+        # Wipe only the first row's result (keep second row = id 1, result 40).
+        # InMemoryArrowDatabase appends in insertion order; execute() processes
+        # rows in stream order, so slice(1) drops the id=0 result row.
+        for table_path in list(result_db._tables.keys()):
+            result_db._tables[table_path] = result_db._tables[table_path].slice(1)
+        result_db._pending_batches.clear()
+        result_db._pending_record_ids.clear()
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node2.node_config = NodeConfig(missing_cache_policy="as_empty")
+        results = node2.execute(stream)
+
+        # Function must not be called again.
+        assert call_count["n"] == 2, "as_empty must not recompute"
+        assert len(results) == 2
+        empty_results = [d for _, d in results if isinstance(d, EmptyData)]
+        real_results = [d for _, d in results if not isinstance(d, EmptyData)]
+        assert len(empty_results) == 1, "exactly one row should be EmptyData"
+        assert len(real_results) == 1, "exactly one row should be real data"
+        assert real_results[0].as_dict()["result"] == 40
+
 
 class TestEphemeralInfoLog:
     """Ephemeral misses log at INFO level (never WARNING)."""
@@ -487,6 +542,164 @@ class TestAsyncExecutePolicy:
 
         with pytest.raises(CacheMissError):
             asyncio.run(run())
+
+    def test_async_as_empty_nonephemeral_miss_emits_empty_data_without_recompute(self):
+        """Branch A (async): non-ephemeral result DB completely absent after wipe.
+
+        async_execute with as_empty must forward EmptyData without calling the
+        function.  This covers the Branch A non-ephemeral as_empty path through
+        async route_inputs (the sync equivalent is in TestAsEmptyPolicy).
+        """
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 1
+
+        _wipe_result_db(result_db)
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node2.node_config = NodeConfig(missing_cache_policy="as_empty")
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=16)
+            output_ch: Channel = Channel(buffer_size=16)
+            await _feed_stream(stream, input_ch)
+            await node2.async_execute(input_ch.reader, output_ch.writer)
+            return await output_ch.reader.collect()
+
+        results = asyncio.run(run())
+        assert call_count["n"] == 1, "function must not be called again in as_empty mode"
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData)
+
+    def test_async_as_empty_partial_gap_emits_empty_data_for_missing_row(self):
+        """Branch B (async): result DB has some rows but one entry is absent.
+
+        async_execute with as_empty must forward EmptyData for the missing row
+        and the real cached result for the present row — no recomputation.
+        """
+        call_count = {"n": 0}
+
+        def counting_double(x: int) -> int:
+            call_count["n"] += 1
+            return x * 2
+
+        rows = [{"id": 0, "x": 10}, {"id": 1, "x": 20}]
+        stream = _make_stream(rows)
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        pf = PythonDataFunction(counting_double, output_keys="result")
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(pf),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node1.execute(stream)
+        assert call_count["n"] == 2
+
+        # Drop the first row's result (keep id=1, result=40).
+        for table_path in list(result_db._tables.keys()):
+            result_db._tables[table_path] = result_db._tables[table_path].slice(1)
+        result_db._pending_batches.clear()
+        result_db._pending_record_ids.clear()
+
+        pf2 = PythonDataFunction(counting_double, output_keys="result")
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(pf2),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        node2.node_config = NodeConfig(missing_cache_policy="as_empty")
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=16)
+            output_ch: Channel = Channel(buffer_size=16)
+            await _feed_stream(stream, input_ch)
+            await node2.async_execute(input_ch.reader, output_ch.writer)
+            return await output_ch.reader.collect()
+
+        results = asyncio.run(run())
+        assert call_count["n"] == 2, "as_empty must not recompute"
+        assert len(results) == 2
+        empty_results = [d for _, d in results if isinstance(d, EmptyData)]
+        real_results = [d for _, d in results if not isinstance(d, EmptyData)]
+        assert len(empty_results) == 1, "exactly one row should be EmptyData"
+        assert len(real_results) == 1, "exactly one row should be real data"
+        assert real_results[0].as_dict()["result"] == 40
+
+    def test_async_strict_ephemeral_miss_emits_empty_data_not_raise(self):
+        """strict + ephemeral miss (async): must emit EmptyData, never raise CacheMissError.
+
+        CacheMissError is only raised for persistent (non-ephemeral) result-store
+        misses.  A cross-session ephemeral miss is always handled gracefully
+        regardless of policy.
+        """
+        stream = _make_stream([{"id": 0, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        ephemeral_db = InMemoryArrowDatabase()
+
+        node1 = FunctionJobNode(
+            function_pod=FunctionPod(PythonDataFunction(_double, output_keys="result")),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node1.node_config = NodeConfig(is_result_ephemeral=True, missing_cache_policy="strict")
+        node1.execute(stream)
+
+        # Wipe ephemeral store to simulate cross-session miss.
+        ephemeral_db._tables.clear()
+        ephemeral_db._pending_batches.clear()
+        ephemeral_db._pending_record_ids.clear()
+
+        node2 = FunctionJobNode(
+            function_pod=FunctionPod(PythonDataFunction(_double, output_keys="result")),
+            input_stream=stream,
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+            ephemeral_database=ephemeral_db,
+        )
+        node2.node_config = NodeConfig(is_result_ephemeral=True, missing_cache_policy="strict")
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=16)
+            output_ch: Channel = Channel(buffer_size=16)
+            await _feed_stream(stream, input_ch)
+            await node2.async_execute(input_ch.reader, output_ch.writer)
+            return await output_ch.reader.collect()
+
+        # Must NOT raise CacheMissError — strict only applies to persistent misses.
+        results = asyncio.run(run())
+        assert len(results) == 1
+        assert isinstance(results[0][1], EmptyData), (
+            "strict policy must emit EmptyData for ephemeral miss, not raise"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -783,3 +996,63 @@ class TestRecomputeRegression:
         results = node2.execute(stream)
         assert call_count["n"] == 2
         assert not isinstance(results[0][1], EmptyData)
+
+
+# ---------------------------------------------------------------------------
+# channel_buffer_size parameter
+# ---------------------------------------------------------------------------
+
+
+class TestChannelBufferSize:
+    """async_execute() channel_buffer_size kwarg is accepted and produces correct results."""
+
+    def test_custom_buffer_size_produces_correct_results(self):
+        """Non-default channel_buffer_size works end-to-end.
+
+        Exercises that the parameter is forwarded to both ``compute_channel``
+        and ``result_channel`` constructors without error, and that the node
+        still produces the right output.
+        """
+        stream = _make_stream([{"id": 0, "x": 5}, {"id": 1, "x": 10}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        node = _make_node(stream, pipeline_db, result_db)
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=4)
+            output_ch: Channel = Channel(buffer_size=4)
+            await _feed_stream(stream, input_ch)
+            await node.async_execute(
+                input_ch.reader, output_ch.writer, channel_buffer_size=4
+            )
+            return await output_ch.reader.collect()
+
+        results = asyncio.run(run())
+        assert len(results) == 2
+        result_values = sorted(d.as_dict()["result"] for _, d in results)
+        assert result_values == [10, 20]
+
+    def test_buffer_size_one_still_produces_correct_results(self):
+        """channel_buffer_size=1 (minimal backpressure) still works correctly.
+
+        This is a tighter stress-test: each channel slot fills and drains
+        one item at a time, exercising the backpressure path.
+        """
+        stream = _make_stream([{"id": 0, "x": 3}, {"id": 1, "x": 7}, {"id": 2, "x": 11}])
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        node = _make_node(stream, pipeline_db, result_db)
+
+        async def run():
+            input_ch: Channel = Channel(buffer_size=16)
+            output_ch: Channel = Channel(buffer_size=16)
+            await _feed_stream(stream, input_ch)
+            await node.async_execute(
+                input_ch.reader, output_ch.writer, channel_buffer_size=1
+            )
+            return await output_ch.reader.collect()
+
+        results = asyncio.run(run())
+        assert len(results) == 3
+        result_values = sorted(d.as_dict()["result"] for _, d in results)
+        assert result_values == [6, 14, 22]
