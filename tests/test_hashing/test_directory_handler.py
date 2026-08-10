@@ -182,6 +182,62 @@ class TestBasicDirectoryHasher:
         hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
 
+    def test_relative_path_pattern_scopes_to_subdirectory(self, tmp_path):
+        """Pattern 'sub/*.pyc' must exclude .pyc files in sub/ but not in other/."""
+        base = tmp_path / "base"
+        base.mkdir()
+        (base / "sub").mkdir()
+        (base / "other").mkdir()
+        (base / "sub" / "app.py").write_bytes(b"code")
+        (base / "sub" / "app.pyc").write_bytes(b"compiled in sub")
+        (base / "other" / "app.py").write_bytes(b"code")
+
+        # reference: same tree but with sub/app.pyc physically absent
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        (ref / "sub").mkdir()
+        (ref / "other").mkdir()
+        (ref / "sub" / "app.py").write_bytes(b"code")
+        (ref / "other" / "app.py").write_bytes(b"code")
+
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
+        # "sub/*.pyc" should exclude sub/app.pyc → same hash as ref
+        assert hasher.hash_directory(base, ignore=["sub/*.pyc"]) == hasher.hash_directory(ref)
+        # "other/*.pyc" should not match sub/app.pyc → different hash from ref
+        assert hasher.hash_directory(base, ignore=["other/*.pyc"]) != hasher.hash_directory(ref)
+
+    def test_ignore_none_is_equivalent_to_no_ignore(self, tmp_path):
+        """hash(dir) == hash(dir, ignore=None) — the new arg in absent form must not shift the hash."""
+        d = tmp_path / "d"
+        d.mkdir()
+        (d / "file.txt").write_bytes(b"content")
+        (d / "sub").mkdir()
+        (d / "sub" / "nested.txt").write_bytes(b"nested")
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
+        assert hasher.hash_directory(d) == hasher.hash_directory(d, ignore=None)
+
+    def test_non_matching_filter_is_equivalent_to_no_filter(self, tmp_path):
+        """A filter that matches nothing must produce the same hash as no filter."""
+        d = tmp_path / "d"
+        d.mkdir()
+        (d / "file.txt").write_bytes(b"content")
+        (d / "sub").mkdir()
+        (d / "sub" / "nested.txt").write_bytes(b"nested")
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
+        assert hasher.hash_directory(d) == hasher.hash_directory(d, ignore=["*.nonexistent_xyz"])
+
+    def test_filter_identity_irrelevance(self, tmp_path):
+        """Two patterns selecting the same effective file set must produce the same hash."""
+        d = tmp_path / "d"
+        d.mkdir()
+        (d / "app.py").write_bytes(b"code")
+        (d / "app.pyc").write_bytes(b"compiled")
+        hasher = BasicDirectoryHasher(file_hasher=FileHasher())
+        # Both patterns exclude only app.pyc — results must be identical
+        h1 = hasher.hash_directory(d, ignore=["*.pyc"])
+        h2 = hasher.hash_directory(d, ignore=["app.pyc"])
+        assert h1 == h2
+
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="mkfifo not available on this platform")
     def test_special_files_skipped(self, tmp_path):
         """Named pipes (FIFOs) and other special files are silently skipped."""

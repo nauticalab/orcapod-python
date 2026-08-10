@@ -45,9 +45,21 @@ class Directory(ProxyUPath):
     Args:
         *args: Positional path arguments forwarded to ``UPath``.
         ignore: Optional filter for excluding entries from the content hash.
-            Accepts an iterable of glob patterns matched against entry names (via
-            ``fnmatch``), or a callable ``(UPath) -> bool`` returning ``True`` to
-            exclude an entry. Applied at every level of recursion during hashing.
+            Accepts an iterable of glob patterns matched against the **POSIX
+            relative path from the directory root** via
+            ``pathlib.PurePosixPath.match()`` (right-anchored: ``"*.pyc"`` matches
+            any ``.pyc`` at any depth; ``"sub/*.pyc"`` matches any ``.pyc`` in
+            any directory named ``sub/`` at any depth — right-anchored, not
+            root-anchored), or a callable
+            ``(UPath) -> bool`` receiving the relative path from the root
+            and returning ``True`` to exclude an entry. Excluding a directory
+            also excludes its entire subtree. Applied at every level of
+            recursion during hashing.
+
+            Hash invariant: excluded entries are invisible to the hash — the
+            result is identical to those entries never existing. The pattern
+            itself is not input to the hash.
+
             Defaults to ``None`` (all entries included).
         **kwargs: Keyword arguments forwarded to ``UPath``.
 
@@ -60,6 +72,12 @@ class Directory(ProxyUPath):
         >>> d = Directory("/tmp/mydata")
         >>> str(d)
         '/tmp/mydata'
+        >>> # Exclude compiled Python files at any depth
+        >>> d = Directory("/tmp/mydata", ignore=["*.pyc", "__pycache__"])
+        >>> # Exclude files only inside a specific subdirectory
+        >>> d = Directory("/tmp/mydata", ignore=["build/*.o"])
+        >>> # Custom callable filter: exclude hidden files (receives relative UPath)
+        >>> d = Directory("/tmp/mydata", ignore=lambda p: p.name.startswith("."))
         >>> Directory("/tmp/nonexistent")
         FileNotFoundError: ...
     """
