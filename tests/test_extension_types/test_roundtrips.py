@@ -61,6 +61,20 @@ class _Outer:
     label: str
 
 
+@dataclasses.dataclass
+class _TaggedPoint:
+    """Dataclass with a list[uuid.UUID] field — tests ET2 fix in DataclassLogicalTypeFactory."""
+    name: str
+    ids: list[uuid_module.UUID]
+
+
+@dataclasses.dataclass
+class _SimplePoint:
+    """Dataclass with only scalar fields — used as element of list[_SimplePoint]."""
+    label: str
+    value: int
+
+
 # ── Storage backend abstraction ───────────────────────────────────────────────
 
 
@@ -479,3 +493,206 @@ def test_builtin_series_round_trip(storage_backend: _StorageBackend, tmp_path: P
     recovered = rows[0]["series"]
     assert isinstance(recovered, pd.Series)
     pd.testing.assert_series_equal(recovered, s)
+
+
+# ── list[T] / set[T] round-trip tests (ITL-173) ──────────────────────────────
+
+
+def test_list_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """list[uuid.UUID] round-trips with extension name list[orcapod.uuid]."""
+    u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
+
+    result, read_converter = _write_and_read(
+        {"ids": list[uuid_module.UUID]},
+        [{"ids": [u1, u2]}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("ids")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on 'ids', got {field.type!r}"
+    )
+    assert field.type.extension_name == "list[orcapod.uuid]"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    assert rows[0]["ids"] == [u1, u2]
+    assert all(isinstance(v, uuid_module.UUID) for v in rows[0]["ids"])
+
+
+def test_set_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[uuid.UUID] round-trips with extension name set[orcapod.uuid]; read back as set."""
+    u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
+
+    result, read_converter = _write_and_read(
+        {"ids": set[uuid_module.UUID]},
+        [{"ids": {u1, u2}}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("ids")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[orcapod.uuid]"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    assert isinstance(rows[0]["ids"], set)
+    assert rows[0]["ids"] == {u1, u2}
+
+
+def test_list_of_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """list[_SimplePoint] round-trips — ListLogicalType wrapping DataclassLogicalType."""
+    p1 = _SimplePoint(label="alpha", value=1)
+    p2 = _SimplePoint(label="beta", value=2)
+
+    result, read_converter = _write_and_read(
+        {"points": list[_SimplePoint]},
+        [{"points": [p1, p2]}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("points")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name.startswith("list[")
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    reconstructed = rows[0]["points"]
+    assert len(reconstructed) == 2
+    assert reconstructed[0] == p1
+    assert reconstructed[1] == p2
+
+
+def test_list_of_list_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """list[list[uuid.UUID]] round-trips — two-level nesting."""
+    u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
+
+    result, read_converter = _write_and_read(
+        {"groups": list[list[uuid_module.UUID]]},
+        [{"groups": [[u1, u2], [u2]]}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("groups")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "list[list[orcapod.uuid]]"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    assert rows[0]["groups"] == [[u1, u2], [u2]]
+
+
+def test_dataclass_with_list_uuid_field_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
+    """Dataclass with list[uuid.UUID] field round-trips (previously broke DataclassLogicalTypeFactory)."""
+    u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
+    obj = _TaggedPoint(name="test", ids=[u1, u2])
+
+    result, read_converter = _write_and_read(
+        {"data": _TaggedPoint},
+        [{"data": obj}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("data")
+    assert hasattr(field.type, "extension_name")
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    reconstructed = rows[0]["data"]
+    assert isinstance(reconstructed, _TaggedPoint)
+    assert reconstructed.name == "test"
+    assert reconstructed.ids == [u1, u2]
+    assert all(isinstance(v, uuid_module.UUID) for v in reconstructed.ids)
+
+
+def test_list_of_int_produces_no_extension_type(tmp_path: Path) -> None:
+    """list[int] must still produce plain large_list(int64) — no ListLogicalType wrapping."""
+    import pyarrow as pa
+    from orcapod.contexts import create_registry
+
+    converter = create_registry().get_context().type_converter
+    result = converter.register_python_class(list[int])
+
+    assert not isinstance(result, pa.ExtensionType), (
+        f"list[int] must not be wrapped as an extension type, got {result!r}"
+    )
+    assert pa.types.is_large_list(result)
+    assert result.value_type == pa.int64()
+
+
+def test_schema_round_trip_list_of_uuid(tmp_path: Path) -> None:
+    """arrow_schema_to_python_schema then python_schema_to_arrow_schema is identity for list[UUID]."""
+    import uuid
+    import pyarrow as pa
+    from orcapod.contexts import create_registry
+
+    converter = create_registry().get_context().type_converter
+
+    python_schema = {
+        "ids": list[uuid.UUID],
+        "groups": list[list[uuid.UUID]],
+        "tag_set": set[uuid.UUID],
+    }
+    arrow_schema = converter.python_schema_to_arrow_schema(python_schema)
+
+    recovered_python = converter.arrow_schema_to_python_schema(arrow_schema)
+    assert recovered_python["ids"] == list[uuid.UUID]
+    assert recovered_python["groups"] == list[list[uuid.UUID]]
+    assert recovered_python["tag_set"] == set[uuid.UUID]
+
+    arrow_schema2 = converter.python_schema_to_arrow_schema(recovered_python)
+    assert arrow_schema2.field("ids").type.extension_name == "list[orcapod.uuid]"
+    assert arrow_schema2.field("groups").type.extension_name == "list[list[orcapod.uuid]]"
+    assert arrow_schema2.field("tag_set").type.extension_name == "set[orcapod.uuid]"
+
+
+def test_python_type_property_list_and_set(tmp_path: Path) -> None:
+    """ListLogicalType.python_type returns the exact generic alias."""
+    import uuid
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+
+    uuid_ext = LogicalUUID().get_arrow_extension_type()
+
+    lt_list = ListLogicalType(uuid.UUID, uuid_ext, is_set=False)
+    assert lt_list.python_type == list[uuid.UUID]
+
+    lt_set = ListLogicalType(uuid.UUID, uuid_ext, is_set=True)
+    assert lt_set.python_type == set[uuid.UUID]
+
+
+def test_fresh_converter_reads_list_of_uuid(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
+    """A fresh converter (no prior registration) can read list[UUID] via load_extension_types."""
+    u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+
+    # Write with converter A
+    write_converter = _fresh_converter()
+    write_converter.register_python_class(list[uuid_module.UUID])
+    arrow_schema = write_converter.python_schema_to_arrow_schema({"ids": list[uuid_module.UUID]})
+    table = write_converter.python_dicts_to_arrow_table([{"ids": [u1]}], arrow_schema=arrow_schema)
+    storage_backend.write(table, tmp_path)
+
+    # Read with converter B — no prior registration; load_extension_types triggers factory
+    read_converter = _fresh_converter()
+    result = storage_backend.read(tmp_path, read_converter)
+
+    field = result.schema.field("ids")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "list[orcapod.uuid]"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert rows[0]["ids"] == [u1]
+    assert isinstance(rows[0]["ids"][0], uuid_module.UUID)
