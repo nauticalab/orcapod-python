@@ -847,3 +847,46 @@ class TestParquetRoundtripNonCanonicalStorage:
                 pa.unregister_extension_type(name)
             except Exception:
                 pass
+
+
+def test_register_logical_type_conflict_error_uses_repr_for_generic_alias():
+    """Conflict error message for GenericAlias python_type must not raise AttributeError."""
+    import uuid
+    import pyarrow as pa
+    from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
+    from orcapod.extension_types.base_logical_type import BaseLogicalType
+
+    class _FakeListLT(BaseLogicalType):
+        logical_type_name = "list[orcapod.uuid]"
+        python_type = list[uuid.UUID]
+
+        def get_arrow_extension_type(self):
+            ext_cls = make_arrow_extension_type(
+                "list[orcapod.uuid]", pa.large_list(pa.large_binary())
+            )
+            return ext_cls()
+
+        def get_polars_extension_type(self):
+            ext_cls = make_polars_extension_type(
+                "list[orcapod.uuid]", pa.large_list(pa.large_binary())
+            )
+            return ext_cls()
+
+        def python_to_storage(self, value, converter):
+            return value
+
+        def storage_to_python(self, storage_value, converter):
+            return storage_value
+
+    class _FakeListLT2(_FakeListLT):
+        """Different instance, same keys — should raise ValueError, not AttributeError."""
+
+    registry = LogicalTypeRegistry()
+    lt1 = _FakeListLT()
+    lt2 = _FakeListLT2()
+    registry.register_logical_type(lt1)
+
+    # The registry should raise ValueError (not AttributeError) even when python_type
+    # is a GenericAlias (like list[uuid.UUID]) that lacks __qualname__.
+    with pytest.raises(ValueError):
+        registry.register_logical_type(lt2)

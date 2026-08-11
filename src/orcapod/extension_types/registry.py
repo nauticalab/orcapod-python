@@ -294,7 +294,7 @@ class LogicalTypeRegistry:
         for existing, label, key in [
             (existing_by_logical, "logical_type_name", logical_name),
             (existing_by_arrow, "arrow_extension_name", arrow_ext_name),
-            (existing_by_python, "python_type", py_type.__qualname__),
+            (existing_by_python, "python_type", getattr(py_type, "__qualname__", repr(py_type))),
         ]:
             if existing is not None and existing is not logical_type:
                 raise ValueError(
