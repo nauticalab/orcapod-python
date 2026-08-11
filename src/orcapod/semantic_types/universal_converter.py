@@ -339,11 +339,11 @@ class UniversalTypeConverter:
                 )
             return self.register_python_class(next(iter(value_types)))
 
-        # list[T] → pa.large_list(T).
-        # Raise if T resolves to an extension type: Arrow forbids extension types inside
-        # list value fields (ET1/ET2 in DESIGN_ISSUES.md). Fail loudly now rather than
-        # silently dropping type information and failing mysteriously on read.
-        # Native list-of-logical-type support is planned in PLT-1732 (ListLogicalType).
+        # list[T] → large_list(T storage) when T is a plain type, or a top-level
+        # ListLogicalType extension when T maps to a pa.ExtensionType.
+        # Arrow forbids extension types inside list value fields (ET1 in DESIGN_ISSUES.md).
+        # Wrapping the whole list as an extension type (ET2 fix, ITL-173) preserves
+        # element type information at the field-metadata level.
         if origin is list:
             if not args:
                 raise ValueError(
