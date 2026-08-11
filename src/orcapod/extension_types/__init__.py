@@ -25,6 +25,7 @@ from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
 from .database_hooks import apply_extension_types, register_discovered_extensions
 from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
 from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalType, PydanticLogicalTypeFactory
+from .list_logical_type_factory import LIST_CATEGORY, SET_CATEGORY, ListLogicalType, ListLogicalTypeFactory
 from .file_type import LogicalFile  # ITL-450
 from .directory_type import LogicalDirectory  # ITL-451
 from .numpy_type import LogicalNumpyArray  # ITL-460
@@ -51,6 +52,11 @@ __all__ = [
     "PYDANTIC_CATEGORY",
     "PydanticLogicalType",
     "PydanticLogicalTypeFactory",
+    # ITL-173
+    "LIST_CATEGORY",
+    "SET_CATEGORY",
+    "ListLogicalType",
+    "ListLogicalTypeFactory",
     # ITL-450
     "LogicalFile",
     # ITL-451

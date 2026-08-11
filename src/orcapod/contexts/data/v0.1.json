@@ -71,6 +71,20 @@
                             },
                             "category": "orcapod.pydantic",
                             "python_bases": [{"_type": "pydantic.BaseModel"}]
+                        },
+                        {
+                            "factory": {
+                                "_class": "orcapod.extension_types.list_logical_type_factory.ListLogicalTypeFactory",
+                                "_config": {}
+                            },
+                            "category": "list"
+                        },
+                        {
+                            "factory": {
+                                "_class": "orcapod.extension_types.list_logical_type_factory.ListLogicalTypeFactory",
+                                "_config": {}
+                            },
+                            "category": "set"
                         }
                     ]
                 }
