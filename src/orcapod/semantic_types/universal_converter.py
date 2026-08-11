@@ -1095,9 +1095,9 @@ class UniversalTypeConverter:
             return type_map[python_type]
 
         # Check LogicalTypeRegistry — extension-type identity takes priority over shape-based system.
-        # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;
-        # generic aliases (list[T], Optional[T], etc.) will never be registered there.
-        if self._logical_type_registry is not None and isinstance(python_type, type):
+        # GenericAlias instances like list[UUID] may be registered as ListLogicalType entries,
+        # so we must not guard this check with isinstance(python_type, type).
+        if self._logical_type_registry is not None:
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
                 return lt.get_arrow_extension_type()
@@ -1125,6 +1125,8 @@ class UniversalTypeConverter:
                     f"list type must have exactly one type argument, got: {args}"
                 )
             element_type = self.python_type_to_arrow_type(args[0])
+            if isinstance(element_type, pa.ExtensionType) and self._logical_type_registry is not None:
+                return self._make_or_get_list_logical_type(element_type, is_set=False)
             return pa.large_list(element_type)
 
         # Handle tuple types
@@ -1194,6 +1196,8 @@ class UniversalTypeConverter:
                     f"set type must have exactly one type argument, got: {args}"
                 )
             element_type = self.python_type_to_arrow_type(args[0])
+            if isinstance(element_type, pa.ExtensionType) and self._logical_type_registry is not None:
+                return self._make_or_get_list_logical_type(element_type, is_set=True)
             return pa.large_list(element_type)
 
         else:

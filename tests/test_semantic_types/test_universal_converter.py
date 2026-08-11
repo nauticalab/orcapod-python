@@ -52,3 +52,56 @@ def test_register_python_class_list_of_uuid_idempotent():
     result1 = converter.register_python_class(list[uuid.UUID])
     result2 = converter.register_python_class(list[uuid.UUID])
     assert result1.extension_name == result2.extension_name
+
+
+def test_python_type_to_arrow_type_list_of_uuid_returns_extension_type():
+    """python_type_to_arrow_type(list[UUID]) must return the list[orcapod.uuid] ext type."""
+    import uuid
+    import pyarrow as pa
+    from orcapod.contexts import create_registry
+
+    converter = create_registry().get_context().type_converter
+    # Pre-register so the type is in the registry before python_type_to_arrow_type is called.
+    converter.register_python_class(list[uuid.UUID])
+    result = converter.python_type_to_arrow_type(list[uuid.UUID])
+
+    assert isinstance(result, pa.ExtensionType), (
+        f"Expected pa.ExtensionType, got {type(result)}: {result!r}"
+    )
+    assert result.extension_name == "list[orcapod.uuid]"
+
+
+def test_python_type_to_arrow_type_list_of_uuid_without_prior_registration():
+    """python_type_to_arrow_type(list[UUID]) must work even without prior register_python_class."""
+    import uuid
+    import pyarrow as pa
+    from orcapod.contexts import create_registry
+
+    # Fresh converter — ListLogicalType not yet registered
+    converter = create_registry().get_context().type_converter
+    result = converter.python_type_to_arrow_type(list[uuid.UUID])
+
+    assert isinstance(result, pa.ExtensionType)
+    assert result.extension_name == "list[orcapod.uuid]"
+
+
+def test_arrow_schema_to_python_schema_round_trip_list_of_uuid():
+    """Schema round-trip: list[UUID] → Arrow ext → python schema → Arrow ext (same type)."""
+    import uuid
+    import pyarrow as pa
+    from orcapod.contexts import create_registry
+
+    converter = create_registry().get_context().type_converter
+    python_schema = {"ids": list[uuid.UUID]}
+    arrow_schema = converter.python_schema_to_arrow_schema(python_schema)
+
+    # Arrow schema has list[orcapod.uuid] extension type
+    assert arrow_schema.field("ids").type.extension_name == "list[orcapod.uuid]"
+
+    # Recover Python schema
+    recovered = converter.arrow_schema_to_python_schema(arrow_schema)
+    assert recovered["ids"] == list[uuid.UUID]
+
+    # Re-derive Arrow schema — must be identical
+    arrow_schema2 = converter.python_schema_to_arrow_schema(recovered)
+    assert arrow_schema2.field("ids").type.extension_name == "list[orcapod.uuid]"
