@@ -162,3 +162,9 @@ def test_factory_create_for_python_type_conformance():
     assert isinstance(factory, LogicalTypeFactoryProtocol)
     result = factory.create_for_python_type(str, converter=None)
     assert isinstance(result, LogicalTypeProtocol)
+
+
+def test_type_converter_protocol_has_arrow_type_to_python_type():
+    """TypeConverterProtocol must declare arrow_type_to_python_type."""
+    from orcapod.extension_types.protocols import TypeConverterProtocol
+    assert "arrow_type_to_python_type" in TypeConverterProtocol.__protocol_attrs__

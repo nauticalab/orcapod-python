@@ -90,6 +90,20 @@ class TypeConverterProtocol(Protocol):
         """Register an extension type from (name, metadata, storage_type) and return the Arrow type."""
         ...
 
+    def arrow_type_to_python_type(self, arrow_type: "pa.DataType") -> "DataType":
+        """Convert an Arrow type to its Python type hint.
+
+        Used by ``ListLogicalTypeFactory.reconstruct_from_arrow`` to recover
+        the element Python type after registering the element extension type.
+
+        Args:
+            arrow_type: An Arrow type (may be a ``pa.ExtensionType``).
+
+        Returns:
+            The Python type hint corresponding to ``arrow_type``.
+        """
+        ...
+
 
 @runtime_checkable
 class LogicalTypeProtocol(Protocol):
