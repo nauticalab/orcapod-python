@@ -6,7 +6,7 @@ import pyarrow as pa
 import pytest
 from pathlib import Path
 
-from orcapod.extension_types.file_type import File
+from orcapod.logical_types.file_type import File
 from orcapod.hashing.visitors import SemanticHashingVisitor
 from orcapod.contexts import get_default_context
 

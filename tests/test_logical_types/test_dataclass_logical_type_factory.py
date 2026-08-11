@@ -40,13 +40,13 @@ class _StubConverter:
 # ── DataclassLogicalType tests ───────────────────────────────────────────────
 
 def test_dataclass_logical_type_is_importable():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
     assert DataclassLogicalType is not None
 
 
 def test_dataclass_logical_type_protocol_conformance():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
-    from orcapod.extension_types.protocols import LogicalTypeProtocol
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.protocols import LogicalTypeProtocol
 
     @dataclasses.dataclass
     class _MyDC:
@@ -65,7 +65,7 @@ def test_dataclass_logical_type_protocol_conformance():
 
 
 def test_dataclass_logical_type_python_to_storage():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
 
     @dataclasses.dataclass
     class _Point:
@@ -81,7 +81,7 @@ def test_dataclass_logical_type_python_to_storage():
 
 
 def test_dataclass_logical_type_storage_to_python():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
 
     @dataclasses.dataclass
     class _Point:
@@ -99,7 +99,7 @@ def test_dataclass_logical_type_storage_to_python():
 
 
 def test_dataclass_logical_type_logical_type_name():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
 
     @dataclasses.dataclass
     class _Foo:
@@ -111,7 +111,7 @@ def test_dataclass_logical_type_logical_type_name():
 
 
 def test_dataclass_logical_type_python_type():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
 
     @dataclasses.dataclass
     class _Bar:
@@ -126,9 +126,9 @@ def test_dataclass_logical_type_python_type():
 
 def _make_full_converter():
     """Make a UniversalTypeConverter with builtin types + DataclassLogicalTypeFactory."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath, LogicalUUID, LogicalUPath
-    from orcapod.extension_types.registry import LogicalTypeRegistry
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DATACLASS_CATEGORY
+    from orcapod.logical_types.builtin_logical_types import LogicalPath, LogicalUUID, LogicalUPath
+    from orcapod.logical_types.registry import LogicalTypeRegistry
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DATACLASS_CATEGORY
     from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
     registry = LogicalTypeRegistry(logical_types=[LogicalPath(), LogicalUUID(), LogicalUPath()])
@@ -140,7 +140,7 @@ def _make_full_converter():
 # ── DataclassLogicalTypeFactory write-path tests ─────────────────────────────────
 
 def test_factory_supports_class_dataclass():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     @dataclasses.dataclass
     class _Dummy:
@@ -151,7 +151,7 @@ def test_factory_supports_class_dataclass():
 
 
 def test_factory_supports_class_non_dataclass():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     factory = DataclassLogicalTypeFactory()
     assert factory.supports_class(str) is False
@@ -211,7 +211,7 @@ class _ListContainerDC:
 
 
 def test_factory_create_flat_dataclass():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DataclassLogicalType
 
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
@@ -233,7 +233,7 @@ def test_factory_create_dataclass_with_uuid_field():
     The UUID's extension type (``orcapod.uuid``) is still registered and used for
     value conversion; only the struct field schema uses the stripped storage type.
     """
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
@@ -247,7 +247,7 @@ def test_factory_create_dataclass_with_uuid_field():
 
 
 def test_factory_create_dataclass_with_list_field():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
@@ -259,7 +259,7 @@ def test_factory_create_dataclass_with_list_field():
 
 
 def test_factory_create_dataclass_with_dict_field():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
@@ -274,7 +274,7 @@ def test_factory_create_dataclass_with_dict_field():
 
 
 def test_factory_rejects_local_class():
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     def _make_local():
         @dataclasses.dataclass
@@ -319,7 +319,7 @@ class _RoundTripRecord:
 
 def test_factory_reconstruct_from_arrow():
     """reconstruct_from_arrow rebuilds the logical type from the Arrow struct."""
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DataclassLogicalType
 
     storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.int64())])
     metadata = {"category": "orcapod.dataclass"}
@@ -336,7 +336,7 @@ def test_factory_reconstruct_from_arrow():
 
 def test_factory_reconstruct_from_arrow_invalid_fqcn():
     """ImportError if the FQCN cannot be resolved."""
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     storage = pa.struct([pa.field("x", pa.int64())])
     factory = DataclassLogicalTypeFactory()
@@ -350,7 +350,7 @@ def test_factory_reconstruct_from_arrow_invalid_fqcn():
 
 def test_reconstruct_from_arrow_registers_nested_types():
     """reconstruct_from_arrow for Outer must register Inner as a side effect."""
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     # Build the storage type for _OuterForRegistrationTest manually (as it would come
     # from Parquet): outer struct with an inner struct field (Inner is stored as a struct,
@@ -379,7 +379,7 @@ def test_dataclass_python_to_storage_round_trip():
     """python_to_storage → storage_to_python returns an equivalent dataclass."""
     converter = _make_full_converter()
 
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
     factory = DataclassLogicalTypeFactory()
     lt = factory.create_for_python_type(_RoundTripPoint, converter=converter)
     converter.register_logical_type(lt)
@@ -396,7 +396,7 @@ def test_dataclass_python_to_storage_round_trip():
 
 def test_dataclass_with_uuid_round_trip():
     """Round-trip a dataclass with a UUID field through python_to_storage / storage_to_python."""
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
     converter = _make_full_converter()
     factory = DataclassLogicalTypeFactory()
@@ -431,7 +431,7 @@ class _OuterForNestedTest:
 
 def test_import_from_fqcn_nested_class():
     """_import_from_fqcn resolves module-level nested dataclasses via attribute walk."""
-    from orcapod.extension_types.dataclass_logical_type_factory import _import_from_fqcn
+    from orcapod.logical_types.dataclass_logical_type_factory import _import_from_fqcn
 
     # _OuterForNestedTest.Inner lives in this test module; its FQCN uses '.' for nesting
     module = _OuterForNestedTest.__module__
@@ -446,7 +446,7 @@ def test_import_from_fqcn_nested_class():
 
 def test_python_to_storage_raises_when_converter_none():
     """DataclassLogicalType.python_to_storage raises ValueError when converter is None."""
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
 
     @dataclasses.dataclass
     class _DC:
@@ -460,7 +460,7 @@ def test_python_to_storage_raises_when_converter_none():
 
 def test_storage_to_python_raises_when_converter_none():
     """DataclassLogicalType.storage_to_python raises ValueError when converter is None."""
-    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalType
+    from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalType
 
     @dataclasses.dataclass
     class _DC:
@@ -475,13 +475,13 @@ def test_storage_to_python_raises_when_converter_none():
 def test_nested_dataclass_parquet_roundtrip(tmp_path):
     """Fresh-process Parquet round-trip for a two-level nested dataclass.
 
-    Verifies that register_discovered_extensions triggers the chain:
-      register_arrow_extension("Outer") -> reconstruct_from_arrow
+    Verifies that register_discovered_logical_types triggers the chain:
+      register_logical_type_from_arrow_metadata("Outer") -> reconstruct_from_arrow
         -> register_python_class(Inner) -> registers Inner
     so that storage_to_python can reconstruct the full nested object.
     """
     import pyarrow.parquet as pq
-    from orcapod.extension_types.database_hooks import register_discovered_extensions, apply_extension_types
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types, apply_logical_types
 
     # ── Write path ───────────────────────────────────────────────────────────
     write_converter = _make_full_converter()
@@ -505,10 +505,10 @@ def test_nested_dataclass_parquet_roundtrip(tmp_path):
     read_converter = _make_full_converter()
     read_table = pq.read_table(parquet_path)
 
-    # register_discovered_extensions triggers: Outer -> reconstruct_from_arrow
+    # register_discovered_logical_types triggers: Outer -> reconstruct_from_arrow
     # -> register_python_class(Inner) -> registers Inner
-    register_discovered_extensions(read_converter, read_table.schema)
-    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+    register_discovered_logical_types(read_converter, read_table.schema)
+    read_table = apply_logical_types(read_table, read_converter._logical_type_registry)
 
     # Both types must now be registered
     assert read_converter._logical_type_registry.get_by_python_type(_OuterForRegistrationTest) is not None
@@ -532,7 +532,7 @@ def test_list_of_nested_dataclass_parquet_roundtrip(tmp_path):
     round-trips through Parquet without data loss.
     """
     import pyarrow.parquet as pq
-    from orcapod.extension_types.database_hooks import register_discovered_extensions, apply_extension_types
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types, apply_logical_types
 
     # ── Write path ───────────────────────────────────────────────────────────
     write_converter = _make_full_converter()
@@ -554,8 +554,8 @@ def test_list_of_nested_dataclass_parquet_roundtrip(tmp_path):
     # ── Read path (fresh converter) ──────────────────────────────────────────
     read_converter = _make_full_converter()
     read_table = pq.read_table(parquet_path)
-    register_discovered_extensions(read_converter, read_table.schema)
-    read_table = apply_extension_types(read_table, read_converter._logical_type_registry)
+    register_discovered_logical_types(read_converter, read_table.schema)
+    read_table = apply_logical_types(read_table, read_converter._logical_type_registry)
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1

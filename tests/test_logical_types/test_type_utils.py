@@ -1,4 +1,4 @@
-"""Tests for extension_types.type_utils helpers."""
+"""Tests for logical_types.type_utils helpers."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from typing import Optional, Union
 
 import pytest
 
-from orcapod.extension_types.type_utils import _extract_leaf_classes as extract_leaf_classes
-from orcapod.extension_types.type_utils import _walk_fqcn
+from orcapod.logical_types.type_utils import _extract_leaf_classes as extract_leaf_classes
+from orcapod.logical_types.type_utils import _walk_fqcn
 
 
 class _A:
@@ -170,7 +170,7 @@ def test_walk_fqcn_reraises_when_dep_name_is_bare_prefix_of_module(monkeypatch):
 
 def test_import_from_fqcn_raises_for_non_dataclass():
     """_import_from_fqcn raises ImportError when FQCN resolves to a non-dataclass."""
-    from orcapod.extension_types.dataclass_logical_type_factory import _import_from_fqcn
+    from orcapod.logical_types.dataclass_logical_type_factory import _import_from_fqcn
     # pathlib.Path is importable via _walk_fqcn but is not a dataclass
     with pytest.raises(ImportError):
         _import_from_fqcn("pathlib.Path")

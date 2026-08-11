@@ -5,8 +5,8 @@ from __future__ import annotations
 import pyarrow as pa
 import polars as pl
 
-from orcapod.extension_types.protocols import LogicalTypeProtocol
-from orcapod.extension_types.registry import make_arrow_extension_type
+from orcapod.logical_types.protocols import LogicalTypeProtocol
+from orcapod.logical_types.registry import make_arrow_extension_type
 
 
 class _StubLogicalType:
@@ -61,13 +61,13 @@ class _StubFactory:
 
 
 def test_type_converter_protocol_is_importable():
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
     assert TypeConverterProtocol is not None
 
 
 def test_factory_supports_class_method_required():
     """LogicalTypeFactoryProtocol requires supports_class."""
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol
 
     class _BadFactory:
         def reconstruct_from_arrow(self, name, storage_type, metadata, converter):
@@ -80,7 +80,7 @@ def test_factory_supports_class_method_required():
 
 
 def test_factory_with_supports_class_satisfies_protocol():
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol
 
     class _GoodFactory:
         def supports_class(self, python_type):
@@ -95,7 +95,7 @@ def test_factory_with_supports_class_satisfies_protocol():
 
 def test_logical_type_python_to_storage_accepts_converter():
     """LogicalTypeProtocol.python_to_storage now requires converter param."""
-    from orcapod.extension_types.protocols import LogicalTypeProtocol
+    from orcapod.logical_types.protocols import LogicalTypeProtocol
 
     class _GoodLT:
         @property
@@ -113,20 +113,20 @@ def test_logical_type_python_to_storage_accepts_converter():
 
 
 def test_logical_type_factory_protocol_is_importable():
-    """LogicalTypeFactoryProtocol can be imported from extension_types.protocols."""
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    """LogicalTypeFactoryProtocol can be imported from logical_types.protocols."""
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol
     assert LogicalTypeFactoryProtocol is not None
 
 
 def test_logical_type_factory_conforming_class_satisfies_protocol():
     """A conforming class is recognized as a LogicalTypeFactoryProtocol instance."""
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol
     assert isinstance(_StubFactory(), LogicalTypeFactoryProtocol)
 
 
 def test_logical_type_factory_create_returns_logical_type():
     """A conforming factory returns a LogicalTypeProtocol from reconstruct_from_arrow."""
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
     factory: LogicalTypeFactoryProtocol = _StubFactory()
     result = factory.reconstruct_from_arrow(
         "test.ext", pa.large_utf8(), {"category": "Test"}, converter=None
@@ -135,7 +135,7 @@ def test_logical_type_factory_create_returns_logical_type():
 
 
 def test_protocol_is_importable():
-    """LogicalTypeProtocol can be imported from extension_types.protocols."""
+    """LogicalTypeProtocol can be imported from logical_types.protocols."""
     assert LogicalTypeProtocol is not None
 
 
@@ -157,7 +157,7 @@ def test_conforming_class_satisfies_protocol():
 
 def test_factory_create_for_python_type_conformance():
     """A conforming factory implements create_for_python_type and returns LogicalTypeProtocol."""
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
     factory: LogicalTypeFactoryProtocol = _StubFactory()
     assert isinstance(factory, LogicalTypeFactoryProtocol)
     result = factory.create_for_python_type(str, converter=None)
@@ -166,5 +166,5 @@ def test_factory_create_for_python_type_conformance():
 
 def test_type_converter_protocol_has_arrow_type_to_python_type():
     """TypeConverterProtocol must declare arrow_type_to_python_type."""
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
     assert "arrow_type_to_python_type" in TypeConverterProtocol.__protocol_attrs__

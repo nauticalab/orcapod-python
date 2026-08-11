@@ -43,8 +43,8 @@ from . import types  # noqa: F401
 from pathlib import Path
 from upath import UPath
 from uuid import UUID
-from orcapod.extension_types.file_type import File
-from orcapod.extension_types.directory_type import Directory
+from orcapod.logical_types.file_type import File
+from orcapod.logical_types.directory_type import Directory
 
 # Extension registration API (ITL-473)
 from .extensions import OrcapodExtension, register_extension

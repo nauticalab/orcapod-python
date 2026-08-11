@@ -1,13 +1,13 @@
-"""Arrow/Polars extension type system for orcapod.
+"""Logical type system for orcapod.
 
-This subpackage provides the registry and protocol for logical types that map
-between Python objects and their Arrow/Polars extension type representation.
+This subpackage provides the registry and protocol for logical types that bind
+Python classes to their Arrow/Polars extension type representation.
 
 Built-in registrations (``LogicalPath``, ``LogicalUPath``, ``LogicalUUID``) are
 wired into ``DataContext`` via ``contexts/data/v0.1.json``. Use
 ``get_default_context().type_converter.register_python_class()`` to register new
 types, ``register_logical_type_factory()`` to add factories, and
-``apply_extension_types()`` to re-wrap Arrow tables with their registered extension types.
+``apply_logical_types()`` to re-wrap Arrow tables with their registered extension types.
 
 ``DataclassLogicalTypeFactory`` provides automatic registration for Python dataclasses:
 register it with a ``LogicalTypeRegistry`` and any dataclass used in a ``FunctionPod``
@@ -22,7 +22,7 @@ from __future__ import annotations
 from .protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
-from .database_hooks import apply_extension_types, register_discovered_extensions
+from .database_hooks import apply_logical_types, register_discovered_logical_types
 from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
 from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalType, PydanticLogicalTypeFactory
 from .list_logical_type_factory import LIST_CATEGORY, SET_CATEGORY, ListLogicalType, ListLogicalTypeFactory
@@ -42,8 +42,8 @@ __all__ = [
     "walk_schema",
     "walk_field",
     # PLT-1655
-    "register_discovered_extensions",
-    "apply_extension_types",
+    "register_discovered_logical_types",
+    "apply_logical_types",
     # PLT-1705
     "DATACLASS_CATEGORY",
     "DataclassLogicalType",

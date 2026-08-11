@@ -1,4 +1,4 @@
-"""Tests for apply_extension_types in database_hooks."""
+"""Tests for apply_logical_types in database_hooks."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import uuid
 import pyarrow as pa
 import pytest
 
-from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type
 
 
 # ---------------------------------------------------------------------------
@@ -82,23 +82,23 @@ def _degraded_table_with_metadata(
 
 def test_noop_when_no_extension_metadata():
     """Table with plain Arrow types is returned unchanged."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     registry = LogicalTypeRegistry()
     table = pa.table({"x": pa.array([1, 2, 3], type=pa.int32())})
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
     assert result is table  # same object — nothing to do
 
 
 def test_wraps_storage_column_into_extension_type():
     """A column with extension field metadata is re-wrapped into the registered type."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
     table = _degraded_table_with_metadata(name, pa.large_utf8(), ["hello", "world"])
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     assert result.schema.field("col").type == ext_type
     assert result.column("col").to_pylist() == ["hello", "world"]
@@ -106,13 +106,13 @@ def test_wraps_storage_column_into_extension_type():
 
 def test_zero_copy_single_chunk():
     """from_storage wrapping shares the underlying buffer — no data copy."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, _ = _make_registry_with_type(name, pa.large_utf8())
     table = _degraded_table_with_metadata(name, pa.large_utf8(), ["a", "b"])
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     orig_buf = table.column("col").chunk(0).buffers()[2]
     new_buf = result.column("col").chunk(0).buffers()[2]
@@ -121,7 +121,7 @@ def test_zero_copy_single_chunk():
 
 def test_zero_copy_multiple_chunks():
     """Multi-chunk columns are wrapped per-chunk, all buffers shared."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
@@ -137,7 +137,7 @@ def test_zero_copy_multiple_chunks():
     schema = pa.schema([field])
     table = pa.table({"col": chunked}, schema=schema)
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
     result_col = result.column("col")
 
     assert result.schema.field("col").type == ext_type
@@ -150,7 +150,7 @@ def test_zero_copy_multiple_chunks():
 
 def test_already_extension_type_passthrough():
     """Column already carrying an extension type is returned as-is."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
@@ -158,19 +158,19 @@ def test_already_extension_type_passthrough():
     arr = pa.ExtensionArray.from_storage(ext_type, pa.array(["a"], type=pa.large_utf8()))
     table = pa.table({"col": arr})
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
     assert result is table
 
 
 def test_unregistered_extension_metadata_left_as_storage():
     """A column whose extension type is not in the registry stays as storage type."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry = LogicalTypeRegistry()  # no types registered
     table = _degraded_table_with_metadata(name, pa.large_utf8(), ["v"])
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     # Column stays as large_utf8 — registry has nothing to apply
     assert result.schema.field("col").type == pa.large_utf8()
@@ -178,7 +178,7 @@ def test_unregistered_extension_metadata_left_as_storage():
 
 def test_nested_struct_extension_type():
     """Extension type inside a struct child field is reconstructed recursively."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
@@ -194,7 +194,7 @@ def test_nested_struct_extension_type():
     schema = pa.schema([pa.field("s", struct_type)])
     table = pa.table({"s": struct_col}, schema=schema)
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     result_struct_type = result.schema.field("s").type
     assert pa.types.is_struct(result_struct_type)
@@ -205,7 +205,7 @@ def test_nested_struct_extension_type():
 
 def test_mixed_columns_only_ext_columns_changed():
     """Plain columns are left untouched when an extension column is processed."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
@@ -221,7 +221,7 @@ def test_mixed_columns_only_ext_columns_changed():
         schema=schema,
     )
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     assert result.schema.field("ext_col").type == ext_type
     assert result.schema.field("plain_col").type == pa.int32()
@@ -230,7 +230,7 @@ def test_mixed_columns_only_ext_columns_changed():
 
 def test_schema_level_metadata_preserved():
     """Schema-level metadata (e.g. pandas metadata) is preserved when rebuilding schema."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
@@ -243,7 +243,7 @@ def test_schema_level_metadata_preserved():
     schema = pa.schema([ext_field], metadata=schema_meta)
     table = pa.table({"col": pa.array(["x"], type=pa.large_utf8())}, schema=schema)
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     assert result.schema.field("col").type == ext_type
     assert result.schema.metadata == schema_meta
@@ -251,7 +251,7 @@ def test_schema_level_metadata_preserved():
 
 def test_plain_struct_not_rebuilt():
     """A struct column with no extension children is returned as-is without rebuilding."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     registry = LogicalTypeRegistry()  # empty — nothing registered
     inner_field = pa.field("x", pa.int32())
@@ -262,7 +262,7 @@ def test_plain_struct_not_rebuilt():
     schema = pa.schema([pa.field("s", struct_type)])
     table = pa.table({"s": struct_col}, schema=schema)
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     # Nothing changed — same object returned
     assert result is table
@@ -270,7 +270,7 @@ def test_plain_struct_not_rebuilt():
 
 def test_struct_null_bitmap_preserved():
     """Null struct rows retain their null status after extension type wrapping."""
-    from orcapod.extension_types.database_hooks import apply_extension_types
+    from orcapod.logical_types.database_hooks import apply_logical_types
 
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
@@ -290,7 +290,7 @@ def test_struct_null_bitmap_preserved():
     schema = pa.schema([pa.field("s", struct_type)])
     table = pa.table({"s": struct_col}, schema=schema)
 
-    result = apply_extension_types(table, registry)
+    result = apply_logical_types(table, registry)
 
     result_col = result.column("s")
     assert result_col.null_count == 1

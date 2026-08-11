@@ -22,25 +22,31 @@ if TYPE_CHECKING:
 class TypeConverterProtocol(Protocol):
     """Minimal protocol exposing what factories and logical types need from the converter.
 
-    Placed in ``extension_types/protocols.py`` to avoid circular imports.
+    Placed in ``logical_types/protocols.py`` to avoid circular imports.
     ``UniversalTypeConverter`` is the canonical implementation.
     """
 
     def register_python_class(self, annotation: Any) -> "pa.DataType":
-        """Traverse a Python annotation, register any logical types found, and return
-        the storage-safe Arrow type.
+        """Ensure a ``LogicalType`` is registered for ``annotation`` and return the Arrow column data type.
 
-        The returned type may be a ``pa.ExtensionType`` at the top level for registered
-        classes (e.g. ``UUID`` → ``orcapod.uuid`` extension type), but struct fields and
-        list value types at any depth are always plain (non-extension) Arrow types.
+        Traverses generic annotations recursively. For each concrete class found,
+        either returns from the primitive map or registry (cache hit), or
+        synthesises via factory and registers the result.
+
+        The returned ``pa.DataType`` describes what the column looks like in Arrow
+        storage: a ``pa.ExtensionType`` when the class has a registered ``LogicalType``
+        (e.g. ``uuid.UUID`` → ``orcapod.uuid``), or a plain Arrow type otherwise
+        (e.g. ``str`` → ``pa.large_string()``). Struct fields and list value types
+        are always plain (non-extension) Arrow types, regardless of what the element
+        logical type is — this is the ET1 constraint.
 
         Args:
             annotation: A Python type or generic alias (e.g. ``list[str]``,
                 ``Optional[uuid.UUID]``, a dataclass type).
 
         Returns:
-            A storage-safe ``pa.DataType``. May be ``pa.ExtensionType`` at the top level;
-            never contains nested extension types in struct/list fields.
+            A ``pa.DataType`` for the Arrow column. May be ``pa.ExtensionType`` at the
+            top level; never contains nested extension types in struct/list fields.
         """
         ...
 
@@ -69,25 +75,48 @@ class TypeConverterProtocol(Protocol):
         """Convert an Arrow storage value back to a Python object."""
         ...
 
-    def apply_extension_types(self, table: "pa.Table") -> "pa.Table":
+    def apply_logical_types(self, table: "pa.Table") -> "pa.Table":
         """Re-wrap table columns into their registered Arrow extension types."""
         ...
 
-    def register_discovered_extensions(self, schema: "pa.Schema") -> None:
+    def register_discovered_logical_types(self, schema: "pa.Schema") -> None:
         """Register any extension types found in ``schema`` that are not yet known."""
         ...
 
-    def load_extension_types(self, table: "pa.Table") -> "pa.Table":
+    def load_logical_types(self, table: "pa.Table") -> "pa.Table":
         """Register and apply extension types for *table* in one step."""
         ...
 
-    def register_arrow_extension(
+    def register_logical_type_from_arrow_metadata(
         self,
         arrow_extension_name: str,
         extension_metadata: "bytes | None",
         storage_type: "pa.DataType",
     ) -> "pa.DataType":
-        """Register an extension type from (name, metadata, storage_type) and return the Arrow type."""
+        """Reconstruct and register a ``LogicalType`` from Arrow schema metadata.
+
+        Called during the read path when an Arrow extension type is discovered in a
+        Parquet or IPC schema. Parses the JSON ``extension_metadata`` (from the
+        ``ARROW:extension:metadata`` field) to find the ``"category"`` key, then
+        delegates to the matching ``LogicalTypeFactoryProtocol.reconstruct_from_arrow``
+        to re-create the ``LogicalType`` and register it.
+
+        The ``storage_type`` must already be resolved (nested extension types
+        registered bottom-up) before calling this method.
+
+        Args:
+            arrow_extension_name: Arrow extension name (``ARROW:extension:name``).
+            extension_metadata: Raw metadata bytes, expected to be UTF-8 JSON with
+                at least a ``"category"`` key. ``None`` or empty bytes if absent.
+            storage_type: Underlying Arrow storage type (already bottom-up resolved).
+
+        Returns:
+            The Arrow extension type after registration.
+
+        Raises:
+            ValueError: If metadata is missing, malformed, lacks ``"category"``, or
+                no factory is registered for the category.
+        """
         ...
 
     def arrow_type_to_python_type(self, arrow_type: "pa.DataType") -> "DataType":
@@ -107,7 +136,7 @@ class TypeConverterProtocol(Protocol):
         """Return the registered logical type for *arrow_ext_name*, or ``None``.
 
         Used by ``ListLogicalTypeFactory.reconstruct_from_arrow`` to retrieve the
-        element logical type after ``register_arrow_extension`` has registered it.
+        element logical type after ``register_logical_type_from_arrow_metadata`` has registered it.
 
         Args:
             arrow_ext_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).

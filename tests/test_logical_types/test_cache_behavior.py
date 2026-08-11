@@ -1,7 +1,7 @@
 """Integration tests for per-process extension type cache behaviour.
 
 The ``LogicalTypeRegistry`` stores registered types in an in-memory dict keyed
-by Arrow extension name.  ``register_discovered_extensions`` skips the factory
+by Arrow extension name.  ``register_discovered_logical_types`` skips the factory
 call (``reconstruct_from_arrow``) when the extension name is already present in
 the registry — this is the "cache hit" path.
 
@@ -22,7 +22,7 @@ from unittest.mock import patch
 import pyarrow.parquet as pq
 
 from orcapod.contexts import create_registry
-from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
 
 
 # Module-level dataclass — local classes cannot be reconstructed from FQCN.
@@ -60,10 +60,10 @@ def _write_parquet(tmp_path, converter) -> str:
 
 
 def test_cache_populated_after_first_read(tmp_path):
-    """Registry has _CachePoint after load_extension_types on a fresh converter.
+    """Registry has _CachePoint after load_logical_types on a fresh converter.
 
     Before reading: the fresh converter's registry does not know about _CachePoint.
-    After reading: register_discovered_extensions triggers reconstruct_from_arrow
+    After reading: register_discovered_logical_types triggers reconstruct_from_arrow
     which registers _CachePoint, populating the cache.
     """
     write_converter = _fresh_converter()
@@ -75,7 +75,7 @@ def test_cache_populated_after_first_read(tmp_path):
     # Before read: not registered
     assert read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn) is None
 
-    read_converter.load_extension_types(pq.read_table(parquet_path))
+    read_converter.load_logical_types(pq.read_table(parquet_path))
 
     # After read: registered (cache populated)
     assert read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn) is not None
@@ -84,11 +84,11 @@ def test_cache_populated_after_first_read(tmp_path):
 def test_factory_not_called_on_second_read(tmp_path):
     """reconstruct_from_arrow called once on first read, zero times on second read.
 
-    On first read, register_discovered_extensions finds _CachePoint's extension
+    On first read, register_discovered_logical_types finds _CachePoint's extension
     name in the schema, dispatches to the factory (call count = 1), and stores
     the result in the registry.
 
-    On second read, register_discovered_extensions finds the extension name already
+    On second read, register_discovered_logical_types finds the extension name already
     in the registry and short-circuits — the factory is not called again
     (call count remains 1).
     """
@@ -104,11 +104,11 @@ def test_factory_not_called_on_second_read(tmp_path):
         wraps=DataclassLogicalTypeFactory.reconstruct_from_arrow,
     ) as spy:
         # First read: factory is called once
-        read_converter.load_extension_types(pq.read_table(parquet_path))
+        read_converter.load_logical_types(pq.read_table(parquet_path))
         assert spy.call_count == 1, f"Expected 1 factory call, got {spy.call_count}"
 
         # Second read on the same file: registry hit — factory not called again
-        read_converter.load_extension_types(pq.read_table(parquet_path))
+        read_converter.load_logical_types(pq.read_table(parquet_path))
         assert spy.call_count == 1, (
             f"Expected still 1 factory call after second read, got {spy.call_count}"
         )

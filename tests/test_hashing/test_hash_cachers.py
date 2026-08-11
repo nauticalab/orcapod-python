@@ -175,8 +175,8 @@ class TestSqliteHashCacher:
 def restore_default_file_handler():
     """Restore the default FileHandler and DirectoryHandler after each test."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.directory_type import Directory
-    from orcapod.extension_types.file_type import File
+    from orcapod.logical_types.directory_type import Directory
+    from orcapod.logical_types.file_type import File
 
     context = get_default_context()
     registry = context.semantic_hasher.type_handler_registry
@@ -190,7 +190,7 @@ def restore_default_file_handler():
 class TestEnableFileHashCaching:
     def test_registers_cached_file_hasher(self, restore_default_file_handler, tmp_path):
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
         from orcapod.hashing.file_hashers import CachedFileHasher
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db")
@@ -205,7 +205,7 @@ class TestEnableFileHashCaching:
     ):
         import logging
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
         from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db")
@@ -227,7 +227,7 @@ class TestEnableFileHashCaching:
         self, restore_default_file_handler, tmp_path
     ):
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db")
 
@@ -242,7 +242,7 @@ class TestEnableFileHashCaching:
     ):
         """After enable_file_hash_caching(), DirectoryHandler uses CachedFileHasher."""
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.directory_type import Directory
+        from orcapod.logical_types.directory_type import Directory
         from orcapod.hashing.file_hashers import CachedFileHasher
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db")
@@ -257,8 +257,8 @@ class TestEnableFileHashCaching:
     ):
         """FileHandler and DirectoryHandler share the exact same CachedFileHasher instance."""
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.directory_type import Directory
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.directory_type import Directory
+        from orcapod.logical_types.file_type import File
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db")
 
@@ -274,7 +274,7 @@ class TestEnableFileHashCaching:
         self, restore_default_file_handler, tmp_path
     ):
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
         from orcapod.hashing.hash_cachers import SqliteHashCacher
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db", read_only=True)
@@ -291,7 +291,7 @@ class TestEnableFileHashCaching:
         self, restore_default_file_handler, tmp_path
     ):
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
         from orcapod.hashing.hash_cachers import SqliteHashCacher
 
         enable_file_hash_caching(
@@ -310,7 +310,7 @@ class TestEnableFileHashCaching:
         self, restore_default_file_handler, tmp_path
     ):
         from orcapod.contexts import enable_file_hash_caching, get_default_context
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
         from orcapod.hashing.hash_cachers import SqliteHashCacher
 
         enable_file_hash_caching(db_path=tmp_path / "cache.db", match_mtime=False)

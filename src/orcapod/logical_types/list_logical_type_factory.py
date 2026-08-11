@@ -19,14 +19,14 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from orcapod.extension_types.base_logical_type import BaseLogicalType
-from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    from orcapod.extension_types.protocols import LogicalTypeProtocol, TypeConverterProtocol
+    from orcapod.logical_types.protocols import LogicalTypeProtocol, TypeConverterProtocol
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -57,7 +57,7 @@ class ListLogicalType(BaseLogicalType):
             ``False`` (``list[T]`` semantics).
 
     Example:
-        >>> from orcapod.extension_types.builtin_logical_types import LogicalUUID
+        >>> from orcapod.logical_types.builtin_logical_types import LogicalUUID
         >>> lt = ListLogicalType(LogicalUUID(), is_set=False)
         >>> lt.logical_type_name
         'list[orcapod.uuid]'
@@ -230,8 +230,9 @@ class ListLogicalTypeFactory:
     No ``python_bases`` are registered — write-path dispatch is handled explicitly in
     ``UniversalTypeConverter._register_python_class_impl`` and ``_convert_python_to_arrow``.
 
-    Read path only (``reconstruct_from_arrow``). ``create_for_python_type`` raises
-    ``NotImplementedError`` because explicit dispatch makes it unnecessary.
+    Both ``create_for_python_type`` (write path) and ``reconstruct_from_arrow`` (read path)
+    are implemented. Write-path dispatch for list/set is also handled explicitly in
+    ``UniversalTypeConverter._register_python_class_impl`` and ``_convert_python_to_arrow``.
     """
 
     def supports_class(self, python_type: type) -> bool:
@@ -250,16 +251,60 @@ class ListLogicalTypeFactory:
         python_type: type,
         converter: "TypeConverterProtocol",
     ) -> ListLogicalType:
-        """Not implemented — list/set types are registered directly in the converter.
+        """Synthesize a ``ListLogicalType`` for ``list[T]`` or ``set[T]`` (write path).
+
+        Extracts the element type from the generic alias, ensures the element
+        has a registered ``LogicalType`` via ``converter.register_python_class``,
+        and constructs the appropriate ``ListLogicalType``.
+
+        Args:
+            python_type: A ``list[T]`` or ``set[T]`` generic alias where ``T``
+                maps to a registered ``LogicalType``.
+            converter: The active converter for recursive element-type resolution.
+
+        Returns:
+            A ``ListLogicalType`` ready for registration.
 
         Raises:
-            NotImplementedError: Always.
+            ValueError: If ``python_type`` is not ``list[T]`` or ``set[T]``, if
+                it lacks a type argument, or if ``T`` has no registered ``LogicalType``.
         """
-        raise NotImplementedError(
-            "ListLogicalTypeFactory does not implement create_for_python_type. "
-            "list[T] and set[T] logical types are created explicitly in "
-            "UniversalTypeConverter._register_python_class_impl."
+        import typing
+        origin = typing.get_origin(python_type)
+        args = typing.get_args(python_type)
+
+        if origin not in (list, set):
+            raise ValueError(
+                f"ListLogicalTypeFactory.create_for_python_type: expected list[T] or "
+                f"set[T], got {python_type!r}."
+            )
+        if not args:
+            raise ValueError(
+                f"ListLogicalTypeFactory.create_for_python_type: {python_type!r} has no "
+                f"type argument. Use list[T] or set[T] with a concrete element type."
+            )
+
+        element_annotation = args[0]
+        is_set = origin is set
+
+        # Register the element type and get its Arrow representation.
+        element_arrow_type = converter.register_python_class(element_annotation)
+
+        # The element must map to a LogicalType (i.e. be an Arrow extension type).
+        element_lt = converter.get_logical_type_by_arrow_name(
+            element_arrow_type.extension_name
+            if hasattr(element_arrow_type, "extension_name")
+            else ""
         )
+        if element_lt is None:
+            raise ValueError(
+                f"ListLogicalTypeFactory.create_for_python_type: element type "
+                f"{element_annotation!r} has no registered LogicalType. "
+                f"Only list[T]/set[T] where T maps to a LogicalType are supported; "
+                f"use plain list[{element_annotation}] for primitive element types."
+            )
+
+        return ListLogicalType(element_lt, is_set=is_set)
 
     def reconstruct_from_arrow(
         self,
@@ -270,7 +315,7 @@ class ListLogicalTypeFactory:
     ) -> ListLogicalType:
         """Reconstruct a ``ListLogicalType`` from Arrow schema metadata (read path).
 
-        Recursively calls ``converter.register_arrow_extension`` for the element type,
+        Recursively calls ``converter.register_logical_type_from_arrow_metadata`` for the element type,
         ensuring the element logical type is registered before constructing the outer
         ``ListLogicalType``. Handles arbitrary nesting depth via recursion.
 
@@ -309,7 +354,7 @@ class ListLogicalTypeFactory:
         element_storage_type = storage_type.value_type
 
         # Recursively register the element logical type (handles nesting).
-        converter.register_arrow_extension(
+        converter.register_logical_type_from_arrow_metadata(
             element_ext_name, element_meta_bytes, element_storage_type
         )
 
@@ -319,7 +364,7 @@ class ListLogicalTypeFactory:
             raise ValueError(
                 f"ListLogicalTypeFactory.reconstruct_from_arrow: element extension "
                 f"{element_ext_name!r} was registered but no logical type found. "
-                f"This is a bug in register_arrow_extension."
+                f"This is a bug in register_logical_type_from_arrow_metadata."
             )
 
         is_set = metadata.get("category") == SET_CATEGORY

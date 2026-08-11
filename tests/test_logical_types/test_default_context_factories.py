@@ -9,15 +9,15 @@ import pyarrow.parquet as pq
 from pydantic import BaseModel
 
 from orcapod.contexts import create_registry
-from orcapod.extension_types.dataclass_logical_type_factory import (
+from orcapod.logical_types.dataclass_logical_type_factory import (
     DataclassLogicalTypeFactory,
     DATACLASS_CATEGORY,
 )
-from orcapod.extension_types.pydantic_logical_type_factory import (
+from orcapod.logical_types.pydantic_logical_type_factory import (
     PydanticLogicalTypeFactory,
     PYDANTIC_CATEGORY,
 )
-from orcapod.extension_types.registry import LogicalTypeRegistry
+from orcapod.logical_types.registry import LogicalTypeRegistry
 
 
 # ── Module-level dataclasses (local classes cannot be registered) ────────────
@@ -129,7 +129,7 @@ def test_default_context_dataclass_parquet_roundtrip(tmp_path):
 
     # Read path — another fresh context, no manual factory setup
     read_converter = create_registry().get_context().type_converter
-    read_table = read_converter.load_extension_types(pq.read_table(parquet_path))
+    read_table = read_converter.load_logical_types(pq.read_table(parquet_path))
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1
@@ -153,7 +153,7 @@ def test_default_context_pydantic_parquet_roundtrip(tmp_path):
 
     # Read path — another fresh context, no manual factory setup
     read_converter = create_registry().get_context().type_converter
-    read_table = read_converter.load_extension_types(pq.read_table(parquet_path))
+    read_table = read_converter.load_logical_types(pq.read_table(parquet_path))
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1

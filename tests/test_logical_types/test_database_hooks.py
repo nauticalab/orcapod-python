@@ -1,4 +1,4 @@
-"""Tests for register_discovered_extensions in database_hooks."""
+"""Tests for register_discovered_logical_types in database_hooks."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import uuid
 import pyarrow as pa
 import pytest
 
-from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
@@ -72,7 +72,7 @@ def _make_stub_factory():
 
         def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, converter):
             import polars as pl
-            from orcapod.extension_types.registry import make_arrow_extension_type
+            from orcapod.logical_types.registry import make_arrow_extension_type
 
             self.calls.append((arrow_extension_name, storage_type, metadata))
 
@@ -135,21 +135,21 @@ def fresh_converter():
 # ---------------------------------------------------------------------------
 
 def test_no_extension_types_is_noop(fresh_converter):
-    """Schema with only primitives — register_discovered_extensions returns without touching registry."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    """Schema with only primitives — register_discovered_logical_types returns without touching registry."""
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     schema = pa.schema([
         pa.field("id", pa.int64()),
         pa.field("name", pa.large_utf8()),
     ])
-    register_discovered_extensions(fresh_converter, schema)
+    register_discovered_logical_types(fresh_converter, schema)
     # fresh registry is empty — no error means no spurious lookup was triggered
     assert fresh_converter._logical_type_registry.get_by_arrow_extension_name("anything") is None
 
 
 def test_known_type_is_registered():
     """Schema with one extension type whose factory is registered — type is registered after call."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
@@ -158,15 +158,15 @@ def test_known_type_is_registered():
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema = _make_ext_schema(arrow_name, metadata=metadata_bytes)
 
-    register_discovered_extensions(converter, schema)
+    register_discovered_logical_types(converter, schema)
 
     assert converter._logical_type_registry.get_by_arrow_extension_name(arrow_name) is not None
     assert len(factory.calls) == 1
 
 
 def test_already_registered_is_skipped():
-    """Calling register_discovered_extensions twice does not raise and factory is called once."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    """Calling register_discovered_logical_types twice does not raise and factory is called once."""
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
@@ -175,15 +175,15 @@ def test_already_registered_is_skipped():
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema = _make_ext_schema(arrow_name, metadata=metadata_bytes)
 
-    register_discovered_extensions(converter, schema)
-    register_discovered_extensions(converter, schema)  # second call
+    register_discovered_logical_types(converter, schema)
+    register_discovered_logical_types(converter, schema)  # second call
 
     assert len(factory.calls) == 1  # factory invoked exactly once
 
 
 def test_none_metadata_already_registered_noop():
     """Extension type with None metadata that IS already in the registry — silent no-op."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
@@ -192,41 +192,41 @@ def test_none_metadata_already_registered_noop():
     # First: register via metadata so it ends up in the registry.
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema_with_meta = _make_ext_schema(arrow_name, metadata=metadata_bytes)
-    register_discovered_extensions(converter, schema_with_meta)
+    register_discovered_logical_types(converter, schema_with_meta)
 
     # Now: same arrow name but with no metadata (simulates reading the schema without
     # metadata — e.g. after an IPC round-trip where the type is now registered in-process).
     schema_no_meta = _make_ext_schema(arrow_name, metadata=None)
-    register_discovered_extensions(converter, schema_no_meta)  # should NOT raise
+    register_discovered_logical_types(converter, schema_no_meta)  # should NOT raise
 
 
 def test_none_metadata_not_registered_raises():
     """Unregistered extension type with None metadata raises ValueError."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     converter = _make_converter()
     schema = _make_ext_schema(arrow_name, metadata=None)
 
     with pytest.raises(ValueError, match="Pre-register them explicitly"):
-        register_discovered_extensions(converter, schema)
+        register_discovered_logical_types(converter, schema)
 
 
 def test_metadata_not_json_raises():
     """Unregistered extension type with non-JSON metadata bytes raises ValueError."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     converter = _make_converter()
     schema = _make_field_metadata_schema(arrow_name, metadata=b"not-json!")
 
     with pytest.raises(ValueError, match="not valid UTF-8 JSON"):
-        register_discovered_extensions(converter, schema)
+        register_discovered_logical_types(converter, schema)
 
 
 def test_metadata_json_missing_category_raises():
     """Unregistered extension type with valid JSON but no 'category' key raises ValueError."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     converter = _make_converter()
@@ -235,12 +235,12 @@ def test_metadata_json_missing_category_raises():
     )
 
     with pytest.raises(ValueError, match='"category"'):
-        register_discovered_extensions(converter, schema)
+        register_discovered_logical_types(converter, schema)
 
 
 def test_unknown_metadata_raises():
     """Unregistered extension type with valid JSON and 'category' but no matching factory raises ValueError."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     converter = _make_converter()
@@ -249,12 +249,12 @@ def test_unknown_metadata_raises():
     )
 
     with pytest.raises(ValueError, match="NoSuchFactory"):
-        register_discovered_extensions(converter, schema)
+        register_discovered_logical_types(converter, schema)
 
 
 def test_nested_extension_type():
     """Extension type inside a struct column is discovered and registered."""
-    from orcapod.extension_types.database_hooks import register_discovered_extensions
+    from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
@@ -266,7 +266,7 @@ def test_nested_extension_type():
     struct_type = pa.struct([pa.field("inner", inner_ext_cls())])
     schema = pa.schema([pa.field("outer", struct_type)])
 
-    register_discovered_extensions(converter, schema)
+    register_discovered_logical_types(converter, schema)
 
     assert converter._logical_type_registry.get_by_arrow_extension_name(arrow_name) is not None
     assert len(factory.calls) == 1

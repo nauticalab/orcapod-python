@@ -24,14 +24,14 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from orcapod.extension_types.base_logical_type import BaseLogicalType
-from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -360,7 +360,7 @@ def _import_pydantic_model_from_fqcn(fqcn: str) -> type:
             resolved object is not a ``BaseModel`` subclass.
     """
     from pydantic import BaseModel
-    from orcapod.extension_types.type_utils import _walk_fqcn
+    from orcapod.logical_types.type_utils import _walk_fqcn
 
     obj: Any = _walk_fqcn(fqcn)
     if not (isinstance(obj, type) and issubclass(obj, BaseModel)):

@@ -11,8 +11,8 @@ from upath import UPath
 
 import orcapod
 
-from orcapod.extension_types.protocols import LogicalTypeProtocol
-from orcapod.extension_types.registry import LogicalTypeRegistry
+from orcapod.logical_types.protocols import LogicalTypeProtocol
+from orcapod.logical_types.registry import LogicalTypeRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -22,40 +22,40 @@ from orcapod.extension_types.registry import LogicalTypeRegistry
 
 def test_logical_path_isinstance_logical_type():
     """LogicalPath() satisfies the LogicalType runtime-checkable protocol."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     assert isinstance(LogicalPath(), LogicalTypeProtocol)
 
 
 def test_logical_path_logical_type_name():
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     assert LogicalPath().logical_type_name == "orcapod.path"
 
 
 def test_logical_path_python_type():
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     assert LogicalPath().python_type is pathlib.Path
 
 
 def test_logical_path_arrow_ext_name():
     """get_arrow_extension_type().extension_name is 'orcapod.path'."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     assert LogicalPath().get_arrow_extension_type().extension_name == "orcapod.path"
 
 
 def test_logical_path_arrow_ext_storage_type():
     """Arrow extension storage type is pa.large_string()."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     assert LogicalPath().get_arrow_extension_type().storage_type == pa.large_string()
 
 
 def test_logical_path_get_arrow_extension_type_is_cached():
     """get_arrow_extension_type() returns the same object on repeated calls."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     lt = LogicalPath()
     assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
@@ -63,7 +63,7 @@ def test_logical_path_get_arrow_extension_type_is_cached():
 
 def test_logical_path_get_polars_extension_type_is_cached():
     """get_polars_extension_type() returns the same object on repeated calls."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     lt = LogicalPath()
     assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
@@ -71,7 +71,7 @@ def test_logical_path_get_polars_extension_type_is_cached():
 
 def test_logical_path_round_trip():
     """Path -> python_to_storage -> storage_to_python -> Path is identity."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     lt = LogicalPath()
     p = pathlib.Path("/tmp/foo/bar.txt")
@@ -79,7 +79,7 @@ def test_logical_path_round_trip():
 
 
 def test_logical_path_python_to_storage_returns_string():
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     lt = LogicalPath()
     result = lt.python_to_storage(pathlib.Path("/tmp/test"))
@@ -94,46 +94,46 @@ def test_logical_path_python_to_storage_returns_string():
 
 def test_logical_upath_isinstance_logical_type():
     """LogicalUPath() satisfies the LogicalType runtime-checkable protocol."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     assert isinstance(LogicalUPath(), LogicalTypeProtocol)
 
 
 def test_logical_upath_logical_type_name():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     assert LogicalUPath().logical_type_name == "orcapod.upath"
 
 
 def test_logical_upath_python_type():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     assert LogicalUPath().python_type is UPath
 
 
 def test_logical_upath_arrow_ext_name():
     """get_arrow_extension_type().extension_name is 'orcapod.upath'."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     assert LogicalUPath().get_arrow_extension_type().extension_name == "orcapod.upath"
 
 
 def test_logical_upath_arrow_ext_storage_type():
     """Arrow extension storage type is pa.large_string()."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     assert LogicalUPath().get_arrow_extension_type().storage_type == pa.large_string()
 
 
 def test_logical_upath_get_arrow_extension_type_is_cached():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     lt = LogicalUPath()
     assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
 
 def test_logical_upath_get_polars_extension_type_is_cached():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     lt = LogicalUPath()
     assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
@@ -141,7 +141,7 @@ def test_logical_upath_get_polars_extension_type_is_cached():
 
 def test_logical_upath_round_trip():
     """UPath -> python_to_storage -> storage_to_python -> UPath is identity."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     lt = LogicalUPath()
     up = UPath("s3://bucket/key/file.txt")
@@ -149,7 +149,7 @@ def test_logical_upath_round_trip():
 
 
 def test_logical_upath_python_to_storage_returns_string():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     lt = LogicalUPath()
     result = lt.python_to_storage(UPath("s3://bucket/key"))
@@ -164,26 +164,26 @@ def test_logical_upath_python_to_storage_returns_string():
 
 def test_logical_uuid_isinstance_logical_type():
     """LogicalUUID() satisfies the LogicalType runtime-checkable protocol."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     assert isinstance(LogicalUUID(), LogicalTypeProtocol)
 
 
 def test_logical_uuid_logical_type_name():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     assert LogicalUUID().logical_type_name == "orcapod.uuid"
 
 
 def test_logical_uuid_python_type():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     assert LogicalUUID().python_type is uuid_module.UUID
 
 
 def test_logical_uuid_arrow_ext_name():
     """Arrow extension name is 'orcapod.uuid', matching logical_type_name."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     assert lt.get_arrow_extension_type().extension_name == "orcapod.uuid"
@@ -192,20 +192,20 @@ def test_logical_uuid_arrow_ext_name():
 
 def test_logical_uuid_arrow_ext_storage_type():
     """Arrow extension storage type is pa.large_binary()."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     assert LogicalUUID().get_arrow_extension_type().storage_type == pa.large_binary()
 
 
 def test_logical_uuid_get_arrow_extension_type_is_cached():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
 
 def test_logical_uuid_get_polars_extension_type_is_cached():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
@@ -213,7 +213,7 @@ def test_logical_uuid_get_polars_extension_type_is_cached():
 
 def test_logical_uuid_round_trip():
     """UUID -> python_to_storage -> storage_to_python -> UUID is identity."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     u = uuid_module.uuid4()
@@ -221,7 +221,7 @@ def test_logical_uuid_round_trip():
 
 
 def test_logical_uuid_python_to_storage_returns_bytes():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
@@ -232,7 +232,7 @@ def test_logical_uuid_python_to_storage_returns_bytes():
 
 def test_logical_uuid_storage_to_python_accepts_bytes():
     """storage_to_python works when storage_value is plain bytes."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
@@ -242,7 +242,7 @@ def test_logical_uuid_storage_to_python_accepts_bytes():
 
 def test_logical_uuid_registration_does_not_raise():
     """Registering LogicalUUID succeeds and is reachable by both logical and arrow names."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     registry = LogicalTypeRegistry()
     lt = LogicalUUID()
@@ -258,7 +258,7 @@ def test_logical_uuid_registration_does_not_raise():
 
 def test_logical_path_arrow_round_trip():
     """Python -> Arrow extension array -> Python via LogicalPath."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     lt = LogicalPath()
     registry = LogicalTypeRegistry()
@@ -275,7 +275,7 @@ def test_logical_path_arrow_round_trip():
 
 def test_logical_path_polars_round_trip():
     """Python -> Arrow extension array -> Polars series -> Arrow -> Python via LogicalPath."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     lt = LogicalPath()
     registry = LogicalTypeRegistry()
@@ -294,7 +294,7 @@ def test_logical_path_polars_round_trip():
 
 def test_logical_upath_arrow_round_trip():
     """Python -> Arrow extension array -> Python via LogicalUPath."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     lt = LogicalUPath()
     registry = LogicalTypeRegistry()
@@ -311,7 +311,7 @@ def test_logical_upath_arrow_round_trip():
 
 def test_logical_upath_polars_round_trip():
     """Python -> Arrow extension array -> Polars series -> Arrow -> Python via LogicalUPath."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     lt = LogicalUPath()
     registry = LogicalTypeRegistry()
@@ -330,7 +330,7 @@ def test_logical_upath_polars_round_trip():
 
 def test_logical_uuid_arrow_round_trip():
     """Python -> Arrow extension array -> Python via LogicalUUID."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     registry = LogicalTypeRegistry()
@@ -347,7 +347,7 @@ def test_logical_uuid_arrow_round_trip():
 
 def test_logical_uuid_polars_round_trip():
     """Python -> Arrow extension array -> Polars series -> Arrow -> Python via LogicalUUID."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
     registry = LogicalTypeRegistry()
@@ -381,7 +381,7 @@ def test_default_context_has_logical_type_registry():
 def test_default_context_registry_has_logical_path():
     """Default registry returns LogicalPath for 'pathlib.Path'."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_logical_name("orcapod.path")
@@ -391,7 +391,7 @@ def test_default_context_registry_has_logical_path():
 def test_default_context_registry_lookup_by_python_type_path():
     """Default registry routes pathlib.Path to LogicalPath."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_python_type(pathlib.Path)
@@ -401,7 +401,7 @@ def test_default_context_registry_lookup_by_python_type_path():
 def test_default_context_registry_lookup_by_arrow_name_path():
     """Default registry routes 'pathlib.Path' arrow ext name to LogicalPath."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_arrow_extension_name("orcapod.path")
@@ -411,7 +411,7 @@ def test_default_context_registry_lookup_by_arrow_name_path():
 def test_default_context_registry_has_logical_upath():
     """Default registry returns LogicalUPath for 'upath.UPath'."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_logical_name("orcapod.upath")
@@ -421,7 +421,7 @@ def test_default_context_registry_has_logical_upath():
 def test_default_context_registry_lookup_by_python_type_upath():
     """Default registry routes UPath to LogicalUPath."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_python_type(UPath)
@@ -431,7 +431,7 @@ def test_default_context_registry_lookup_by_python_type_upath():
 def test_default_context_registry_has_logical_uuid():
     """Default registry returns LogicalUUID for 'uuid.UUID'."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_logical_name("orcapod.uuid")
@@ -441,7 +441,7 @@ def test_default_context_registry_has_logical_uuid():
 def test_default_context_registry_lookup_by_arrow_name_uuid():
     """Default registry routes 'uuid.UUID' arrow ext name to LogicalUUID."""
     from orcapod.contexts import get_default_context
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_arrow_extension_name("orcapod.uuid")
@@ -525,7 +525,7 @@ def test_pathlib_path_works_via_orcapod_path_alias_arrow_round_trip():
     Arrow extension type (``"orcapod.path"``), and the recovered value is a
     pathlib.Path (i.e. orcapod.Path).
     """
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
 
     # Precondition: test is only meaningful if orcapod.Path is pathlib.Path
     assert orcapod.Path is pathlib.Path
@@ -564,7 +564,7 @@ def test_upath_upath_works_via_orcapod_upath_alias_arrow_round_trip():
     Arrow extension type (``"orcapod.upath"``), and the recovered value is a
     upath.UPath (i.e. orcapod.UPath).
     """
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
 
     # Precondition: test is only meaningful if orcapod.UPath is upath.UPath
     assert orcapod.UPath is UPath
@@ -603,7 +603,7 @@ def test_uuid_uuid_works_via_orcapod_uuid_alias_arrow_round_trip():
     Arrow extension type (``"orcapod.uuid"``), and the recovered value is a
     uuid.UUID (i.e. orcapod.UUID).
     """
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
 
     # Precondition: test is only meaningful if orcapod.UUID is uuid.UUID
     assert orcapod.UUID is uuid_module.UUID
@@ -641,7 +641,7 @@ def test_uuid_uuid_works_via_orcapod_uuid_alias_arrow_round_trip():
 
 def test_logical_path_python_to_storage_accepts_converter():
     """python_to_storage now accepts a converter param (ignored)."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
     lt = LogicalPath()
     result = lt.python_to_storage(pathlib.Path("/tmp/foo"), converter=None)
     assert result == "/tmp/foo"
@@ -649,14 +649,14 @@ def test_logical_path_python_to_storage_accepts_converter():
 
 def test_logical_path_storage_to_python_accepts_converter():
     """storage_to_python now accepts a converter param (ignored)."""
-    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    from orcapod.logical_types.builtin_logical_types import LogicalPath
     lt = LogicalPath()
     result = lt.storage_to_python("/tmp/foo", converter=None)
     assert result == pathlib.Path("/tmp/foo")
 
 
 def test_logical_uuid_python_to_storage_accepts_converter():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
     lt = LogicalUUID()
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result = lt.python_to_storage(u, converter=None)
@@ -664,7 +664,7 @@ def test_logical_uuid_python_to_storage_accepts_converter():
 
 
 def test_logical_uuid_storage_to_python_accepts_converter():
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
     lt = LogicalUUID()
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result = lt.storage_to_python(u.bytes, converter=None)
@@ -672,14 +672,14 @@ def test_logical_uuid_storage_to_python_accepts_converter():
 
 
 def test_logical_upath_python_to_storage_accepts_converter():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
     lt = LogicalUPath()
     result = lt.python_to_storage(UPath("s3://bucket/key"), converter=None)
     assert result == "s3://bucket/key"
 
 
 def test_logical_upath_storage_to_python_accepts_converter():
-    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import LogicalUPath
     lt = LogicalUPath()
     result = lt.storage_to_python("s3://bucket/key", converter=None)
     assert isinstance(result, UPath)

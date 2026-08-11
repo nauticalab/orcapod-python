@@ -296,7 +296,7 @@ def enable_file_hash_caching(
             "enable_file_hash_caching(): provide conninfo or db_path, not both."
         )
 
-    from orcapod.extension_types.file_type import File
+    from orcapod.logical_types.file_type import File
     from orcapod.hashing.file_hashers import CachedFileHasher
     from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler
 
@@ -326,7 +326,7 @@ def enable_file_hash_caching(
                 cacher.close()
             base_hasher = base_hasher.file_hasher
 
-    from orcapod.extension_types.directory_type import Directory
+    from orcapod.logical_types.directory_type import Directory
     from orcapod.hashing.directory_hashers import BasicDirectoryHasher
     from orcapod.hashing.semantic_hashing.builtin_handlers import DirectoryHandler
 

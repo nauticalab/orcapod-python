@@ -9,7 +9,7 @@ import pytest
 
 from orcapod.databases.extension_aware_database import ExtensionAwareDatabase
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
-from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 

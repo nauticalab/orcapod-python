@@ -11,7 +11,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Iterable
 
-from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
+from orcapod.logical_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

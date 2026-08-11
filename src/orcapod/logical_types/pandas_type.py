@@ -21,11 +21,11 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.ipc
 
-from orcapod.extension_types.base_logical_type import BaseLogicalType
-from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
 
 if TYPE_CHECKING:
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
 
 
 _SERIES_UNNAMED_SENTINEL = "__pandas_series_unnamed__"

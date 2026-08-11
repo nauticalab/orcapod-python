@@ -1,4 +1,4 @@
-"""Tests for orcapod.extension_types.directory_type.Directory and LogicalDirectory."""
+"""Tests for orcapod.logical_types.directory_type.Directory and LogicalDirectory."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 import pyarrow as pa
 from upath import UPath
 
-from orcapod.extension_types.directory_type import Directory, LogicalDirectory, _try_import_callable
+from orcapod.logical_types.directory_type import Directory, LogicalDirectory, _try_import_callable
 
 
 class TestDirectoryConstructor:

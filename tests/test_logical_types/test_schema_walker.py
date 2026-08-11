@@ -8,7 +8,7 @@ import uuid
 import pyarrow as pa
 import pytest
 
-from orcapod.extension_types.schema_walker import (
+from orcapod.logical_types.schema_walker import (
     ExtensionTypeInfo,
     walk_field,
     walk_schema,

@@ -23,11 +23,11 @@ import pyarrow as pa
 from upath import UPath
 from upath.extensions import ProxyUPath
 
-from orcapod.extension_types.base_logical_type import BaseLogicalType
-from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
 
 if TYPE_CHECKING:
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
 
 
 class Directory(ProxyUPath):

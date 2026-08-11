@@ -13,8 +13,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
-from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type, _canonical_storage
+from orcapod.logical_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
+from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type, _canonical_storage
 
 
 # ---------------------------------------------------------------------------
@@ -853,8 +853,8 @@ def test_register_logical_type_conflict_error_uses_repr_for_generic_alias():
     """Conflict error message for GenericAlias python_type must not raise AttributeError."""
     import uuid
     import pyarrow as pa
-    from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
-    from orcapod.extension_types.base_logical_type import BaseLogicalType
+    from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
+    from orcapod.logical_types.base_logical_type import BaseLogicalType
 
     class _FakeListLT(BaseLogicalType):
         logical_type_name = "list[orcapod.uuid]"

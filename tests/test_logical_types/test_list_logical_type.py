@@ -12,13 +12,13 @@ import pytest
 
 def _uuid_ext_type() -> pa.ExtensionType:
     """Return the registered orcapod.uuid extension type."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
     return LogicalUUID().get_arrow_extension_type()
 
 
 def _logical_uuid():
     """Return a ``LogicalUUID`` instance."""
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
     return LogicalUUID()
 
 
@@ -52,7 +52,7 @@ class _StubConverter:
             return pa.int64()
         raise ValueError(f"Unsupported annotation: {annotation}")
 
-    def register_arrow_extension(self, ext_name, metadata_bytes, storage_type):
+    def register_logical_type_from_arrow_metadata(self, ext_name, metadata_bytes, storage_type):
         if ext_name == "orcapod.uuid":
             return _uuid_ext_type()
         raise ValueError(f"Unknown extension: {ext_name}")
@@ -73,36 +73,36 @@ class _StubConverter:
 
 
 def test_list_logical_type_importable():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     assert ListLogicalType is not None
 
 
 def test_list_logical_type_name():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     assert lt.logical_type_name == "list[orcapod.uuid]"
 
 
 def test_set_logical_type_name():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=True)
     assert lt.logical_type_name == "set[orcapod.uuid]"
 
 
 def test_list_logical_type_python_type():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     assert lt.python_type == list[uuid_module.UUID]
 
 
 def test_set_logical_type_python_type():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=True)
     assert lt.python_type == set[uuid_module.UUID]
 
 
 def test_list_logical_type_arrow_extension_type_name():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     ext = lt.get_arrow_extension_type()
     assert hasattr(ext, "extension_name")
@@ -110,7 +110,7 @@ def test_list_logical_type_arrow_extension_type_name():
 
 
 def test_list_logical_type_storage_is_large_list_of_large_binary():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     ext = lt.get_arrow_extension_type()
     assert pa.types.is_large_list(ext.storage_type)
@@ -119,7 +119,7 @@ def test_list_logical_type_storage_is_large_list_of_large_binary():
 
 def test_list_logical_type_storage_is_et1_safe():
     """Value type of list storage must NOT be a pa.ExtensionType (ET1 invariant)."""
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     ext = lt.get_arrow_extension_type()
     assert not isinstance(ext.storage_type.value_type, pa.ExtensionType), (
@@ -128,19 +128,19 @@ def test_list_logical_type_storage_is_et1_safe():
 
 
 def test_list_logical_type_arrow_extension_type_cached():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
 
 def test_list_logical_type_index_element():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     assert lt.index_element() == uuid_module.UUID
 
 
 def test_list_logical_type_python_to_storage():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
@@ -149,13 +149,13 @@ def test_list_logical_type_python_to_storage():
 
 
 def test_list_logical_type_python_to_storage_none():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     assert lt.python_to_storage(None, _StubConverter()) == []
 
 
 def test_list_logical_type_storage_to_python():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result = lt.storage_to_python([u1.bytes], _StubConverter())
@@ -164,7 +164,7 @@ def test_list_logical_type_storage_to_python():
 
 
 def test_set_logical_type_storage_to_python_returns_set():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=True)
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result = lt.storage_to_python([u1.bytes], _StubConverter())
@@ -179,7 +179,7 @@ def test_set_logical_type_python_to_storage_is_sorted():
     must always be sorted so that two sets with identical elements produce identical
     Arrow storage bytes (required for content-hash stability).
     """
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
     lt = ListLogicalType(_logical_uuid(), is_set=True)
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
@@ -193,7 +193,7 @@ def test_set_logical_type_python_to_storage_is_sorted():
 def test_list_logical_type_metadata_contains_element_ext_name():
     """Extension metadata must contain element_ext_name for reconstruction."""
     import json
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType, LIST_CATEGORY
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType, LIST_CATEGORY
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     ext = lt.get_arrow_extension_type()
     meta = json.loads(ext.__arrow_ext_serialize__().decode("utf-8"))
@@ -203,8 +203,8 @@ def test_list_logical_type_metadata_contains_element_ext_name():
 
 
 def test_list_logical_type_protocol_conformance():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
-    from orcapod.extension_types.protocols import LogicalTypeProtocol
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.protocols import LogicalTypeProtocol
     lt = ListLogicalType(_logical_uuid(), is_set=False)
     assert isinstance(lt, LogicalTypeProtocol)
 
@@ -213,13 +213,13 @@ def test_list_logical_type_protocol_conformance():
 
 
 def test_list_logical_type_factory_importable():
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalTypeFactory
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalTypeFactory
     assert ListLogicalTypeFactory is not None
 
 
 def test_list_logical_type_factory_reconstruct_list_of_uuid():
     """reconstruct_from_arrow produces ListLogicalType(uuid.UUID, …, is_set=False)."""
-    from orcapod.extension_types.list_logical_type_factory import (
+    from orcapod.logical_types.list_logical_type_factory import (
         ListLogicalTypeFactory,
         LIST_CATEGORY,
     )
@@ -239,7 +239,7 @@ def test_list_logical_type_factory_reconstruct_list_of_uuid():
 
 def test_list_logical_type_factory_reconstruct_set_of_uuid():
     """reconstruct_from_arrow produces ListLogicalType(uuid.UUID, …, is_set=True)."""
-    from orcapod.extension_types.list_logical_type_factory import (
+    from orcapod.logical_types.list_logical_type_factory import (
         ListLogicalTypeFactory,
         SET_CATEGORY,
     )
@@ -258,7 +258,7 @@ def test_list_logical_type_factory_reconstruct_set_of_uuid():
 
 
 def test_list_logical_type_factory_reconstruct_raises_on_non_list_storage():
-    from orcapod.extension_types.list_logical_type_factory import (
+    from orcapod.logical_types.list_logical_type_factory import (
         ListLogicalTypeFactory,
         LIST_CATEGORY,
     )
@@ -271,7 +271,7 @@ def test_list_logical_type_factory_reconstruct_raises_on_non_list_storage():
 
 
 def test_list_logical_type_factory_reconstruct_raises_on_missing_element_ext_name():
-    from orcapod.extension_types.list_logical_type_factory import (
+    from orcapod.logical_types.list_logical_type_factory import (
         ListLogicalTypeFactory,
         LIST_CATEGORY,
     )

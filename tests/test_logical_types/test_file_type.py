@@ -1,4 +1,4 @@
-"""Tests for orcapod.extension_types.file_type.File and LogicalFile."""
+"""Tests for orcapod.logical_types.file_type.File and LogicalFile."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 import pyarrow as pa
 from upath import UPath
 
-from orcapod.extension_types.file_type import File, LogicalFile
+from orcapod.logical_types.file_type import File, LogicalFile
 
 
 class TestFileConstructor:

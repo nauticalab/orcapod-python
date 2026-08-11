@@ -99,7 +99,7 @@ def _parquet_write(table: pa.Table, base_path: Path) -> None:
 
 
 def _parquet_read(base_path: Path, converter: UniversalTypeConverter) -> pa.Table:
-    return converter.load_extension_types(pq.read_table(str(base_path / "data.parquet")))
+    return converter.load_logical_types(pq.read_table(str(base_path / "data.parquet")))
 
 
 def _delta_write(table: pa.Table, base_path: Path) -> None:
@@ -116,7 +116,7 @@ def _delta_read(base_path: Path, converter: UniversalTypeConverter) -> pa.Table:
     # as storage fail to deserialise because the _deserialize method strictly
     # checks that the storage type matches the registered one.
     raw = dt.to_pyarrow_dataset(as_large_types=True).to_table()
-    return converter.load_extension_types(raw)
+    return converter.load_logical_types(raw)
 
 
 _BACKENDS = [
@@ -307,7 +307,7 @@ def test_simple_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path:
     """Simple dataclass round-trips with correct FQCN as the Arrow extension name.
 
     The read-side converter starts with no knowledge of _PointA.  After read,
-    register_discovered_extensions triggers DataclassLogicalTypeFactory which
+    register_discovered_logical_types triggers DataclassLogicalTypeFactory which
     imports _PointA from its fully-qualified class name and registers it.
     """
     point = _PointA(x=3, y=7)
@@ -367,7 +367,7 @@ def test_two_dataclasses_same_shape_distinct_extension_names(
 def test_nested_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
     """Nested dataclass: _Outer and _Inner both registered; full object reconstructed.
 
-    register_discovered_extensions triggers DataclassLogicalTypeFactory for _Outer.
+    register_discovered_logical_types triggers DataclassLogicalTypeFactory for _Outer.
     That factory's reconstruct_from_arrow calls converter.register_python_class(_Inner)
     as a side-effect, so _Inner is also registered without an explicit peek step.
     """
@@ -660,8 +660,8 @@ def test_schema_round_trip_list_of_uuid(tmp_path: Path) -> None:
 def test_python_type_property_list_and_set(tmp_path: Path) -> None:
     """ListLogicalType.python_type returns the exact generic alias."""
     import uuid
-    from orcapod.extension_types.builtin_logical_types import LogicalUUID
-    from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
 
     lt_list = ListLogicalType(LogicalUUID(), is_set=False)
     assert lt_list.python_type == list[uuid.UUID]
@@ -673,7 +673,7 @@ def test_python_type_property_list_and_set(tmp_path: Path) -> None:
 def test_fresh_converter_reads_list_of_uuid(
     storage_backend: _StorageBackend, tmp_path: Path
 ) -> None:
-    """A fresh converter (no prior registration) can read list[UUID] via load_extension_types."""
+    """A fresh converter (no prior registration) can read list[UUID] via load_logical_types."""
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
 
     # Write with converter A
@@ -683,7 +683,7 @@ def test_fresh_converter_reads_list_of_uuid(
     table = write_converter.python_dicts_to_arrow_table([{"ids": [u1]}], arrow_schema=arrow_schema)
     storage_backend.write(table, tmp_path)
 
-    # Read with converter B — no prior registration; load_extension_types triggers factory
+    # Read with converter B — no prior registration; load_logical_types triggers factory
     read_converter = _fresh_converter()
     result = storage_backend.read(tmp_path, read_converter)
 

@@ -17,8 +17,8 @@ from orcapod.contexts import get_default_context
 from orcapod.contexts.core import DataContext
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
-from orcapod.extension_types.protocols import LogicalTypeProtocol
-from orcapod.extension_types.registry import (
+from orcapod.logical_types.protocols import LogicalTypeProtocol
+from orcapod.logical_types.registry import (
     LogicalTypeRegistry,
     make_arrow_extension_type,
     make_polars_extension_type,

@@ -13,8 +13,8 @@ the on-disk extension identity: even if the upstream library is renamed or restr
 data written with these extension names continues to be readable without modification.
 
 Note:
-    All imports from orcapod.extension_types use direct submodule paths
-    (e.g. ``from orcapod.extension_types.registry import ...``) rather than
+    All imports from orcapod.logical_types use direct submodule paths
+    (e.g. ``from orcapod.logical_types.registry import ...``) rather than
     the package ``__init__`` to avoid circular imports when the context system
     loads this module at startup.
 """
@@ -29,11 +29,11 @@ import polars as pl
 import pyarrow as pa
 from upath import UPath
 
-from orcapod.extension_types.base_logical_type import BaseLogicalType
-from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
 
 if TYPE_CHECKING:
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
 
 
 class LogicalPath(BaseLogicalType):

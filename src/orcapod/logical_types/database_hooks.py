@@ -2,12 +2,12 @@
 
 Two entry points:
 
-``register_discovered_extensions(converter, schema)``
+``register_discovered_logical_types(converter, schema)``
     Walk an Arrow schema and register any extension types not yet known to
     *converter*.  No-op when *converter* is ``None`` or the schema has no
     extension types.
 
-``apply_extension_types(table, registry)``
+``apply_logical_types(table, registry)``
     Re-wrap columns of *table* that carry ``ARROW:extension:*`` field metadata
     into their registered extension types.  Operates per-chunk so no data is
     copied — each chunk is wrapped with ``pa.ExtensionArray.from_storage()``.
@@ -15,8 +15,8 @@ Two entry points:
 
 These two functions are typically called in sequence via ``UniversalTypeConverter``:
 
-    register_discovered_extensions(converter, table.schema)
-    table = converter.apply_extension_types(table)
+    register_discovered_logical_types(converter, table.schema)
+    table = converter.apply_logical_types(table)
 """
 
 from __future__ import annotations
@@ -24,17 +24,17 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from orcapod.extension_types.registry import LogicalTypeRegistry
-from orcapod.extension_types.schema_walker import walk_schema
+from orcapod.logical_types.registry import LogicalTypeRegistry
+from orcapod.logical_types.schema_walker import walk_schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
 
 logger = logging.getLogger(__name__)
 
 
-def register_discovered_extensions(
+def register_discovered_logical_types(
     converter: "TypeConverterProtocol | None",
     schema: "pa.Schema",
 ) -> None:
@@ -42,7 +42,7 @@ def register_discovered_extensions(
 
     Walks ``schema`` recursively via ``walk_schema`` to discover all Arrow extension
     types at any nesting depth (both in-memory and field-metadata channels).
-    For each discovered type, delegates to ``converter.register_arrow_extension``.
+    For each discovered type, delegates to ``converter.register_logical_type_from_arrow_metadata``.
 
     Already-registered types are detected and skipped inside the converter —
     this function itself is stateless beyond the converter it operates on.
@@ -58,29 +58,29 @@ def register_discovered_extensions(
             has no registered factory or is malformed.
     """
     if converter is None:
-        logger.debug("register_discovered_extensions: no converter provided, skipping")
+        logger.debug("register_discovered_logical_types: no converter provided, skipping")
         return
 
     found = walk_schema(schema)
     if not found:
-        logger.debug("register_discovered_extensions: no extension types in schema")
+        logger.debug("register_discovered_logical_types: no extension types in schema")
         return
     logger.debug(
-        "register_discovered_extensions: found %d extension type(s) in schema: %s",
+        "register_discovered_logical_types: found %d extension type(s) in schema: %s",
         len(found),
         [info.extension_name for info in found],
     )
     for info in found:
         # Bottom-up resolve the storage type first, then register the extension
         resolved_storage = converter.register_storage_type(info.storage_type)
-        converter.register_arrow_extension(
+        converter.register_logical_type_from_arrow_metadata(
             info.extension_name,
             info.extension_metadata,
             resolved_storage,
         )
 
 
-def apply_extension_types(
+def apply_logical_types(
     table: pa.Table,
     registry: LogicalTypeRegistry,
 ) -> pa.Table:
@@ -90,7 +90,7 @@ def apply_extension_types(
     field metadata even when an extension type was not registered at read
     time, in which case the column is stored as a plain storage type (e.g.
     ``large_utf8``).  Once the extension type has been registered (via
-    ``register_discovered_extensions``), this function reconstructs the
+    ``register_discovered_logical_types``), this function reconstructs the
     correct extension-typed columns using ``pa.ExtensionArray.from_storage``.
 
     The operation is zero-copy per chunk: each chunk in a ``ChunkedArray``
@@ -106,7 +106,7 @@ def apply_extension_types(
             but were loaded as storage types.
         registry: Registry that holds the registered ``LogicalTypeProtocol``
             instances.  Must already contain every extension type referenced
-            by ``table.schema`` — call ``register_discovered_extensions``
+            by ``table.schema`` — call ``register_discovered_logical_types``
             first.
 
     Returns:
@@ -168,7 +168,7 @@ def _apply_field(
             ]
             new_col = pa.chunked_array(wrapped_chunks, type=ext_type)
             new_field = field.with_type(ext_type)
-            logger.debug("apply_extension_types: wrapped column %r as %r", field.name, ext_name)
+            logger.debug("apply_logical_types: wrapped column %r as %r", field.name, ext_name)
             return new_col, new_field
 
     # ── Case 3: struct — recurse only if children carry extension metadata ──────
