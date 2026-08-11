@@ -16,6 +16,7 @@ Design decisions:
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 from orcapod.extension_types.base_logical_type import BaseLogicalType
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
+
+logger = logging.getLogger(__name__)
 
 LIST_CATEGORY = "list"
 SET_CATEGORY = "set"
@@ -206,3 +209,105 @@ class ListLogicalType(BaseLogicalType):
                 for item in storage_value
             ]
         return set(elements) if self._is_set else elements
+
+
+class ListLogicalTypeFactory:
+    """Stateless factory that reconstructs ``ListLogicalType`` instances from Arrow metadata.
+
+    Registered for categories ``"list"`` and ``"set"`` in the ``LogicalTypeRegistry``.
+    No ``python_bases`` are registered — write-path dispatch is handled explicitly in
+    ``UniversalTypeConverter._register_python_class_impl`` and ``_convert_python_to_arrow``.
+
+    Read path only (``reconstruct_from_arrow``). ``create_for_python_type`` raises
+    ``NotImplementedError`` because explicit dispatch makes it unnecessary.
+    """
+
+    def supports_class(self, python_type: type) -> bool:
+        """Always ``False`` — write-path dispatch is explicit, not via base-class matching.
+
+        Args:
+            python_type: Ignored.
+
+        Returns:
+            ``False``.
+        """
+        return False
+
+    def create_for_python_type(
+        self,
+        python_type: type,
+        converter: "TypeConverterProtocol",
+    ) -> ListLogicalType:
+        """Not implemented — list/set types are registered directly in the converter.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "ListLogicalTypeFactory does not implement create_for_python_type. "
+            "list[T] and set[T] logical types are created explicitly in "
+            "UniversalTypeConverter._register_python_class_impl."
+        )
+
+    def reconstruct_from_arrow(
+        self,
+        arrow_extension_name: str,
+        storage_type: "pa.DataType",
+        metadata: dict,
+        converter: "TypeConverterProtocol",
+    ) -> ListLogicalType:
+        """Reconstruct a ``ListLogicalType`` from Arrow schema metadata (read path).
+
+        Recursively calls ``converter.register_arrow_extension`` for the element type,
+        ensuring the element logical type is registered before constructing the outer
+        ``ListLogicalType``. Handles arbitrary nesting depth via recursion.
+
+        Args:
+            arrow_extension_name: Extension name (e.g. ``"list[orcapod.uuid]"``).
+            storage_type: Outer storage type (``large_list(<element storage>)``).
+            metadata: Parsed metadata dict; must contain ``"category"`` and
+                ``"element_ext_name"``; ``"element_ext_metadata"`` may be ``None``.
+            converter: Active converter for recursive element registration.
+
+        Returns:
+            A ``ListLogicalType`` ready for registration.
+
+        Raises:
+            ValueError: If ``storage_type`` is not a list type, or required metadata
+                keys are missing.
+        """
+        if not (pa.types.is_large_list(storage_type) or pa.types.is_list(storage_type)):
+            raise ValueError(
+                f"ListLogicalTypeFactory.reconstruct_from_arrow: expected a list storage "
+                f"type for {arrow_extension_name!r}, got {storage_type!r}."
+            )
+
+        element_ext_name = metadata.get("element_ext_name")
+        if not element_ext_name:
+            raise ValueError(
+                f"ListLogicalTypeFactory.reconstruct_from_arrow: missing 'element_ext_name' "
+                f"in metadata for {arrow_extension_name!r}. metadata={metadata!r}."
+            )
+
+        element_meta_str = metadata.get("element_ext_metadata")
+        element_meta_bytes = (
+            element_meta_str.encode("utf-8") if element_meta_str else b""
+        )
+        # Element storage is the value type of the outer list storage.
+        element_storage_type = storage_type.value_type
+
+        # Recursively register the element logical type (handles nesting).
+        element_ext_arrow_type = converter.register_arrow_extension(
+            element_ext_name, element_meta_bytes, element_storage_type
+        )
+
+        # Recover element Python type from the now-registered extension type.
+        element_python_type = converter.arrow_type_to_python_type(element_ext_arrow_type)
+
+        is_set = metadata.get("category") == SET_CATEGORY
+        logger.debug(
+            "ListLogicalTypeFactory: reconstructed %r from Arrow (is_set=%s)",
+            arrow_extension_name,
+            is_set,
+        )
+        return ListLogicalType(element_python_type, element_ext_arrow_type, is_set=is_set)
