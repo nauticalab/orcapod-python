@@ -1411,9 +1411,9 @@ class UniversalTypeConverter:
         """Create a cached conversion function for Python → Arrow values."""
 
         # Check LogicalTypeRegistry first — extension-type identity takes priority.
-        # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;
-        # generic aliases (list[T], Optional[T], etc.) will never be registered there.
-        if self._logical_type_registry is not None and isinstance(python_type, type):
+        # GenericAlias instances like list[UUID] or set[UUID] may be registered as
+        # ListLogicalType entries, so we must not guard this check with isinstance(python_type, type).
+        if self._logical_type_registry is not None:
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
                 _lt = lt

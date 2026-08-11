@@ -105,3 +105,35 @@ def test_arrow_schema_to_python_schema_round_trip_list_of_uuid():
     # Re-derive Arrow schema — must be identical
     arrow_schema2 = converter.python_schema_to_arrow_schema(recovered)
     assert arrow_schema2.field("ids").type.extension_name == "list[orcapod.uuid]"
+
+
+def test_value_converter_list_of_uuid_produces_bytes_list():
+    """get_python_to_arrow_converter(list[UUID]) converts [uuid, uuid] → [bytes, bytes]."""
+    import uuid
+    import pyarrow as pa
+    from orcapod.contexts import create_registry
+
+    converter = create_registry().get_context().type_converter
+    converter.register_python_class(list[uuid.UUID])
+
+    conv_fn = converter.get_python_to_arrow_converter(list[uuid.UUID])
+    u1 = uuid.UUID("12345678-1234-5678-1234-567812345678")
+    u2 = uuid.UUID("87654321-4321-8765-4321-876543218765")
+    result = conv_fn([u1, u2])
+
+    assert result == [u1.bytes, u2.bytes]
+
+
+def test_value_converter_set_of_uuid_produces_bytes_list():
+    """get_python_to_arrow_converter(set[UUID]) converts {uuid} → [bytes]."""
+    import uuid
+    from orcapod.contexts import create_registry
+
+    converter = create_registry().get_context().type_converter
+    converter.register_python_class(set[uuid.UUID])
+
+    conv_fn = converter.get_python_to_arrow_converter(set[uuid.UUID])
+    u1 = uuid.UUID("12345678-1234-5678-1234-567812345678")
+    result = conv_fn({u1})
+
+    assert result == [u1.bytes]
