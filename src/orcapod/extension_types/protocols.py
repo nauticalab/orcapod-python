@@ -93,14 +93,27 @@ class TypeConverterProtocol(Protocol):
     def arrow_type_to_python_type(self, arrow_type: "pa.DataType") -> "DataType":
         """Convert an Arrow type to its Python type hint.
 
-        Used by ``ListLogicalTypeFactory.reconstruct_from_arrow`` to recover
-        the element Python type after registering the element extension type.
-
         Args:
             arrow_type: An Arrow type (may be a ``pa.ExtensionType``).
 
         Returns:
             The Python type hint corresponding to ``arrow_type``.
+        """
+        ...
+
+    def get_logical_type_by_arrow_name(
+        self, arrow_ext_name: str
+    ) -> "LogicalTypeProtocol | None":
+        """Return the registered logical type for *arrow_ext_name*, or ``None``.
+
+        Used by ``ListLogicalTypeFactory.reconstruct_from_arrow`` to retrieve the
+        element logical type after ``register_arrow_extension`` has registered it.
+
+        Args:
+            arrow_ext_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
+
+        Returns:
+            The registered ``LogicalTypeProtocol``, or ``None`` if not found.
         """
         ...
 

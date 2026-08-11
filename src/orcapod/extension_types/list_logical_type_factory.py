@@ -26,7 +26,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.extension_types.protocols import LogicalTypeProtocol, TypeConverterProtocol
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -49,17 +49,16 @@ class ListLogicalType(BaseLogicalType):
     - Metadata: JSON with ``category``, ``element_ext_name``, and ``element_ext_metadata``
 
     Args:
-        element_python_type: The Python type of individual list elements (e.g. ``uuid.UUID``).
-        element_ext_type: The Arrow extension type for the element (e.g. the ``orcapod.uuid``
-            extension type instance).
+        element_logical_type: The logical type of individual list elements (e.g. ``LogicalUUID()``
+            for ``uuid.UUID`` elements). The element Python type and Arrow extension type are
+            derived from this logical type.
         is_set: If ``True``, uses ``set[T]`` semantics (``storage_to_python`` returns a
-            ``set``). Defaults to ``False`` (``list[T]`` semantics).
+            ``set``; ``python_to_storage`` sorts storage values for determinism). Defaults to
+            ``False`` (``list[T]`` semantics).
 
     Example:
         >>> from orcapod.extension_types.builtin_logical_types import LogicalUUID
-        >>> import uuid
-        >>> uuid_ext = LogicalUUID().get_arrow_extension_type()
-        >>> lt = ListLogicalType(uuid.UUID, uuid_ext, is_set=False)
+        >>> lt = ListLogicalType(LogicalUUID(), is_set=False)
         >>> lt.logical_type_name
         'list[orcapod.uuid]'
         >>> lt.python_type
@@ -68,18 +67,18 @@ class ListLogicalType(BaseLogicalType):
 
     def __init__(
         self,
-        element_python_type: type,
-        element_ext_type: pa.ExtensionType,
+        element_logical_type: "LogicalTypeProtocol",
         *,
         is_set: bool = False,
     ) -> None:
-        self._element_python_type = element_python_type
-        self._element_ext_type = element_ext_type
+        self._element_logical_type = element_logical_type
+        self._element_python_type = element_logical_type.python_type
         self._is_set = is_set
         self._arrow_ext: pa.ExtensionType | None = None
         self._polars_ext: pl.BaseExtension | None = None
 
-        # Build metadata bytes for Arrow extension serialization.
+        # Derive Arrow extension details from the element logical type.
+        element_ext_type = element_logical_type.get_arrow_extension_type()
         element_ext_name = element_ext_type.extension_name
         raw_meta_bytes: bytes = element_ext_type.__arrow_ext_serialize__()
         element_ext_metadata: str | None = raw_meta_bytes.decode("utf-8") if raw_meta_bytes else None
@@ -169,6 +168,11 @@ class ListLogicalType(BaseLogicalType):
         Delegates per-element conversion to ``converter.python_to_storage`` using
         the element Python type. If ``value`` is ``None``, returns an empty list.
 
+        For ``set[T]`` (``is_set=True``), the resulting list is sorted to guarantee
+        deterministic storage order regardless of Python set iteration order. Sorting
+        is attempted naturally; if elements are not comparable (``TypeError``), falls
+        back to ``repr``-based ordering.
+
         Args:
             value: A Python list (or set) of elements of type ``element_python_type``,
                 or ``None``.
@@ -176,12 +180,20 @@ class ListLogicalType(BaseLogicalType):
 
         Returns:
             A plain Python list of storage values suitable for Arrow large_list storage.
+            For set semantics the list is sorted.
         """
         if value is None:
             return []
         if converter is None:
-            return list(value)
-        return [converter.python_to_storage(item, self._element_python_type) for item in value]
+            elements = list(value)
+        else:
+            elements = [converter.python_to_storage(item, self._element_python_type) for item in value]
+        if self._is_set:
+            try:
+                elements = sorted(elements)
+            except TypeError:
+                elements = sorted(elements, key=repr)
+        return elements
 
     def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None) -> list | set:
         """Reconstruct a Python list or set from its Arrow storage representation.
@@ -297,12 +309,18 @@ class ListLogicalTypeFactory:
         element_storage_type = storage_type.value_type
 
         # Recursively register the element logical type (handles nesting).
-        element_ext_arrow_type = converter.register_arrow_extension(
+        converter.register_arrow_extension(
             element_ext_name, element_meta_bytes, element_storage_type
         )
 
-        # Recover element Python type from the now-registered extension type.
-        element_python_type = converter.arrow_type_to_python_type(element_ext_arrow_type)
+        # Retrieve the now-registered element logical type.
+        element_logical_type = converter.get_logical_type_by_arrow_name(element_ext_name)
+        if element_logical_type is None:
+            raise ValueError(
+                f"ListLogicalTypeFactory.reconstruct_from_arrow: element extension "
+                f"{element_ext_name!r} was registered but no logical type found. "
+                f"This is a bug in register_arrow_extension."
+            )
 
         is_set = metadata.get("category") == SET_CATEGORY
         logger.debug(
@@ -310,4 +328,4 @@ class ListLogicalTypeFactory:
             arrow_extension_name,
             is_set,
         )
-        return ListLogicalType(element_python_type, element_ext_arrow_type, is_set=is_set)
+        return ListLogicalType(element_logical_type, is_set=is_set)

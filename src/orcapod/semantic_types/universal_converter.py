@@ -449,7 +449,7 @@ class UniversalTypeConverter:
         creating two different ``ListLogicalType`` instances for the same annotation.
 
         Args:
-            element_ext_type: Arrow extension type of the element.
+            element_ext_type: Arrow extension type of the element (already registered).
             is_set: ``True`` for ``set[T]``, ``False`` for ``list[T]``.
 
         Returns:
@@ -463,8 +463,18 @@ class UniversalTypeConverter:
         # Idempotency: look up by extension name (GenericAlias key not yet in registry).
         lt = self._logical_type_registry.get_by_arrow_extension_name(list_ext_name)
         if lt is None:
-            element_python_type = self.arrow_type_to_python_type(element_ext_type)
-            lt = ListLogicalType(element_python_type, element_ext_type, is_set=is_set)
+            # The element logical type must already be in the registry — it was registered
+            # by the register_python_class call that returned element_ext_type.
+            element_lt = self._logical_type_registry.get_by_arrow_extension_name(
+                element_ext_type.extension_name
+            )
+            if element_lt is None:
+                raise ValueError(
+                    f"_make_or_get_list_logical_type: no logical type registered for "
+                    f"element extension name {element_ext_type.extension_name!r}. "
+                    f"register_python_class should have registered it before calling this."
+                )
+            lt = ListLogicalType(element_lt, is_set=is_set)
             self._logical_type_registry.register_logical_type(lt)
         return lt.get_arrow_extension_type()
 
@@ -875,6 +885,21 @@ class UniversalTypeConverter:
         except TypeError:
             pass  # Unhashable type — skip caching.
         return python_type
+
+    def get_logical_type_by_arrow_name(
+        self, arrow_ext_name: str
+    ) -> "LogicalTypeProtocol | None":
+        """Return the registered logical type for *arrow_ext_name*, or ``None``.
+
+        Args:
+            arrow_ext_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
+
+        Returns:
+            The registered ``LogicalTypeProtocol``, or ``None`` if not found.
+        """
+        if self._logical_type_registry is None:
+            return None
+        return self._logical_type_registry.get_by_arrow_extension_name(arrow_ext_name)
 
     def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> Schema:
         """

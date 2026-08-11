@@ -663,12 +663,10 @@ def test_python_type_property_list_and_set(tmp_path: Path) -> None:
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
     from orcapod.extension_types.list_logical_type_factory import ListLogicalType
 
-    uuid_ext = LogicalUUID().get_arrow_extension_type()
-
-    lt_list = ListLogicalType(uuid.UUID, uuid_ext, is_set=False)
+    lt_list = ListLogicalType(LogicalUUID(), is_set=False)
     assert lt_list.python_type == list[uuid.UUID]
 
-    lt_set = ListLogicalType(uuid.UUID, uuid_ext, is_set=True)
+    lt_set = ListLogicalType(LogicalUUID(), is_set=True)
     assert lt_set.python_type == set[uuid.UUID]
 
 

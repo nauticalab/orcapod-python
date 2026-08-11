@@ -1132,7 +1132,7 @@ can be removed and `make_polars_extension_type` can accept extension-typed stora
 Track upstream PyArrow / Polars issues.
 
 ### ET2 — Top-level `list[T]` / `dict[K, V]` columns lose extension-type schema metadata when `T`/`V` is a logical type
-**Status:** resolved
+**Status:** in progress
 **Severity:** medium
 **Issue:** PLT-1732
 
@@ -1173,13 +1173,15 @@ sits at the outermost (list) level, not inside the list value field, so it satis
 `register_storage_type` would dispatch to the new factory on read, auto-registering the
 element type. See PLT-1732 for full design.
 
-**Fix:** Introduced `ListLogicalType` and `ListLogicalTypeFactory` in
+**Partial fix (ITL-173):** Introduced `ListLogicalType` and `ListLogicalTypeFactory` in
 `src/orcapod/extension_types/list_logical_type_factory.py`. The entire
 `list[T]`/`set[T]` is wrapped as a top-level Arrow extension type with storage
 `large_list(<T storage>)`, embedding element reconstruction metadata in the
 field-level metadata JSON. Wired into `_register_python_class_impl` and
 `_convert_python_to_arrow` via `_make_or_get_list_logical_type`. Registered in
-`v0.1.json` under categories `"list"` and `"set"`. Closes ITL-173.
+`v0.1.json` under categories `"list"` and `"set"`. Resolves the `list[T]`/`set[T]`
+case. `dict[K, V]` with extension-type keys or values remains unsupported (raises
+``ValueError``); tracked in PLT-1732.
 
 ---
 
