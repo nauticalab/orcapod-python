@@ -884,9 +884,17 @@ def test_register_logical_type_conflict_error_uses_repr_for_generic_alias():
     registry = LogicalTypeRegistry()
     lt1 = _FakeListLT()
     lt2 = _FakeListLT2()
-    registry.register_logical_type(lt1)
+    try:
+        registry.register_logical_type(lt1)
 
-    # The registry should raise ValueError (not AttributeError) even when python_type
-    # is a GenericAlias (like list[uuid.UUID]) that lacks __qualname__.
-    with pytest.raises(ValueError):
-        registry.register_logical_type(lt2)
+        # The registry should raise ValueError (not AttributeError) even when python_type
+        # is a GenericAlias (like list[uuid.UUID]) that lacks __qualname__.
+        with pytest.raises(ValueError):
+            registry.register_logical_type(lt2)
+    finally:
+        # Clean up PyArrow's global registry so subsequent tests can register
+        # "list[orcapod.uuid]" with different metadata without conflict.
+        try:
+            pa.unregister_extension_type("list[orcapod.uuid]")
+        except Exception:
+            pass
