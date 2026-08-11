@@ -352,15 +352,10 @@ class UniversalTypeConverter:
                 )
             inner = self.register_python_class(args[0])
             if isinstance(inner, pa.ExtensionType):
-                raise ValueError(
-                    f"'list[{args[0]}]' is not yet supported: the element type maps to Arrow "
-                    f"extension type {inner.extension_name!r}, which cannot be preserved inside "
-                    f"a list value field due to an Arrow limitation (ET2 in DESIGN_ISSUES.md). "
-                    f"Native list-of-logical-type support is tracked in PLT-1732."
-                )
+                return self._make_or_get_list_logical_type(inner, is_set=False)
             return pa.large_list(inner)
 
-        # set[T] → pa.large_list(T).  Same restriction as list[T].
+        # set[T] → pa.large_list(T).  Same restriction as list[T] unless T is an extension type.
         if origin is set:
             if not args:
                 raise ValueError(
@@ -369,12 +364,7 @@ class UniversalTypeConverter:
                 )
             inner = self.register_python_class(args[0])
             if isinstance(inner, pa.ExtensionType):
-                raise ValueError(
-                    f"'set[{args[0]}]' is not yet supported: the element type maps to Arrow "
-                    f"extension type {inner.extension_name!r}, which cannot be preserved inside "
-                    f"a list value field due to an Arrow limitation (ET2 in DESIGN_ISSUES.md). "
-                    f"Native set-of-logical-type support is tracked in PLT-1732."
-                )
+                return self._make_or_get_list_logical_type(inner, is_set=True)
             return pa.large_list(inner)
 
         # dict[K, V] → pa.large_list(struct{key: K, value: V}).
@@ -446,6 +436,37 @@ class UniversalTypeConverter:
             return lt.get_arrow_extension_type()
 
         raise ValueError(f"Unsupported annotation: {annotation!r}")
+
+    def _make_or_get_list_logical_type(
+        self,
+        element_ext_type: "pa.ExtensionType",
+        is_set: bool,
+    ) -> "pa.ExtensionType":
+        """Return (creating and registering if needed) a ``ListLogicalType`` for a container.
+
+        Shared by ``_register_python_class_impl`` and ``_convert_python_to_arrow`` to
+        ensure idempotent creation — looking up by extension name first avoids
+        creating two different ``ListLogicalType`` instances for the same annotation.
+
+        Args:
+            element_ext_type: Arrow extension type of the element.
+            is_set: ``True`` for ``set[T]``, ``False`` for ``list[T]``.
+
+        Returns:
+            The ``pa.ExtensionType`` of the created-or-existing ``ListLogicalType``.
+        """
+        from orcapod.extension_types.list_logical_type_factory import ListLogicalType
+
+        prefix = "set" if is_set else "list"
+        list_ext_name = f"{prefix}[{element_ext_type.extension_name}]"
+
+        # Idempotency: look up by extension name (GenericAlias key not yet in registry).
+        lt = self._logical_type_registry.get_by_arrow_extension_name(list_ext_name)
+        if lt is None:
+            element_python_type = self.arrow_type_to_python_type(element_ext_type)
+            lt = ListLogicalType(element_python_type, element_ext_type, is_set=is_set)
+            self._logical_type_registry.register_logical_type(lt)
+        return lt.get_arrow_extension_type()
 
     def _find_factory_for_class(
         self,

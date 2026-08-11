@@ -524,24 +524,12 @@ def test_nested_dataclass_parquet_roundtrip(tmp_path):
     assert reconstructed.label == "hello"
 
 
-@pytest.mark.xfail(
-    reason=(
-        "list[T] where T is a logical type (e.g. a dataclass) is not yet supported. "
-        "Arrow cannot preserve extension types inside list value fields (ET2 in "
-        "DESIGN_ISSUES.md). Planned in PLT-1732 (ListLogicalType / StructLogicalType)."
-    ),
-    raises=ValueError,
-    strict=True,
-)
 def test_list_of_nested_dataclass_parquet_roundtrip(tmp_path):
     """Parquet round-trip for a dataclass whose field is list[AnotherDataclass].
 
-    This test documents the PLT-1732 gap: registering a dataclass that contains a
-    list[T] field where T is itself a logical type currently raises ValueError because
-    Arrow cannot represent extension types inside list value fields.
-
-    Once PLT-1732 (ListLogicalType) is implemented, this test should pass and the
-    xfail marker should be removed.
+    Verifies that registering a dataclass that contains a list[T] field where T is
+    itself a logical type (a dataclass) correctly creates a ListLogicalType and
+    round-trips through Parquet without data loss.
     """
     import pyarrow.parquet as pq
     from orcapod.extension_types.database_hooks import register_discovered_extensions, apply_extension_types
