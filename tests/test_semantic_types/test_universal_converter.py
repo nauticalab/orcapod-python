@@ -110,7 +110,6 @@ def test_arrow_schema_to_python_schema_round_trip_list_of_uuid():
 def test_value_converter_list_of_uuid_produces_bytes_list():
     """get_python_to_arrow_converter(list[UUID]) converts [uuid, uuid] → [bytes, bytes]."""
     import uuid
-    import pyarrow as pa
     from orcapod.contexts import create_registry
 
     converter = create_registry().get_context().type_converter
