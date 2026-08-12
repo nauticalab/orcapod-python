@@ -253,9 +253,9 @@ class ListLogicalTypeFactory:
     ) -> ListLogicalType:
         """Synthesize a ``ListLogicalType`` for ``list[T]`` or ``set[T]`` (write path).
 
-        Extracts the element type from the generic alias, ensures the element
-        has a registered ``LogicalType`` via ``converter.register_python_class``,
-        and constructs the appropriate ``ListLogicalType``.
+        Extracts the element type from the generic alias, resolves its ``LogicalType``
+        via ``converter.get_logical_type_for_python_type``, and constructs the appropriate
+        ``ListLogicalType``.
 
         Args:
             python_type: A ``list[T]`` or ``set[T]`` generic alias where ``T``
@@ -287,15 +287,8 @@ class ListLogicalTypeFactory:
         element_annotation = args[0]
         is_set = origin is set
 
-        # Register the element type and get its Arrow representation.
-        element_arrow_type = converter.register_python_class(element_annotation)
-
-        # The element must map to a LogicalType (i.e. be an Arrow extension type).
-        element_lt = converter.get_logical_type_by_arrow_name(
-            element_arrow_type.extension_name
-            if hasattr(element_arrow_type, "extension_name")
-            else ""
-        )
+        # Directly look up (and register if needed) the LogicalType for the element.
+        element_lt = converter.get_logical_type_for_python_type(element_annotation)
         if element_lt is None:
             raise ValueError(
                 f"ListLogicalTypeFactory.create_for_python_type: element type "
@@ -359,7 +352,7 @@ class ListLogicalTypeFactory:
         )
 
         # Retrieve the now-registered element logical type.
-        element_logical_type = converter.get_logical_type_by_arrow_name(element_ext_name)
+        element_logical_type = converter.get_logical_type_by_arrow_extension_name(element_ext_name)
         if element_logical_type is None:
             raise ValueError(
                 f"ListLogicalTypeFactory.reconstruct_from_arrow: element extension "

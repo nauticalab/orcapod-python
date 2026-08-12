@@ -879,20 +879,56 @@ class UniversalTypeConverter:
             pass  # Unhashable type — skip caching.
         return python_type
 
-    def get_logical_type_by_arrow_name(
-        self, arrow_ext_name: str
+    def get_logical_type_by_arrow_extension_name(
+        self, arrow_extension_name: str
     ) -> "LogicalTypeProtocol | None":
-        """Return the registered logical type for *arrow_ext_name*, or ``None``.
+        """Return the registered logical type for *arrow_extension_name*, or ``None``.
 
         Args:
-            arrow_ext_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
+            arrow_extension_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
 
         Returns:
             The registered ``LogicalTypeProtocol``, or ``None`` if not found.
         """
         if self._logical_type_registry is None:
             return None
-        return self._logical_type_registry.get_by_arrow_extension_name(arrow_ext_name)
+        return self._logical_type_registry.get_by_arrow_extension_name(arrow_extension_name)
+
+    def get_logical_type_for_python_type(
+        self, annotation: Any
+    ) -> "LogicalTypeProtocol | None":
+        """Return the ``LogicalType`` for *annotation*, registering it first if needed.
+
+        Combines registration and registry lookup into a single call, providing a
+        direct path from a Python type annotation to its ``LogicalType`` without going
+        through the intermediate Arrow type representation.
+
+        Fast path: if the type is already in the registry, returns immediately.
+        Slow path: calls ``register_python_class`` to synthesise via factory, then
+        returns the result of a fresh registry lookup.
+
+        Args:
+            annotation: A Python type or generic alias (e.g. ``uuid.UUID``,
+                ``list[uuid.UUID]``). Primitives like ``str`` and ``int`` have no
+                ``LogicalType`` and return ``None``.
+
+        Returns:
+            The registered ``LogicalTypeProtocol`` for *annotation*, or ``None`` if
+            the type has no associated ``LogicalType``.
+        """
+        if self._logical_type_registry is None:
+            return None
+        # Fast path: already registered.
+        lt = self._logical_type_registry.get_by_python_type(annotation)
+        if lt is not None:
+            return lt
+        # Slow path: try registering (synthesises via factory if applicable).
+        # Primitives return without raising and produce no registry entry.
+        try:
+            self.register_python_class(annotation)
+        except (TypeError, ValueError):
+            return None
+        return self._logical_type_registry.get_by_python_type(annotation)
 
     def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> Schema:
         """

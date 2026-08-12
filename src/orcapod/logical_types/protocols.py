@@ -130,19 +130,39 @@ class TypeConverterProtocol(Protocol):
         """
         ...
 
-    def get_logical_type_by_arrow_name(
-        self, arrow_ext_name: str
+    def get_logical_type_by_arrow_extension_name(
+        self, arrow_extension_name: str
     ) -> "LogicalTypeProtocol | None":
-        """Return the registered logical type for *arrow_ext_name*, or ``None``.
+        """Return the registered logical type for *arrow_extension_name*, or ``None``.
 
         Used by ``ListLogicalTypeFactory.reconstruct_from_arrow`` to retrieve the
         element logical type after ``register_logical_type_from_arrow_metadata`` has registered it.
 
         Args:
-            arrow_ext_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
+            arrow_extension_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
 
         Returns:
             The registered ``LogicalTypeProtocol``, or ``None`` if not found.
+        """
+        ...
+
+    def get_logical_type_for_python_type(
+        self, annotation: "Any"
+    ) -> "LogicalTypeProtocol | None":
+        """Return the ``LogicalType`` for *annotation*, registering it first if needed.
+
+        Combines registration and registry lookup into a single call, providing a
+        direct path from a Python type annotation to its ``LogicalType`` without
+        going through the intermediate Arrow type representation.
+
+        Args:
+            annotation: A Python type or generic alias (e.g. ``uuid.UUID``,
+                ``list[uuid.UUID]``). Primitives like ``str`` and ``int`` have no
+                ``LogicalType`` and return ``None``.
+
+        Returns:
+            The registered ``LogicalTypeProtocol`` for *annotation*, or ``None`` if
+            the type has no associated ``LogicalType``.
         """
         ...
 

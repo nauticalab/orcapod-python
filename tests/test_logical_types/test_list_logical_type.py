@@ -63,8 +63,13 @@ class _StubConverter:
                 return uuid_module.UUID
         return type(None)
 
-    def get_logical_type_by_arrow_name(self, arrow_ext_name):
-        if arrow_ext_name == "orcapod.uuid":
+    def get_logical_type_by_arrow_extension_name(self, arrow_extension_name):
+        if arrow_extension_name == "orcapod.uuid":
+            return _logical_uuid()
+        return None
+
+    def get_logical_type_for_python_type(self, annotation):
+        if annotation is uuid_module.UUID:
             return _logical_uuid()
         return None
 
