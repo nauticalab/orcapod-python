@@ -3,10 +3,10 @@
 Wraps any ``ArrowDatabaseProtocol`` backend and transparently applies the
 register → cast pattern on every read result:
 
-1. Call ``register_discovered_extensions(converter, table.schema)`` to ensure
+1. Call ``register_discovered_logical_types(converter, table.schema)`` to ensure
    all Arrow extension types found in the returned table's field metadata are
    registered with the converter.
-2. Call ``converter.apply_extension_types(table)`` to re-wrap columns that
+2. Call ``converter.apply_logical_types(table)`` to re-wrap columns that
    were loaded as plain storage types into their correct extension types.
    This operation is zero-copy (``pa.ExtensionArray.from_storage`` per chunk).
 
@@ -24,12 +24,12 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
-from orcapod.extension_types.database_hooks import register_discovered_extensions
+from orcapod.logical_types.database_hooks import register_discovered_logical_types
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.extension_types.protocols import TypeConverterProtocol
+    from orcapod.logical_types.protocols import TypeConverterProtocol
 
 
 class ExtensionAwareDatabase:
@@ -40,9 +40,9 @@ class ExtensionAwareDatabase:
     1. Walk the returned table's schema to find any extension types (from
        preserved ``ARROW:extension:*`` field metadata).
     2. Register any newly discovered types with *converter* via
-       ``register_discovered_extensions``.
+       ``register_discovered_logical_types``.
     3. Re-wrap columns that were loaded as plain storage types into their
-       correct Arrow extension types via ``converter.apply_extension_types``
+       correct Arrow extension types via ``converter.apply_logical_types``
        (zero-copy).
 
     Write methods and ``flush`` delegate directly without modification.
@@ -67,8 +67,8 @@ class ExtensionAwareDatabase:
         """Register extension types and re-wrap columns, or return None unchanged."""
         if table is None:
             return None
-        register_discovered_extensions(self._converter, table.schema)
-        return self._converter.apply_extension_types(table)
+        register_discovered_logical_types(self._converter, table.schema)
+        return self._converter.apply_logical_types(table)
 
     # ── Read methods ──────────────────────────────────────────────────────────
 

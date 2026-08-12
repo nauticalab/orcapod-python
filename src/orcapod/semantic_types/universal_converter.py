@@ -29,8 +29,8 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.extension_types.registry import LogicalTypeRegistry
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
+    from orcapod.logical_types.registry import LogicalTypeRegistry
+    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -339,11 +339,11 @@ class UniversalTypeConverter:
                 )
             return self.register_python_class(next(iter(value_types)))
 
-        # list[T] → pa.large_list(T).
-        # Raise if T resolves to an extension type: Arrow forbids extension types inside
-        # list value fields (ET1/ET2 in DESIGN_ISSUES.md). Fail loudly now rather than
-        # silently dropping type information and failing mysteriously on read.
-        # Native list-of-logical-type support is planned in PLT-1732 (ListLogicalType).
+        # list[T] → large_list(T storage) when T is a plain type, or a top-level
+        # ListLogicalType extension when T has a registered LogicalType.
+        # Arrow forbids extension types inside list value fields (ET1 in DESIGN_ISSUES.md).
+        # Wrapping the whole list as an extension type (ET2 fix, ITL-173) preserves
+        # element type information at the field-metadata level.
         if origin is list:
             if not args:
                 raise ValueError(
@@ -351,16 +351,13 @@ class UniversalTypeConverter:
                     "element type (e.g. list[int], list[str])."
                 )
             inner = self.register_python_class(args[0])
-            if isinstance(inner, pa.ExtensionType):
-                raise ValueError(
-                    f"'list[{args[0]}]' is not yet supported: the element type maps to Arrow "
-                    f"extension type {inner.extension_name!r}, which cannot be preserved inside "
-                    f"a list value field due to an Arrow limitation (ET2 in DESIGN_ISSUES.md). "
-                    f"Native list-of-logical-type support is tracked in PLT-1732."
-                )
+            if self._logical_type_registry is not None and hasattr(inner, "extension_name"):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(inner.extension_name)
+                if element_lt is not None:
+                    return self._make_or_get_list_logical_type(element_lt, is_set=False)
             return pa.large_list(inner)
 
-        # set[T] → pa.large_list(T).  Same restriction as list[T].
+        # set[T] → pa.large_list(T). Same restriction as list[T] unless T has a LogicalType.
         if origin is set:
             if not args:
                 raise ValueError(
@@ -368,13 +365,10 @@ class UniversalTypeConverter:
                     "element type (e.g. set[int], set[str])."
                 )
             inner = self.register_python_class(args[0])
-            if isinstance(inner, pa.ExtensionType):
-                raise ValueError(
-                    f"'set[{args[0]}]' is not yet supported: the element type maps to Arrow "
-                    f"extension type {inner.extension_name!r}, which cannot be preserved inside "
-                    f"a list value field due to an Arrow limitation (ET2 in DESIGN_ISSUES.md). "
-                    f"Native set-of-logical-type support is tracked in PLT-1732."
-                )
+            if self._logical_type_registry is not None and hasattr(inner, "extension_name"):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(inner.extension_name)
+                if element_lt is not None:
+                    return self._make_or_get_list_logical_type(element_lt, is_set=True)
             return pa.large_list(inner)
 
         # dict[K, V] → pa.large_list(struct{key: K, value: V}).
@@ -447,6 +441,36 @@ class UniversalTypeConverter:
 
         raise ValueError(f"Unsupported annotation: {annotation!r}")
 
+    def _make_or_get_list_logical_type(
+        self,
+        element_logical_type: "LogicalTypeProtocol",
+        is_set: bool,
+    ) -> "pa.ExtensionType":
+        """Return (creating and registering if needed) a ``ListLogicalType`` for a container.
+
+        Shared by ``_register_python_class_impl`` and ``_convert_python_to_arrow`` to
+        ensure idempotent creation — looking up by extension name first avoids
+        creating two different ``ListLogicalType`` instances for the same annotation.
+
+        Args:
+            element_logical_type: Logical type of the list/set element (already registered).
+            is_set: ``True`` for ``set[T]``, ``False`` for ``list[T]``.
+
+        Returns:
+            The ``pa.ExtensionType`` of the created-or-existing ``ListLogicalType``.
+        """
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        prefix = "set" if is_set else "list"
+        list_ext_name = f"{prefix}[{element_logical_type.logical_type_name}]"
+
+        # Idempotency: look up by extension name first.
+        lt = self._logical_type_registry.get_by_arrow_extension_name(list_ext_name)
+        if lt is None:
+            lt = ListLogicalType(element_logical_type, is_set=is_set)
+            self._logical_type_registry.register_logical_type(lt)
+        return lt.get_arrow_extension_type()
+
     def _find_factory_for_class(
         self,
         python_type: type,
@@ -518,7 +542,7 @@ class UniversalTypeConverter:
             raw_meta = arrow_type.__arrow_ext_serialize__()
             ext_meta = raw_meta if raw_meta else None
             resolved_storage = self.register_storage_type(arrow_type.storage_type)
-            return self.register_arrow_extension(ext_name, ext_meta, resolved_storage)
+            return self.register_logical_type_from_arrow_metadata(ext_name, ext_meta, resolved_storage)
 
         # Struct type — recurse into each field, preserving field-level metadata.
         # Strip any extension type from field types before embedding (ET1: Arrow/Polars
@@ -559,15 +583,15 @@ class UniversalTypeConverter:
         # All other types (primitives, timestamps, binary, etc.) — return as-is
         return arrow_type
 
-    def apply_extension_types(self, table: "pa.Table") -> "pa.Table":
+    def apply_logical_types(self, table: "pa.Table") -> "pa.Table":
         """Re-wrap *table* columns into their registered Arrow extension types.
 
-        A convenience wrapper around the module-level ``apply_extension_types``
+        A convenience wrapper around the module-level ``apply_logical_types``
         function that uses this converter's own logical type registry. No-op
         when the registry is absent or when the table contains no columns with
         ``ARROW:extension:name`` field metadata.
 
-        Call ``self.register_discovered_extensions(table.schema)`` first to
+        Call ``self.register_discovered_logical_types(table.schema)`` first to
         ensure all extension types in the schema are registered before calling
         this method.
 
@@ -582,41 +606,41 @@ class UniversalTypeConverter:
         """
         if self._logical_type_registry is None:
             return table
-        from orcapod.extension_types.database_hooks import (
-            apply_extension_types as _apply_ext,
+        from orcapod.logical_types.database_hooks import (
+            apply_logical_types as _apply_ext,
         )
         return _apply_ext(table, self._logical_type_registry)
 
-    def register_discovered_extensions(self, schema: "pa.Schema") -> None:
+    def register_discovered_logical_types(self, schema: "pa.Schema") -> None:
         """Register any extension types found in ``schema`` that are not yet known.
 
-        A convenience wrapper around the module-level ``register_discovered_extensions``
+        A convenience wrapper around the module-level ``register_discovered_logical_types``
         function. Walks ``schema`` recursively and registers each discovered extension
-        type via this converter's ``register_arrow_extension``. Already-registered types
+        type via this converter's ``register_logical_type_from_arrow_metadata``. Already-registered types
         are skipped. No-op when the schema contains no extension types.
 
-        Call this before ``apply_extension_types`` when reading a table from Parquet or
+        Call this before ``apply_logical_types`` when reading a table from Parquet or
         IPC to ensure all extension types in the schema are registered:
 
-            converter.register_discovered_extensions(table.schema)
-            table = converter.apply_extension_types(table)
+            converter.register_discovered_logical_types(table.schema)
+            table = converter.apply_logical_types(table)
 
         Args:
             schema: The Arrow schema to inspect for extension types.
         """
-        from orcapod.extension_types.database_hooks import (
-            register_discovered_extensions as _reg_disc,
+        from orcapod.logical_types.database_hooks import (
+            register_discovered_logical_types as _reg_disc,
         )
         _reg_disc(self, schema)
 
-    def load_extension_types(self, table: "pa.Table") -> "pa.Table":
+    def load_logical_types(self, table: "pa.Table") -> "pa.Table":
         """Register and apply extension types for *table* in one step.
 
-        Convenience wrapper that calls ``register_discovered_extensions`` followed
-        by ``apply_extension_types``. Use this as the standard post-read step after
+        Convenience wrapper that calls ``register_discovered_logical_types`` followed
+        by ``apply_logical_types``. Use this as the standard post-read step after
         loading a table from Parquet or IPC:
 
-            table = converter.load_extension_types(pq.read_table(path))
+            table = converter.load_logical_types(pq.read_table(path))
 
         Args:
             table: Arrow table as returned by a Parquet or IPC read, whose columns
@@ -627,10 +651,10 @@ class UniversalTypeConverter:
             A new ``pa.Table`` with extension-typed columns re-wrapped, or the
             original *table* unchanged if no extension types are present.
         """
-        self.register_discovered_extensions(table.schema)
-        return self.apply_extension_types(table)
+        self.register_discovered_logical_types(table.schema)
+        return self.apply_logical_types(table)
 
-    def register_arrow_extension(
+    def register_logical_type_from_arrow_metadata(
         self,
         arrow_extension_name: str,
         extension_metadata: bytes | None,
@@ -639,7 +663,7 @@ class UniversalTypeConverter:
         """Register an extension type from (name, metadata, storage_type) info.
 
         Called by ``register_storage_type`` for in-memory ``pa.ExtensionType`` objects,
-        and by ``register_discovered_extensions`` for the field-metadata (Parquet) channel.
+        and by ``register_discovered_logical_types`` for the field-metadata (Parquet) channel.
         The ``storage_type`` must already be resolved (nested extension types registered).
 
         Args:
@@ -854,6 +878,57 @@ class UniversalTypeConverter:
         except TypeError:
             pass  # Unhashable type — skip caching.
         return python_type
+
+    def get_logical_type_by_arrow_extension_name(
+        self, arrow_extension_name: str
+    ) -> "LogicalTypeProtocol | None":
+        """Return the registered logical type for *arrow_extension_name*, or ``None``.
+
+        Args:
+            arrow_extension_name: Arrow extension name to look up (e.g. ``"orcapod.uuid"``).
+
+        Returns:
+            The registered ``LogicalTypeProtocol``, or ``None`` if not found.
+        """
+        if self._logical_type_registry is None:
+            return None
+        return self._logical_type_registry.get_by_arrow_extension_name(arrow_extension_name)
+
+    def get_logical_type_for_python_type(
+        self, annotation: Any
+    ) -> "LogicalTypeProtocol | None":
+        """Return the ``LogicalType`` for *annotation*, registering it first if needed.
+
+        Combines registration and registry lookup into a single call, providing a
+        direct path from a Python type annotation to its ``LogicalType`` without going
+        through the intermediate Arrow type representation.
+
+        Fast path: if the type is already in the registry, returns immediately.
+        Slow path: calls ``register_python_class`` to synthesise via factory, then
+        returns the result of a fresh registry lookup.
+
+        Args:
+            annotation: A Python type or generic alias (e.g. ``uuid.UUID``,
+                ``list[uuid.UUID]``). Primitives like ``str`` and ``int`` have no
+                ``LogicalType`` and return ``None``.
+
+        Returns:
+            The registered ``LogicalTypeProtocol`` for *annotation*, or ``None`` if
+            the type has no associated ``LogicalType``.
+        """
+        if self._logical_type_registry is None:
+            return None
+        # Fast path: already registered.
+        lt = self._logical_type_registry.get_by_python_type(annotation)
+        if lt is not None:
+            return lt
+        # Slow path: try registering (synthesises via factory if applicable).
+        # Primitives return without raising and produce no registry entry.
+        try:
+            self.register_python_class(annotation)
+        except (TypeError, ValueError):
+            return None
+        return self._logical_type_registry.get_by_python_type(annotation)
 
     def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> Schema:
         """
@@ -1074,9 +1149,9 @@ class UniversalTypeConverter:
             return type_map[python_type]
 
         # Check LogicalTypeRegistry — extension-type identity takes priority over shape-based system.
-        # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;
-        # generic aliases (list[T], Optional[T], etc.) will never be registered there.
-        if self._logical_type_registry is not None and isinstance(python_type, type):
+        # GenericAlias instances like list[UUID] may be registered as ListLogicalType entries,
+        # so we must not guard this check with isinstance(python_type, type).
+        if self._logical_type_registry is not None:
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
                 return lt.get_arrow_extension_type()
@@ -1104,6 +1179,10 @@ class UniversalTypeConverter:
                     f"list type must have exactly one type argument, got: {args}"
                 )
             element_type = self.python_type_to_arrow_type(args[0])
+            if self._logical_type_registry is not None and hasattr(element_type, "extension_name"):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(element_type.extension_name)
+                if element_lt is not None:
+                    return self._make_or_get_list_logical_type(element_lt, is_set=False)
             return pa.large_list(element_type)
 
         # Handle tuple types
@@ -1114,12 +1193,26 @@ class UniversalTypeConverter:
             if len(set(args)) == 1:
                 # Homogeneous tuple → fixed-size list
                 element_type = self.python_type_to_arrow_type(args[0])
+                if hasattr(element_type, "extension_name"):
+                    raise ValueError(
+                        f"'tuple[{args[0]}, ...]' is not supported: the element type maps to "
+                        f"Arrow extension type {element_type.extension_name!r}, which cannot be "
+                        f"preserved inside a list or struct field due to an Arrow limitation "
+                        f"(ET1 in DESIGN_ISSUES.md)."
+                    )
                 return pa.list_(element_type, len(args))
             else:
                 # Heterogeneous tuple → struct with indexed fields
                 fields = []
                 for i, arg_type in enumerate(args):
                     field_type = self.python_type_to_arrow_type(arg_type)
+                    if hasattr(field_type, "extension_name"):
+                        raise ValueError(
+                            f"'tuple[..., {arg_type}, ...]' is not supported: element type "
+                            f"maps to Arrow extension type {field_type.extension_name!r}, which "
+                            f"cannot be preserved inside a struct field due to an Arrow limitation "
+                            f"(ET1 in DESIGN_ISSUES.md)."
+                        )
                     fields.append((f"f{i}", field_type))
                 return pa.struct(fields)
 
@@ -1173,6 +1266,10 @@ class UniversalTypeConverter:
                     f"set type must have exactly one type argument, got: {args}"
                 )
             element_type = self.python_type_to_arrow_type(args[0])
+            if self._logical_type_registry is not None and hasattr(element_type, "extension_name"):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(element_type.extension_name)
+                if element_lt is not None:
+                    return self._make_or_get_list_logical_type(element_lt, is_set=True)
             return pa.large_list(element_type)
 
         else:
@@ -1386,9 +1483,9 @@ class UniversalTypeConverter:
         """Create a cached conversion function for Python → Arrow values."""
 
         # Check LogicalTypeRegistry first — extension-type identity takes priority.
-        # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;
-        # generic aliases (list[T], Optional[T], etc.) will never be registered there.
-        if self._logical_type_registry is not None and isinstance(python_type, type):
+        # GenericAlias instances like list[UUID] or set[UUID] may be registered as
+        # ListLogicalType entries, so we must not guard this check with isinstance(python_type, type).
+        if self._logical_type_registry is not None:
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
                 _lt = lt

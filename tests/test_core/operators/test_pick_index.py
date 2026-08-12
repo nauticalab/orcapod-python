@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.extension_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.base_logical_type import BaseLogicalType
 
 
 class ConcreteLogicalType(BaseLogicalType):

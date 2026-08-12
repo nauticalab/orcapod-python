@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.extension_types.directory_type import Directory
-from orcapod.extension_types.file_type import File
+from orcapod.logical_types.directory_type import Directory
+from orcapod.logical_types.file_type import File
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.file_hashers import CachedFileHasher, FileHasher
 from orcapod.hashing.hash_cachers import InMemoryHashCacher
