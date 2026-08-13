@@ -19,46 +19,46 @@
         "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
         "_config": {
             "logical_type_registry": {
-                "_class": "orcapod.extension_types.registry.LogicalTypeRegistry",
+                "_class": "orcapod.logical_types.registry.LogicalTypeRegistry",
                 "_config": {
                     "logical_types": [
                         {
-                            "_class": "orcapod.extension_types.builtin_logical_types.LogicalPath",
+                            "_class": "orcapod.logical_types.builtin_logical_types.LogicalPath",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.builtin_logical_types.LogicalUPath",
+                            "_class": "orcapod.logical_types.builtin_logical_types.LogicalUPath",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.builtin_logical_types.LogicalUUID",
+                            "_class": "orcapod.logical_types.builtin_logical_types.LogicalUUID",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.file_type.LogicalFile",
+                            "_class": "orcapod.logical_types.file_type.LogicalFile",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.directory_type.LogicalDirectory",
+                            "_class": "orcapod.logical_types.directory_type.LogicalDirectory",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.numpy_type.LogicalNumpyArray",
+                            "_class": "orcapod.logical_types.numpy_type.LogicalNumpyArray",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.pandas_type.LogicalPandasDataFrame",
+                            "_class": "orcapod.logical_types.pandas_type.LogicalPandasDataFrame",
                             "_config": {}
                         },
                         {
-                            "_class": "orcapod.extension_types.pandas_type.LogicalPandasSeries",
+                            "_class": "orcapod.logical_types.pandas_type.LogicalPandasSeries",
                             "_config": {}
                         }
                     ],
                     "factories": [
                         {
                             "factory": {
-                                "_class": "orcapod.extension_types.dataclass_logical_type_factory.DataclassLogicalTypeFactory",
+                                "_class": "orcapod.logical_types.dataclass_logical_type_factory.DataclassLogicalTypeFactory",
                                 "_config": {}
                             },
                             "category": "orcapod.dataclass",
@@ -66,11 +66,25 @@
                         },
                         {
                             "factory": {
-                                "_class": "orcapod.extension_types.pydantic_logical_type_factory.PydanticLogicalTypeFactory",
+                                "_class": "orcapod.logical_types.pydantic_logical_type_factory.PydanticLogicalTypeFactory",
                                 "_config": {}
                             },
                             "category": "orcapod.pydantic",
                             "python_bases": [{"_type": "pydantic.BaseModel"}]
+                        },
+                        {
+                            "factory": {
+                                "_class": "orcapod.logical_types.list_logical_type_factory.ListLogicalTypeFactory",
+                                "_config": {}
+                            },
+                            "category": "list"
+                        },
+                        {
+                            "factory": {
+                                "_class": "orcapod.logical_types.list_logical_type_factory.ListLogicalTypeFactory",
+                                "_config": {}
+                            },
+                            "category": "set"
                         }
                     ]
                 }
@@ -91,8 +105,8 @@
                 [{"_type": "builtins.bytes"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",        "_config": {}}],
                 [{"_type": "builtins.bytearray"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",        "_config": {}}],
                 [{"_type": "uuid.UUID"},               {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDHandler",         "_config": {}}],
-                [{"_type": "orcapod.extension_types.file_type.File"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FileHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
-                [{"_type": "orcapod.extension_types.directory_type.Directory"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.DirectoryHandler", "_config": {"directory_hasher": {"_ref": "directory_hasher"}}}],
+                [{"_type": "orcapod.logical_types.file_type.File"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FileHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
+                [{"_type": "orcapod.logical_types.directory_type.Directory"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.DirectoryHandler", "_config": {"directory_hasher": {"_ref": "directory_hasher"}}}],
                 [{"_type": "types.FunctionType"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "types.BuiltinFunctionType"},{"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",    "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "types.MethodType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],

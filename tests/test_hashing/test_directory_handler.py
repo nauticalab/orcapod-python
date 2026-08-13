@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from orcapod.extension_types.directory_type import Directory
+from orcapod.logical_types.directory_type import Directory
 from orcapod.hashing.directory_hashers import BasicDirectoryHasher
 from orcapod.hashing.file_hashers import FileHasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import (

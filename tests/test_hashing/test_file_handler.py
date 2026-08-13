@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.extension_types.file_type import File
+from orcapod.logical_types.file_type import File
 from orcapod.hashing.file_hashers import FileHasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler, register_builtin_python_type_handlers
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher

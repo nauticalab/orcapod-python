@@ -193,7 +193,7 @@ class FileHandler:
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
         # Deferred import breaks the circular dependency between this module and
         # file_type.py — the same pattern used by ArrowTableHandler.
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
         if not isinstance(obj, File):
             raise TypeError(
                 f"FileHandler: expected an orcapod.File, got {type(obj)!r}"
@@ -223,7 +223,7 @@ class DirectoryHandler:
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
         # Deferred import breaks the circular dependency between this module and
         # directory_type.py — the same pattern used by FileHandler.
-        from orcapod.extension_types.directory_type import Directory
+        from orcapod.logical_types.directory_type import Directory
         if not isinstance(obj, Directory):
             raise TypeError(
                 f"DirectoryHandler: expected an orcapod.Directory, got {type(obj)!r}"
@@ -475,10 +475,10 @@ def register_builtin_python_type_handlers(
 
     registry.register(UUID, UUIDHandler())
 
-    from orcapod.extension_types.file_type import File
+    from orcapod.logical_types.file_type import File
     registry.register(File, FileHandler(file_hasher))
 
-    from orcapod.extension_types.directory_type import Directory
+    from orcapod.logical_types.directory_type import Directory
     registry.register(Directory, DirectoryHandler(directory_hasher))
 
     import types as _types

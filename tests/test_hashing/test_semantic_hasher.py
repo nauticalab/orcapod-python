@@ -1017,7 +1017,7 @@ class TestGlobalSingletons:
 
         import typing as _typing
 
-        from orcapod.extension_types.file_type import File
+        from orcapod.logical_types.file_type import File
 
         reg = get_default_python_type_handler_registry()
         assert reg.has_handler(bytes)
