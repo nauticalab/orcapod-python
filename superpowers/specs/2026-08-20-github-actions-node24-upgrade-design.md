@@ -39,7 +39,7 @@ Single PR targeting `main`, five commits ordered by risk (smallest version jump 
 | 1 | `ci: upgrade dependency-review-action to v5.0.0` | `actions/dependency-review-action` | v4.9.0 | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | v5.0.0 | `run-tests.yml` |
 | 2 | `ci: upgrade setup-python to v7.0.0` | `actions/setup-python` | v5.6.0 | `5fda3b95a4ea91299a34e894583c3862153e4b97` | v7.0.0 | `run-tests.yml`, `run-objective-tests.yml`, `run-postgres-tests.yml` |
 | 3 | `ci: upgrade codecov-action to v7.0.0` | `codecov/codecov-action` | v5.5.5 | `fb8b3582c8e4def4969c97caa2f19720cb33a72f` | v7.0.0 | `run-tests.yml`, `run-objective-tests.yml`, `run-postgres-tests.yml` |
-| 4 | `ci: upgrade actions/checkout to v7.0.0` | `actions/checkout` | v4.4.0 | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` | v7.0.0 | all 6 workflow files |
+| 4 | `ci: upgrade actions/checkout to v7.0.0` | `actions/checkout` | v4.4.0 | `9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0` | v7.0.0 | all 7 workflow files (incl. `release-sync.yml`) |
 | 5 | `ci: upgrade setup-uv to v10.0.1` | `astral-sh/setup-uv` | v5.4.2 | `20cfd1bf945f4377ade1205e4dbc17946fc9a30d` | v10.0.1 | all 6 workflow files |
 
 ## Breaking Change Findings
