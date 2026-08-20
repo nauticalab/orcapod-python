@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import logging
 from collections.abc import Collection
 from math import floor
@@ -18,10 +19,11 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.errors import CursorInvalidatedError, InputValidationError, SchemaInconsistencyError
-from orcapod.types import ColumnConfig, Cursor, PollingConfig
+from orcapod.types import ColumnConfig, Cursor, PollingConfig, Schema
 from orcapod.utils import arrow_utils, polars_data_utils
+from orcapod.utils.arrow_utils import system_tag_column_names
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.utils.schema_utils import _normalize_column_list
+from orcapod.utils.schema_utils import _normalize_column_list, compute_schema_hash
 
 if TYPE_CHECKING:
     import polars as pl
@@ -238,6 +240,31 @@ class PollingSource(RootSource, Generic[T]):
             self._source_id = str(self._impl.identity())
 
     # -------------------------------------------------------------------------
+    # Schema helpers — fetch-free schema computation from declared schemas
+    # -------------------------------------------------------------------------
+
+    @functools.cached_property
+    def _declared_schema_hash(self) -> str | None:
+        """Schema hash derived from declared tag/data schemas, or ``None`` if either is missing.
+
+        Produces the same hash that ``SourceStreamBuilder`` embeds in system-tag
+        column names, so ``output_schema(columns={"system_tags": True})`` can return
+        correct column names and types without triggering a poll+fetch cycle.
+
+        Returns:
+            Hex schema-hash string, or ``None`` if ``tag_schema`` or ``data_schema``
+            was not provided at construction.
+        """
+        if self._tag_schema is None or self._data_schema is None:
+            return None
+        return compute_schema_hash(
+            self._tag_schema,
+            self._data_schema,
+            self.data_context.semantic_hasher,
+            self.orcapod_config.hashing.schema_n_char,
+        )
+
+    # -------------------------------------------------------------------------
     # Identity
     # -------------------------------------------------------------------------
 
@@ -261,27 +288,41 @@ class PollingSource(RootSource, Generic[T]):
     ) -> tuple[Schema, Schema]:
         """Return the output schema.
 
-        When both ``tag_schema`` and ``data_schema`` were provided at
-        construction and ``columns`` is ``None`` with ``all_info=False``,
-        returns the declared schemas directly without triggering a fetch.
+        Uses three levels of resolution to avoid triggering a poll+fetch cycle:
 
-        When that fast path does not apply (``columns`` is not ``None`` or
-        ``all_info=True``) and ``accumulated_stream`` is already populated
-        (i.e. at least one batch has been fetched, either via the sync or
-        async path), the existing stream is used to answer the query instead
-        of triggering a new poll+fetch cycle. This prevents a race condition
-        where calling ``output_schema`` concurrently with ``async_iter_data``
-        (e.g. from ``FunctionJobNode.async_execute``) would advance the cursor
-        via ``_run_sync``, causing the async polling loop to skip
-        already-fetched batches.
+        1. **Declared-schema fast path** — when both ``tag_schema`` and
+           ``data_schema`` were provided at construction, answers directly from
+           those schemas. System-tag column names and types (``str`` for
+           ``source_id``, ``bytes`` for ``record_id``) are derived from
+           ``_declared_schema_hash`` without any fetch. This covers all
+           ``ColumnConfig`` flags that are computable from declared schemas
+           (``system_tags``). Flags that require actual data columns (``meta``,
+           ``source``, ``context``, ``content_hash``) fall through to the next
+           level.
+        2. **Cached-stream path** — if ``accumulated_stream`` is already
+           populated (at least one batch fetched via sync or async), delegates
+           to it without triggering a new poll+fetch cycle.
+        3. **Fallback** — calls ``_get_latest_stream()``, which runs a
+           synchronous poll+fetch via ``_run_sync``. Only reached when no
+           declared schemas are available and no batch has been fetched yet.
         """
-        if (
-            self._tag_schema is not None
-            and self._data_schema is not None
-            and columns is None
-            and not all_info
-        ):
-            return self._tag_schema, self._data_schema
+        if self._tag_schema is not None and self._data_schema is not None:
+            columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
+            # meta / source / context / content_hash require actual stream data —
+            # fall through to accumulated_stream or _get_latest_stream for those.
+            if not (
+                columns_config.meta
+                or columns_config.source
+                or columns_config.context
+                or columns_config.content_hash
+            ):
+                tag_schema = self._tag_schema
+                if columns_config.system_tags:
+                    src_col, rec_col = system_tag_column_names(self._declared_schema_hash)
+                    tag_schema = Schema(
+                        {**dict(tag_schema), src_col: str, rec_col: bytes}
+                    )
+                return tag_schema, self._data_schema
         if self._accumulated_stream is not None:
             return self._accumulated_stream.output_schema(columns=columns, all_info=all_info)
         return self._get_latest_stream().output_schema(columns=columns, all_info=all_info)
@@ -294,22 +335,24 @@ class PollingSource(RootSource, Generic[T]):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Return tag and data column keys.
 
-        When both ``tag_schema`` and ``data_schema`` were provided at
-        construction and ``columns`` is ``None`` with ``all_info=False``,
-        derives keys from the declared schemas directly without triggering a
-        fetch.
-
-        When that fast path does not apply and ``accumulated_stream`` is
-        already populated, the existing stream is used directly, for the same
-        race-condition reason described in ``output_schema``.
+        Uses the same three-level resolution as ``output_schema``: declared
+        schemas → cached stream → ``_get_latest_stream()`` fallback. When
+        declared schemas are available, system-tag column names are derived
+        from ``_declared_schema_hash`` without triggering a fetch.
         """
-        if (
-            self._tag_schema is not None
-            and self._data_schema is not None
-            and columns is None
-            and not all_info
-        ):
-            return tuple(self._tag_schema.keys()), tuple(self._data_schema.keys())
+        if self._tag_schema is not None and self._data_schema is not None:
+            columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
+            if not (
+                columns_config.meta
+                or columns_config.source
+                or columns_config.context
+                or columns_config.content_hash
+            ):
+                tag_keys = tuple(self._tag_schema.keys())
+                if columns_config.system_tags:
+                    src_col, rec_col = system_tag_column_names(self._declared_schema_hash)
+                    tag_keys = tag_keys + (src_col, rec_col)
+                return tag_keys, tuple(self._data_schema.keys())
         if self._accumulated_stream is not None:
             return self._accumulated_stream.keys(columns=columns, all_info=all_info)
         return self._get_latest_stream().keys(columns=columns, all_info=all_info)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import functools
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
@@ -566,7 +566,9 @@ class SourceJobNode(SourceNodeBase):
             )
         return self._bound_source.iter_data()
 
-    async def async_iter_data(self):
+    async def async_iter_data(
+        self,
+    ) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
         """Delegate to ``bound_source.async_iter_data()`` when bound.
 
         Overrides ``SourceNodeBase.async_iter_data()`` to route through the
