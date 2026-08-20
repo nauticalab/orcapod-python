@@ -262,17 +262,27 @@ class PollingSource(RootSource, Generic[T]):
         """Return the output schema.
 
         When both ``tag_schema`` and ``data_schema`` were provided at
-        construction and no data has been fetched yet, returns them directly
-        without triggering a fetch. Otherwise triggers a fetch on first access.
+        construction and ``columns`` is ``None`` with ``all_info=False``,
+        returns the declared schemas directly without triggering a fetch.
+
+        When the ``accumulated_stream`` is already populated (i.e. at least one
+        batch has been fetched, either via the sync or async path) it is used
+        directly to answer schema queries, avoiding a redundant poll+fetch
+        cycle. This prevents a race condition where calling ``output_schema``
+        concurrently with ``async_iter_data`` (e.g. from
+        ``FunctionJobNode.async_execute``) would advance the cursor via
+        ``_run_sync``, causing the async polling loop to skip already-fetched
+        batches.
         """
         if (
             self._tag_schema is not None
             and self._data_schema is not None
-            and self._accumulated_stream is None
             and columns is None
             and not all_info
         ):
             return self._tag_schema, self._data_schema
+        if self._accumulated_stream is not None:
+            return self._accumulated_stream.output_schema(columns=columns, all_info=all_info)
         return self._get_latest_stream().output_schema(columns=columns, all_info=all_info)
 
     def keys(
@@ -284,17 +294,23 @@ class PollingSource(RootSource, Generic[T]):
         """Return tag and data column keys.
 
         When both ``tag_schema`` and ``data_schema`` were provided at
-        construction and no data has been fetched yet, derives keys from them
-        directly without triggering a fetch.
+        construction and ``columns`` is ``None`` with ``all_info=False``,
+        derives keys from the declared schemas directly without triggering a
+        fetch.
+
+        When the ``accumulated_stream`` is already populated it is used
+        directly, for the same race-condition reason described in
+        ``output_schema``.
         """
         if (
             self._tag_schema is not None
             and self._data_schema is not None
-            and self._accumulated_stream is None
             and columns is None
             and not all_info
         ):
             return tuple(self._tag_schema.keys()), tuple(self._data_schema.keys())
+        if self._accumulated_stream is not None:
+            return self._accumulated_stream.keys(columns=columns, all_info=all_info)
         return self._get_latest_stream().keys(columns=columns, all_info=all_info)
 
     def iter_data(self):

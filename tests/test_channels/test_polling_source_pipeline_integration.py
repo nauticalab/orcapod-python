@@ -114,8 +114,10 @@ class TestPollingSourcPipelineJobIntegration:
             f"Expected 2 rows (one per batch), got {records.num_rows}. "
             "This means only the static snapshot ran, not the polling loop."
         )
-        vals = sorted(records.column("val").to_pylist())
-        assert vals == [10, 20]
+        # get_all_records() returns tag + output columns only (not input data).
+        # Verify both batches by checking the tag (id) and output (doubled) columns.
+        ids = sorted(records.column("id").to_pylist())
+        assert ids == [1, 2]
         doubled = sorted(records.column("doubled").to_pylist())
         assert doubled == [20, 40]
 

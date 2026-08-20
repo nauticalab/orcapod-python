@@ -566,6 +566,26 @@ class SourceJobNode(SourceNodeBase):
             )
         return self._bound_source.iter_data()
 
+    async def async_iter_data(self):
+        """Delegate to ``bound_source.async_iter_data()`` when bound.
+
+        Overrides ``SourceNodeBase.async_iter_data()`` to route through the
+        bound source's own async generator instead of wrapping ``iter_data()``
+        synchronously. This ensures that dynamic sources such as
+        ``PollingSource`` run their async polling loop rather than returning
+        a static snapshot.
+
+        Raises:
+            UnboundSourceError: When no concrete source is attached.
+        """
+        if self._bound_source is None:
+            raise UnboundSourceError(
+                f"SourceJobNode '{self._name}' has no concrete source bound. "
+                "Call job.bind(sources={'<name>': source}) before running."
+            )
+        async for pair in self._bound_source.async_iter_data():
+            yield pair
+
     def output_schema(
         self,
         *,
