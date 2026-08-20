@@ -40,6 +40,25 @@ integration test for the exact bug topology, and per-site regression tests. PR: 
 
 ---
 
+## `src/orcapod/core/nodes/source_node.py`
+
+### SJN1 — `SourceJobNode.async_iter_data()` wraps `iter_data()` synchronously, bypassing `PollingSource` polling loop
+**Status:** in progress
+**Severity:** high
+**Issue:** ITL-615
+
+`SourceJobNode` does not override `async_iter_data()`. The base-class
+`SourceNodeBase.async_iter_data()` wraps `self.iter_data()` (sync) as an async generator,
+so `bound_source.async_iter_data()` is never called. For `PollingSource`,
+`iter_data()` returns a static single-batch snapshot — the async polling loop is never started.
+This contradicts the stated intent of `async_execute`'s own docstring.
+
+**Fix:** Add `SourceJobNode.async_iter_data()` that delegates to
+`self._bound_source.async_iter_data()`, consistent with the existing delegation pattern of
+`iter_data()`, `output_schema()`, and `as_table()`.
+
+---
+
 ## `src/orcapod/core/nodes/function_node.py`
 
 ### FN1 — `FunctionNodeBase.as_table()` returned empty schema when no data existed
