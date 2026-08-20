@@ -76,7 +76,7 @@ def _double_val(val: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-class TestPollingSourcPipelineJobIntegration:
+class TestPollingSourcePipelineJobIntegration:
     @pytest.mark.asyncio
     async def test_async_orchestrator_runs_polling_loop(self):
         """PollingSource bound to PipelineJob runs the full async polling loop.

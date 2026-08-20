@@ -265,14 +265,15 @@ class PollingSource(RootSource, Generic[T]):
         construction and ``columns`` is ``None`` with ``all_info=False``,
         returns the declared schemas directly without triggering a fetch.
 
-        When the ``accumulated_stream`` is already populated (i.e. at least one
-        batch has been fetched, either via the sync or async path) it is used
-        directly to answer schema queries, avoiding a redundant poll+fetch
-        cycle. This prevents a race condition where calling ``output_schema``
-        concurrently with ``async_iter_data`` (e.g. from
-        ``FunctionJobNode.async_execute``) would advance the cursor via
-        ``_run_sync``, causing the async polling loop to skip already-fetched
-        batches.
+        When that fast path does not apply (``columns`` is not ``None`` or
+        ``all_info=True``) and ``accumulated_stream`` is already populated
+        (i.e. at least one batch has been fetched, either via the sync or
+        async path), the existing stream is used to answer the query instead
+        of triggering a new poll+fetch cycle. This prevents a race condition
+        where calling ``output_schema`` concurrently with ``async_iter_data``
+        (e.g. from ``FunctionJobNode.async_execute``) would advance the cursor
+        via ``_run_sync``, causing the async polling loop to skip
+        already-fetched batches.
         """
         if (
             self._tag_schema is not None
@@ -298,9 +299,9 @@ class PollingSource(RootSource, Generic[T]):
         derives keys from the declared schemas directly without triggering a
         fetch.
 
-        When the ``accumulated_stream`` is already populated it is used
-        directly, for the same race-condition reason described in
-        ``output_schema``.
+        When that fast path does not apply and ``accumulated_stream`` is
+        already populated, the existing stream is used directly, for the same
+        race-condition reason described in ``output_schema``.
         """
         if (
             self._tag_schema is not None
