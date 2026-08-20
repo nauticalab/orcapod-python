@@ -275,16 +275,28 @@ class PollingSource(RootSource, Generic[T]):
 
     @functools.cached_property
     def _declared_schema_hash(self) -> str | None:
-        """Schema hash derived from declared tag/data schemas, or ``None`` if unavailable.
+        """Schema hash used to derive system-tag column names without fetching data.
 
-        Set when ``impl.schema()`` returns a non-``None`` unified schema (which is split
-        into ``_tag_schema`` and ``_data_schema`` at construction). Produces the same hash
-        that ``SourceStreamBuilder`` embeds in system-tag column names, so
-        ``output_schema(columns={"system_tags": True})`` can return correct column names
-        and types without triggering a poll+fetch cycle.
+        When ``SourceStreamBuilder`` materialises a source stream it embeds a
+        schema hash in the two system-tag column names::
+
+            _tag::source:<HASH>   →  source-ID column (str)
+            _tag::source:<HASH>::record_id  →  record-ID column (bytes)
+
+        where ``<HASH>`` is produced by ``compute_schema_hash(tag_schema,
+        data_schema, ...)``.
+
+        Callers such as ``FunctionJobNode.async_execute`` ask for these column
+        names up-front (via ``output_schema(columns={"system_tags": True})`` /
+        ``keys(columns={"system_tags": True})``) before any data has been
+        fetched.  ``_declared_schema_hash`` replicates the exact same hash
+        computation from the schemas declared by ``impl.schema()``, so those
+        callers can get the correct column names and Arrow types without
+        triggering a poll+fetch cycle.
 
         Returns:
-            Hex schema-hash string, or ``None`` if the impl declared no schema.
+            Hex schema-hash string, or ``None`` if ``impl.schema()`` returned
+            ``None`` (schema not yet known).
         """
         if self._tag_schema is None or self._data_schema is None:
             return None
