@@ -416,8 +416,8 @@ class TestSQLiteTableSourceTagColumns:
 class _FakePollingImpl:
     """Minimal DynamicSourceProtocol stub for tag_columns normalization tests.
 
-    No real data is served — ``tag_schema`` and ``data_schema`` are declared
-    at construction so that ``keys()`` can answer without triggering a fetch.
+    Declares its schema via ``schema()`` so that ``keys()`` can answer without
+    triggering a fetch.
     """
 
     def identity(self) -> Any:
@@ -429,6 +429,11 @@ class _FakePollingImpl:
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "_FakePollingImpl":
         return cls()
+
+    def schema(self) -> Any:
+        from orcapod.types import Schema
+
+        return Schema({"session_id": str, "value": int})
 
     async def poll(self, cursor: Any = None) -> bool:
         return False
@@ -445,40 +450,19 @@ class _FakePollingImpl:
 class TestPollingSourceTagColumns:
     def test_bare_string_same_as_list(self):
         from orcapod.core.sources.polling_source import PollingSource
-        from orcapod.types import Schema
 
-        tag_schema = Schema({"session_id": str})
-        data_schema = Schema({"value": int})
         stub = _FakePollingImpl()
-        src_str = PollingSource(
-            impl=stub,
-            tag_columns="session_id",
-            tag_schema=tag_schema,
-            data_schema=data_schema,
-        )
-        src_list = PollingSource(
-            impl=stub,
-            tag_columns=["session_id"],
-            tag_schema=tag_schema,
-            data_schema=data_schema,
-        )
+        src_str = PollingSource(impl=stub, tag_columns="session_id")
+        src_list = PollingSource(impl=stub, tag_columns=["session_id"])
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
 
     def test_tuple_accepted(self):
         from orcapod.core.sources.polling_source import PollingSource
-        from orcapod.types import Schema
 
-        tag_schema = Schema({"session_id": str})
-        data_schema = Schema({"value": int})
         stub = _FakePollingImpl()
-        src = PollingSource(
-            impl=stub,
-            tag_columns=("session_id",),
-            tag_schema=tag_schema,
-            data_schema=data_schema,
-        )
+        src = PollingSource(impl=stub, tag_columns=("session_id",))
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
 

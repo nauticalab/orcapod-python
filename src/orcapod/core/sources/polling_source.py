@@ -143,28 +143,40 @@ class PollingSource(RootSource, Generic[T]):
     ``poll()``/``fetch()`` errors with 1-second exponential backoff, and
     resets error and overrun counters on every clean tick.
 
+    Schema declaration:
+        If ``impl.schema()`` returns a non-``None`` ``Schema``, it is treated
+        as the declared unified column schema and split by ``tag_columns`` into
+        ``_tag_schema`` (tag columns) and ``_data_schema`` (all remaining
+        columns). This enables ``output_schema()`` and ``keys()`` to answer
+        without triggering a fetch. If ``impl.schema()`` returns ``None``,
+        schema is inferred from the first batch returned by ``fetch()``.
+
+    Iteration order guarantee:
+        Both sync (``iter_data``) and async (``async_iter_data``) iteration
+        always drain the accumulated stream first, then continue polling from
+        the saved cursor. This ensures that data fetched for schema inference
+        (or by a previous iteration) is never skipped or re-fetched.
+
     Args:
         impl: User-supplied ``DynamicSourceProtocol`` implementation that
             provides ``identity``, ``to_config``, ``from_config``, ``poll``,
-            ``fetch``, and ``close`` methods.
+            ``fetch``, ``close``, and ``schema`` methods.
         tag_columns: Column name(s) that form the tag (join key) for each
             row. All other columns become data columns.
         polling_config: Scheduling and error-handling configuration.
             See ``PollingConfig`` for field semantics and defaults.
             All fields are validated at construction — ``ValueError`` is
             raised for out-of-range values.
-        tag_schema: Optional expected tag schema. When provided, ``output_schema``
-            and ``keys`` can answer without triggering a fetch, and each fetched
-            batch is validated against this schema — ``SchemaInconsistencyError`` is
-            raised on any mismatch.
-        data_schema: Optional expected data schema. Same behaviour as
-            *tag_schema* above.
         source_id: Optional stable string identifier for provenance tracking.
             Defaults to ``str(impl.identity())`` when omitted.
         label: Optional human-readable label shown in pipeline diagrams.
         data_context: Optional data context key or instance for type
             conversion and hashing.
         config: Optional Orcapod framework config.
+
+    Raises:
+        ValueError: If ``impl.schema()`` returns a non-``None`` schema that
+            does not include all columns named in ``tag_columns``.
 
     Example::
 
@@ -181,6 +193,9 @@ class PollingSource(RootSource, Generic[T]):
             @classmethod
             def from_config(cls, config):
                 return cls(config["url"])
+
+            def schema(self):
+                return Schema({"row_id": int, "value": float})
 
             async def poll(self, cursor=None):
                 return await self._check_has_new_rows(since=cursor)
@@ -215,8 +230,6 @@ class PollingSource(RootSource, Generic[T]):
         impl: DynamicSourceProtocol[T],
         tag_columns: str | Collection[str],
         polling_config: PollingConfig = PollingConfig(),
-        tag_schema: Schema | None = None,
-        data_schema: Schema | None = None,
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | Any | None = None,
@@ -231,13 +244,30 @@ class PollingSource(RootSource, Generic[T]):
         self._impl: DynamicSourceProtocol[T] = impl
         self._tag_columns: tuple[str, ...] = tuple(_normalize_column_list(tag_columns))
         self._polling_config = polling_config
-        self._tag_schema = tag_schema
-        self._data_schema = data_schema
         self._cursor: Cursor[T] | None = None
         self._accumulated_stream: ArrowTableStream | None = None
         # Derive source_id from impl identity if not explicitly provided
         if self._source_id is None:
             self._source_id = str(self._impl.identity())
+        # Split impl.schema() into tag/data schemas
+        self._tag_schema: Schema | None = None
+        self._data_schema: Schema | None = None
+        unified_schema = self._impl.schema()
+        if unified_schema is not None:
+            tag_cols_set = set(self._tag_columns)
+            missing = tag_cols_set - set(unified_schema.keys())
+            if missing:
+                raise ValueError(
+                    f"PollingSource: impl.schema() is missing tag columns "
+                    f"{sorted(missing)!r}. All tag_columns must be present "
+                    f"in the schema declared by impl.schema()."
+                )
+            self._tag_schema = Schema(
+                {k: v for k, v in unified_schema.items() if k in tag_cols_set}
+            )
+            self._data_schema = Schema(
+                {k: v for k, v in unified_schema.items() if k not in tag_cols_set}
+            )
 
     # -------------------------------------------------------------------------
     # Schema helpers — fetch-free schema computation from declared schemas
@@ -245,15 +275,16 @@ class PollingSource(RootSource, Generic[T]):
 
     @functools.cached_property
     def _declared_schema_hash(self) -> str | None:
-        """Schema hash derived from declared tag/data schemas, or ``None`` if either is missing.
+        """Schema hash derived from declared tag/data schemas, or ``None`` if unavailable.
 
-        Produces the same hash that ``SourceStreamBuilder`` embeds in system-tag
-        column names, so ``output_schema(columns={"system_tags": True})`` can return
-        correct column names and types without triggering a poll+fetch cycle.
+        Set when ``impl.schema()`` returns a non-``None`` unified schema (which is split
+        into ``_tag_schema`` and ``_data_schema`` at construction). Produces the same hash
+        that ``SourceStreamBuilder`` embeds in system-tag column names, so
+        ``output_schema(columns={"system_tags": True})`` can return correct column names
+        and types without triggering a poll+fetch cycle.
 
         Returns:
-            Hex schema-hash string, or ``None`` if ``tag_schema`` or ``data_schema``
-            was not provided at construction.
+            Hex schema-hash string, or ``None`` if the impl declared no schema.
         """
         if self._tag_schema is None or self._data_schema is None:
             return None
@@ -290,21 +321,21 @@ class PollingSource(RootSource, Generic[T]):
 
         Uses three levels of resolution to avoid triggering a poll+fetch cycle:
 
-        1. **Declared-schema fast path** — when both ``tag_schema`` and
-           ``data_schema`` were provided at construction, answers directly from
-           those schemas. System-tag column names and types (``str`` for
-           ``source_id``, ``bytes`` for ``record_id``) are derived from
-           ``_declared_schema_hash`` without any fetch. This covers all
-           ``ColumnConfig`` flags that are computable from declared schemas
-           (``system_tags``). Flags that require actual data columns (``meta``,
-           ``source``, ``context``, ``content_hash``) fall through to the next
-           level.
+        1. **Declared-schema fast path** — when ``impl.schema()`` returned a
+           non-``None`` schema at construction (populating ``_tag_schema`` and
+           ``_data_schema``), answers directly from those schemas. System-tag
+           column names and types (``str`` for ``source_id``, ``bytes`` for
+           ``record_id``) are derived from ``_declared_schema_hash`` without
+           any fetch. Applies to all ``ColumnConfig`` flags computable from
+           declared schemas (``system_tags``); flags requiring actual persisted
+           data (``meta``, ``source``, ``context``, ``content_hash``) fall
+           through to the next level.
         2. **Cached-stream path** — if ``accumulated_stream`` is already
            populated (at least one batch fetched via sync or async), delegates
            to it without triggering a new poll+fetch cycle.
         3. **Fallback** — calls ``_get_latest_stream()``, which runs a
-           synchronous poll+fetch via ``_run_sync``. Only reached when no
-           declared schemas are available and no batch has been fetched yet.
+           synchronous poll+fetch via ``_run_sync``. Only reached when the impl
+           declared no schema and no batch has been fetched yet.
         """
         if self._tag_schema is not None and self._data_schema is not None:
             columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
@@ -335,10 +366,10 @@ class PollingSource(RootSource, Generic[T]):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Return tag and data column keys.
 
-        Uses the same three-level resolution as ``output_schema``: declared
-        schemas → cached stream → ``_get_latest_stream()`` fallback. When
-        declared schemas are available, system-tag column names are derived
-        from ``_declared_schema_hash`` without triggering a fetch.
+        Uses the same three-level resolution as ``output_schema``: impl-declared
+        schemas → cached stream → ``_get_latest_stream()`` fallback. When the
+        impl declared a schema, system-tag column names are derived from
+        ``_declared_schema_hash`` without triggering a fetch.
         """
         if self._tag_schema is not None and self._data_schema is not None:
             columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
@@ -525,10 +556,11 @@ class PollingSource(RootSource, Generic[T]):
         return result.stream
 
     def _validate_against_declared_schemas(self, stream: ArrowTableStream) -> None:
-        """Validate *stream*'s schema against the declared ``tag_schema`` / ``data_schema``.
+        """Validate *stream*'s schema against the declared ``_tag_schema`` / ``_data_schema``.
 
-        Called whenever a new batch is fetched and declared schemas were provided
-        at construction. Raises if the fetched data is incompatible.
+        Called whenever a new batch is fetched and ``impl.schema()`` returned a
+        non-``None`` schema at construction. Raises if the fetched data is
+        incompatible with the declared schema.
 
         Args:
             stream: The newly built stream whose schema is to be validated.

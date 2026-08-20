@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from polars._typing import FrameInitTypes
 
     from orcapod.protocols.database_protocols import DatabaseRegistryProtocol
+    from orcapod.types import Schema
 
 
 @runtime_checkable
@@ -64,10 +65,10 @@ class SourceProtocol(StreamProtocol, Protocol):
 class DynamicSourceProtocol(Protocol[T]):
     """User-supplied protocol for a polling data source.
 
-    Implementations provide six methods. The framework handles scheduling,
-    cursor tracking, cache management, error handling, and lifecycle; the
-    implementation supplies identity information, serialization, and the
-    core async data-access trio.
+    Implementations provide six required methods. The framework handles
+    scheduling, cursor tracking, cache management, error handling, and
+    lifecycle; the implementation supplies identity information,
+    serialization, and the core async data-access trio.
 
     Type parameter ``T`` is the cursor value type (e.g. ``datetime``, ``int``,
     ``str``).
@@ -82,6 +83,21 @@ class DynamicSourceProtocol(Protocol[T]):
         Raise ``CursorInvalidatedError`` from ``poll()`` or ``fetch()`` when
         previous state is no longer valid. This is a terminal condition —
         ``PollingSource`` will close its channel cleanly.
+
+    Optional ``schema()`` method:
+        Implementations may optionally define a ``schema()`` method that
+        returns a ``Schema`` mapping column names to Python types, or ``None``
+        if the schema is not known ahead of time::
+
+            def schema(self) -> Schema | None:
+                return Schema({"id": int, "val": float, "label": str})
+
+        When ``schema()`` is defined and returns non-``None``, ``PollingSource``
+        uses it as the declared column schema and splits it into tag columns
+        (based on ``tag_columns``) and data columns automatically — no schema
+        inference fetch is needed. When ``schema()`` is absent or returns
+        ``None``, schema is inferred from the first batch returned by
+        ``fetch()``.
 
     Example::
 
@@ -98,6 +114,9 @@ class DynamicSourceProtocol(Protocol[T]):
             @classmethod
             def from_config(cls, config):
                 return cls(connect(config["url"]))
+
+            def schema(self):
+                return Schema({"row_id": int, "value": float, "label": str})
 
             async def poll(
                 self, cursor: Cursor[datetime] | None = None
@@ -208,5 +227,32 @@ class DynamicSourceProtocol(Protocol[T]):
         cancellation, max error threshold exceeded, or
         ``CursorInvalidatedError``. The framework guarantees ``close()`` is
         awaited before the output channel is closed.
+        """
+        ...
+
+    def schema(self) -> Schema | None:
+        """Return the unified column schema for this source, or ``None``.
+
+        When non-``None``, ``PollingSource`` uses this as the declared schema
+        and splits it into tag columns (based on the ``tag_columns`` argument)
+        and data columns — no schema-inference fetch is needed upfront.
+
+        When ``None`` (or when the method is absent), schema is inferred from
+        the first batch returned by ``fetch()``.
+
+        The returned ``Schema`` must include all columns that ``fetch()`` will
+        produce, including all columns named in ``tag_columns``. Returning a
+        schema that omits a declared tag column raises ``ValueError`` at
+        ``PollingSource`` construction time.
+
+        Returns:
+            A flat ``Schema`` mapping column names to Python types covering
+            all columns (both tag and data), or ``None`` if the schema is not
+            known ahead of time.
+
+        Example::
+
+            def schema(self) -> Schema | None:
+                return Schema({"row_id": int, "value": float, "label": str})
         """
         ...

@@ -46,6 +46,9 @@ class _TwoBatchImpl:
     def from_config(cls, config):
         return cls()
 
+    def schema(self):
+        return Schema({"id": int, "val": int})
+
     async def poll(self, cursor=None):
         idx = cursor.value if cursor is not None else 0
         return idx < len(self._BATCHES)
@@ -88,8 +91,6 @@ class TestPollingSourcePipelineJobIntegration:
         src = PollingSource(
             _TwoBatchImpl(),
             tag_columns="id",
-            tag_schema=Schema({"id": int}),
-            data_schema=Schema({"val": int}),
             polling_config=PollingConfig(
                 interval=0.05,
                 duration=0.5,
