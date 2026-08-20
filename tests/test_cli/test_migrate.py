@@ -3,18 +3,22 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
-
-# Repo root: tests/test_cli/test_migrate.py → tests/test_cli/ → tests/ → repo root
-_REPO_ROOT = Path(__file__).parent.parent.parent
+import sys
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
+    """Invoke the CLI in a subprocess using the interpreter running the tests.
+
+    Deliberately does *not* shell out to ``uv run``: a nested ``uv run`` re-resolves
+    the project interpreter from ``.python-version`` and, when that disagrees with
+    the interpreter the outer session was started with (e.g. the release matrix's
+    ``uv run --python 3.11``), deletes and recreates ``.venv`` — tearing
+    site-packages out from under the pytest process that is still running.
+    """
     return subprocess.run(
-        ["uv", "run", "orcapod", *args],
+        [sys.executable, "-m", "orcapod.cli", *args],
         capture_output=True,
         text=True,
-        cwd=str(_REPO_ROOT),
     )
 
 

@@ -166,5 +166,10 @@ def test_factory_create_for_python_type_conformance():
 
 def test_type_converter_protocol_has_arrow_type_to_python_type():
     """TypeConverterProtocol must declare arrow_type_to_python_type."""
+    from typing_extensions import get_protocol_members
+
     from orcapod.logical_types.protocols import TypeConverterProtocol
-    assert "arrow_type_to_python_type" in TypeConverterProtocol.__protocol_attrs__
+
+    # ``get_protocol_members`` rather than ``__protocol_attrs__``: the latter is a
+    # CPython implementation detail that only exists on typing.Protocol from 3.12 on.
+    assert "arrow_type_to_python_type" in get_protocol_members(TypeConverterProtocol)
