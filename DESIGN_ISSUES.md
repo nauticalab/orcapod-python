@@ -1319,7 +1319,7 @@ Open questions:
 
 ---
 
-## `src/orcapod/extension_types/`
+## `src/orcapod/logical_types/`
 
 ### ET1 — `make_polars_extension_type` cannot accept a storage type containing nested extension types
 **Status:** open
@@ -1395,6 +1395,14 @@ resolves to a logical type, pointing to this entry and PLT-1732. Use a direct `T
 (no list wrapper) or wrap the list inside a dataclass field — the outer dataclass extension
 type carries the annotation into the schema, and `reconstruct_from_arrow` re-registers `T`
 transitively on read.
+
+**Operator layer (NPIPE-204):** `Batch` and `GroupBy` previously called
+`pa.list_(field.type)` directly, so they raised `ArrowNotImplementedError: extension` on any
+extension-typed column even after ITL-173 landed `ListLogicalType`. Both now build their
+output through `arrow_utils.build_aggregated_table`, which constructs the list over the
+element's storage type and wraps it in the outer `list[<element>]` extension type. A pod
+annotated `-> Path` groups into `list[orcapod.path]` and the downstream pod receives real
+`Path` objects.
 
 **Planned fix (PLT-1732, target v0.2):** Introduce `ListLogicalType` /
 `ListLogicalTypeFactory` and `StructLogicalType` / `StructLogicalTypeFactory`. A

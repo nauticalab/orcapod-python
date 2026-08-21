@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pyarrow as pa
 import pytest
 
+from orcapod.core.data_function import PythonDataFunction
+from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Batch, GroupBy
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 
 
@@ -249,3 +254,83 @@ class TestGroupByAsyncIsBarrier:
 
         assert "async_execute" not in GroupBy.__dict__
         assert GroupBy.async_execute is UnaryOperator.async_execute
+
+
+# ---------------------------------------------------------------------------
+# Logical (extension) element types — NPIPE-204 / ET2
+# ---------------------------------------------------------------------------
+
+# Defined at module level on purpose.  This file uses `from __future__ import
+# annotations`, so a pod function nested inside a test method would have its
+# annotations stringified with no resolvable scope, and `Path` would fail to
+# resolve.  Module scope keeps `-> Path` resolvable, matching how real pipelines
+# declare pods.
+def _make_path(seed: str) -> Path:
+    return Path(f"/data/sync_{seed}.parquet")
+
+
+def _path_stream() -> StreamProtocol:
+    """A stream whose data column is ``extension<orcapod.path>``."""
+    source = ArrowTableSource(
+        pa.table({
+            "date": ["d1", "d1", "d2"],
+            "probe": [0, 1, 0],
+            "seed": ["a", "b", "c"],
+        }),
+        tag_columns=["date", "probe"],
+        infer_nullable=True,
+    )
+    return FunctionPod(
+        PythonDataFunction(_make_path, output_keys="result_path")
+    )(source)
+
+
+class TestAggregationLogicalTypes:
+    """Aggregating operators must preserve logical (extension) element types.
+
+    A pod annotated ``-> Path`` emits an ``extension<orcapod.path>`` column.
+    Naively wrapping that in ``pa.list_()`` raises ``ArrowNotImplementedError``:
+    Arrow cannot embed an extension type inside a list value field
+    (DESIGN_ISSUES ET1/ET2).  The list must be built over the element's
+    *storage* type and wrapped in the ``list[orcapod.path]`` extension type at
+    the outermost level, which is what ``ListLogicalType`` provides.
+
+    Every other fixture in this file uses plain ``large_string``/``int64``,
+    which is why this case was originally missed.
+    """
+
+    def test_upstream_column_really_is_extension_typed(self):
+        """Guard the fixture -- if this stops holding, the rest is vacuous."""
+        field = _path_stream().as_table().schema.field("result_path")
+        assert isinstance(field.type, pa.ExtensionType)
+        assert field.type.storage_type == pa.large_string()
+
+    def test_group_by_preserves_path_element_type(self):
+        out = GroupBy(by=["date"]).process(_path_stream())
+        field = out.as_table().schema.field("result_path")
+
+        assert isinstance(field.type, pa.ExtensionType), (
+            f"expected a list extension type, got {field.type}"
+        )
+        assert field.type.storage_type == pa.large_list(pa.large_string())
+
+    def test_group_by_output_schema_is_list_of_path(self):
+        out = GroupBy(by=["date"]).process(_path_stream())
+        _, data_schema = out.output_schema()
+        assert data_schema["result_path"] == list[Path]
+
+    def test_group_by_preserves_path_values(self):
+        out = GroupBy(by=["date"]).process(_path_stream())
+        assert out.as_table().column("result_path").to_pylist() == [
+            ["/data/sync_a.parquet", "/data/sync_b.parquet"],
+            ["/data/sync_c.parquet"],
+        ]
+
+    def test_batch_preserves_path_element_type(self):
+        """Batch has the same defect, independent of GroupBy."""
+        out = Batch(batch_size=0).process(_path_stream())
+        field = out.as_table().schema.field("result_path")
+        assert isinstance(field.type, pa.ExtensionType), (
+            f"expected a list extension type, got {field.type}"
+        )
+        assert field.type.storage_type == pa.large_list(pa.large_string())

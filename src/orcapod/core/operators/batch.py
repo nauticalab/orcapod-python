@@ -92,14 +92,12 @@ class Batch(UnaryOperator):
             for members in batches
         ]
 
-        input_fields = {f.name: f for f in table.schema}
-        batched_schema = pa.schema([
-            pa.field(c, pa.list_(input_fields[c].type), nullable=False)
-            if c in member_columns
-            else input_fields[c]
-            for c in table.column_names
-        ])
-        batched_table = pa.Table.from_pylist(batched_data, schema=batched_schema)
+        batched_table = arrow_utils.build_aggregated_table(
+            batched_data,
+            table.schema,
+            member_columns,
+            stream.data_context.type_converter,
+        )
 
         n_char = self.orcapod_config.hashing.system_tag_n_char
         batched_table = arrow_utils.append_to_system_tags(

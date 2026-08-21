@@ -320,3 +320,9 @@ Prefixes are computed from SystemConstant in system_constants.py.
   the value, with None mapping to large_string. A many→one operator must emit a list for EVERY
   row of a list-valued column — mixing in a bare None makes per-row as_table() schemas diverge
   and pa.concat_tables fail on the barrier path.
+- Aggregating operators (Batch, GroupBy) must build list-valued columns via
+  arrow_utils.build_aggregated_table, never pa.list_(field.type). Arrow cannot embed an
+  extension type inside a list value field, so the naive call raises
+  ArrowNotImplementedError on any logical-typed column (e.g. a pod annotated -> Path).
+  The helper builds the list over the element's storage type and wraps it in the outer
+  list[<element>] extension type from ListLogicalType.

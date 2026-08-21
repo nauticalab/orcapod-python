@@ -368,3 +368,9 @@ and `as_table()` methods. `all_info=True` sets everything to True.
   are derived from the value, with `None` mapping to `large_string`. A many→one operator must
   emit a list for **every** row of a list-valued column — mixing a bare `None` into some rows
   makes per-row `as_table()` schemas diverge and `pa.concat_tables` fail on the barrier path.
+- Aggregating operators (`Batch`, `GroupBy`) must build list-valued columns via
+  `arrow_utils.build_aggregated_table`, never `pa.list_(field.type)`. Arrow cannot embed an
+  extension type inside a list value field, so the naive call raises
+  `ArrowNotImplementedError` on any logical-typed column (e.g. a pod annotated `-> Path`).
+  The helper builds the list over the element's storage type and wraps it in the outer
+  `list[<element>]` extension type from `ListLogicalType`.
