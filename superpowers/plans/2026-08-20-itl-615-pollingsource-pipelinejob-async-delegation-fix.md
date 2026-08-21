@@ -117,6 +117,9 @@
       def from_config(cls, config):
           return cls()
 
+      def schema(self):
+          return Schema({"id": int, "val": int})
+
       async def poll(self, cursor=None):
           idx = cursor.value if cursor is not None else 0
           return idx < len(self._BATCHES)
@@ -145,7 +148,7 @@
   # Tests
   # ---------------------------------------------------------------------------
 
-  class TestPollingSourcPipelineJobIntegration:
+  class TestPollingSourcePipelineJobIntegration:
       @pytest.mark.asyncio
       async def test_async_orchestrator_runs_polling_loop(self):
           """PollingSource bound to PipelineJob runs the full async polling loop.
@@ -157,8 +160,6 @@
           src = PollingSource(
               _TwoBatchImpl(),
               tag_columns="id",
-              tag_schema=Schema({"id": int}),
-              data_schema=Schema({"val": int}),
               polling_config=PollingConfig(
                   interval=0.05,
                   duration=0.5,
@@ -281,8 +282,8 @@
 
   Expected output:
   ```
-  tests/test_channels/test_polling_source_pipeline_integration.py::TestPollingSourcPipelineJobIntegration::test_async_orchestrator_runs_polling_loop PASSED
-  tests/test_channels/test_polling_source_pipeline_integration.py::TestPollingSourcPipelineJobIntegration::test_unbound_source_job_node_async_iter_raises PASSED
+  tests/test_channels/test_polling_source_pipeline_integration.py::TestPollingSourcePipelineJobIntegration::test_async_orchestrator_runs_polling_loop PASSED
+  tests/test_channels/test_polling_source_pipeline_integration.py::TestPollingSourcePipelineJobIntegration::test_unbound_source_job_node_async_iter_raises PASSED
   ```
 
 - [ ] **Step 4: Run the full test suite to verify no regressions**
@@ -323,4 +324,4 @@
 - [x] Spec coverage: `SourceJobNode.async_iter_data()` fix → Task 3 ✓. Integration test → Task 2 ✓. DESIGN_ISSUES.md → Task 1 ✓.
 - [x] No placeholders: All code blocks are complete, no TODOs.
 - [x] Type consistency: `UnboundSourceError` is imported in the test (line 10). The method signature matches `SourceNodeBase.async_iter_data()` (returns an async generator).
-- [x] The `_TwoBatchImpl` class satisfies `DynamicSourceProtocol` (has `identity`, `to_config`, `from_config`, `poll`, `fetch`, `close`).
+- [x] The `_TwoBatchImpl` class satisfies `DynamicSourceProtocol` (has `identity`, `to_config`, `from_config`, `schema`, `poll`, `fetch`, `close`).

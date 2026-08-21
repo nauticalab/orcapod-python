@@ -361,7 +361,11 @@ class PollingSource(RootSource, Generic[T]):
             ):
                 tag_schema = self._tag_schema
                 if columns_config.system_tags:
-                    src_col, rec_col = system_tag_column_names(self._declared_schema_hash)
+                    # _declared_schema_hash is str | None but is guaranteed non-None
+                    # here because _tag_schema and _data_schema are both non-None.
+                    schema_hash = self._declared_schema_hash
+                    assert schema_hash is not None
+                    src_col, rec_col = system_tag_column_names(schema_hash)
                     tag_schema = Schema(
                         {**dict(tag_schema), src_col: str, rec_col: bytes}
                     )
@@ -393,7 +397,11 @@ class PollingSource(RootSource, Generic[T]):
             ):
                 tag_keys = tuple(self._tag_schema.keys())
                 if columns_config.system_tags:
-                    src_col, rec_col = system_tag_column_names(self._declared_schema_hash)
+                    # _declared_schema_hash is str | None but is guaranteed non-None
+                    # here because _tag_schema and _data_schema are both non-None.
+                    schema_hash = self._declared_schema_hash
+                    assert schema_hash is not None
+                    src_col, rec_col = system_tag_column_names(schema_hash)
                     tag_keys = tag_keys + (src_col, rec_col)
                 return tag_keys, tuple(self._data_schema.keys())
         if self._accumulated_stream is not None:

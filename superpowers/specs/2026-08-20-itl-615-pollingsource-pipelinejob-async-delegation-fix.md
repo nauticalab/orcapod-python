@@ -62,10 +62,14 @@ In scope:
 
 Out of scope:
 
-- Changes to `PollingSource` itself.
 - Changes to `SourceNodeBase` or `AsyncPipelineOrchestrator`.
 - Any new scheduling, cancellation, or duration-propagation logic.
 - Sync orchestrator path (unaffected — `iter_data()` is correct for sync).
+
+> **Note (post-implementation):** `PollingSource` itself was also modified during
+> implementation to fix a race condition where concurrent schema queries triggered
+> an unintended poll+fetch cycle, and to add `schema()` to `DynamicSourceProtocol`
+> so that declared schemas are available without fetching data.
 
 ---
 
@@ -96,7 +100,10 @@ async def async_iter_data(self):
         yield pair
 ```
 
-The fix is six lines. No other files change in the production source tree.
+The core fix is a single method override in `SourceJobNode`. During implementation,
+`PollingSource` and `DynamicSourceProtocol` were also updated to fix a concurrent
+schema-query race condition and to add declared-schema support — see the post-implementation
+note in the Scope section above.
 
 ---
 

@@ -65,10 +65,10 @@ class SourceProtocol(StreamProtocol, Protocol):
 class DynamicSourceProtocol(Protocol[T]):
     """User-supplied protocol for a polling data source.
 
-    Implementations provide six required methods. The framework handles
+    Implementations provide seven required methods. The framework handles
     scheduling, cursor tracking, cache management, error handling, and
     lifecycle; the implementation supplies identity information,
-    serialization, and the core async data-access trio.
+    serialization, schema declaration, and the core async data-access trio.
 
     Type parameter ``T`` is the cursor value type (e.g. ``datetime``, ``int``,
     ``str``).
@@ -84,20 +84,18 @@ class DynamicSourceProtocol(Protocol[T]):
         previous state is no longer valid. This is a terminal condition —
         ``PollingSource`` will close its channel cleanly.
 
-    Optional ``schema()`` method:
-        Implementations may optionally define a ``schema()`` method that
-        returns a ``Schema`` mapping column names to Python types, or ``None``
-        if the schema is not known ahead of time::
+    ``schema()`` method:
+        ``schema()`` returns a ``Schema`` mapping column names to Python types,
+        or ``None`` if the schema is not known ahead of time::
 
             def schema(self) -> Schema | None:
                 return Schema({"id": int, "val": float, "label": str})
 
-        When ``schema()`` is defined and returns non-``None``, ``PollingSource``
-        uses it as the declared column schema and splits it into tag columns
-        (based on ``tag_columns``) and data columns automatically — no schema
-        inference fetch is needed. When ``schema()`` is absent or returns
-        ``None``, schema is inferred from the first batch returned by
-        ``fetch()``.
+        When ``schema()`` returns non-``None``, ``PollingSource`` uses it as
+        the declared column schema and splits it into tag columns (based on
+        ``tag_columns``) and data columns automatically — no schema-inference
+        fetch is needed. When ``schema()`` returns ``None``, schema is inferred
+        from the first batch returned by ``fetch()``.
 
     Example::
 
@@ -237,8 +235,8 @@ class DynamicSourceProtocol(Protocol[T]):
         and splits it into tag columns (based on the ``tag_columns`` argument)
         and data columns — no schema-inference fetch is needed upfront.
 
-        When ``None`` (or when the method is absent), schema is inferred from
-        the first batch returned by ``fetch()``.
+        When ``None``, schema is inferred from the first batch returned by
+        ``fetch()``.
 
         The returned ``Schema`` must include all columns that ``fetch()`` will
         produce, including all columns named in ``tag_columns``. Returning a
