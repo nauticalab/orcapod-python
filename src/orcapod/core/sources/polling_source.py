@@ -23,7 +23,7 @@ from orcapod.types import ColumnConfig, Cursor, PollingConfig, Schema
 from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.arrow_utils import system_tag_column_names
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.utils.schema_utils import _normalize_column_list, compute_schema_hash
+from orcapod.utils.schema_utils import _normalize_column_list, compute_source_schema_hash
 
 if TYPE_CHECKING:
     import polars as pl
@@ -283,16 +283,16 @@ class PollingSource(RootSource, Generic[T]):
             _tag::source:<HASH>   →  source-ID column (str)
             _tag::source:<HASH>::record_id  →  record-ID column (bytes)
 
-        where ``<HASH>`` is produced by ``compute_schema_hash(tag_schema,
-        data_schema, ...)``.
+        where ``<HASH>`` is produced by ``compute_source_schema_hash(tag_schema,
+        data_schema, data_context, config)``.
 
         Callers such as ``FunctionJobNode.async_execute`` ask for these column
         names up-front (via ``output_schema(columns={"system_tags": True})`` /
         ``keys(columns={"system_tags": True})``) before any data has been
-        fetched.  ``_declared_schema_hash`` replicates the exact same hash
-        computation from the schemas declared by ``impl.schema()``, so those
-        callers can get the correct column names and Arrow types without
-        triggering a poll+fetch cycle.
+        fetched.  ``_declared_schema_hash`` computes this hash from the schemas
+        declared by ``impl.schema()`` via the shared ``compute_source_schema_hash``
+        helper, so those callers can get the correct column names and Arrow types
+        without triggering a poll+fetch cycle.
 
         Returns:
             Hex schema-hash string, or ``None`` if ``impl.schema()`` returned
@@ -300,11 +300,11 @@ class PollingSource(RootSource, Generic[T]):
         """
         if self._tag_schema is None or self._data_schema is None:
             return None
-        return compute_schema_hash(
+        return compute_source_schema_hash(
             self._tag_schema,
             self._data_schema,
-            self.data_context.semantic_hasher,
-            self.orcapod_config.hashing.schema_n_char,
+            self.data_context,
+            self.orcapod_config,
         )
 
     # -------------------------------------------------------------------------

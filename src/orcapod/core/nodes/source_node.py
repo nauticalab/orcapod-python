@@ -19,7 +19,7 @@ from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.arrow_utils import system_tag_column_names
-from orcapod.utils.schema_utils import compute_schema_hash
+from orcapod.utils.schema_utils import compute_source_schema_hash
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -123,11 +123,11 @@ class SourceNodeBase(TraceableBase, ABC):
         Returns:
             Hex string schema hash.
         """
-        return compute_schema_hash(
+        return compute_source_schema_hash(
             self._tag_schema,
             self._data_schema,
-            self.data_context.semantic_hasher,
-            self.orcapod_config.hashing.schema_n_char,
+            self.data_context,
+            self.orcapod_config,
         )
 
     @property
