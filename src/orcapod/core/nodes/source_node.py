@@ -9,7 +9,7 @@ from __future__ import annotations
 import functools
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
@@ -19,7 +19,7 @@ from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.arrow_utils import system_tag_column_names
-from orcapod.utils.schema_utils import compute_schema_hash
+from orcapod.utils.schema_utils import compute_source_schema_hash
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -123,11 +123,11 @@ class SourceNodeBase(TraceableBase, ABC):
         Returns:
             Hex string schema hash.
         """
-        return compute_schema_hash(
+        return compute_source_schema_hash(
             self._tag_schema,
             self._data_schema,
-            self.data_context.semantic_hasher,
-            self.orcapod_config.hashing.schema_n_char,
+            self.data_context,
+            self.orcapod_config,
         )
 
     @property
@@ -565,6 +565,28 @@ class SourceJobNode(SourceNodeBase):
                 "Call job.bind(sources={'<name>': source}) before running."
             )
         return self._bound_source.iter_data()
+
+    async def async_iter_data(
+        self,
+    ) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
+        """Delegate to ``bound_source.async_iter_data()`` when bound.
+
+        Overrides ``SourceNodeBase.async_iter_data()`` to route through the
+        bound source's own async generator instead of wrapping ``iter_data()``
+        synchronously. This ensures that dynamic sources such as
+        ``PollingSource`` run their async polling loop rather than returning
+        a static snapshot.
+
+        Raises:
+            UnboundSourceError: When no concrete source is attached.
+        """
+        if self._bound_source is None:
+            raise UnboundSourceError(
+                f"SourceJobNode '{self._name}' has no concrete source bound. "
+                "Call job.bind(sources={'<name>': source}) before running."
+            )
+        async for pair in self._bound_source.async_iter_data():
+            yield pair
 
     def output_schema(
         self,
