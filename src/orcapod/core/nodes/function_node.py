@@ -2120,6 +2120,24 @@ class FunctionJobNode(FunctionNodeBase):
                 unmatched_df, empty_data_tokens, empty_taginfo_rows
             )
 
+        # Filter token dicts to the requested scope before the merge block.
+        # This must happen here — before the early-return `else` branch below
+        # — so that every return path (including the no-matched-rows case)
+        # scopes EmptyData tokens identically to the base_entry_ids filter
+        # applied to merged_df below.  Without this, callers such as
+        # load_cached_results(base_entry_ids=[x]) would cache EmptyData for
+        # IDs outside [x].
+        if base_entry_ids is not None:
+            base_entry_ids_set = set(base_entry_ids)
+            empty_data_tokens = {
+                k: v for k, v in empty_data_tokens.items()
+                if k in base_entry_ids_set
+            }
+            empty_taginfo_rows = {
+                k: v for k, v in empty_taginfo_rows.items()
+                if k in base_entry_ids_set
+            }
+
         # ------------------------------------------------------------------
         # Merge with persistent priority (anti-join + concat)
         # ------------------------------------------------------------------
@@ -2144,7 +2162,7 @@ class FunctionJobNode(FunctionNodeBase):
                 empty_taginfo_rows=empty_taginfo_rows,
             )
 
-        # Apply base_entry_id filter if requested
+        # Apply base_entry_id filter to matched rows (token dicts already filtered above).
         if base_entry_ids is not None:
             merged_df = merged_df.filter(
                 pl.col(_PIPELINE_BASE_ENTRY_ID_COL).is_in(base_entry_ids)

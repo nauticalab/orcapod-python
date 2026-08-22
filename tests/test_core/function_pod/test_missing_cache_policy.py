@@ -340,6 +340,43 @@ class TestAsEmptyPolicy:
         assert len(real_results) == 1, "exactly one row should be real data"
         assert real_results[0].as_dict()["result"] == 40
 
+    def test_as_empty_load_cached_results_scoped_to_requested_ids(self):
+        """load_cached_results(base_entry_ids=[x]) must not cache EmptyData for other IDs.
+
+        Regression for the bug where ``_fetch_joined_records`` populated
+        ``empty_data_tokens`` for all unmatched rows before applying the
+        ``base_entry_ids`` filter, causing ``_cached_output_datas`` to be
+        polluted with EmptyData entries for IDs that were never requested.
+        """
+        rows = [{"id": 0, "x": 10}, {"id": 1, "x": 20}]
+        stream = _make_stream(rows)
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+
+        # Session 1: compute both rows so pipeline DB has two entries.
+        _make_node(stream, pipeline_db, result_db).execute(stream)
+
+        # Wipe result DB entirely — both rows are now persistent misses.
+        _wipe_result_db(result_db)
+
+        node = _make_node(stream, pipeline_db, result_db, missing_cache_policy="as_empty")
+
+        # Request only the first row's base_entry_id.
+        all_pairs = list(stream.iter_data())
+        tag0, data0 = all_pairs[0]
+        tag1, data1 = all_pairs[1]
+        eid0 = node.compute_base_entry_id(tag0, data0)
+        eid1 = node.compute_base_entry_id(tag1, data1)
+
+        # load_cached_results scoped to eid0 only.
+        node.load_cached_results(base_entry_ids=[eid0])
+
+        assert eid0 in node._cached_output_datas, "requested ID must be cached"
+        assert isinstance(node._cached_output_datas[eid0][1], EmptyData)
+        assert eid1 not in node._cached_output_datas, (
+            "unrequested ID must NOT be cached — token filter bug"
+        )
+
 
 class TestEphemeralInfoLog:
     """Ephemeral misses log at INFO level (never WARNING)."""
