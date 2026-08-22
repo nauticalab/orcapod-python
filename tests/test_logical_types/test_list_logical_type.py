@@ -286,3 +286,88 @@ def test_list_logical_type_factory_reconstruct_raises_on_missing_element_ext_nam
         factory.reconstruct_from_arrow(
             "list[orcapod.uuid]", pa.large_list(pa.large_binary()), metadata, _StubConverter()
         )
+
+
+# ── Regression tests for ITL-627 (Defect 1) ──────────────────────────────────
+
+
+class TestListLogicalTypePolarsMetadata:
+    """Regression tests for ListLogicalType Polars extension type metadata.
+
+    Defect 1 (ITL-627): get_polars_extension_type() was called without passing
+    metadata= to make_polars_extension_type, so ext_metadata() returned None.
+    Polars exported b'' on to_arrow(), which _deserialize rejected with ValueError.
+    """
+
+    def test_list_polars_ext_carries_metadata(self):
+        """get_polars_extension_type() for list[Path] must carry JSON metadata.
+
+        With the buggy code (metadata= not passed), ext_metadata() returns None.
+        Polars then exports b'' on to_arrow(), causing _deserialize to raise
+        ValueError because b'' != the expected JSON bytes.
+        """
+        import json
+        from orcapod.logical_types.builtin_logical_types import LogicalPath
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        lt = ListLogicalType(LogicalPath(), is_set=False)
+        polars_ext = lt.get_polars_extension_type()
+
+        meta = polars_ext.ext_metadata()
+        assert meta is not None, (
+            "ext_metadata() returned None — metadata= was not passed to "
+            "make_polars_extension_type. This causes the Polars→Arrow round-trip to fail."
+        )
+        parsed = json.loads(meta)
+        assert parsed["category"] == "list"
+        assert parsed["element_ext_name"] == "orcapod.path"
+
+    def test_set_polars_ext_carries_metadata(self):
+        """Same one-line fix covers set[T] (identical code path, is_set=True)."""
+        import json
+        from orcapod.logical_types.builtin_logical_types import LogicalPath
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        lt = ListLogicalType(LogicalPath(), is_set=True)
+        polars_ext = lt.get_polars_extension_type()
+
+        meta = polars_ext.ext_metadata()
+        assert meta is not None
+        parsed = json.loads(meta)
+        assert parsed["category"] == "set"
+        assert parsed["element_ext_name"] == "orcapod.path"
+
+    def test_polars_to_arrow_round_trip_preserves_extension_type(self):
+        """Full Polars round-trip must not raise and must preserve the extension type.
+
+        pl.DataFrame(table).to_arrow() calls _deserialize; without the fix it
+        receives b'' and raises ValueError.
+        """
+        import polars as pl
+        from orcapod.logical_types.builtin_logical_types import LogicalPath
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        lt = ListLogicalType(LogicalPath(), is_set=False)
+        ext_type = lt.get_arrow_extension_type()
+
+        # Register the extension types with both Arrow and Polars registries so
+        # the round-trip can reconstruct the extension type (not fall back to storage).
+        try:
+            pa.register_extension_type(ext_type)
+        except pa.lib.ArrowKeyError:
+            pass  # already registered
+        polars_ext = lt.get_polars_extension_type()
+        try:
+            pl.register_extension_type(ext_type.extension_name, type(polars_ext))
+        except (ValueError, pl.exceptions.ComputeError):
+            pass  # already registered
+
+        storage = pa.array([["/a.txt", "/b.txt"]], type=pa.large_list(pa.large_string()))
+        ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
+        table = pa.table({"paths": ext_array})
+
+        # Must not raise ValueError from _deserialize
+        result = pl.DataFrame(table).to_arrow()
+
+        assert isinstance(result.schema.field("paths").type, pa.ExtensionType)
+        assert result.schema.field("paths").type.extension_name == "list[orcapod.path]"
