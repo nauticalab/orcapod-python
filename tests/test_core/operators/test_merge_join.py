@@ -982,8 +982,8 @@ class TestMergeJoinLogicalTypeColumns:
 
         # Values must be a list of two storage values
         file_values = out_table.column("file").to_pylist()
-        assert len(file_values) == 1  # one row
-        assert len(file_values[0]) == 2  # two merged elements
+        assert len(file_values) == 1, f"Expected 1 row, got {len(file_values)}"
+        assert len(file_values[0]) == 2, f"Expected 2 merged elements, got {len(file_values[0])}"
 
     def test_merge_join_list_backed_column_yields_nested_list_extension(self, tmp_path):
         """Merging a list[File] column must produce extension<list[list[orcapod.file]]>.
@@ -1038,5 +1038,5 @@ class TestMergeJoinLogicalTypeColumns:
 
         # One row with two inner lists
         files_values = out_table.column("files").to_pylist()
-        assert len(files_values) == 1
-        assert len(files_values[0]) == 2
+        assert len(files_values) == 1, f"Expected 1 row, got {len(files_values)}"
+        assert len(files_values[0]) == 2, f"Expected 2 merged inner lists, got {len(files_values[0])}"

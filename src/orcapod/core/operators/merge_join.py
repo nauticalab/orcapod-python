@@ -284,12 +284,14 @@ class MergeJoin(BinaryOperator):
 
             elem_arrow_type = colliding_col_types.get(col)
             if elem_arrow_type is not None and isinstance(elem_arrow_type, pa.ExtensionType):
+                # Late import: orcapod.contexts pulls in the full type system;
+                # importing at module level creates a circular dependency.
                 from orcapod.contexts import get_default_context
                 tc = get_default_context().type_converter
                 elem_python_type = tc.arrow_type_to_python_type(elem_arrow_type)
-                list_lt = tc.get_logical_type_for_python_type(list[elem_python_type])
-                if list_lt is not None:
-                    list_ext_type = list_lt.get_arrow_extension_type()
+                list_logical_type = tc.get_logical_type_for_python_type(list[elem_python_type])
+                if list_logical_type is not None:
+                    list_ext_type = list_logical_type.get_arrow_extension_type()
                     storage_array = pa.array(merged_vals, type=list_ext_type.storage_type)
                     merged_array = pa.ExtensionArray.from_storage(list_ext_type, storage_array)
                 else:
