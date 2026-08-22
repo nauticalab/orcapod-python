@@ -474,27 +474,15 @@ class TestJoinWithListExtensionColumn:
         Before Fix 1, df.to_arrow() inside static_process called _deserialize
         with b'' (no metadata), raising ValueError.
         """
-        import polars as pl
         import pyarrow as pa
-        from orcapod.logical_types.builtin_logical_types import LogicalPath
-        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+        from pathlib import Path
+        from orcapod.contexts import get_default_context
 
-        lt = ListLogicalType(LogicalPath(), is_set=False)
-        ext_type = lt.get_arrow_extension_type()
-
-        # Registration required: ArrowTableStream does not trigger LogicalType
-        # registration, so without this Polars degrades the extension type to its
-        # storage type (large_list<large_string>) during the operator's Polars
-        # round-trip, and the post-join Arrow table loses the extension wrapper.
-        try:
-            pa.register_extension_type(ext_type)
-        except pa.lib.ArrowKeyError:
-            pass  # already registered
-        polars_ext = lt.get_polars_extension_type()
-        try:
-            pl.register_extension_type(ext_type.extension_name, type(polars_ext))
-        except (ValueError, pl.exceptions.ComputeError):
-            pass  # already registered
+        # Use the shared type-converter cache so both Arrow and Polars always see
+        # the same extension class object, avoiding ArrowTypeError on table.cast().
+        ctx = get_default_context()
+        ctx.type_converter.register_python_class(list[Path])
+        ext_type = ctx.type_converter.python_type_to_arrow_type(list[Path])
 
         storage = pa.array(
             [["/a.txt", "/b.txt"], ["/c.txt"]],
