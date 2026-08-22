@@ -182,6 +182,15 @@ class MergeJoin(BinaryOperator):
         # Find colliding data columns
         colliding_keys = set(left_data_keys) & set(right_data_keys)
 
+        # Snapshot Arrow types of colliding columns BEFORE the Polars round-trip.
+        # The round-trip may strip or alter extension metadata; we need the original
+        # element type to reconstruct the correct list extension type after merging.
+        colliding_col_types: dict[str, "pa.DataType"] = {
+            col: left_table.schema.field(col).type
+            for col in colliding_keys
+            if col in left_table.schema.names
+        }
+
         # Capture nullable flags from input schemas BEFORE Polars conversion.
         # Polars' join discards nullable info (defaults all to True); we derive
         # the output schema from the inputs instead of from data null counts.
@@ -273,7 +282,20 @@ class MergeJoin(BinaryOperator):
             joined = joined.drop(left_col_name)
             joined = joined.drop(right_col_name)
 
-            merged_array = pa.array(merged_vals)
+            elem_arrow_type = colliding_col_types.get(col)
+            if elem_arrow_type is not None and isinstance(elem_arrow_type, pa.ExtensionType):
+                from orcapod.contexts import get_default_context
+                tc = get_default_context().type_converter
+                elem_python_type = tc.arrow_type_to_python_type(elem_arrow_type)
+                list_lt = tc.get_logical_type_for_python_type(list[elem_python_type])
+                if list_lt is not None:
+                    list_ext_type = list_lt.get_arrow_extension_type()
+                    storage_array = pa.array(merged_vals, type=list_ext_type.storage_type)
+                    merged_array = pa.ExtensionArray.from_storage(list_ext_type, storage_array)
+                else:
+                    merged_array = pa.array(merged_vals)
+            else:
+                merged_array = pa.array(merged_vals)
             joined = joined.add_column(col_idx, left_col_name, merged_array)
 
             if has_source:
