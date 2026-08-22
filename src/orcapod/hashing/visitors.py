@@ -198,13 +198,28 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         extension_type: "pa.ExtensionType",
         storage_value: Any,
     ) -> tuple["pa.DataType", Any]:
-        """Hash an extension type value to pa.large_binary(), or passthrough.
+        """Hash an extension type value to ``pa.large_binary()``, or passthrough.
 
         For list-backed extension types (e.g. ``extension<list[orcapod.file]>``),
         delegates to ``_visit_list_elements`` with a virtual
         ``large_list(elem_ext_type)`` so that each element is hashed identically
         to the scalar ``visit_extension`` path. This covers ``list[T]``,
         ``set[T]``, and arbitrary nesting depth via recursion.
+
+        Three passthrough cases (extension type and storage value returned unchanged):
+        - ``storage_value`` is ``None``.
+        - The Python type could not be resolved (``typing.Any`` or not a plain ``type``).
+        - The element type has no registered semantic handler and is not a nested list/set.
+
+        Args:
+            extension_type: The Arrow extension type to process.
+            storage_value: The storage-level value (result of ``to_pylist()`` on the column).
+
+        Returns:
+            Tuple of ``(new_arrow_type, new_data)``. For hashable scalar types returns
+            ``(pa.large_binary(), hash_bytes)``. For list/set-backed types returns
+            ``(pa.large_list(...), [hash_bytes, ...])``. Passthroughs return the
+            original ``(extension_type, storage_value)``.
         """
         if storage_value is None:
             return extension_type, None
@@ -222,6 +237,8 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
             and pa.types.is_large_list(extension_type.storage_type)
         ):
             args = typing.get_args(python_type)
+            # Defensive guard: a well-formed list[T]/set[T] always has args, but if
+            # not, fall through to the isinstance(python_type, type) passthrough below.
             if args:
                 elem_python_type = args[0]
                 # Check handler for plain element types (e.g. File).

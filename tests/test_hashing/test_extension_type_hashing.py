@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 
 import pyarrow as pa
@@ -9,7 +10,11 @@ import pytest
 from pathlib import Path
 
 from orcapod.logical_types.file_type import File
+from orcapod.logical_types.builtin_logical_types import LogicalPath
+from orcapod.logical_types.list_logical_type_factory import ListLogicalType
 from orcapod.hashing.visitors import SemanticHashingVisitor
+from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.contexts import get_default_context
 
 
@@ -137,10 +142,6 @@ class TestSemanticHashingVisitorExtension:
 
     def test_unregistered_python_type_passes_through(self, ctx):
         """Extension types with no registered semantic hasher pass through unchanged."""
-        import uuid
-        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
-        from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
-
         # Build a hasher with a registry that has NO entry for UUID
         empty_registry = PythonTypeHandlerRegistry()
         stripped_hasher = SemanticAwarePythonHasher(
@@ -247,19 +248,22 @@ class TestListExtensionHashing:
     """
 
     def _make_list_file_ext_type(self, ctx):
-        """Return the extension<list[orcapod.file]> Arrow type via the type converter."""
-        from orcapod.logical_types.file_type import File
+        """Return the ``extension<list[orcapod.file]>`` Arrow type via the type converter.
+
+        Idempotent: ``register_python_class`` is a no-op if the type is already registered.
+        """
         ctx.type_converter.register_python_class(list[File])
         return ctx.type_converter.python_type_to_arrow_type(list[File])
 
     def _make_scalar_file_ext_type(self, ctx):
-        """Return the extension<orcapod.file> Arrow type."""
-        from orcapod.logical_types.file_type import File
+        """Return the ``extension<orcapod.file>`` Arrow type.
+
+        Idempotent: ``register_python_class`` is a no-op if the type is already registered.
+        """
         return ctx.type_converter.register_python_class(File)
 
     def _file_storage(self, ctx, path):
         """Return the large_string storage value for a File."""
-        from orcapod.logical_types.file_type import File
         return ctx.type_converter.python_to_storage(File(path), File)
 
     def test_list_file_extension_hashed_to_list_of_large_binary(self, ctx, tmp_path):
@@ -280,7 +284,6 @@ class TestListExtensionHashing:
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         new_type, new_data = visitor.visit(list_ext_type, storage_value)
 
-        import pyarrow as pa
         assert new_type == pa.large_list(pa.large_binary()), (
             f"Expected large_list(large_binary), got {new_type}. "
             "Buggy code returns the extension type unchanged."
@@ -333,7 +336,6 @@ class TestListExtensionHashing:
         r0_v1 = result_v1[0]
 
         f.write_text("v2")
-        from orcapod.logical_types.file_type import File
         s_v2 = ctx.type_converter.python_to_storage(File(f), File)
         _, result_v2 = visitor.visit(list_ext_type, [s_v2])
         r0_v2 = result_v2[0]
@@ -359,9 +361,6 @@ class TestListExtensionHashing:
 
     def test_list_file_extension_passthrough_when_no_handler(self, ctx, tmp_path):
         """When the registry has no FileHandler, visit_extension must passthrough."""
-        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
-        from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
-
         empty_registry = PythonTypeHandlerRegistry()
         stripped_hasher = SemanticAwarePythonHasher(
             hasher_id="test_v0",
@@ -380,9 +379,6 @@ class TestListExtensionHashing:
 
     def test_list_path_extension_passthrough(self, ctx, tmp_path):
         """extension<list[orcapod.path]> must passthrough — Path has no content handler."""
-        from orcapod.logical_types.builtin_logical_types import LogicalPath
-        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
-
         lt = ListLogicalType(LogicalPath(), is_set=False)
         list_ext_type = lt.get_arrow_extension_type()
         storage_value = ["/a.txt", "/b.txt"]
@@ -400,9 +396,6 @@ class TestListExtensionHashing:
         The type must be registered with the converter before visiting so that
         ``arrow_type_to_python_type`` can resolve it.
         """
-        from orcapod.logical_types.file_type import File
-        import pyarrow as pa
-
         f0 = tmp_path / "s0.txt"; f0.write_text("set alpha")
         f1 = tmp_path / "s1.txt"; f1.write_text("set beta")
 
@@ -431,9 +424,6 @@ class TestListExtensionHashing:
         Both the inner and outer list types must be registered with the converter so
         that ``arrow_type_to_python_type`` can resolve them.
         """
-        from orcapod.logical_types.file_type import File
-        import pyarrow as pa
-
         f0 = tmp_path / "n0.txt"; f0.write_text("nested zero")
         f1 = tmp_path / "n1.txt"; f1.write_text("nested one")
         f2 = tmp_path / "n2.txt"; f2.write_text("nested two")
@@ -479,8 +469,6 @@ class TestListExtensionHashing:
         Note: Uses module-level ``FileBundle`` — local dataclasses are rejected
         because they have no stable fully-qualified class name.
         """
-        import pyarrow as pa
-
         # Register the dataclass to get its Arrow extension type.
         ctx.type_converter.register_python_class(FileBundle)
         ext_type = ctx.type_converter.python_type_to_arrow_type(FileBundle)
