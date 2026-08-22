@@ -15,7 +15,7 @@ from orcapod.core.sources.polling_source import PollingSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import CursorInvalidatedError
 from orcapod.protocols.core_protocols.sources import DynamicSourceProtocol
-from orcapod.types import Cursor, PollingConfig
+from orcapod.types import Cursor, PollingConfig, Schema
 
 
 # ===========================================================================
@@ -116,6 +116,9 @@ class _MinimalImpl:
     def from_config(cls, config: dict[str, Any]) -> _MinimalImpl:
         return cls()
 
+    def schema(self):
+        return None
+
     async def poll(self, cursor: Cursor[int] | None = None) -> bool:
         return False
 
@@ -133,33 +136,40 @@ class TestDynamicSourceProtocol:
 
     def test_missing_poll_fails_isinstance(self):
         class NoPoll:
-            async def fetch(self, cursor=None):
-                return Cursor(value=0), {}
-
-            async def close(self):
-                pass
+            def schema(self): return None
+            async def fetch(self, cursor=None): return Cursor(value=0), {}
+            async def close(self): pass
 
         assert not isinstance(NoPoll(), DynamicSourceProtocol)
 
     def test_missing_fetch_fails_isinstance(self):
         class NoFetch:
-            async def poll(self, cursor=None):
-                return False
-
-            async def close(self):
-                pass
+            def schema(self): return None
+            async def poll(self, cursor=None): return False
+            async def close(self): pass
 
         assert not isinstance(NoFetch(), DynamicSourceProtocol)
 
     def test_missing_close_fails_isinstance(self):
         class NoClose:
-            async def poll(self, cursor=None):
-                return False
-
-            async def fetch(self, cursor=None):
-                return Cursor(value=0), {}
+            def schema(self): return None
+            async def poll(self, cursor=None): return False
+            async def fetch(self, cursor=None): return Cursor(value=0), {}
 
         assert not isinstance(NoClose(), DynamicSourceProtocol)
+
+    def test_missing_schema_fails_isinstance(self):
+        """schema() is now a required protocol method."""
+        class NoSchema:
+            def identity(self): return "NoSchema"
+            def to_config(self): return None
+            @classmethod
+            def from_config(cls, config): return cls()
+            async def poll(self, cursor=None): return False
+            async def fetch(self, cursor=None): return Cursor(value=0), {}
+            async def close(self): pass
+
+        assert not isinstance(NoSchema(), DynamicSourceProtocol)
 
 
 # ===========================================================================
@@ -244,12 +254,17 @@ class FakeDynamicSource:
 
     Serves pre-loaded batches sequentially. ``poll()`` returns ``True``
     while un-fetched batches remain; ``False`` once all are consumed.
+
+    Pass ``schema_override`` to declare a known schema upfront (used by
+    schema-validation tests). Omit it (``None``) to exercise the
+    fetch-inference fallback path.
     """
 
     def __init__(
         self,
         batches: list[Any],
         *,
+        schema_override: Any | None = None,
         poll_always_false: bool = False,
         poll_raises: Exception | None = None,
         fetch_raises: Exception | None = None,
@@ -257,6 +272,7 @@ class FakeDynamicSource:
         cursor_modified_at: datetime | None = None,
     ) -> None:
         self._batches = batches
+        self._schema_override = schema_override
         self._poll_always_false = poll_always_false
         self._poll_raises = poll_raises
         self._fetch_raises = fetch_raises
@@ -275,6 +291,9 @@ class FakeDynamicSource:
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> FakeDynamicSource:
         raise NotImplementedError("FakeDynamicSource is not serializable")
+
+    def schema(self) -> Any:
+        return self._schema_override
 
     async def poll(self, cursor: Cursor[int] | None = None) -> bool:
         self.poll_cursors.append(cursor)
@@ -322,6 +341,9 @@ class NoArgSource:
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> NoArgSource:
         return cls()
+
+    def schema(self) -> None:
+        return None
 
     async def poll(self, cursor: Cursor[int] | None = None) -> bool:
         return False
@@ -686,6 +708,8 @@ class TestPollingSourceErrorHandling:
             def identity(self):
                 return "TransientImpl"
 
+            def schema(self): return None
+
             async def poll(self, cursor=None) -> bool:
                 nonlocal call_count
                 call_count += 1
@@ -797,6 +821,8 @@ class TestPollingSourceErrorHandling:
             def identity(self):
                 return "DriftingImpl"
 
+            def schema(self): return None
+
             async def poll(self, cursor=None) -> bool:
                 return self._call < 2
 
@@ -853,45 +879,35 @@ class TestCursorNow:
 
 class TestPollingSourceSchemaValidation:
     # -----------------------------------------------------------------------
-    # Declared-schema short-circuit
+    # Declared-schema short-circuit (via impl.schema())
     # -----------------------------------------------------------------------
 
     def test_output_schema_returns_declared_without_fetch(self):
-        """output_schema() uses declared schemas before any data is fetched."""
-        from orcapod.types import Schema
-
-        tag_schema = Schema({"id": int})
-        data_schema = Schema({"val": int})
-        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        """output_schema() uses impl.schema() before any data is fetched."""
+        declared = Schema({"id": int, "val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
         src = PollingSource(
             fake,
             tag_columns="id",
             polling_config=PollingConfig(interval=1.0),
-            tag_schema=tag_schema,
-            data_schema=data_schema,
         )
 
         # No fetch should have occurred
         assert len(fake.fetch_cursors) == 0
         ts, ds = src.output_schema()
-        assert ts == tag_schema
-        assert ds == data_schema
+        assert ts == Schema({"id": int})
+        assert ds == Schema({"val": int})
         # Still no fetch triggered
         assert len(fake.fetch_cursors) == 0
 
     def test_keys_returns_declared_without_fetch(self):
-        """keys() uses declared schemas before any data is fetched."""
-        from orcapod.types import Schema
-
-        tag_schema = Schema({"id": int})
-        data_schema = Schema({"val": int})
-        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        """keys() uses impl.schema() before any data is fetched."""
+        declared = Schema({"id": int, "val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
         src = PollingSource(
             fake,
             tag_columns="id",
             polling_config=PollingConfig(interval=1.0),
-            tag_schema=tag_schema,
-            data_schema=data_schema,
         )
 
         assert len(fake.fetch_cursors) == 0
@@ -905,54 +921,73 @@ class TestPollingSourceSchemaValidation:
     # -----------------------------------------------------------------------
 
     def test_compatible_declared_schema_passes_silently(self):
-        """Fetched data matching the declared schema succeeds without error."""
-        from orcapod.types import Schema
-
-        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        """Fetched data matching the impl-declared schema succeeds without error."""
+        declared = Schema({"id": int, "val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
         src = PollingSource(
             fake,
             tag_columns="id",
             polling_config=PollingConfig(interval=1.0),
-            tag_schema=Schema({"id": int}),
-            data_schema=Schema({"val": int}),
         )
-        # Should not raise
         rows = list(src.iter_data())
         assert len(rows) == 1
 
-    def test_declared_tag_schema_mismatch_raises(self):
-        """Missing declared tag field in fetched data raises SchemaInconsistencyError."""
+    def test_declared_tag_schema_type_mismatch_raises(self):
+        """Declared tag column type differing from fetched type raises SchemaInconsistencyError."""
         from orcapod.errors import SchemaInconsistencyError
-        from orcapod.types import Schema
 
-        # Declare a tag field "missing_col" that won't appear in the fetched data
-        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        # Declare id as str, but fetch produces id as int64 — tag schema mismatch
+        declared = Schema({"id": str, "val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
         src = PollingSource(
             fake,
             tag_columns="id",
             polling_config=PollingConfig(interval=1.0),
-            tag_schema=Schema({"id": int, "missing_col": str}),
         )
 
         with pytest.raises(SchemaInconsistencyError, match="tag schema incompatible"):
             list(src.iter_data())
 
     def test_declared_data_schema_type_mismatch_raises(self):
-        """A type conflict between declared and actual data schema raises SchemaInconsistencyError."""
+        """Declared data column type differing from fetched type raises SchemaInconsistencyError."""
         from orcapod.errors import SchemaInconsistencyError
-        from orcapod.types import Schema
 
-        # Declare val as str, but fetched data has val as int
-        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        # Declare val as str, but fetch produces val as int64 — data schema mismatch
+        declared = Schema({"id": int, "val": str})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
         src = PollingSource(
             fake,
             tag_columns="id",
             polling_config=PollingConfig(interval=1.0),
-            data_schema=Schema({"val": str}),  # wrong type
         )
 
         with pytest.raises(SchemaInconsistencyError, match="data schema incompatible"):
             list(src.iter_data())
+
+    def test_declared_schema_missing_data_column_raises(self):
+        """Declared schema referencing a column absent from fetched data raises SchemaInconsistencyError."""
+        from orcapod.errors import SchemaInconsistencyError
+
+        # Declare missing_col as a data column — won't appear in fetched data
+        declared = Schema({"id": int, "val": int, "missing_col": str})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+        )
+
+        with pytest.raises(SchemaInconsistencyError, match="data schema incompatible"):
+            list(src.iter_data())
+
+    def test_schema_missing_tag_column_raises_at_construction(self):
+        """impl.schema() omitting a declared tag column raises ValueError at construction."""
+        # id is in tag_columns but not in the schema
+        declared = Schema({"val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], schema_override=declared)
+
+        with pytest.raises(ValueError, match="missing tag columns"):
+            PollingSource(fake, tag_columns="id", polling_config=PollingConfig(interval=1.0))
 
     # -----------------------------------------------------------------------
     # Combining-schema validation
@@ -968,6 +1003,8 @@ class TestPollingSourceSchemaValidation:
 
             def identity(self):
                 return "TypeDriftImpl"
+
+            def schema(self): return None
 
             async def poll(self, cursor=None) -> bool:
                 return self._call < 2
@@ -1008,6 +1045,8 @@ class TestPollingSourceSchemaValidation:
 
             def identity(self):
                 return "ColumnDriftImpl"
+
+            def schema(self): return None
 
             async def poll(self, cursor=None) -> bool:
                 return self._call < 2

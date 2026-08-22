@@ -413,6 +413,39 @@ def compute_schema_hash(
     ).to_hex(char_count=char_count)
 
 
+def compute_source_schema_hash(
+    tag_schema: Schema,
+    data_schema: Schema,
+    data_context: Any,
+    config: Any,
+) -> str:
+    """Compute the schema hash for system-tag column naming from a ``DataContext`` and config.
+
+    This is the canonical single entry-point used by ``SourceStreamBuilder``,
+    ``SourceNodeBase``, and ``PollingSource`` so the unpacking of
+    ``data_context.semantic_hasher`` and ``config.hashing.schema_n_char``
+    is not replicated at every call site.
+
+    Args:
+        tag_schema: Python tag schema (``Schema`` mapping column names to types).
+        data_schema: Python data schema.
+        data_context: Active ``DataContext`` — its ``semantic_hasher`` attribute
+            is used for hashing.
+        config: Active ``OrcapodConfig`` — ``config.hashing.schema_n_char``
+            controls hash truncation.
+
+    Returns:
+        Hex string schema hash, truncated to ``config.hashing.schema_n_char``
+        characters.
+    """
+    return compute_schema_hash(
+        tag_schema,
+        data_schema,
+        data_context.semantic_hasher,
+        config.hashing.schema_n_char,
+    )
+
+
 def _normalize_column_list(value: Any) -> list[str]:
     """Normalize a column-list argument to a plain list of strings.
 
