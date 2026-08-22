@@ -482,8 +482,10 @@ class TestJoinWithListExtensionColumn:
         lt = ListLogicalType(LogicalPath(), is_set=False)
         ext_type = lt.get_arrow_extension_type()
 
-        # Register the extension types with both Arrow and Polars registries so
-        # the round-trip can reconstruct the extension type (not fall back to storage).
+        # Registration required: ArrowTableStream does not trigger LogicalType
+        # registration, so without this Polars degrades the extension type to its
+        # storage type (large_list<large_string>) during the operator's Polars
+        # round-trip, and the post-join Arrow table loses the extension wrapper.
         try:
             pa.register_extension_type(ext_type)
         except pa.lib.ArrowKeyError:
@@ -520,6 +522,13 @@ class TestJoinWithListExtensionColumn:
             f"'paths' column must remain an extension type, got {paths_type}"
         )
         assert paths_type.extension_name == "list[orcapod.path]"
+
+        # Data integrity: 2 rows (inner join on "cat" and "dog")
+        assert len(out_table) == 2
+        # Values are preserved
+        paths_values = out_table.column("paths").to_pylist()
+        assert len(paths_values) == 2
+        assert any(len(row) >= 1 for row in paths_values)  # each row has at least one path
 
 
 class TestJoinMetaColumnCollision:
