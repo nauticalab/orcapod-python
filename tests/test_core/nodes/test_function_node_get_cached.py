@@ -1,4 +1,4 @@
-"""Tests for FunctionNode.get_cached_results."""
+"""Tests for FunctionNode.load_cached_results."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def function_node_with_db():
     return node
 
 
-class TestGetCachedResults:
+class TestLoadCachedResults:
     def test_returns_empty_dict_when_no_db(self):
         table = pa.table(
             {
@@ -51,10 +51,10 @@ class TestGetCachedResults:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionJobNode(pod, src)
-        assert node.get_cached_results([]) == {}
+        assert node.load_cached_results([]) == {}
 
     def test_returns_empty_dict_when_db_empty(self, function_node_with_db):
-        assert function_node_with_db.get_cached_results(["nonexistent"]) == {}
+        assert function_node_with_db.load_cached_results(["nonexistent"]) == {}
 
     def test_returns_cached_results_for_matching_entry_ids(self, function_node_with_db):
         node = function_node_with_db
@@ -65,7 +65,7 @@ class TestGetCachedResults:
             node.execute_data(tag, data)
             base_entry_ids.append(node.compute_base_entry_id(tag, data))
 
-        cached = node.get_cached_results(base_entry_ids)
+        cached = node.load_cached_results(base_entry_ids)
         assert len(cached) == 2
         assert all(eid in cached for eid in base_entry_ids)
 
@@ -78,13 +78,13 @@ class TestGetCachedResults:
             node.execute_data(tag, data)
             base_entry_ids.append(node.compute_base_entry_id(tag, data))
 
-        cached = node.get_cached_results([base_entry_ids[0]])
+        cached = node.load_cached_results([base_entry_ids[0]])
         assert len(cached) == 1
         assert base_entry_ids[0] in cached
         assert base_entry_ids[1] not in cached
 
-    def test_get_cached_results_populates_internal_cache(self, function_node_with_db):
-        """get_cached_results should populate _cached_output_datas keyed by base_entry_id."""
+    def test_load_cached_results_populates_internal_cache(self, function_node_with_db):
+        """load_cached_results should populate _cached_output_datas keyed by base_entry_id."""
         node = function_node_with_db
         all_pairs = list(node._input_stream.iter_data())
 
@@ -97,6 +97,6 @@ class TestGetCachedResults:
         node._cached_output_datas.clear()
         assert len(node._cached_output_datas) == 0
 
-        # get_cached_results should repopulate
-        node.get_cached_results(base_entry_ids)
+        # load_cached_results should repopulate
+        node.load_cached_results(base_entry_ids)
         assert len(node._cached_output_datas) == 2

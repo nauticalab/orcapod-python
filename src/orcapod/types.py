@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Generic, Self, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, Self, TypeAlias, TypeVar
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -360,10 +360,30 @@ class NodeConfig:
             means no old schema is tolerated — any detected v0 table raises
             ``SchemaVersionError``. Pass ``("v0",)`` to suppress the error
             and allow the node to recompute all results from scratch.
+        missing_cache_policy: Controls how the node reacts when the pipeline
+            table has an entry for an input but the result store does not.
+            ``None`` inherits the default (``"recompute"``).
+
+            * ``"recompute"`` *(default)* — WARNING logged; the entry falls
+              through to recomputation from the original upstream data.
+              For ephemeral stores, ``EmptyData`` acts as a recompute sentinel
+              (same as current behaviour).
+            * ``"as_empty"`` — WARNING logged (non-ephemeral) or INFO logged
+              (ephemeral); an ``EmptyData`` token is emitted directly. The
+              downstream node attempts to serve the result from its own cache.
+              Only use when partial gaps are semantically expected (e.g.
+              shared read-only stores, exploratory pipelines).
+            * ``"strict"`` — ERROR logged and ``CacheMissError`` raised for
+              non-ephemeral misses. Ephemeral misses still degrade gracefully
+              to ``EmptyData`` (raising on an ephemeral miss would contradict
+              the semantics of ephemeral storage). Use in production pipelines
+              where a missing durable result always indicates a bug or data
+              loss.
     """
 
     is_result_ephemeral: bool | None = None
     ignore_schema: tuple[str, ...] | None = None
+    missing_cache_policy: Literal["recompute", "as_empty", "strict"] | None = None
 
     def merge(self, other: "NodeConfig") -> "NodeConfig":
         """Return a new ``NodeConfig`` with ``other``'s non-``None`` fields overriding self.
@@ -394,6 +414,11 @@ class NodeConfig:
                 other.ignore_schema
                 if other.ignore_schema is not None
                 else self.ignore_schema
+            ),
+            missing_cache_policy=(
+                other.missing_cache_policy
+                if other.missing_cache_policy is not None
+                else self.missing_cache_policy
             ),
         )
 

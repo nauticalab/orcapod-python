@@ -31,7 +31,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.core.datagrams.tag_data import EmptyData, Tag
-from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError, SchemaVersionError
+from orcapod.errors import CacheMissError, EphemeralResultMissingError, PipelineJobRequiredError, SchemaVersionError
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -1252,47 +1252,53 @@ class FunctionJobNode(FunctionNodeBase):
         base_entry_ids = [eid for _, _, eid in upstream_entries]
 
         # Hot-load any already-computed results from DB into _cached_output_datas.
-        # get_cached_results() is called for its side effect (populating the
+        # load_cached_results() is called for its side effect (populating the
         # in-memory cache); the returned dict is intentionally discarded here so
         # that the per-data cache-hit check below uses _cached_output_datas
         # directly — which includes None-output entries (function returned None)
         # and prevents spurious recomputation of already-processed data.
-        self.get_cached_results(base_entry_ids=base_entry_ids)
+        self.load_cached_results(base_entry_ids=base_entry_ids)
 
         output: list[tuple[TagProtocol, DataProtocol]] = []
+        policy = self._node_config.missing_cache_policy or "recompute"
         for tag, data, base_entry_id in upstream_entries:
             ctx_obs.on_data_start(node_label, tag, data)
 
-            if base_entry_id in self._cached_output_datas and not isinstance(
-                self._cached_output_datas[base_entry_id][1], EmptyData
-            ):
-                tag_out, result = self._cached_output_datas[base_entry_id]
-                ctx_obs.on_data_end(node_label, tag, data, result, cached=True)
+            if base_entry_id in self._cached_output_datas:
+                tag_out, cached_pkt = self._cached_output_datas[base_entry_id]
+                if isinstance(cached_pkt, EmptyData) and policy == "recompute":
+                    # "recompute" mode: EmptyData is a sentinel — fall through to compute.
+                    pass
+                else:
+                    # Real data cache hit, OR opportunistic EmptyData emission (as_empty/strict).
+                    ctx_obs.on_data_end(node_label, tag, data, cached_pkt, cached=True)
+                    if cached_pkt is not None:
+                        output.append((tag_out, cached_pkt))
+                    continue
+
+            # Compute path: not in cache, or EmptyData sentinel in "recompute" mode.
+            pkt_logger = ctx_obs.create_data_logger(tag, data)
+            try:
+                tag_out, result = self._process_data_internal(
+                    tag, data, logger=pkt_logger, run_id=run_id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Data execution failed in %s: %s",
+                    node_label,
+                    exc,
+                    exc_info=True,
+                )
+                ctx_obs.on_data_crash(node_label, tag, data, exc)
+                if error_policy == "fail_fast":
+                    ctx_obs.on_node_end(node_label, node_hash)
+                    raise
+            else:
+                ctx_obs.on_data_end(
+                    node_label, tag, data, result, cached=False
+                )
                 if result is not None:
                     output.append((tag_out, result))
-            else:
-                pkt_logger = ctx_obs.create_data_logger(tag, data)
-                try:
-                    tag_out, result = self._process_data_internal(
-                        tag, data, logger=pkt_logger, run_id=run_id
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Data execution failed in %s: %s",
-                        node_label,
-                        exc,
-                        exc_info=True,
-                    )
-                    ctx_obs.on_data_crash(node_label, tag, data, exc)
-                    if error_policy == "fail_fast":
-                        ctx_obs.on_node_end(node_label, node_hash)
-                        raise
-                else:
-                    ctx_obs.on_data_end(
-                        node_label, tag, data, result, cached=False
-                    )
-                    if result is not None:
-                        output.append((tag_out, result))
 
         ctx_obs.on_node_end(node_label, node_hash)
         # Mark this node as freshly computed so subsequent iter_data() calls
@@ -1421,10 +1427,10 @@ class FunctionJobNode(FunctionNodeBase):
 
         return tag_out, output_data
 
-    def get_cached_results(
+    def load_cached_results(
         self, base_entry_ids: list[bytes]
     ) -> dict[bytes, tuple[TagProtocol, DataProtocol]]:
-        """Public cache façade: return already-computed results for the given base entry IDs.
+        """Load already-computed results for the given base entry IDs into the in-memory cache.
 
         Serves hits directly from the in-memory cache (``_cached_output_datas``).
         For IDs not yet cached, delegates to ``_load_cached_entries`` which calls
@@ -1778,7 +1784,7 @@ class FunctionJobNode(FunctionNodeBase):
         user-facing data. These columns are listed explicitly to ensure they are
         dropped even when ``all_info=True`` (which skips the meta-prefix sweep).
 
-        Does NOT populate the in-memory cache — see ``get_cached_results``
+        Does NOT populate the in-memory cache — see ``load_cached_results``
         for that.
 
         Args:
@@ -1859,6 +1865,54 @@ class FunctionJobNode(FunctionNodeBase):
     # Cache-only helpers (PLT-1156)
     # ------------------------------------------------------------------
 
+    def _populate_empty_data_tokens(
+        self,
+        df: "pl.DataFrame",
+        empty_data_tokens: "dict[bytes, EmptyData]",
+        empty_taginfo_rows: "dict[bytes, dict]",
+    ) -> None:
+        """Populate ``empty_data_tokens`` and ``empty_taginfo_rows`` for rows in ``df``.
+
+        Shared by the ephemeral miss path and the non-ephemeral permissive
+        (``missing_cache_policy="as_empty"``) path in ``_fetch_joined_records``.
+
+        Args:
+            df: DataFrame of unmatched pipeline DB rows (each row is a miss).
+            empty_data_tokens: Dict to populate with ``base_entry_id -> EmptyData``.
+            empty_taginfo_rows: Dict to populate with ``base_entry_id -> raw row dict``.
+
+        Note:
+            ``OUTPUT_DATA_HASH_COL`` is used (not ``INPUT_DATA_HASH_COL``) because
+            the downstream result cache is keyed by the input to the downstream node,
+            which equals the *output* of this node.  ``INPUT_DATA_HASH_COL`` carries
+            the hash of this node's own input (i.e., the upstream's output) and must
+            NOT be used as a fallback — doing so would silently cause cache misses in
+            all downstream nodes.
+        """
+        for row in df.iter_rows(named=True):
+            base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
+            # OUTPUT_DATA_HASH_COL is the hash that the downstream result cache
+            # uses to look up entries.  INPUT_DATA_HASH_COL is deliberately NOT
+            # used here — it holds this node's input hash, not its output hash,
+            # and would silently cause cache misses in every downstream node.
+            raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL)
+            if raw_hash is None:
+                logger.warning(
+                    "Pipeline DB row missing %r column — EmptyData will have "
+                    "no cached hash; flow-through unavailable for this row. "
+                    "base_entry_id: %r",
+                    constants.OUTPUT_DATA_HASH_COL,
+                    base_eid,
+                )
+                cached_hash = None
+            else:
+                cached_hash = ContentHash.from_prefixed_digest(raw_hash)
+            empty_data_tokens[base_eid] = EmptyData(
+                cached_content_hash=cached_hash,
+                data_context=self.data_context,
+            )
+            empty_taginfo_rows[base_eid] = row
+
     def _fetch_joined_records(
         self,
         base_entry_ids: list[bytes] | None = None,
@@ -1870,9 +1924,17 @@ class FunctionJobNode(FunctionNodeBase):
         independent inner joins (one per store), merges with persistent priority
         via an anti-join, and returns the combined result.
 
-        Persistent miss rows (tag entry with no matching result DB row) emit a
-        WARNING-level log. Ephemeral miss rows (cross-session miss) are silently
-        dropped.
+        Persistent miss rows (tag entry with no matching result DB row) are
+        handled according to ``missing_cache_policy``:
+
+        * ``"recompute"`` (default) — WARNING log; the row falls through to
+          Phase 2 for recomputation.
+        * ``"strict"`` — ERROR log; ``CacheMissError`` is raised immediately.
+        * ``"as_empty"`` — WARNING log; the row is emitted as ``EmptyData``
+          so downstream nodes can attempt to serve from their own cache.
+
+        Ephemeral miss rows (cross-session miss) are always emitted as
+        ``EmptyData`` regardless of policy.
 
         If ``base_entry_ids`` is provided, the result is filtered to matching
         ``_PIPELINE_BASE_ENTRY_ID_COL`` values before conversion to Arrow.
@@ -1930,8 +1992,11 @@ class FunctionJobNode(FunctionNodeBase):
         # ------------------------------------------------------------------
         # Persistent join
         # ------------------------------------------------------------------
+        policy = self._node_config.missing_cache_policy or "recompute"
         results_schema = None
         persistent_df = pl.DataFrame()
+        empty_data_tokens: dict[bytes, EmptyData] = {}
+        empty_taginfo_rows: dict[bytes, dict] = {}
         if persistent_taginfo_df.height > 0:
             results = self._cached_function_pod.result_database.get_all_records(
                 self._cached_function_pod.record_path,
@@ -1939,12 +2004,34 @@ class FunctionJobNode(FunctionNodeBase):
             )
             if results is None:
                 # Tag table has persistent entries but result DB is empty — data loss
-                logger.warning(
-                    "%d pipeline DB entries have no match in persistent result DB "
-                    "— data may have been deleted externally. "
-                    "These inputs will be recomputed.",
-                    persistent_taginfo_df.height,
-                )
+                count = persistent_taginfo_df.height
+                if policy == "strict":
+                    logger.error(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— raising CacheMissError (missing_cache_policy='strict').",
+                        count,
+                    )
+                    raise CacheMissError(
+                        f"{count} pipeline DB entries have no match in persistent result DB "
+                        "— data may have been deleted externally."
+                    )
+                elif policy == "as_empty":
+                    logger.warning(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— treating as Empty data (missing_cache_policy='as_empty'). "
+                        "Downstream nodes will attempt to serve from their own cache.",
+                        count,
+                    )
+                    self._populate_empty_data_tokens(
+                        persistent_taginfo_df, empty_data_tokens, empty_taginfo_rows
+                    )
+                else:
+                    logger.warning(
+                        "%d pipeline DB entries have no match in persistent result DB "
+                        "— data may have been deleted externally. "
+                        "These inputs will be recomputed.",
+                        count,
+                    )
             else:
                 results_schema = results.schema
                 full_persistent_df = persistent_taginfo_df.join(
@@ -1955,20 +2042,44 @@ class FunctionJobNode(FunctionNodeBase):
                 # Warn about persistent tag rows that found no match in the result DB
                 missing_count = persistent_taginfo_df.height - full_persistent_df.height
                 if missing_count > 0:
-                    logger.warning(
-                        "%d pipeline DB entries have no match in persistent result DB "
-                        "— data may have been deleted externally. "
-                        "These inputs will be recomputed.",
-                        missing_count,
-                    )
+                    if policy == "strict":
+                        logger.error(
+                            "%d pipeline DB entries have no match in persistent result DB "
+                            "— raising CacheMissError (missing_cache_policy='strict').",
+                            missing_count,
+                        )
+                        raise CacheMissError(
+                            f"{missing_count} pipeline DB entries have no match in "
+                            "persistent result DB — data may have been deleted externally."
+                        )
+                    elif policy == "as_empty":
+                        logger.warning(
+                            "%d pipeline DB entries have no match in persistent result DB "
+                            "— treating as Empty data (missing_cache_policy='as_empty'). "
+                            "Downstream nodes will attempt to serve from their own cache.",
+                            missing_count,
+                        )
+                        unmatched_persistent_df = persistent_taginfo_df.join(
+                            pl.DataFrame(results),
+                            on=constants.DATA_RECORD_ID,
+                            how="anti",
+                        )
+                        self._populate_empty_data_tokens(
+                            unmatched_persistent_df, empty_data_tokens, empty_taginfo_rows
+                        )
+                    else:
+                        logger.warning(
+                            "%d pipeline DB entries have no match in persistent result DB "
+                            "— data may have been deleted externally. "
+                            "These inputs will be recomputed.",
+                            missing_count,
+                        )
                 persistent_df = full_persistent_df
 
         # ------------------------------------------------------------------
         # Ephemeral join
         # ------------------------------------------------------------------
         ephemeral_df = pl.DataFrame()
-        empty_data_tokens: dict[bytes, EmptyData] = {}
-        empty_taginfo_rows: dict[bytes, dict] = {}
 
         if ephemeral_taginfo_df.height > 0:
             eph_results = None
@@ -1997,32 +2108,35 @@ class FunctionJobNode(FunctionNodeBase):
             else:
                 # No ephemeral store or empty store — all ephemeral rows are misses.
                 unmatched_df = ephemeral_taginfo_df
-            for row in unmatched_df.iter_rows(named=True):
-                base_eid = row[_PIPELINE_BASE_ENTRY_ID_COL]
-                # Use OUTPUT_DATA_HASH_COL so that the downstream result cache
-                # lookup in _process_data_internal finds the correct entry.
-                # The downstream's result cache is keyed by the INPUT to the
-                # downstream (= the OUTPUT of this ephemeral node), so we must
-                # use the output hash. INPUT_DATA_HASH_COL is deliberately not
-                # used as a fallback — it carries the wrong hash (the upstream's
-                # input, not its output) and would silently cause cache misses.
-                raw_hash = row.get(constants.OUTPUT_DATA_HASH_COL)
-                if raw_hash is None:
-                    logger.warning(
-                        "Pipeline DB row missing %r column — EmptyData will have "
-                        "no cached hash; flow-through unavailable for this row. "
-                        "base_entry_id: %r",
-                        constants.OUTPUT_DATA_HASH_COL,
-                        base_eid,
-                    )
-                    cached_hash = None
-                else:
-                    cached_hash = ContentHash.from_prefixed_digest(raw_hash)
-                empty_data_tokens[base_eid] = EmptyData(
-                    cached_content_hash=cached_hash,
-                    data_context=self.data_context,
+            if unmatched_df.height > 0:
+                logger.info(
+                    "%d pipeline DB entries have no match in ephemeral result DB "
+                    "— expected after cross-session store clear. Propagating as EmptyData.",
+                    unmatched_df.height,
                 )
-                empty_taginfo_rows[base_eid] = row
+            # Use the shared helper — same EmptyData creation logic for
+            # ephemeral misses and permissive persistent misses.
+            self._populate_empty_data_tokens(
+                unmatched_df, empty_data_tokens, empty_taginfo_rows
+            )
+
+        # Filter token dicts to the requested scope before the merge block.
+        # This must happen here — before the early-return `else` branch below
+        # — so that every return path (including the no-matched-rows case)
+        # scopes EmptyData tokens identically to the base_entry_ids filter
+        # applied to merged_df below.  Without this, callers such as
+        # load_cached_results(base_entry_ids=[x]) would cache EmptyData for
+        # IDs outside [x].
+        if base_entry_ids is not None:
+            base_entry_ids_set = set(base_entry_ids)
+            empty_data_tokens = {
+                k: v for k, v in empty_data_tokens.items()
+                if k in base_entry_ids_set
+            }
+            empty_taginfo_rows = {
+                k: v for k, v in empty_taginfo_rows.items()
+                if k in base_entry_ids_set
+            }
 
         # ------------------------------------------------------------------
         # Merge with persistent priority (anti-join + concat)
@@ -2048,7 +2162,7 @@ class FunctionJobNode(FunctionNodeBase):
                 empty_taginfo_rows=empty_taginfo_rows,
             )
 
-        # Apply base_entry_id filter if requested
+        # Apply base_entry_id filter to matched rows (token dicts already filtered above).
         if base_entry_ids is not None:
             merged_df = merged_df.filter(
                 pl.col(_PIPELINE_BASE_ENTRY_ID_COL).is_in(base_entry_ids)
@@ -2281,6 +2395,7 @@ class FunctionJobNode(FunctionNodeBase):
         *,
         observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
+        channel_buffer_size: int = 16,
     ) -> None:
         """Streaming async execution for FunctionJobNode.
 
@@ -2298,6 +2413,10 @@ class FunctionJobNode(FunctionNodeBase):
             observer: Optional execution observer for hooks.
             run_id: Optional pipeline run identifier threaded through to
                 ``InvocationContext.pipeline_run_id``.
+            channel_buffer_size: Capacity of the internal ``compute_channel``
+                and ``result_channel`` used for backpressure between concurrent
+                stages.  Increase for higher throughput at the cost of memory;
+                decrease to tighten backpressure.  Defaults to 16.
         """
         from orcapod.pipeline.serialization import LoadStatus
 
@@ -2351,24 +2470,35 @@ class FunctionJobNode(FunctionNodeBase):
                 cached_by_base_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
 
                 # Intermediate channels (bounded for backpressure).
-                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
-                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
+                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=channel_buffer_size)
+                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=channel_buffer_size)
 
                 # Local dict: correlation_key → (original_tag, original_input_data)
                 input_store: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
 
                 async def route_inputs() -> None:
                     """Stage 1: send cache hits to output; stamp misses for computation."""
+                    policy = self._node_config.missing_cache_policy or "recompute"
                     try:
                         async for tag, data in input_channel:
                             base_entry_id = self.compute_base_entry_id(tag, data)
                             if base_entry_id in cached_by_base_entry_id:
                                 cached_tag, cached_data = cached_by_base_entry_id[base_entry_id]
-                                ctx_obs.on_data_start(node_label, tag, data)
-                                ctx_obs.on_data_end(
-                                    node_label, tag, data, cached_data, cached=True
-                                )
-                                await output.send((cached_tag, cached_data))
+                                if isinstance(cached_data, EmptyData) and policy == "recompute":
+                                    # "recompute" policy: EmptyData sentinel → recompute.
+                                    correlation_key = uuid.uuid4().bytes
+                                    input_store[correlation_key] = (tag, data)
+                                    stamped_tag = tag.with_meta_columns(
+                                        **{_TAG_NODE_INPUT_REF: correlation_key}
+                                    )
+                                    await compute_channel.writer.send((stamped_tag, data))
+                                else:
+                                    # Real data hit, or EmptyData in as_empty/strict mode.
+                                    ctx_obs.on_data_start(node_label, tag, data)
+                                    ctx_obs.on_data_end(
+                                        node_label, tag, data, cached_data, cached=True
+                                    )
+                                    await output.send((cached_tag, cached_data))
                             else:
                                 correlation_key = uuid.uuid4().bytes
                                 input_store[correlation_key] = (tag, data)
