@@ -853,3 +853,62 @@ class TestMergeJoinSystemTags:
         for row_ab, row_ba in zip(rows_ab, rows_ba):
             for col in sys_cols:
                 assert row_ab[col] == row_ba[col]
+
+
+class TestMergeJoinWithListExtensionColumn:
+    """Regression for ITL-627 Defect 1: MergeJoin Polars round-trip with list extension columns."""
+
+    def test_merge_join_preserves_non_colliding_list_extension_column(self):
+        """MergeJoin must not raise and must preserve extension<list[orcapod.path]>
+        for a non-colliding list[Path] data column.
+
+        MergeJoin also does a Polars round-trip; without Fix 1 it raises ValueError.
+        """
+        import polars as pl
+        import pyarrow as pa
+        from orcapod.logical_types.builtin_logical_types import LogicalPath
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        lt = ListLogicalType(LogicalPath(), is_set=False)
+        ext_type = lt.get_arrow_extension_type()
+
+        # Register the extension types with both Arrow and Polars registries so
+        # the round-trip can reconstruct the extension type (not fall back to storage).
+        try:
+            pa.register_extension_type(ext_type)
+        except pa.lib.ArrowKeyError:
+            pass  # already registered
+        polars_ext = lt.get_polars_extension_type()
+        try:
+            pl.register_extension_type(ext_type.extension_name, type(polars_ext))
+        except (ValueError, pl.exceptions.ComputeError):
+            pass  # already registered
+
+        storage = pa.array(
+            [["/a.txt", "/b.txt"], ["/c.txt"]],
+            type=pa.large_list(pa.large_string()),
+        )
+        ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
+
+        # Left stream: list[Path] data column (non-colliding) + shared tag
+        left_table = pa.table({
+            "id": pa.array([1, 2], type=pa.int64()),
+            "paths": ext_array,
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["id"])
+
+        # Right stream: different non-colliding data column + same tag
+        right_table = pa.table({
+            "id": pa.array([1, 2], type=pa.int64()),
+            "score": pa.array([10.0, 20.0], type=pa.float64()),
+        })
+        right_stream = ArrowTableStream(right_table, tag_columns=["id"])
+
+        result = MergeJoin().static_process(left_stream, right_stream)  # must not raise
+        out_table = result.as_table()
+
+        paths_type = out_table.schema.field("paths").type
+        assert isinstance(paths_type, pa.ExtensionType), (
+            f"'paths' column must remain an extension type, got {paths_type}"
+        )
+        assert paths_type.extension_name == "list[orcapod.path]"

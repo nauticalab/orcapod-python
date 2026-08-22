@@ -465,6 +465,63 @@ class TestJoinBehavior:
         assert isinstance(sym, frozenset)
 
 
+class TestJoinWithListExtensionColumn:
+    """Regression tests for ITL-627 Defect 1: Join Polars round-trip with list extension columns."""
+
+    def test_join_preserves_list_extension_column(self):
+        """Join must not raise and must preserve extension<list[orcapod.path]>.
+
+        Before Fix 1, df.to_arrow() inside static_process called _deserialize
+        with b'' (no metadata), raising ValueError.
+        """
+        import polars as pl
+        import pyarrow as pa
+        from orcapod.logical_types.builtin_logical_types import LogicalPath
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        lt = ListLogicalType(LogicalPath(), is_set=False)
+        ext_type = lt.get_arrow_extension_type()
+
+        # Register the extension types with both Arrow and Polars registries so
+        # the round-trip can reconstruct the extension type (not fall back to storage).
+        try:
+            pa.register_extension_type(ext_type)
+        except pa.lib.ArrowKeyError:
+            pass  # already registered
+        polars_ext = lt.get_polars_extension_type()
+        try:
+            pl.register_extension_type(ext_type.extension_name, type(polars_ext))
+        except (ValueError, pl.exceptions.ComputeError):
+            pass  # already registered
+
+        storage = pa.array(
+            [["/a.txt", "/b.txt"], ["/c.txt"]],
+            type=pa.large_list(pa.large_string()),
+        )
+        ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
+        left_table = pa.table({
+            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+            "paths": ext_array,
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["animal"])
+
+        right_table = pa.table({
+            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+            "speed": pa.array([30.0, 45.0], type=pa.float64()),
+        })
+        right_stream = ArrowTableStream(right_table, tag_columns=["animal"])
+
+        op = Join()
+        result = op.static_process(left_stream, right_stream)  # must not raise
+        out_table = result.as_table()
+
+        paths_type = out_table.schema.field("paths").type
+        assert isinstance(paths_type, pa.ExtensionType), (
+            f"'paths' column must remain an extension type, got {paths_type}"
+        )
+        assert paths_type.extension_name == "list[orcapod.path]"
+
+
 class TestJoinMetaColumnCollision:
     """Verify that a 3-way join with identical meta columns on all inputs does not
     raise a DuplicateError.  Instead, colliding meta columns should be renamed
