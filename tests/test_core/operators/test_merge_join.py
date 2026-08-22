@@ -920,4 +920,4 @@ class TestMergeJoinWithListExtensionColumn:
         # Values are preserved
         paths_values = out_table.column("paths").to_pylist()
         assert len(paths_values) == 2
-        assert any(len(row) >= 1 for row in paths_values)  # each row has at least one path
+        assert all(len(row) >= 1 for row in paths_values)  # each row has at least one path
