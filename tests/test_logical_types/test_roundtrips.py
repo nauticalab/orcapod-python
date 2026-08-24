@@ -763,3 +763,142 @@ def test_explicit_native_list_construction() -> None:
     assert storage == [1, 2, 3]
     result = lt.storage_to_python([1, 2, 3], converter=None)
     assert result == [1, 2, 3]
+
+
+# ── set[T] native element full round-trip tests (ITL-611) ─────────────────────
+
+
+def test_set_of_int_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[int] values round-trip as sets, not lists; extension name is 'set[int]'."""
+    data = {1, 2, 3}
+    result, read_converter = _write_and_read(
+        {"s": set[int]},
+        [{"s": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("s")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on 's', got {field.type!r}"
+    )
+    assert field.type.extension_name == "set[int]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    assert isinstance(rows[0]["s"], set), f"Expected set, got {type(rows[0]['s'])}"
+    assert rows[0]["s"] == data
+
+
+def test_set_of_str_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[str] values round-trip as sets; extension name is 'set[str]'."""
+    data = {"alpha", "beta", "gamma"}
+    result, read_converter = _write_and_read(
+        {"tags": set[str]},
+        [{"tags": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("tags")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[str]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["tags"], set)
+    assert rows[0]["tags"] == data
+
+
+def test_set_of_float_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[float] values round-trip as sets; extension name is 'set[float]'."""
+    data = {1.0, 2.5, 3.14}
+    result, read_converter = _write_and_read(
+        {"values": set[float]},
+        [{"values": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("values")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[float]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["values"], set)
+    assert rows[0]["values"] == data
+
+
+def test_set_of_bool_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[bool] values round-trip as sets; extension name is 'set[bool]'."""
+    data = {True, False}
+    result, read_converter = _write_and_read(
+        {"flags": set[bool]},
+        [{"flags": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("flags")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[bool]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["flags"], set)
+    assert rows[0]["flags"] == data
+
+
+def test_set_of_bytes_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[bytes] values round-trip as sets; extension name is 'set[bytes]'."""
+    data = {b"foo", b"bar", b"baz"}
+    result, read_converter = _write_and_read(
+        {"blobs": set[bytes]},
+        [{"blobs": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("blobs")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[bytes]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["blobs"], set)
+    assert rows[0]["blobs"] == data
+
+
+def test_set_of_datetime_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[datetime] values round-trip as sets of timezone-aware datetimes."""
+    from datetime import datetime, timezone
+    dt1 = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    dt2 = datetime(2024, 6, 15, 12, 30, 0, tzinfo=timezone.utc)
+    data = {dt1, dt2}
+    result, read_converter = _write_and_read(
+        {"timestamps": set[datetime]},
+        [{"timestamps": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("timestamps")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[datetime]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["timestamps"], set)
+    assert rows[0]["timestamps"] == data
+
+
+def test_fresh_converter_reads_set_of_int(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
+    """A fresh converter (no prior registration) reconstructs set[int] via load_logical_types."""
+    data = {1, 2, 3}
+
+    # Write with converter A.
+    write_converter = _fresh_converter()
+    write_converter.register_python_class(set[int])
+    arrow_schema = write_converter.python_schema_to_arrow_schema({"s": set[int]})
+    table = write_converter.python_dicts_to_arrow_table([{"s": data}], arrow_schema=arrow_schema)
+    storage_backend.write(table, tmp_path)
+
+    # Read with converter B — no prior registration; load_logical_types triggers factory.
+    read_converter = _fresh_converter()
+    result = storage_backend.read(tmp_path, read_converter)
+
+    field = result.schema.field("s")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type after fresh-converter read, got {field.type!r}"
+    )
+    assert field.type.extension_name == "set[int]"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["s"], set)
+    assert rows[0]["s"] == data
