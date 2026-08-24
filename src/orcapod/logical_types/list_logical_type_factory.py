@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
@@ -36,22 +37,70 @@ logger = logging.getLogger(__name__)
 LIST_CATEGORY = "list"
 SET_CATEGORY = "set"
 
+_NATIVE_ELEMENT_TYPES: dict[str, type] = {
+    "int": int,
+    "str": str,
+    "float": float,
+    "bool": bool,
+    "bytes": bytes,
+    "datetime": datetime,
+    "date": date,
+}
 
-class ListLogicalType(BaseLogicalType):
-    """Logical type for ``list[T]`` or ``set[T]`` where T maps to an Arrow extension type.
 
-    Wraps a homogeneous list or set of elements whose Python type corresponds to
-    a registered Arrow extension type (e.g. ``list[uuid.UUID]`` where ``uuid.UUID``
-    maps to ``orcapod.uuid``). The resulting Arrow extension type has:
-
-    - Extension name: ``list[<element_ext_name>]`` or ``set[<element_ext_name>]``
-    - Storage type: ``pa.large_list(<element_storage_type>)`` — ET1 safe (no nested extension)
-    - Metadata: JSON with ``category``, ``element_ext_name``, and ``element_ext_metadata``
+def _get_native_element_arrow_type(python_type: type) -> "pa.DataType":
+    """Return the Arrow storage type for a native Python scalar type.
 
     Args:
-        element_logical_type: The logical type of individual list elements (e.g. ``LogicalUUID()``
-            for ``uuid.UUID`` elements). The element Python type and Arrow extension type are
-            derived from this logical type.
+        python_type: A Python type present in ``_NATIVE_ELEMENT_TYPES``.
+
+    Returns:
+        The corresponding ``pa.DataType``.
+
+    Raises:
+        ValueError: If ``python_type`` is not in the native element map.
+    """
+    _native_arrow_map: dict[type, pa.DataType] = {
+        int: pa.int64(),
+        str: pa.large_string(),
+        float: pa.float64(),
+        bool: pa.bool_(),
+        bytes: pa.large_binary(),
+        datetime: pa.timestamp("us", tz="UTC"),
+        date: pa.date32(),
+    }
+    arrow_type = _native_arrow_map.get(python_type)
+    if arrow_type is None:
+        raise ValueError(
+            f"ListLogicalType: native element type {python_type!r} is not in the native "
+            f"element map. Supported native types: {list(_NATIVE_ELEMENT_TYPES.keys())!r}."
+        )
+    return arrow_type
+
+
+class ListLogicalType(BaseLogicalType):
+    """Logical type for ``list[T]`` or ``set[T]``, supporting both extension and native elements.
+
+    Wraps a homogeneous list or set whose element type is either:
+
+    - **Extension mode**: a registered ``LogicalTypeProtocol`` (e.g. ``list[uuid.UUID]``
+      where ``uuid.UUID`` maps to ``orcapod.uuid``).
+    - **Native mode** (ITL-611): a plain Python scalar type in ``_NATIVE_ELEMENT_TYPES``
+      (e.g. ``set[int]``, ``set[str]``). This preserves set semantics through Parquet
+      round-trips for primitive types that have no ``LogicalTypeProtocol``.
+
+    The resulting Arrow extension type has:
+
+    - Extension name: ``list[<element_name>]`` or ``set[<element_name>]``
+    - Storage type: ``pa.large_list(<element_storage_type>)`` — ET1 safe (no nested extension)
+    - Metadata: JSON with ``category``, plus either ``element_ext_name`` /
+      ``element_ext_metadata`` (extension mode) or ``element_kind: "native"`` /
+      ``element_python_type`` (native mode)
+
+    Args:
+        element: Either a ``LogicalTypeProtocol`` instance (extension mode, e.g.
+            ``LogicalUUID()``) or a plain Python type (native mode, e.g. ``int``).
+            In native mode, the type must be a key in ``_NATIVE_ELEMENT_TYPES``.
         is_set: If ``True``, uses ``set[T]`` semantics (``storage_to_python`` returns a
             ``set``; ``python_to_storage`` sorts storage values for determinism). Defaults to
             ``False`` (``list[T]`` semantics).
@@ -61,42 +110,74 @@ class ListLogicalType(BaseLogicalType):
         >>> lt = ListLogicalType(LogicalUUID(), is_set=False)
         >>> lt.logical_type_name
         'list[orcapod.uuid]'
-        >>> lt.python_type
-        list[uuid.UUID]
+        >>> lt_native = ListLogicalType(int, is_set=True)
+        >>> lt_native.logical_type_name
+        'set[int]'
     """
 
     def __init__(
         self,
-        element_logical_type: "LogicalTypeProtocol",
+        element: "LogicalTypeProtocol | type",
         *,
         is_set: bool = False,
     ) -> None:
-        self._element_logical_type = element_logical_type
-        self._element_python_type = element_logical_type.python_type
         self._is_set = is_set
         self._arrow_ext: pa.ExtensionType | None = None
         self._polars_ext: pl.BaseExtension | None = None
 
-        # Derive Arrow extension details from the element logical type.
-        element_ext_type = element_logical_type.get_arrow_extension_type()
-        element_ext_name = element_ext_type.extension_name
-        raw_meta_bytes: bytes = element_ext_type.__arrow_ext_serialize__()
-        element_ext_metadata: str | None = raw_meta_bytes.decode("utf-8") if raw_meta_bytes else None
-
         category = SET_CATEGORY if is_set else LIST_CATEGORY
-        meta_dict = {
-            "category": category,
-            "element_ext_name": element_ext_name,
-            "element_ext_metadata": element_ext_metadata,
-        }
-        self._metadata_bytes: bytes = json.dumps(meta_dict).encode("utf-8")
 
-        # Derive storage type: large_list of the element's storage type (not extension type).
-        element_storage = element_ext_type.storage_type
-        self._storage_type = pa.large_list(element_storage)
+        if hasattr(element, "get_arrow_extension_type"):
+            # Extension mode: element is a LogicalTypeProtocol instance.
+            self._element_logical_type = element
+            self._element_python_type = element.python_type
 
-        # Compose the extension name from the category and element extension name.
-        self._logical_type_name = f"{category}[{element_ext_name}]"
+            element_ext_type = element.get_arrow_extension_type()
+            element_ext_name = element_ext_type.extension_name
+            raw_meta_bytes: bytes = element_ext_type.__arrow_ext_serialize__()
+            element_ext_metadata: str | None = (
+                raw_meta_bytes.decode("utf-8") if raw_meta_bytes else None
+            )
+
+            meta_dict = {
+                "category": category,
+                "element_ext_name": element_ext_name,
+                "element_ext_metadata": element_ext_metadata,
+            }
+            self._metadata_bytes: bytes = json.dumps(meta_dict).encode("utf-8")
+
+            # Derive storage type: large_list of the element's storage type (not extension type).
+            element_storage = element_ext_type.storage_type
+            self._storage_type = pa.large_list(element_storage)
+
+            # Compose the extension name from the category and element extension name.
+            self._logical_type_name = f"{category}[{element_ext_name}]"
+        else:
+            # Native mode: element is a plain Python type from _NATIVE_ELEMENT_TYPES.
+            if not isinstance(element, type):
+                raise ValueError(
+                    f"ListLogicalType: element must be a LogicalTypeProtocol or a plain Python "
+                    f"type, got {element!r}."
+                )
+            element_type_name = element.__name__
+            if element_type_name not in _NATIVE_ELEMENT_TYPES:
+                raise ValueError(
+                    f"ListLogicalType: native element type {element!r} "
+                    f"(name={element_type_name!r}) is not in the native element map. "
+                    f"Supported native types: {list(_NATIVE_ELEMENT_TYPES.keys())!r}."
+                )
+            self._element_logical_type = None
+            self._element_python_type = element
+
+            meta_dict = {
+                "category": category,
+                "element_kind": "native",
+                "element_python_type": element_type_name,
+            }
+            self._metadata_bytes = json.dumps(meta_dict).encode("utf-8")
+
+            self._storage_type = pa.large_list(_get_native_element_arrow_type(element))
+            self._logical_type_name = f"{category}[{element_type_name}]"
 
     @property
     def logical_type_name(self) -> str:
@@ -291,6 +372,13 @@ class ListLogicalTypeFactory:
         # Directly look up (and register if needed) the LogicalType for the element.
         element_lt = converter.get_logical_type_for_python_type(element_annotation)
         if element_lt is None:
+            # NEW (ITL-611): for set[T] where T is a native primitive, use native mode.
+            if (
+                is_set
+                and isinstance(element_annotation, type)
+                and element_annotation.__name__ in _NATIVE_ELEMENT_TYPES
+            ):
+                return ListLogicalType(element_annotation, is_set=True)
             raise ValueError(
                 f"ListLogicalTypeFactory.create_for_python_type: element type "
                 f"{element_annotation!r} has no registered LogicalType. "
@@ -309,16 +397,22 @@ class ListLogicalTypeFactory:
     ) -> ListLogicalType:
         """Reconstruct a ``ListLogicalType`` from Arrow schema metadata (read path).
 
-        Recursively calls ``converter.register_logical_type_from_arrow_metadata`` for the element type,
-        ensuring the element logical type is registered before constructing the outer
-        ``ListLogicalType``. Handles arbitrary nesting depth via recursion.
+        Handles two metadata formats:
+
+        - **Extension mode** (legacy): ``{"category": ..., "element_ext_name": ..., ...}``
+        - **Native mode** (ITL-611): ``{"category": ..., "element_kind": "native", "element_python_type": "int"}``
+
+        Recursively calls ``converter.register_logical_type_from_arrow_metadata`` for the element
+        type in extension mode. Native mode does not require recursive registration. Handles
+        arbitrary nesting depth (extension mode) via recursion.
 
         Args:
-            arrow_extension_name: Extension name (e.g. ``"list[orcapod.uuid]"``).
+            arrow_extension_name: Extension name (e.g. ``"set[int]"`` or ``"list[orcapod.uuid]"``).
             storage_type: Outer storage type (``large_list(<element storage>)``).
-            metadata: Parsed metadata dict; must contain ``"category"`` and
-                ``"element_ext_name"``; ``"element_ext_metadata"`` may be ``None``.
-            converter: Active converter for recursive element registration.
+            metadata: Parsed metadata dict; must contain ``"category"`` and either
+                ``"element_ext_name"`` (extension mode) or ``"element_python_type"`` with
+                ``"element_kind": "native"`` (native mode).
+            converter: Active converter for recursive element registration (extension mode only).
 
         Returns:
             A ``ListLogicalType`` ready for registration.
@@ -333,6 +427,33 @@ class ListLogicalTypeFactory:
                 f"type for {arrow_extension_name!r}, got {storage_type!r}."
             )
 
+        is_set = metadata.get("category") == SET_CATEGORY
+        element_kind = metadata.get("element_kind")
+
+        if element_kind == "native":
+            # Native mode: element is a plain Python type from _NATIVE_ELEMENT_TYPES.
+            element_python_type_name = metadata.get("element_python_type")
+            if not element_python_type_name:
+                raise ValueError(
+                    f"ListLogicalTypeFactory.reconstruct_from_arrow: missing "
+                    f"'element_python_type' in native-mode metadata for "
+                    f"{arrow_extension_name!r}. metadata={metadata!r}."
+                )
+            element_python_type = _NATIVE_ELEMENT_TYPES.get(element_python_type_name)
+            if element_python_type is None:
+                raise ValueError(
+                    f"ListLogicalTypeFactory.reconstruct_from_arrow: unknown native element "
+                    f"type {element_python_type_name!r} for {arrow_extension_name!r}. "
+                    f"Supported: {list(_NATIVE_ELEMENT_TYPES.keys())!r}."
+                )
+            logger.debug(
+                "ListLogicalTypeFactory: reconstructed %r from Arrow as native mode (is_set=%s)",
+                arrow_extension_name,
+                is_set,
+            )
+            return ListLogicalType(element_python_type, is_set=is_set)
+
+        # Extension mode (existing logic — unchanged).
         element_ext_name = metadata.get("element_ext_name")
         if not element_ext_name:
             raise ValueError(
@@ -361,7 +482,6 @@ class ListLogicalTypeFactory:
                 f"This is a bug in register_logical_type_from_arrow_metadata."
             )
 
-        is_set = metadata.get("category") == SET_CATEGORY
         logger.debug(
             "ListLogicalTypeFactory: reconstructed %r from Arrow (is_set=%s)",
             arrow_extension_name,
