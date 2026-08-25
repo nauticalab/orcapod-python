@@ -1077,6 +1077,65 @@ class TestPollingSourceSchemaValidation:
             async for _ in src.async_iter_data():
                 pass
 
+    def test_sync_three_fetches_no_content_hash_leak(self):
+        """After 3 accumulating fetches (2 combines), data schema is stable and
+        contains no _content_hash column, and all rows are present.
+
+        Regression test for ITL-616: _combine called as_table(all_info=True),
+        which injected the synthetic _content_hash column into the stored stream.
+        The second combine then raised SchemaInconsistencyError.
+        """
+        fake = FakeDynamicSource(
+            batches=[_batch(1, 10), _batch(2, 20), _batch(3, 30)]
+        )
+        src = PollingSource(
+            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+        )
+
+        rows1 = list(src.iter_data())   # fetch 1 — builds initial stream
+        rows2 = list(src.iter_data())   # fetch 2 — first combine
+        rows3 = list(src.iter_data())   # fetch 3 — second combine (crashed before fix)
+
+        assert len(rows1) == 1
+        assert len(rows2) == 2
+        assert len(rows3) == 3
+
+        _, data_keys = src.keys()
+        assert "_content_hash" not in data_keys
+
+        _, data_schema = src.output_schema()
+        assert "_content_hash" not in data_schema
+
+    @pytest.mark.asyncio
+    async def test_async_three_fetches_no_content_hash_leak(self):
+        """After 3 async batches (2 combines), data schema is stable and contains
+        no _content_hash column, and all rows are accumulated.
+
+        Regression test for ITL-616: same root cause as the sync path.
+        """
+        fake = FakeDynamicSource(
+            batches=[_batch(1, 10), _batch(2, 20), _batch(3, 30)]
+        )
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(
+                interval=0.05, duration=0.5, max_missed_intervals=50
+            ),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert len(items) == 3
+
+        _, data_keys = src.keys()
+        assert "_content_hash" not in data_keys
+
+        _, data_schema = src.output_schema()
+        assert "_content_hash" not in data_schema
+
 
 async def _drain_async(agen):
     """Consume all items from an async generator."""
