@@ -125,7 +125,8 @@ lock before iterating, so later writes to the stream don't affect the snapshot m
 ---
 
 ### PS3 — `_combine` leaks `_content_hash` into the data schema on the second accumulating fetch
-**Status:** in progress
+**Status:** resolved
+**Fix:** Added `_STREAM_COMBINE_COLUMNS = ColumnConfig(system_tags=True, source=True, context=True)` constant and replaced `as_table(all_info=True)` with `as_table(columns=_STREAM_COMBINE_COLUMNS)` in `_combine`. `content_hash` is intentionally excluded — it is a synthetic output column, never a stored one.
 **Severity:** high
 **Issue:** ITL-616
 
