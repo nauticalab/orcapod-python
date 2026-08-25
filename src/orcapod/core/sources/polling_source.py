@@ -121,6 +121,16 @@ def _assert_schema_match(
         )
 
 
+# ColumnConfig used when concatenating streams in _combine.
+# Includes the provenance columns (system_tags, source, context) that
+# ArrowTableStream.__init__ knows how to parse and split into their
+# respective internal tables.
+# content_hash is intentionally absent: it is a synthetic, on-demand
+# column produced by as_table(); including it would bake it into stored
+# data and corrupt the data schema on the next combine.
+_STREAM_COMBINE_COLUMNS = ColumnConfig(system_tags=True, source=True, context=True)
+
+
 # ---------------------------------------------------------------------------
 # PollingSource
 # ---------------------------------------------------------------------------
@@ -652,8 +662,8 @@ class PollingSource(RootSource, Generic[T]):
 
         combined = pa.concat_tables(
             [
-                existing.as_table(all_info=True),
-                new_stream.as_table(all_info=True),
+                existing.as_table(columns=_STREAM_COMBINE_COLUMNS),
+                new_stream.as_table(columns=_STREAM_COMBINE_COLUMNS),
             ],
             promote_options="default",
         )
