@@ -1129,12 +1129,11 @@ class TestPollingSourceSchemaValidation:
             items.append((tag, data))
 
         assert len(items) == 3
-        assert src._accumulated_stream is not None
 
-        _, data_keys = src._accumulated_stream.keys()
+        _, data_keys = src.keys()
         assert "_content_hash" not in data_keys
 
-        _, data_schema = src._accumulated_stream.output_schema()
+        _, data_schema = src.output_schema()
         assert "_content_hash" not in data_schema
 
 
