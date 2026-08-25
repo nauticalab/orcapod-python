@@ -553,3 +553,22 @@ def test_list_logical_type_factory_reconstruct_native_missing_python_type_raises
     converter = create_registry().get_context().type_converter
     with pytest.raises(ValueError, match="element_python_type"):
         factory.reconstruct_from_arrow("set[int]", storage_type, metadata, converter)
+
+
+def test_list_logical_type_factory_reconstruct_native_storage_type_mismatch_raises():
+    """reconstruct_from_arrow raises ValueError when storage value type doesn't match metadata."""
+    from orcapod.logical_types.list_logical_type_factory import (
+        ListLogicalTypeFactory, SET_CATEGORY,
+    )
+    from orcapod.contexts import create_registry
+    factory = ListLogicalTypeFactory()
+    # Metadata says int, but actual storage value type is large_string — mismatch.
+    storage_type = pa.large_list(pa.large_string())
+    metadata = {
+        "category": SET_CATEGORY,
+        "element_kind": "native",
+        "element_python_type": "int",
+    }
+    converter = create_registry().get_context().type_converter
+    with pytest.raises(ValueError, match="storage type mismatch"):
+        factory.reconstruct_from_arrow("set[int]", storage_type, metadata, converter)

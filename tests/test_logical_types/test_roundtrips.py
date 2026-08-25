@@ -876,6 +876,27 @@ def test_set_of_datetime_round_trip(storage_backend: _StorageBackend, tmp_path: 
     assert rows[0]["timestamps"] == data
 
 
+def test_set_of_date_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[date] values round-trip as sets; extension name is 'set[date]'."""
+    from datetime import date
+    d1 = date(2024, 1, 1)
+    d2 = date(2024, 6, 15)
+    d3 = date(2025, 12, 31)
+    data = {d1, d2, d3}
+    result, read_converter = _write_and_read(
+        {"dates": set[date]},
+        [{"dates": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("dates")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[date]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["dates"], set)
+    assert rows[0]["dates"] == data
+
+
 def test_fresh_converter_reads_set_of_int(
     storage_backend: _StorageBackend, tmp_path: Path
 ) -> None:

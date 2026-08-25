@@ -381,9 +381,11 @@ class ListLogicalTypeFactory:
                 return ListLogicalType(element_annotation, is_set=True)
             raise ValueError(
                 f"ListLogicalTypeFactory.create_for_python_type: element type "
-                f"{element_annotation!r} has no registered LogicalType. "
-                f"Only list[T]/set[T] where T maps to a LogicalType are supported; "
-                f"use plain list[{element_annotation}] for primitive element types."
+                f"{element_annotation!r} has no registered LogicalType and is not a supported "
+                f"native primitive type. "
+                f"For list[T]: T must map to a registered LogicalType. "
+                f"For set[T]: T must either map to a registered LogicalType or be one of "
+                f"the supported native types: {list(_NATIVE_ELEMENT_TYPES.keys())!r}."
             )
 
         return ListLogicalType(element_lt, is_set=is_set)
@@ -445,6 +447,23 @@ class ListLogicalTypeFactory:
                     f"ListLogicalTypeFactory.reconstruct_from_arrow: unknown native element "
                     f"type {element_python_type_name!r} for {arrow_extension_name!r}. "
                     f"Supported: {list(_NATIVE_ELEMENT_TYPES.keys())!r}."
+                )
+            # Validate that the field's on-disk value type matches what the metadata promises.
+            # A mismatch means the metadata and storage are inconsistent (e.g. corrupt file or
+            # mis-written metadata), and silently constructing a ListLogicalType with the wrong
+            # storage type would cause silent conversion errors at read time.
+            expected_value_type = _get_native_element_arrow_type(element_python_type)
+            actual_value_type = storage_type.value_type
+            # Use canonical comparison: canonicalise both sides so minor variants (string vs
+            # large_string) don't produce spurious failures on the validation path.
+            from orcapod.logical_types.registry import _canonical_storage
+            if _canonical_storage(actual_value_type) != _canonical_storage(expected_value_type):
+                raise ValueError(
+                    f"ListLogicalTypeFactory.reconstruct_from_arrow: storage type mismatch for "
+                    f"{arrow_extension_name!r}: metadata claims element type "
+                    f"{element_python_type_name!r} (expected value type "
+                    f"{expected_value_type!r}), but the field has value type "
+                    f"{actual_value_type!r}. The metadata and storage are inconsistent."
                 )
             logger.debug(
                 "ListLogicalTypeFactory: reconstructed %r from Arrow as native mode (is_set=%s)",
