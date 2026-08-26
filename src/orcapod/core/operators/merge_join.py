@@ -241,6 +241,11 @@ class MergeJoin(BinaryOperator):
         )
         joined = joined.drop(COMMON_JOIN_KEY)
 
+        # Use the left stream's type converter — not the default context — so that a
+        # MergeJoin over streams built with a non-default DataContext reconstructs the
+        # merged column's extension type from the correct registry.
+        tc = left_stream.data_context.type_converter
+
         # Process colliding data columns: merge into sorted lists
         for col in colliding_keys:
             left_col_name = col
@@ -284,10 +289,6 @@ class MergeJoin(BinaryOperator):
 
             elem_arrow_type = colliding_col_types.get(col)
             if elem_arrow_type is not None and isinstance(elem_arrow_type, pa.ExtensionType):
-                # Late import: orcapod.contexts pulls in the full type system;
-                # importing at module level creates a circular dependency.
-                from orcapod.contexts import get_default_context
-                tc = get_default_context().type_converter
                 elem_python_type = tc.arrow_type_to_python_type(elem_arrow_type)
                 list_logical_type = tc.get_logical_type_for_python_type(list[elem_python_type])
                 if list_logical_type is not None:

@@ -266,12 +266,17 @@ class TestListExtensionHashing:
         """Return the large_string storage value for a File."""
         return ctx.type_converter.python_to_storage(File(path), File)
 
-    def test_list_file_extension_hashed_to_list_of_large_binary(self, ctx, tmp_path):
+    def test_list_file_extension_hashed_to_large_binary(self, ctx, tmp_path):
         """visit_extension for extension<list[orcapod.file]> must return
-        (large_list(large_binary), [bytes, bytes]) — not the extension type unchanged.
+        (large_binary, bytes) — not the extension type unchanged.
 
-        With the buggy code the isinstance guard exits immediately, returning
-        (extension_type, storage_value). This assertion on new_type would fail.
+        The result is a single bytes value combining the outer extension name and
+        the per-element content hashes, mirroring the scalar encoding:
+        ``b"<outer_type_name>::<elem0_hash>\\x00<elem1_hash>"``.
+
+        With the original buggy code the isinstance guard exits immediately,
+        returning (extension_type, storage_value). This assertion on new_type
+        would fail.
         """
         f0 = tmp_path / "f0.txt"; f0.write_text("alpha")
         f1 = tmp_path / "f1.txt"; f1.write_text("beta")
@@ -284,20 +289,22 @@ class TestListExtensionHashing:
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         new_type, new_data = visitor.visit(list_ext_type, storage_value)
 
-        assert new_type == pa.large_list(pa.large_binary()), (
-            f"Expected large_list(large_binary), got {new_type}. "
-            "Buggy code returns the extension type unchanged."
+        assert new_type == pa.large_binary(), (
+            f"Expected large_binary(), got {new_type}. "
+            "The list result is a single combined hash bytes value."
         )
-        assert isinstance(new_data, list)
-        assert len(new_data) == 2
-        assert all(isinstance(b, bytes) for b in new_data)
+        assert isinstance(new_data, bytes)
+        # Combined format: b"<outer_type_name>::<elem_hashes>"
+        assert b"::" in new_data
+        type_prefix, _ = new_data.split(b"::", 1)
+        assert type_prefix == b"list[orcapod:file]"
 
-    def test_list_file_extension_is_hash_of_file_content_hashes(self, ctx, tmp_path):
-        """Each element of the list result equals the scalar visit result for the same file.
+    def test_list_file_extension_embeds_per_element_scalar_hashes(self, ctx, tmp_path):
+        """The combined list hash embeds each element's scalar hash.
 
-        Contract: visit(list_ext, [s0, s1])[1][i] == visit(scalar_ext, si)[1]
-        This is the symmetry invariant — list[File] and scalar File hash identically
-        per element. Starfix then sees an ordered list of content-hash tokens.
+        Combined format: b"<outer_type_name>::<h0>\\x00<h1>"
+        where h0 and h1 are the scalar visit results for the same files.
+        Splitting the suffix by \\x00 recovers individual element hashes.
         """
         f0 = tmp_path / "contract0.txt"; f0.write_text("content zero")
         f1 = tmp_path / "contract1.txt"; f1.write_text("content one")
@@ -309,22 +316,25 @@ class TestListExtensionHashing:
 
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
 
-        # Scalar hashes
+        # Scalar hashes — b"orcapod:file::<method>:<digest>" each
         _, h0_bytes = visitor.visit(scalar_ext_type, s0)
         _, h1_bytes = visitor.visit(scalar_ext_type, s1)
 
-        # List hash
-        _, list_result = visitor.visit(list_ext_type, [s0, s1])
+        # List hash — b"list[orcapod:file]::<h0>\x00<h1>"
+        _, combined = visitor.visit(list_ext_type, [s0, s1])
 
-        assert list_result[0] == h0_bytes, (
-            "Element 0 of list result must equal the scalar hash of file 0"
+        # Strip outer type prefix and split to recover per-element hashes
+        suffix = combined.split(b"::", 1)[1]  # b"<h0>\x00<h1>"
+        elem_hashes = suffix.split(b"\x00")
+        assert elem_hashes[0] == h0_bytes, (
+            "Embedded element 0 must equal the scalar hash of file 0"
         )
-        assert list_result[1] == h1_bytes, (
-            "Element 1 of list result must equal the scalar hash of file 1"
+        assert elem_hashes[1] == h1_bytes, (
+            "Embedded element 1 must equal the scalar hash of file 1"
         )
 
     def test_list_file_extension_content_change_changes_hash(self, ctx, tmp_path):
-        """Changing file content changes the per-element hash."""
+        """Changing file content changes the combined hash."""
         f = tmp_path / "mutable.txt"
         f.write_text("v1")
 
@@ -333,17 +343,15 @@ class TestListExtensionHashing:
 
         s_v1 = self._file_storage(ctx, f)
         _, result_v1 = visitor.visit(list_ext_type, [s_v1])
-        r0_v1 = result_v1[0]
 
         f.write_text("v2")
         s_v2 = ctx.type_converter.python_to_storage(File(f), File)
         _, result_v2 = visitor.visit(list_ext_type, [s_v2])
-        r0_v2 = result_v2[0]
 
-        assert r0_v1 != r0_v2, "Content change must change the per-element hash"
+        assert result_v1 != result_v2, "Content change must change the combined hash"
 
     def test_list_file_extension_same_content_same_hash(self, ctx, tmp_path):
-        """Two files with identical content produce identical per-element hashes."""
+        """Two files with identical content produce identical combined hashes."""
         fa = tmp_path / "a.txt"; fa.write_text("identical")
         fb = tmp_path / "b.txt"; fb.write_text("identical")
 
@@ -355,8 +363,8 @@ class TestListExtensionHashing:
         _, result_a = visitor.visit(list_ext_type, [sa])
         _, result_b = visitor.visit(list_ext_type, [sb])
 
-        assert result_a[0] == result_b[0], (
-            "Same content at different paths must produce the same hash"
+        assert result_a == result_b, (
+            "Same content at different paths must produce the same combined hash"
         )
 
     def test_list_file_extension_passthrough_when_no_handler(self, ctx, tmp_path):
@@ -389,10 +397,10 @@ class TestListExtensionHashing:
         assert new_type == list_ext_type, "Path has no handler — must passthrough"
         assert new_data == storage_value
 
-    def test_set_file_extension_hashed_to_list_of_large_binary(self, ctx, tmp_path):
-        """set[File] (extension<set[orcapod.file]>) also hashes per element.
+    def test_set_file_extension_hashed_to_large_binary(self, ctx, tmp_path):
+        """set[File] (extension<set[orcapod.file]>) also hashes to a combined large_binary.
 
-        get_origin(set[File]) is `set`, covered by `in (list, set)` in Fix 2.
+        get_origin(set[File]) is `set`, covered by `in (list, set)` in the fix.
         The type must be registered with the converter before visiting so that
         ``arrow_type_to_python_type`` can resolve it.
         """
@@ -408,18 +416,44 @@ class TestListExtensionHashing:
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         new_type, new_data = visitor.visit(set_ext_type, storage_value)
 
-        assert new_type == pa.large_list(pa.large_binary())
-        assert isinstance(new_data, list)
-        assert len(new_data) == 2
-        assert all(isinstance(b, bytes) for b in new_data)
+        assert new_type == pa.large_binary()
+        assert isinstance(new_data, bytes)
+        # Outer type name is "set[orcapod:file]" (dots replaced with colons)
+        assert new_data.startswith(b"set[orcapod:file]::")
+
+    def test_list_and_set_file_extension_produce_distinct_hashes(self, ctx, tmp_path):
+        """list[File] and set[File] with identical contents must hash differently.
+
+        Before the fix, the outer extension name was not included in the result,
+        so ``extension<list[orcapod.file]>`` and ``extension<set[orcapod.file]>``
+        tables holding the same file produced identical hashes — a silent hash
+        collision that allows memoised records keyed on one to be served for the other.
+        """
+        f = tmp_path / "same.txt"; f.write_text("collision test")
+
+        ctx.type_converter.register_python_class(list[File])
+        ctx.type_converter.register_python_class(set[File])
+        list_ext_type = ctx.type_converter.python_type_to_arrow_type(list[File])
+        set_ext_type = ctx.type_converter.python_type_to_arrow_type(set[File])
+
+        s = self._file_storage(ctx, f)
+        visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
+
+        _, list_hash = visitor.visit(list_ext_type, [s])
+        _, set_hash = visitor.visit(set_ext_type, [s])
+
+        assert list_hash != set_hash, (
+            "list[File] and set[File] with identical content must produce distinct hashes"
+        )
 
     def test_list_list_file_extension_hashed_recursively(self, ctx, tmp_path):
-        """extension<list[list[orcapod.file]]> recurses: each inner list becomes large_list(large_binary).
+        """extension<list[list[orcapod.file]]> recurses to a single combined large_binary.
 
-        Fix 2 recurses naturally: outer visit_extension delegates to _visit_list_elements
-        with virtual_type=large_list(extension<list[orcapod.file]>), which calls
+        Recursion: outer visit_extension delegates to _visit_list_elements with
+        virtual_type=large_list(extension<list[orcapod.file]>), which calls
         visit(extension<list[orcapod.file]>, inner_list) for each element, which
-        recurses back into visit_extension.
+        recurses back into visit_extension, each returning (large_binary, inner_bytes).
+        The outer call then combines: b"<outer_name>::<inner0>\\x00<inner1>".
 
         Both the inner and outer list types must be registered with the converter so
         that ``arrow_type_to_python_type`` can resolve them.
@@ -442,14 +476,13 @@ class TestListExtensionHashing:
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         new_type, new_data = visitor.visit(outer_ext_type, storage_value)
 
-        assert new_type == pa.large_list(pa.large_list(pa.large_binary())), (
-            f"Expected large_list(large_list(large_binary)), got {new_type}"
+        assert new_type == pa.large_binary(), (
+            f"Expected large_binary(), got {new_type}"
         )
-        assert len(new_data) == 2
-        assert len(new_data[0]) == 2  # two files in first inner list
-        assert len(new_data[1]) == 1  # one file in second inner list
-        assert all(isinstance(b, bytes) for b in new_data[0])
-        assert all(isinstance(b, bytes) for b in new_data[1])
+        assert isinstance(new_data, bytes)
+        # Outer type prefix encodes the nesting depth
+        assert b"list[" in new_data[:30]
+        assert b"::" in new_data
 
     def test_dataclass_with_list_file_field_hashed(self, ctx, tmp_path):
         """A struct with a list[File] extension field must hash per element.
@@ -491,11 +524,11 @@ class TestListExtensionHashing:
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         new_type, new_data = visitor.visit(struct_type, storage_value)
 
-        # The `files` field should be hashed to large_list(large_binary)
+        # The `files` field should be hashed to large_binary (single combined value)
         files_field_type = new_type.field("files").type
-        assert files_field_type == pa.large_list(pa.large_binary()), (
-            f"files field must be large_list(large_binary), got {files_field_type}"
+        assert files_field_type == pa.large_binary(), (
+            f"files field must be large_binary(), got {files_field_type}"
         )
-        files_hashes = new_data["files"]
-        assert len(files_hashes) == 2
-        assert all(isinstance(b, bytes) for b in files_hashes)
+        files_combined = new_data["files"]
+        assert isinstance(files_combined, bytes)
+        assert files_combined.startswith(b"list[orcapod:file]::")

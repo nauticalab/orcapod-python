@@ -342,25 +342,21 @@ class TestListLogicalTypePolarsMetadata:
 
         pl.DataFrame(table).to_arrow() calls _deserialize; without the fix it
         receives b'' and raises ValueError.
+
+        Uses the type converter registry (not a fresh ListLogicalType instance) so
+        that the same class object is in both the orcapod and Arrow/Polars global
+        registries.  A fresh instance registered manually would leave a different
+        class in the global registry, causing ArrowTypeError in cross-directory
+        test runs (e.g. ``uv run pytest tests/test_logical_types tests/test_core``).
         """
         import polars as pl
-        from orcapod.logical_types.builtin_logical_types import LogicalPath
-        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+        from pathlib import Path
+        from orcapod.contexts import get_default_context
 
-        lt = ListLogicalType(LogicalPath(), is_set=False)
-        ext_type = lt.get_arrow_extension_type()
-
-        # Register the extension types with both Arrow and Polars registries so
-        # the round-trip can reconstruct the extension type (not fall back to storage).
-        try:
-            pa.register_extension_type(ext_type)
-        except pa.lib.ArrowKeyError:
-            pass  # already registered
-        polars_ext = lt.get_polars_extension_type()
-        try:
-            pl.register_extension_type(ext_type.extension_name, type(polars_ext))
-        except (ValueError, pl.exceptions.ComputeError):
-            pass  # already registered
+        ctx = get_default_context()
+        # register_python_class registers the type with both Arrow and Polars global
+        # registries using the same class object the orcapod registry holds.
+        ext_type = ctx.type_converter.register_python_class(list[Path])
 
         storage = pa.array([["/a.txt", "/b.txt"]], type=pa.large_list(pa.large_string()))
         ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
