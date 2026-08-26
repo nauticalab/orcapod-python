@@ -9,7 +9,7 @@ import pytest
 
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.operators import Batch, GroupBy
+from orcapod.core.operators import Batch, GroupBy, Join
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
@@ -118,6 +118,39 @@ class TestGroupByOrdering:
         out = GroupBy(by=["s"]).process(src)
         # Emission order would give ["z", "a"]; record_id imposes ["a", "z"].
         assert out.as_table().column("path").to_pylist()[0] == ["a", "z"]
+
+    def test_join_fan_out_ties_broken_by_every_record_id_column(self):
+        """A joined stream carries one record_id per canonical input position.
+
+        The broadcast side of a fan-out repeats its record_id on every row it
+        was joined into, so it cannot separate those rows; only the fanned-out
+        side's record_id can.  Consulting just the first record_id column in
+        table order therefore leaves the sort key fully tied whenever the
+        broadcast side happens to sort first canonically, and the members fall
+        back to emission order -- which DB fetch order and Ray scheduling make
+        nondeterministic.  Every record_id column has to take part.
+
+        The literals are load-bearing: with this pair of schemas the broadcast
+        input sorts to canonical position 0, and its record_ids order the
+        members *against* emission order, so emission order and record_id
+        order are distinguishable.  Sorting the result before comparing would
+        make the test blind to the ordering it exists to pin down.
+        """
+        left = ArrowTableSource(
+            pa.table({"k": ["t", "t"], "a": [10, 20]}),
+            tag_columns=["k"],
+            infer_nullable=True,
+        )
+        right = ArrowTableSource(
+            pa.table({"k": ["t"], "b": [1]}),
+            tag_columns=["k"],
+            infer_nullable=True,
+        )
+        joined = Join().process(left, right)
+        out = GroupBy(by=["k"]).process(joined).as_table()
+        # Emission order would give [10, 20]; the fanned-out side's record_id
+        # imposes [20, 10].
+        assert out.column("a").to_pylist() == [[20, 10]]
 
 
 class TestGroupByValidation:

@@ -157,24 +157,28 @@ class GroupBy(UnaryOperator):
             for c in table.column_names
             if c not in self.by and c not in system_tag_columns
         )
-        # Non-key user tags order the members of a group.  `record_id` is
-        # appended as a final tiebreaker: tag tuples are supposed to be unique
-        # within a stream, but nothing enforces that, and without the
-        # tiebreaker duplicate tuples would fall back to emission order --
+        # Non-key user tags order the members of a group.  The `record_id`
+        # columns are appended as a final tiebreaker: tag tuples are supposed
+        # to be unique within a stream, but nothing enforces that, and without
+        # the tiebreaker duplicate tuples would fall back to emission order --
         # which Ray scheduling and DB fetch order make nondeterministic.
         # `record_id` is fixed when the source is materialized, so it is immune
         # to that shuffling.
+        #
+        # A joined stream carries one `record_id` per canonical input position,
+        # and the broadcast side of a fan-out repeats its id on every row it
+        # was joined into.  So *every* record_id column has to take part --
+        # consulting only the first would tie on exactly the fan-out rows the
+        # tiebreaker exists for.  They are sorted by name so the key order is
+        # itself independent of column order in the input table.
         sort_columns = tuple(c for c in tag_columns if c not in self.by)
-        record_id_column = next(
-            (
+        sort_columns += tuple(
+            sorted(
                 c
                 for c in system_tag_columns
                 if c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
-            ),
-            None,
+            )
         )
-        if record_id_column is not None:
-            sort_columns += (record_id_column,)
 
         groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for row in table.to_pylist():
