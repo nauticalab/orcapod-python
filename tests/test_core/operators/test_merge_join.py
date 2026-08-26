@@ -853,3 +853,178 @@ class TestMergeJoinSystemTags:
         for row_ab, row_ba in zip(rows_ab, rows_ba):
             for col in sys_cols:
                 assert row_ab[col] == row_ba[col]
+
+
+class TestMergeJoinWithListExtensionColumn:
+    """Regression for ITL-627 Defect 1: MergeJoin Polars round-trip with list extension columns."""
+
+    def test_merge_join_preserves_non_colliding_list_extension_column(self):
+        """MergeJoin must not raise and must preserve extension<list[orcapod.path]>
+        for a non-colliding list[Path] data column.
+
+        MergeJoin also does a Polars round-trip; without Fix 1 it raises ValueError.
+        """
+        import pyarrow as pa
+        from pathlib import Path
+        from orcapod.contexts import get_default_context
+
+        # Use the shared type-converter cache so both Arrow and Polars always see
+        # the same extension class object, avoiding ArrowTypeError on table.cast().
+        ctx = get_default_context()
+        ctx.type_converter.register_python_class(list[Path])
+        ext_type = ctx.type_converter.python_type_to_arrow_type(list[Path])
+
+        storage = pa.array(
+            [["/a.txt", "/b.txt"], ["/c.txt"]],
+            type=pa.large_list(pa.large_string()),
+        )
+        ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
+
+        # Left stream: list[Path] data column (non-colliding) + shared tag
+        left_table = pa.table({
+            "id": pa.array([1, 2], type=pa.int64()),
+            "paths": ext_array,
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["id"])
+
+        # Right stream: different non-colliding data column + same tag
+        right_table = pa.table({
+            "id": pa.array([1, 2], type=pa.int64()),
+            "score": pa.array([10.0, 20.0], type=pa.float64()),
+        })
+        right_stream = ArrowTableStream(right_table, tag_columns=["id"])
+
+        result = MergeJoin().static_process(left_stream, right_stream)  # must not raise
+        out_table = result.as_table()
+
+        paths_type = out_table.schema.field("paths").type
+        assert isinstance(paths_type, pa.ExtensionType), (
+            f"'paths' column must remain an extension type, got {paths_type}"
+        )
+        assert paths_type.extension_name == "list[orcapod.path]"
+
+        # Data integrity: 2 rows (inner join on id=1 and id=2)
+        assert len(out_table) == 2
+        # Values are preserved
+        paths_values = out_table.column("paths").to_pylist()
+        assert len(paths_values) == 2
+        assert all(len(row) >= 1 for row in paths_values)  # each row has at least one path
+
+
+class TestMergeJoinLogicalTypeColumns:
+    """Regression tests for ITL-627 Defect 3.
+
+    Before Fix 3, pa.array(merged_vals) inferred the array type from raw storage
+    values, producing plain large_list(storage_type) — the extension wrapper was lost.
+    """
+
+    def test_merge_join_scalar_logical_type_column_yields_list_extension(self, tmp_path):
+        """Merging a File column must produce extension<list[orcapod.file]>, not large_list.
+
+        Before Fix 3: pa.array([[json1, json2]]) inferred large_list(large_string).
+        After Fix 3: pa.ExtensionArray.from_storage(list_file_ext, ...) gives the correct type.
+        """
+        import pyarrow as pa
+        from orcapod.logical_types.file_type import File, LogicalFile
+        from orcapod.contexts import get_default_context
+
+        ctx = get_default_context()
+        # Registration required so that list[File] resolves to the extension type
+        # and Polars round-trips preserve the extension wrapper.
+        ctx.type_converter.register_python_class(File)
+        ctx.type_converter.register_python_class(list[File])
+
+        f1 = tmp_path / "mj1.txt"; f1.write_text("merge left")
+        f2 = tmp_path / "mj2.txt"; f2.write_text("merge right")
+
+        scalar_lt = LogicalFile()
+        ext_type = scalar_lt.get_arrow_extension_type()
+
+        s1 = ctx.type_converter.python_to_storage(File(f1), File)
+        s2 = ctx.type_converter.python_to_storage(File(f2), File)
+
+        left_table = pa.table({
+            "id": pa.array([1], type=pa.int64()),
+            "file": pa.ExtensionArray.from_storage(
+                ext_type, pa.array([s1], type=pa.large_string())
+            ),
+        })
+        right_table = pa.table({
+            "id": pa.array([1], type=pa.int64()),
+            "file": pa.ExtensionArray.from_storage(
+                ext_type, pa.array([s2], type=pa.large_string())
+            ),
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["id"])
+        right_stream = ArrowTableStream(right_table, tag_columns=["id"])
+
+        result = MergeJoin().static_process(left_stream, right_stream)
+        out_table = result.as_table()
+
+        file_type = out_table.schema.field("file").type
+        assert isinstance(file_type, pa.ExtensionType), (
+            f"'file' column must be extension<list[orcapod.file]>, got {file_type}. "
+            "Buggy code produces plain large_list(large_string)."
+        )
+        assert file_type.extension_name == "list[orcapod.file]"
+
+        # Values must be a list of two storage values
+        file_values = out_table.column("file").to_pylist()
+        assert len(file_values) == 1, f"Expected 1 row, got {len(file_values)}"
+        assert len(file_values[0]) == 2, f"Expected 2 merged elements, got {len(file_values[0])}"
+
+    def test_merge_join_list_backed_column_yields_nested_list_extension(self, tmp_path):
+        """Merging a list[File] column must produce extension<list[list[orcapod.file]]>.
+
+        Fix 3 handles this naturally: elem_python_type = list[File],
+        get_logical_type_for_python_type(list[list[File]]) = ListLogicalType(ListLogicalType(LogicalFile())).
+        """
+        import pyarrow as pa
+        from orcapod.logical_types.file_type import File, LogicalFile
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+        from orcapod.contexts import get_default_context
+
+        ctx = get_default_context()
+        # Registration required so that list[File] and list[list[File]] resolve to
+        # extension types and Polars round-trips preserve the extension wrapper.
+        ctx.type_converter.register_python_class(File)
+        ctx.type_converter.register_python_class(list[File])
+        ctx.type_converter.register_python_class(list[list[File]])
+
+        f1 = tmp_path / "nl1.txt"; f1.write_text("nested left")
+        f2 = tmp_path / "nl2.txt"; f2.write_text("nested right")
+
+        inner_lt = ListLogicalType(LogicalFile(), is_set=False)
+        inner_ext_type = inner_lt.get_arrow_extension_type()
+
+        s1 = ctx.type_converter.python_to_storage(File(f1), File)
+        s2 = ctx.type_converter.python_to_storage(File(f2), File)
+
+        # Each row's "files" value is a list of one file-storage-value
+        left_storage = pa.array([[s1]], type=pa.large_list(pa.large_string()))
+        right_storage = pa.array([[s2]], type=pa.large_list(pa.large_string()))
+
+        left_table = pa.table({
+            "id": pa.array([1], type=pa.int64()),
+            "files": pa.ExtensionArray.from_storage(inner_ext_type, left_storage),
+        })
+        right_table = pa.table({
+            "id": pa.array([1], type=pa.int64()),
+            "files": pa.ExtensionArray.from_storage(inner_ext_type, right_storage),
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["id"])
+        right_stream = ArrowTableStream(right_table, tag_columns=["id"])
+
+        result = MergeJoin().static_process(left_stream, right_stream)
+        out_table = result.as_table()
+
+        files_type = out_table.schema.field("files").type
+        assert isinstance(files_type, pa.ExtensionType), (
+            f"'files' column must be extension<list[list[orcapod.file]]>, got {files_type}"
+        )
+        assert files_type.extension_name == "list[list[orcapod.file]]"
+
+        # One row with two inner lists
+        files_values = out_table.column("files").to_pylist()
+        assert len(files_values) == 1, f"Expected 1 row, got {len(files_values)}"
+        assert len(files_values[0]) == 2, f"Expected 2 merged inner lists, got {len(files_values[0])}"

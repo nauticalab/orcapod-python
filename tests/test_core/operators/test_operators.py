@@ -465,6 +465,60 @@ class TestJoinBehavior:
         assert isinstance(sym, frozenset)
 
 
+class TestJoinWithListExtensionColumn:
+    """Regression tests for ITL-627 Defect 1: Join Polars round-trip with list extension columns."""
+
+    def test_join_preserves_list_extension_column(self):
+        """Join must not raise and must preserve extension<list[orcapod.path]>.
+
+        Before Fix 1, df.to_arrow() inside static_process called _deserialize
+        with b'' (no metadata), raising ValueError.
+        """
+        import pyarrow as pa
+        from pathlib import Path
+        from orcapod.contexts import get_default_context
+
+        # Use the shared type-converter cache so both Arrow and Polars always see
+        # the same extension class object, avoiding ArrowTypeError on table.cast().
+        ctx = get_default_context()
+        ctx.type_converter.register_python_class(list[Path])
+        ext_type = ctx.type_converter.python_type_to_arrow_type(list[Path])
+
+        storage = pa.array(
+            [["/a.txt", "/b.txt"], ["/c.txt"]],
+            type=pa.large_list(pa.large_string()),
+        )
+        ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
+        left_table = pa.table({
+            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+            "paths": ext_array,
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["animal"])
+
+        right_table = pa.table({
+            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+            "speed": pa.array([30.0, 45.0], type=pa.float64()),
+        })
+        right_stream = ArrowTableStream(right_table, tag_columns=["animal"])
+
+        op = Join()
+        result = op.static_process(left_stream, right_stream)  # must not raise
+        out_table = result.as_table()
+
+        paths_type = out_table.schema.field("paths").type
+        assert isinstance(paths_type, pa.ExtensionType), (
+            f"'paths' column must remain an extension type, got {paths_type}"
+        )
+        assert paths_type.extension_name == "list[orcapod.path]"
+
+        # Data integrity: 2 rows (inner join on "cat" and "dog")
+        assert len(out_table) == 2
+        # Values are preserved
+        paths_values = out_table.column("paths").to_pylist()
+        assert len(paths_values) == 2
+        assert all(len(row) >= 1 for row in paths_values)  # each row has at least one path
+
+
 class TestJoinMetaColumnCollision:
     """Verify that a 3-way join with identical meta columns on all inputs does not
     raise a DuplicateError.  Instead, colliding meta columns should be renamed

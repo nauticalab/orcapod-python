@@ -150,6 +150,7 @@ class ListLogicalType(BaseLogicalType):
             polars_ext_class = make_polars_extension_type(
                 self._logical_type_name,
                 self._storage_type,
+                metadata=self._metadata_bytes.decode("utf-8"),
             )
             self._polars_ext = polars_ext_class()
         return self._polars_ext
