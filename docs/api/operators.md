@@ -10,6 +10,8 @@ Operators perform structural transformations on streams without inspecting or sy
 
 ::: orcapod.core.operators.Batch
 
+::: orcapod.core.operators.GroupBy
+
 ::: orcapod.core.operators.SelectTagColumns
 
 ::: orcapod.core.operators.SelectDataColumns

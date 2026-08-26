@@ -8,8 +8,9 @@ orcapod-python framework. For conceptual background on the two identity chains
 
 ## Hash Site Index
 
-The table below summarises all 14 hash computation sites across the six usage groups
-documented in the sections that follow.
+The table below summarises all 15 hash computation sites across the six usage groups
+documented in the sections that follow. (Site 6b is numbered alongside site 6 rather than
+appended, because it is a variant of the same system tag mechanism.)
 
 | # | Site | Algorithm | Output format | One-line guarantee |
 |---|------|-----------|---------------|--------------------|
@@ -19,6 +20,7 @@ documented in the sections that follow.
 | 4 | Default `source_id` | `StarfixArrowHasher.hash_table(table).to_hex(n)` | Truncated hex `str` | Unique per raw table content; used as source identifier when none is provided |
 | 5 | Per-row `record_id` (system tag value) | `uuid.uuid5(NAMESPACE, f"{source_id}::{provenance_token}")` | `bytes` (16, UUID v5) | Deterministic per `(source_id, row_identity)`; stable across re-runs of the same source |
 | 6 | Join system tag suffix | `stream.pipeline_hash().to_hex(n)` + `:{idx}` appended to column name | Column name suffix | Unique per `(input topology, canonical join position)`; encodes full join lineage in column name |
+| 6b | Aggregating operator system tag fold | `uuid.uuid5(NAMESPACE, joined_member_hex)` for `record_id`; `combine_hashes(*member_values)` otherwise | `bytes` (16) / hex `str`, plus a column name suffix | Deterministic per ordered member set; keeps system tags scalar through a many-to-one reduction |
 | 7 | `compute_base_entry_id()` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL)` | `bytes` (`b"method:digest"`) | Unique per `(node, tag lineage, input_data content)` across all recomputation attempts |
 | 8 | `compute_pipeline_entry_id()` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL + recomputation_index)` | `bytes` (`b"method:digest"`) | Unique per `(node, tag lineage, input_data content, recomputation attempt)` |
 | 9 | Side-effect `record_id` | `StarfixArrowHasher.hash_table(system_tags + INPUT_DATA_HASH_COL + recomputation_index=0)` | `bytes` | Unique per `(tag lineage, input_data content)`; pod-version scoped via table path (`uri` + `pipeline_hash()`) |
@@ -32,7 +34,8 @@ documented in the sections that follow.
 
 ## 7. Worked Example
 
-The pipeline below exercises all 14 hash sites. `source_id` values are set explicitly so
+The pipeline below exercises hash sites 1--14; it contains no aggregating operator, so site 6b
+is not covered. `source_id` values are set explicitly so
 every content hash is reproducible across runs. Run the script to regenerate the values
 in this section:
 
@@ -298,7 +301,27 @@ topology suffix, encoding the full join lineage into each column name.
 | **Algorithm** | Streams are first sorted by `stream.pipeline_hash().to_string()` for determinism. For each input at canonical position `idx`, every existing system tag column name has `{BLOCK_SEPARATOR}{stream.pipeline_hash().to_hex(system_tag_n_char)}:{idx}` appended via `arrow_utils.append_to_system_tags()`. (`system_tag_n_char` from `OrcapodConfig.hashing`; default `None` = full digest.) |
 | **Output format** | Column name suffix; no separate value is stored |
 | **Uniqueness guarantee** | Each post-join system tag column name uniquely identifies `(original schema, input topology, canonical join position)`; no collision even when joining streams with identical schemas |
-| **Known exclusions** | `SemiJoin` passes system tags through unchanged. `Batch` changes the column type from `str` to `list[str]` but preserves the column name. |
+| **Known exclusions** | `SemiJoin` passes system tags through unchanged. Aggregating operators (`Batch`, `GroupBy`) use the fold described in site 6b instead. |
+
+---
+
+### Site 6b — Aggregating operator system tag fold
+
+| Field | Value |
+|---|---|
+| **Inputs** | The ordered list of a group's member values for one system tag column, plus that column's name (which selects the fold) |
+| **Algorithm** | `arrow_utils.fold_system_tag_values()`. For a `record_id` column: `uuid.uuid5(_AGGREGATED_RECORD_ID_NAMESPACE, BLOCK_SEPARATOR.join(v.hex() for v in values))`, where `_AGGREGATED_RECORD_ID_NAMESPACE = uuid.uuid5(NAMESPACE_URL, "https://orcapod.org/namespaces/aggregated-record-id")` is a fixed constant. For every other system tag column: `combine_hashes(*[str(v) for v in values], order=False)` — SHA-256 over the members concatenated in order. `None` members contribute the empty string. The folded column name then gains `{BLOCK_SEPARATOR}{stream.pipeline_hash().to_hex(system_tag_n_char)}` via `arrow_utils.append_to_system_tags()`. |
+| **Output format** | `bytes` (16, UUID v5 bit pattern) for a `record_id` column; 64-character hex `str` otherwise — in both cases **scalar**, matching the input column's type |
+| **Uniqueness guarantee** | Deterministic per ordered member set, and stable across processes (both primitives are SHA-based). `Batch` and `GroupBy` both order their members deterministically before folding, so an unchanged member set always folds to the same digest |
+| **Known exclusions** | Member order is significant; a permuted member set folds differently. This is why `GroupBy` sorts members by their non-key tag values with `record_id` as a tiebreaker rather than relying on upstream emission order |
+
+> **Why fold rather than list-wrap.** A many-to-one operator turns user tag and data columns
+> into `list[T]`, but system tag columns must stay scalar: `_build_record_id_preimage`
+> (`core/nodes/function_node.py`) hashes those columns directly to derive record identity.
+> Folding rather than dropping them preserves the Merkle link, so an upstream recompute that
+> yields identical data still invalidates downstream records. Because the digest becomes a
+> cache key, the fold must never use `hash()` or a set-based construction — a per-process value
+> would look correct in a single-process test and miss the cache on every new driver run.
 
 > **Key insight for entry IDs:** Because `compute_base_entry_id()` (§3) calls
 > `tag.as_table(columns={"system_tags": True})`, its preimage captures the full set of
