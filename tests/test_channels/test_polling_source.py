@@ -597,8 +597,8 @@ class TestPollingSourceAsyncMode:
 
         assert len(items) == 2
         # Internal cache should hold both rows
-        assert src._accumulated_stream is not None
-        cached_rows = list(src._accumulated_stream.iter_data())
+        assert len(src._batches) == 2
+        cached_rows = list(src._get_combined_stream().iter_data())
         assert len(cached_rows) == 2
 
     @pytest.mark.asyncio
@@ -1141,3 +1141,107 @@ async def _drain_async(agen):
     """Consume all items from an async generator."""
     async for _ in agen:
         pass
+
+
+# ===========================================================================
+# ITL-617: Concurrent sync access during async run must not lose rows
+# ===========================================================================
+
+
+class TestPollingSourceSyncAccessDuringAsyncRun:
+    """Regression tests for ITL-617.
+
+    A concurrent sync call (``iter_data``, ``as_table``, ``output_schema``,
+    ``keys``) must not advance ``_cursor`` in a way that causes the async
+    polling loop to skip rows.
+    """
+
+    @pytest.mark.asyncio
+    async def test_iter_data_and_as_table_concurrent_with_async_run_lose_no_rows(self):
+        """iter_data() and as_table() called concurrently with async_iter_data()
+        must not cause any rows to be skipped by the async iterator."""
+        fake = FakeDynamicSource(
+            batches=[_batch(1, 10), _batch(2, 20), _batch(3, 30)],
+            schema_override=None,
+        )
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.02, duration=1.0, max_missed_intervals=100),
+        )
+
+        rows_from_async: list = []
+        stop_bg = asyncio.Event()
+
+        async def background_sync_calls():
+            # Wait until at least one batch is committed, then hammer the
+            # sync API from a thread pool (iter_data and as_table both call
+            # _sync_poll_and_commit which can race with the async loop).
+            while not src._batches:
+                await asyncio.sleep(0.005)
+            while not stop_bg.is_set():
+                await asyncio.to_thread(lambda: list(src.iter_data()))
+                await asyncio.to_thread(lambda: src.as_table())
+                await asyncio.sleep(0.005)
+
+        bg_task = asyncio.create_task(background_sync_calls())
+
+        async for tag, data in src.async_iter_data():
+            rows_from_async.append((tag, data))
+
+        stop_bg.set()
+        try:
+            await asyncio.wait_for(bg_task, timeout=1.0)
+        except asyncio.TimeoutError:
+            bg_task.cancel()
+
+        # The async iterator must deliver ALL three rows, regardless of
+        # how many times the sync caller raced in.
+        assert len(rows_from_async) == 3
+
+    @pytest.mark.asyncio
+    async def test_output_schema_and_keys_concurrent_with_async_run_lose_no_rows(self):
+        """output_schema() and keys() called concurrently with async_iter_data()
+        must not trigger a fetch that advances the cursor past the async loop."""
+        fake = FakeDynamicSource(
+            batches=[_batch(1, 10), _batch(2, 20), _batch(3, 30)],
+            schema_override=None,  # no declared schema → would fall through to fetch
+        )
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.02, duration=1.0, max_missed_intervals=100),
+        )
+
+        rows_from_async: list = []
+        stop_bg = asyncio.Event()
+
+        async def background_introspection():
+            # Wait until first batch is available (so _batches is non-empty)
+            # then hammer output_schema / keys.
+            while not src._batches:
+                await asyncio.sleep(0.005)
+            while not stop_bg.is_set():
+                src.output_schema()
+                src.keys()
+                src.output_schema(columns={"system_tags": True})
+                src.keys(columns={"system_tags": True})
+                await asyncio.sleep(0.005)
+
+        bg_task = asyncio.create_task(background_introspection())
+
+        async for tag, data in src.async_iter_data():
+            rows_from_async.append((tag, data))
+
+        stop_bg.set()
+        try:
+            await asyncio.wait_for(bg_task, timeout=1.0)
+        except asyncio.TimeoutError:
+            bg_task.cancel()
+
+        # All 3 rows must be delivered by the async iterator.
+        assert len(rows_from_async) == 3
+        # output_schema / keys must not have triggered any fetches —
+        # they should use _batches[0] bypass once the first batch exists.
+        # Exactly 3 fetches: one per batch, all by the async loop.
+        assert len(fake.fetch_cursors) == 3

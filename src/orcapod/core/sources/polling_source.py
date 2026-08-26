@@ -12,6 +12,7 @@ import asyncio
 import dataclasses
 import functools
 import logging
+import threading
 from collections.abc import Collection
 from math import floor
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -255,7 +256,8 @@ class PollingSource(RootSource, Generic[T]):
         self._tag_columns: tuple[str, ...] = tuple(_normalize_column_list(tag_columns))
         self._polling_config = polling_config
         self._cursor: Cursor[T] | None = None
-        self._accumulated_stream: ArrowTableStream | None = None
+        self._batches: list[ArrowTableStream] = []
+        self._state_lock: threading.Lock = threading.Lock()
         # Derive source_id from impl identity if not explicitly provided
         if self._source_id is None:
             self._source_id = str(self._impl.identity())
@@ -330,7 +332,7 @@ class PollingSource(RootSource, Generic[T]):
         return (self._impl.identity(), self._tag_columns)
 
     # -------------------------------------------------------------------------
-    # Sync stream delegation — all route through _get_latest_stream()
+    # Sync stream delegation
     # -------------------------------------------------------------------------
 
     def output_schema(
@@ -352,17 +354,18 @@ class PollingSource(RootSource, Generic[T]):
            declared schemas (``system_tags``); flags requiring actual persisted
            data (``meta``, ``source``, ``context``, ``content_hash``) fall
            through to the next level.
-        2. **Cached-stream path** — if ``accumulated_stream`` is already
-           populated (at least one batch fetched via sync or async), delegates
-           to it without triggering a new poll+fetch cycle.
-        3. **Fallback** — calls ``_get_latest_stream()``, which runs a
-           synchronous poll+fetch via ``_run_sync``. Only reached when the impl
-           declared no schema and no batch has been fetched yet.
+        2. **Cached-stream path** — if ``_batches`` is already non-empty (at
+           least one batch fetched via sync or async), delegates to the first
+           batch without triggering a new poll+fetch cycle.
+        3. **Fallback** — calls ``_sync_poll_and_commit()`` then
+           ``_get_combined_stream()``, running a synchronous poll+fetch via
+           ``_run_sync``. Only reached when the impl declared no schema and no
+           batch has been fetched yet.
         """
         if self._tag_schema is not None and self._data_schema is not None:
             columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
             # meta / source / context / content_hash require actual stream data —
-            # fall through to accumulated_stream or _get_latest_stream for those.
+            # fall through to _batches[0] or _sync_poll_and_commit for those.
             if not (
                 columns_config.meta
                 or columns_config.source
@@ -380,9 +383,10 @@ class PollingSource(RootSource, Generic[T]):
                         {**dict(tag_schema), src_col: str, rec_col: bytes}
                     )
                 return tag_schema, self._data_schema
-        if self._accumulated_stream is not None:
-            return self._accumulated_stream.output_schema(columns=columns, all_info=all_info)
-        return self._get_latest_stream().output_schema(columns=columns, all_info=all_info)
+        if self._batches:
+            return self._batches[0].output_schema(columns=columns, all_info=all_info)
+        self._sync_poll_and_commit()
+        return self._get_combined_stream().output_schema(columns=columns, all_info=all_info)
 
     def keys(
         self,
@@ -393,9 +397,9 @@ class PollingSource(RootSource, Generic[T]):
         """Return tag and data column keys.
 
         Uses the same three-level resolution as ``output_schema``: impl-declared
-        schemas → cached stream → ``_get_latest_stream()`` fallback. When the
-        impl declared a schema, system-tag column names are derived from
-        ``_declared_schema_hash`` without triggering a fetch.
+        schemas → cached ``_batches[0]`` → ``_sync_poll_and_commit()`` fallback.
+        When the impl declared a schema, system-tag column names are derived
+        from ``_declared_schema_hash`` without triggering a fetch.
         """
         if self._tag_schema is not None and self._data_schema is not None:
             columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
@@ -414,13 +418,15 @@ class PollingSource(RootSource, Generic[T]):
                     src_col, rec_col = system_tag_column_names(schema_hash)
                     tag_keys = tag_keys + (src_col, rec_col)
                 return tag_keys, tuple(self._data_schema.keys())
-        if self._accumulated_stream is not None:
-            return self._accumulated_stream.keys(columns=columns, all_info=all_info)
-        return self._get_latest_stream().keys(columns=columns, all_info=all_info)
+        if self._batches:
+            return self._batches[0].keys(columns=columns, all_info=all_info)
+        self._sync_poll_and_commit()
+        return self._get_combined_stream().keys(columns=columns, all_info=all_info)
 
     def iter_data(self):
         """Iterate over (tag, data) pairs from the current snapshot."""
-        return self._get_latest_stream().iter_data()
+        self._sync_poll_and_commit()
+        return self._get_combined_stream().iter_data()
 
     def as_table(
         self,
@@ -429,7 +435,8 @@ class PollingSource(RootSource, Generic[T]):
         all_info: bool = False,
     ) -> pa.Table:
         """Return the accumulated rows as a PyArrow table."""
-        return self._get_latest_stream().as_table(columns=columns, all_info=all_info)
+        self._sync_poll_and_commit()
+        return self._get_combined_stream().as_table(columns=columns, all_info=all_info)
 
     # -------------------------------------------------------------------------
     # Serialization
@@ -510,40 +517,86 @@ class PollingSource(RootSource, Generic[T]):
     # Internal sync helpers
     # -------------------------------------------------------------------------
 
-    def _get_latest_stream(self) -> ArrowTableStream:
-        """Return the current accumulated stream, fetching/polling as needed."""
-        if self._accumulated_stream is None:
-            # First access — no cache yet; fetch immediately
+    def _sync_poll_and_commit(self) -> None:
+        """Poll for new data and commit a new batch under the optimistic lock.
+
+        Implements the check-snapshot → I/O → check-and-commit protocol:
+        reads the cursor snapshot under a brief lock, performs poll and fetch
+        with no lock held, then commits only if the cursor has not changed.
+        If another caller advanced the cursor in between (winning the commit
+        race), this call discards its fetched data — the batch is already in
+        ``_batches`` and will be visible on the next read.
+
+        Safe to call concurrently with ``async_iter_data``.
+        """
+        with self._state_lock:
+            cursor_snapshot = self._cursor
+
+        if cursor_snapshot is None:
+            # First access — no poll needed, fetch unconditionally.
             logger.debug("PollingSource %r: first sync access — fetching", self._source_id)
             new_cursor, data = _run_sync(self._impl.fetch, cursor=None)
             new_stream = self._try_build_stream(data)
             if new_stream is not None:
                 if self._tag_schema is not None or self._data_schema is not None:
                     self._validate_against_declared_schemas(new_stream)
-                self._accumulated_stream = new_stream
-            self._update_last_modified_from_cursor(new_cursor)
-            self._cursor = new_cursor
+            committed = False
+            with self._state_lock:
+                if self._cursor is None:
+                    if new_stream is not None:
+                        self._batches.append(new_stream)
+                    self._cursor = new_cursor
+                    committed = True
+            if committed:
+                self._update_last_modified_from_cursor(new_cursor)
         else:
-            # Have cache — poll for updates
-            has_new = _run_sync(self._impl.poll, cursor=self._cursor)
+            has_new = _run_sync(self._impl.poll, cursor=cursor_snapshot)
             if has_new:
-                logger.debug("PollingSource %r: sync poll found new data — fetching", self._source_id)
-                new_cursor, data = _run_sync(self._impl.fetch, cursor=self._cursor)
+                logger.debug(
+                    "PollingSource %r: sync poll found new data — fetching", self._source_id
+                )
+                new_cursor, data = _run_sync(self._impl.fetch, cursor=cursor_snapshot)
                 new_stream = self._try_build_stream(data)
                 if new_stream is not None:
                     if self._tag_schema is not None or self._data_schema is not None:
                         self._validate_against_declared_schemas(new_stream)
-                    self._accumulated_stream = self._combine(self._accumulated_stream, new_stream)
-                self._update_last_modified_from_cursor(new_cursor)
-                self._cursor = new_cursor
+                    if self._batches:
+                        self._validate_combining_schemas(self._batches[0], new_stream)
+                committed = False
+                with self._state_lock:
+                    if self._cursor == cursor_snapshot:
+                        if new_stream is not None:
+                            self._batches.append(new_stream)
+                        self._cursor = new_cursor
+                        committed = True
+                if committed:
+                    self._update_last_modified_from_cursor(new_cursor)
             else:
-                logger.debug("PollingSource %r: sync poll — cache still valid", self._source_id)
+                logger.debug(
+                    "PollingSource %r: sync poll — cache still valid", self._source_id
+                )
 
-        if self._accumulated_stream is None:
+    def _get_combined_stream(self) -> ArrowTableStream:
+        """Return all committed batches concatenated as a single stream.
+
+        Takes a snapshot of ``_batches`` (no lock needed — list is append-only)
+        then combines using the existing ``_combine`` helper.
+
+        Returns:
+            A single ``ArrowTableStream`` containing all rows from all batches.
+
+        Raises:
+            ValueError: If no data has been fetched yet (``_batches`` is empty).
+        """
+        batches = list(self._batches)  # snapshot — safe, list is append-only
+        if not batches:
             raise ValueError(
                 "PollingSource: no data available yet — first fetch returned empty data."
             )
-        return self._accumulated_stream
+        result = batches[0]
+        for batch in batches[1:]:
+            result = self._combine(result, batch)
+        return result
 
     def _try_build_stream(self, data: FrameInitTypes) -> ArrowTableStream | None:
         """Build an ``ArrowTableStream`` from raw data, returning ``None`` for empty data.
@@ -683,26 +736,22 @@ class PollingSource(RootSource, Generic[T]):
     async def async_iter_data(self):
         """Async generator that continuously emits (tag, data) pairs.
 
-        Pre-seeds from the cached stream (if any) before entering the polling
-        loop. The loop runs until: the configured duration elapses, the maximum
-        consecutive error or overrun threshold is exceeded, or the task is
-        cancelled. ``CursorInvalidatedError`` is re-raised to the caller after
-        logging — the caller will see it as an exception rather than a clean
-        end-of-stream. ``SchemaInconsistencyError`` is also propagated
-        immediately.
+        Uses a per-iterator ``local_batch_idx`` to track the next position in
+        the append-only ``_batches`` list. A drain step at the top of each
+        loop iteration yields any newly committed batches (including those
+        committed by concurrent sync callers) before sleeping.
+
+        The optimistic lock protocol — snapshot cursor (brief lock) → poll and
+        fetch with no lock held → commit only if cursor unchanged (brief lock)
+        — prevents TOCTOU races without ever holding ``_state_lock`` across an
+        ``await``.
 
         ``impl.close()`` is always awaited before returning or raising.
         """
-        # Pre-seed from cache
-        if self._accumulated_stream is not None:
-            pre_seed_count = 0
-            for pre_seed_count, item in enumerate(
-                self._accumulated_stream.iter_data(), start=1
-            ):
-                yield item
-            logger.debug(
-                "PollingSource %r: pre-seeded %d row(s)", self._source_id, pre_seed_count
-            )
+        # local_batch_idx tracks the next _batches index to yield.
+        # Starting at 0 means the first drain covers any pre-existing batches
+        # (the pre-seed case from the old implementation).
+        local_batch_idx = 0
 
         cfg = self._polling_config
         loop = asyncio.get_running_loop()
@@ -720,44 +769,70 @@ class PollingSource(RootSource, Generic[T]):
 
         try:
             while True:
-                # 1. Sleep until next scheduled tick
+                # ── 1. Drain: yield any batches not yet emitted ──────────────
+                # Covers pre-existing rows on first iteration AND rows committed
+                # by concurrent sync callers while this iterator was polling.
+                while local_batch_idx < len(self._batches):
+                    for item in self._batches[local_batch_idx].iter_data():
+                        yield item
+                    local_batch_idx += 1
+
+                # ── 2. Sleep to next scheduled tick ──────────────────────────
                 now = loop.time()
                 if next_tick > now:
                     await asyncio.sleep(next_tick - now)
 
-                # 2. Poll + fetch
+                # ── 3. Poll + fetch + commit (optimistic lock) ───────────────
                 try:
-                    has_new = await self._impl.poll(cursor=self._cursor)
+                    # Brief lock: snapshot cursor only.
+                    with self._state_lock:
+                        cursor_snapshot = self._cursor
+
+                    # Poll — no lock held across await.
+                    has_new = await self._impl.poll(cursor=cursor_snapshot)
 
                     if has_new:
                         logger.debug(
                             "PollingSource %r: new data detected, fetching",
                             self._source_id,
                         )
-                        new_cursor, data = await self._impl.fetch(cursor=self._cursor)
+                        # Fetch — no lock held across await.
+                        new_cursor, data = await self._impl.fetch(cursor=cursor_snapshot)
                         new_stream = self._try_build_stream(data)
-                        self._cursor = new_cursor
-                        self._update_last_modified_from_cursor(new_cursor)
+
                         if new_stream is not None:
                             if self._tag_schema is not None or self._data_schema is not None:
                                 self._validate_against_declared_schemas(new_stream)
-                            if self._accumulated_stream is None:
-                                self._accumulated_stream = new_stream
-                            else:
-                                self._accumulated_stream = self._combine(
-                                    self._accumulated_stream, new_stream
+                            if self._batches:
+                                self._validate_combining_schemas(
+                                    self._batches[0], new_stream
                                 )
 
-                            # Emit new rows from just this fetch
-                            emitted = 0
-                            for item in new_stream.iter_data():
-                                yield item
-                                emitted += 1
-                            logger.debug(
-                                "PollingSource %r: emitted %d row(s)",
-                                self._source_id,
-                                emitted,
-                            )
+                        # Brief lock: check cursor then commit atomically.
+                        committed = False
+                        with self._state_lock:
+                            if self._cursor == cursor_snapshot:
+                                if new_stream is not None:
+                                    self._batches.append(new_stream)
+                                self._cursor = new_cursor
+                                committed = True
+                            # else: sync caller already advanced cursor —
+                            # their batch is in _batches; drain step above
+                            # will yield it at the top of the next iteration.
+
+                        if committed:
+                            self._update_last_modified_from_cursor(new_cursor)
+                            if logger.isEnabledFor(logging.DEBUG):
+                                emitted_count = (
+                                    new_stream.as_table().num_rows
+                                    if new_stream is not None
+                                    else 0
+                                )
+                                logger.debug(
+                                    "PollingSource %r: committed %d row(s)",
+                                    self._source_id,
+                                    emitted_count,
+                                )
                     else:
                         logger.debug(
                             "PollingSource %r: poll returned no new data",
@@ -803,7 +878,7 @@ class PollingSource(RootSource, Generic[T]):
                     await asyncio.sleep(backoff)
                     continue  # retry — do not advance next_tick
 
-                # 3. Tick advancement (start-to-start)
+                # ── 4. Tick advancement (start-to-start) ─────────────────────
                 now = loop.time()
                 intervals_consumed = floor((now - next_tick) / cfg.interval)
                 if intervals_consumed > 0:
@@ -827,7 +902,7 @@ class PollingSource(RootSource, Generic[T]):
                     consecutive_misses = 0
                 next_tick += (intervals_consumed + 1) * cfg.interval
 
-                # 4. Duration check
+                # ── 5. Duration check ─────────────────────────────────────────
                 if cfg.duration > 0 and (loop.time() - start_time) >= cfg.duration:
                     logger.info(
                         "PollingSource %r: duration limit (%.1fs) reached. "
