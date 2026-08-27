@@ -698,6 +698,148 @@ Three categories of improvement are planned:
 overrides in the future but require careful handling of Polars expression evaluation and
 system-tag evolution respectively.
 
+`GroupBy` (NPIPE-204) is barrier-only by construction and is not a candidate for either category:
+no group can be emitted before the input channel closes, because any row not yet seen could belong
+to a group already started. Emitting early would require a guarantee that input arrives clustered
+by group key, which orcapod streams do not carry.
+
+---
+
+### O2 — Operators silently discard a non-default `_context_key`
+**Status:** open
+**Severity:** medium
+
+Every operator reads its input with
+`stream.as_table(columns={"source": True, "system_tags": True})` — `batch.py:48`,
+`merge_join.py:168`, `semijoin.py:60`, `column_selection.py:524`. That column set excludes
+`_context_key`, so no operator ever sees the input's data context. `ArrowTableStream.__init__`
+then finds no context column on the result and substitutes
+`contexts.get_default_context_key()`.
+
+Consequence: a stream carrying a non-default context key reverts to the default at the first
+operator it crosses, with no warning. Function pods are unaffected — only the operator layer.
+
+This is pre-existing and layer-wide rather than specific to any one operator. It may also be
+intended (operators produce output in the ambient context rather than inheriting an input's), in
+which case the fix is to document the rule rather than change behavior. Logged while working
+NPIPE-204; deliberately not addressed there.
+
+Fix: decide whether operator output should inherit the input context. If yes, request
+`context: True` and propagate it, erroring when inputs disagree. If no, document the reset
+explicitly on `StaticOutputPod`.
+
+---
+
+### O3 — `_materialize_to_stream` broadcasts row 0's provenance to every row
+**Status:** open
+**Severity:** high
+
+`StaticOutputOperatorPod._materialize_to_stream` (`core/operators/static_output_pod.py:223`)
+reads the source info of the *first* row and applies it to the whole concatenated table:
+
+```python
+# Preserve actual source_info provenance from the first row
+# (all rows share the same data columns and source tokens).
+source_info = rows[0][1].source_info()
+```
+
+The comment is half right. All rows do share the same data *column names*, but not the same
+*tokens* — a provenance token embeds a per-row identifier (`...::row_0::value` versus
+`...::row_1::value`, built by `_make_provenance_token` in `core/sources/stream_builder.py`).
+So every row from index 1 onward is attributed to row 0. `sync_orchestrator.py:207,222`
+repeats the pattern.
+
+Observed directly in a `MergeJoin` round-trip: row 1 of the output carried `row_0` tokens.
+
+This predates NPIPE-204 and is equally wrong for scalar tokens, so nothing in that change
+caused it. NPIPE-204 did make it **more visible**: previously the list-valued case crashed at
+`as_table` (see U1), so a broken operator never got far enough to mis-attribute provenance.
+That crash is now fixed, which converts a loud failure into a quiet wrong answer.
+
+Fix: build the source-info mapping per row rather than once from row 0, or push the
+provenance into the concatenated table before constructing the stream.
+
+---
+
+### O4 — `GroupBy` member order is undefined for duplicate tag tuples
+**Status:** open
+**Severity:** medium
+
+`GroupBy` sorts a group's members by their non-group-key tag values so the emitted lists are
+stable across runs — orcapod hashes those lists to build the cache key, so an unstable order
+causes spurious recomputes.
+
+When `by` covers *every* tag column there is no non-key tag left to sort on, and the operator
+falls back to the system `record_id`. That is a UUID v5 over the source id and a per-row
+provenance token, so it encodes source *row position*. Permuting the source table therefore
+changes member order, changes the list hash, and triggers a recompute. Measured: 79 distinct
+member orders across all 120 permutations of a 5-row duplicate-tag input.
+
+The branch is reachable with more than one member only when the input contains **duplicate tag
+tuples** — `sort_columns` is empty exactly when the group key is the full tag tuple, so a
+multi-member group requires duplicates.
+
+This is not fixable inside `GroupBy`. The only remaining ordering signal is data content, and
+the operator / function pod boundary forbids an operator from inspecting data.
+
+The real root cause is upstream: `DuplicateTagError` (`errors.py:23`) is defined but **never
+raised anywhere** in `src/` or `tests/`, so duplicate tag tuples are not prevented in the first
+place. Tag uniqueness is assumed throughout the operator layer and enforced nowhere.
+
+Fix: enforce tag uniqueness at stream construction (raising `DuplicateTagError`), which makes
+this branch unreachable with more than one member.
+
+---
+### O5 — A reduction persists a result computed from an incomplete member set
+**Status:** open
+**Severity:** high
+
+When an upstream pod's output changes, the first `job.run()` afterwards emits only the rows
+that were recomputed in that pass. For a per-row pod that emission is *complete* — each row is
+independent, so processing just the changed one is correct. For a many→one operator it is
+*partial*: the group is reduced over only the members present in that pass, the reducing pod
+executes, and its result is persisted with nothing marking it incomplete. The next run emits
+the full set and the group is recomputed correctly.
+
+Measured with two upstream pod stages (`source → sync_like → stringify → [GroupBy] → pod`),
+one member of one group changed, same Delta store, fresh objects per run:
+
+```
+CONTROL (per-row, no GroupBy)
+  changed run1   sync_like(99), stringify(sync_99), pod(sync_99.parquet)   <- converged
+  changed run2   []
+
+GROUPED
+  changed run1   sync_like(99), stringify(sync_99), GROUP ['sync_99']      <- ONE member
+  changed run2   GROUP ['sync_99', 'sync_1']                              <- correct
+  changed run3   []
+```
+
+The control converges in a single run; only the grouped path needs a second one, and it
+executes on an incomplete set first.
+
+Consequence: a reducing pod with a side effect writes a complete-looking artifact from partial
+input. For the motivating consumer (`common_clock_op`) an intermediate run can produce an
+`alignment.json` built from one of a session's probes. It is replaced on the next run, so a
+driver that runs to convergence never observes it — but a consumer reading between runs gets a
+wrong answer with no signal.
+
+`Batch` behaves identically, so this is pre-existing pipeline semantics surfaced by reduction
+rather than something `GroupBy` introduced. It is more consequential for `GroupBy`, because
+`GroupBy` exists specifically so a pod can reason over a *complete* group, whereas nobody
+derives a result from `Batch` membership.
+
+Not fixable inside the operator: an operator sees whatever its upstream emits and has no way to
+know whether a group is complete. A fix needs a completeness signal at the node level — either
+the upstream emitting its full cached set on every pass, or a reducing node deferring execution
+until its inputs are known settled.
+
+History: first reported as a cache-corruption bug (wrong group recomputing, tag/data
+misalignment), then retracted as a propagation lag "identical with and without `GroupBy`". Both
+framings are wrong. There is no tag/data misalignment and no cache defect — but the control
+above shows the behaviour is *not* identical, because a partial emission is harmless per-row
+and harmful for a reduction.
+
 ---
 
 ## `src/orcapod/core/` — AddResult pod and Pod Groups
@@ -1055,15 +1197,45 @@ The `normalize_extension_columns` utility landed in ITL-432.
 ## `src/orcapod/utils/`
 
 ### U1 — Source-info column type hard-coded to `large_string`
-**Status:** open
+**Status:** resolved (`tag_data.py` half), open (`arrow_utils.py` half)
 **Severity:** critical
 
-In `add_source_info_to_table()` (`arrow_utils.py:604`), when source info is a collection it is
-unconditionally cast to `pa.list_(pa.large_string())`:
+Two sibling call sites assume source-info values are always scalar strings.
+
+**`Data._ensure_source_info_table()` (`core/datagrams/tag_data.py:330`)** builds the Arrow schema
+as `pa.field(k, pa.large_string())` for every key, and `Data.schema()` (line ~384) reports `str`
+for every `_source_*` column. Any operator that produces list-valued source info therefore fails
+inside `job.run()`:
+
+```
+pyarrow.lib.ArrowTypeError: Expected bytes, got a 'list' object
+  core/datagrams/tag_data.py:342  _ensure_source_info_table
+```
+
+Two operators hit this: `MergeJoin`, which carries source columns along as parallel lists when
+merging colliding data columns (`merge_join.py:262`), and `Batch`, which list-wraps every column.
+Both were reproduced against `966d759a`.
+
+**Fix:** landed in NPIPE-204 (`1b570e68`, `1ed22ee4`). `_source_info_arrow_type` and
+`_source_info_python_type` in `core/datagrams/tag_data.py` derive the Arrow and Python types
+from the stored value — `str`/`None` → `large_string`, list → `large_list(<elem>)`
+recursively. The `SourceInfoValue` alias lives in `types.py` next to `TagValue`/`DataValue`,
+which lets `DataProtocol` and `ArrowTableStream` reference it without inverting the
+`protocols/` → `core/` layering. No pipeline-DB schema bump: a node's source-column type is
+fixed by its own output schema, so existing nodes keep `large_string`. Job-level regression
+coverage is in `tests/test_pipeline/test_aggregation_job.py`. See
+`superpowers/specs/2026-08-07-npipe-204-batch-group-by-design.md`.
+
+A third site, `polars_data_utils.add_source_info` (line 119), forces `dtype=pl.String()`. It is
+dead code — nothing in `src/` calls it, and the tests importing `add_source_info` import it from
+`arrow_utils` — and it carries a latent shadowing bug where `source_column` is rebound to a
+`pl.Series` inside the per-column loop. NPIPE-204 deletes it rather than fixing it.
+
+**Still open:** in `add_source_info_to_table()` (`arrow_utils.py:604`), when source info is a
+collection it is unconditionally cast to `pa.list_(pa.large_string())`:
 ```python
 # TODO: this won't work other data types!!!
 ```
-
 Any non-string collection values will fail or silently corrupt data. The logic also has an
 unclear nested isinstance check (line ~602: `# TODO: clean up the logic here`).
 
@@ -1198,7 +1370,7 @@ Open questions:
 
 ---
 
-## `src/orcapod/extension_types/`
+## `src/orcapod/logical_types/`
 
 ### ET1 — `make_polars_extension_type` cannot accept a storage type containing nested extension types
 **Status:** open
@@ -1274,6 +1446,14 @@ resolves to a logical type, pointing to this entry and PLT-1732. Use a direct `T
 (no list wrapper) or wrap the list inside a dataclass field — the outer dataclass extension
 type carries the annotation into the schema, and `reconstruct_from_arrow` re-registers `T`
 transitively on read.
+
+**Operator layer (NPIPE-204):** `Batch` and `GroupBy` previously called
+`pa.list_(field.type)` directly, so they raised `ArrowNotImplementedError: extension` on any
+extension-typed column even after ITL-173 landed `ListLogicalType`. Both now build their
+output through `arrow_utils.build_aggregated_table`, which constructs the list over the
+element's storage type and wraps it in the outer `list[<element>]` extension type. A pod
+annotated `-> Path` groups into `list[orcapod.path]` and the downstream pod receives real
+`Path` objects.
 
 **Planned fix (PLT-1732, target v0.2):** Introduce `ListLogicalType` /
 `ListLogicalTypeFactory` and `StructLogicalType` / `StructLogicalTypeFactory`. A

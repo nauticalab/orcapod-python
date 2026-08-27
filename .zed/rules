@@ -175,7 +175,8 @@ src/orcapod/
       join.py                 — Join (N-ary inner join, commutative)
       merge_join.py           — MergeJoin (binary, colliding cols → sorted list[T])
       semijoin.py             — SemiJoin (binary, non-commutative)
-      batch.py                — Batch (group rows, types become list[T])
+      batch.py                — Batch (group rows by count, types become list[T])
+      group_by.py             — GroupBy (many→one reduction keyed on tag values)
       column_selection.py     — Select/Drop Tag/Data columns
       mappers.py              — MapTags, MapData (rename columns)
       filters.py              — PolarsFilter
@@ -275,7 +276,16 @@ Prefixes are computed from SystemConstant in system_constants.py.
 2. Name-extending — multi-input ops. System tag column name gets
    ::{pipeline_hash}:{canonical_position} appended. Commutative operators sort by
    pipeline_hash and sort system tag values per row.
-3. Type-evolving — aggregation ops. Column type changes from str to list[str].
+3. Reducing — many→one ops (Batch, GroupBy). User tag and data columns become list[T], and
+   source-info columns become list[str] with one element per member. System tag columns must
+   stay scalar, because _build_record_id_preimage (core/nodes/function_node.py) hashes them
+   directly to derive record identity. They fold to a deterministic digest via
+   arrow_utils.fold_system_tag_values and their column name gains ::{pipeline_hash}.
+
+   The fold is SHA-based (uuid5 for record_id, combine_hashes for source_id) and so is stable
+   across processes. Never use hash() or a set-based construction there: the digest becomes a
+   cache key, so a per-process value would look correct in a single-process test and miss the
+   cache on every new driver run.
 
 ### Key patterns
 
@@ -296,4 +306,23 @@ Prefixes are computed from SystemConstant in system_constants.py.
 - DerivedSource before run() → raises ValueError (no computed records).
 - Join requires non-overlapping data columns; raises InputValidationError on collision.
 - MergeJoin requires colliding columns to have identical types; merges into sorted list[T].
-- Operators predict output schema (including system tag names) without computation.
+- Operators predict output schema (including system tag names) without computation. Verify a
+  prediction against unary_static_process(stream).output_schema(...), NOT against process(...)
+  (circular — it delegates back to the pod) and NOT against as_table() (legitimately differs:
+  output_schema ignores columns.source, so _source_*, _content_hash and _context_key appear in
+  the table but never in the schema).
+- GroupBy requires every column in `by` to be a scalar tag column; raises InputValidationError
+  for unknown, data, or list-valued columns (list-valued usually means the stream came from
+  Batch — group before batching, not after). Members sort by non-key tag values with system
+  record_id as tiebreaker; groups emit in key order, so reordered input yields a
+  byte-identical table.
+- Data source-info values may be str, None, or list[...]; Arrow/Python types are derived from
+  the value, with None mapping to large_string. A many→one operator must emit a list for EVERY
+  row of a list-valued column — mixing in a bare None makes per-row as_table() schemas diverge
+  and pa.concat_tables fail on the barrier path.
+- Aggregating operators (Batch, GroupBy) must build list-valued columns via
+  arrow_utils.build_aggregated_table, never pa.list_(field.type). Arrow cannot embed an
+  extension type inside a list value field, so the naive call raises
+  ArrowNotImplementedError on any logical-typed column (e.g. a pod annotated -> Path).
+  The helper builds the list over the element's storage type and wraps it in the outer
+  list[<element>] extension type from ListLogicalType.

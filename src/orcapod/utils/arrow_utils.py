@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import uuid
 from collections import defaultdict
-from collections.abc import Mapping, Collection
+from collections.abc import Mapping, Collection, Sequence
 from typing import Any, TYPE_CHECKING
 
+from orcapod.hashing.hash_utils import combine_hashes
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
@@ -1175,6 +1177,121 @@ def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
         for c in table.column_names
     }
     return table.rename_columns(column_name_map)
+
+
+# Fixed namespace for aggregated record IDs produced by many->one operators.
+# Mirrors _SOURCE_RECORD_ID_NAMESPACE in core/sources/stream_builder.py.
+# Computed value: uuid.UUID('96411bfc-d3ba-5395-ba6f-5bb5726f18ad')
+_AGGREGATED_RECORD_ID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL,
+    "https://orcapod.org/namespaces/aggregated-record-id",
+)
+
+
+def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | bytes:
+    """Fold a group's system-tag values into one scalar of the same type.
+
+    Many->one operators must emit scalar system tags, because
+    ``_build_record_id_preimage`` (``core/nodes/function_node.py``) hashes
+    those columns directly to derive a record's identity.  Each column folds
+    independently over its own ordered member values.
+
+    Both digests are SHA-based and therefore stable across processes.  Never
+    substitute ``hash()`` or a set-based construction: orcapod uses the result
+    as a cache key, so a per-process digest would miss the cache on every new
+    driver run while looking correct in a single-process test.
+
+    Member order is significant -- it matches the order of the list-valued
+    data columns the folded tag accompanies.
+
+    Args:
+        column_name: The system-tag column name, used to select the fold.
+            Names starting with ``constants.SYSTEM_TAG_RECORD_ID_PREFIX`` fold
+            to ``binary(16)``; everything else folds to a hex string.
+        values: The group's member values, in emission order.
+
+    Returns:
+        16 raw bytes for a record_id column, a 64-character hex string
+        otherwise.
+    """
+    if column_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
+        name = constants.BLOCK_SEPARATOR.join(
+            "" if v is None else v.hex() for v in values
+        )
+        return uuid.uuid5(_AGGREGATED_RECORD_ID_NAMESPACE, name).bytes
+    return combine_hashes(
+        *["" if v is None else str(v) for v in values], order=False
+    )
+
+
+def build_aggregated_table(
+    rows: "Sequence[Mapping[str, Any]]",
+    input_schema: "pa.Schema",
+    member_columns: "Collection[str]",
+    type_converter: Any,
+) -> "pa.Table":
+    """Build a many->one operator's output table, list-wrapping member columns.
+
+    Columns named in ``member_columns`` become list-valued, one element per
+    group member; every other column keeps its input field unchanged (that is
+    how scalar group keys and folded system tags pass through).
+
+    Logical element types are preserved. Arrow cannot embed an extension type
+    inside a list value field, so ``pa.list_(extension_type)`` raises
+    ``ArrowNotImplementedError`` (see ``DESIGN_ISSUES`` ET1/ET2). For such a
+    column the list is built over the element's *storage* type and then wrapped
+    in the outer ``list[<element>]`` extension type supplied by
+    ``ListLogicalType``. A pod annotated ``-> Path`` therefore groups into
+    ``list[orcapod.path]`` rather than losing the type or failing.
+
+    Args:
+        rows: One mapping per output row, values already aggregated into lists
+            for every member column.
+        input_schema: Schema of the operator's input table, used to derive
+            element types and to pass non-member fields through unchanged.
+        member_columns: Names of the columns to list-wrap.
+        type_converter: The stream's type converter, used to resolve an
+            extension type's Python element type and the matching outer list
+            extension type.
+
+    Returns:
+        The aggregated ``pa.Table``.
+    """
+    member_columns = set(member_columns)
+    fields: list[pa.Field] = []
+    # Extension columns are built as plain storage lists, then re-wrapped.
+    extension_overrides: dict[str, Any] = {}
+
+    for field in input_schema:
+        if field.name not in member_columns:
+            fields.append(field)
+            continue
+        if isinstance(field.type, pa.ExtensionType):
+            element_python_type = type_converter.arrow_type_to_python_type(field.type)
+            list_type = type_converter.python_type_to_arrow_type(
+                list[element_python_type]
+            )
+            extension_overrides[field.name] = list_type
+            fields.append(
+                pa.field(field.name, list_type.storage_type, nullable=False)
+            )
+        else:
+            fields.append(pa.field(field.name, pa.list_(field.type), nullable=False))
+
+    table = pa.Table.from_pylist(list(rows), schema=pa.schema(fields))
+
+    for name, list_type in extension_overrides.items():
+        index = table.schema.get_field_index(name)
+        storage = table.column(name)
+        wrapped = pa.chunked_array(
+            [pa.ExtensionArray.from_storage(list_type, chunk) for chunk in storage.chunks],
+            type=list_type,
+        )
+        table = table.set_column(
+            index, pa.field(name, list_type, nullable=False), wrapped
+        )
+
+    return table
 
 
 def _parse_system_tag_column(

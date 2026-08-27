@@ -148,6 +148,27 @@ class StreamBase(TraceableBase):
             self, label=label
         )
 
+    def group_by(
+        self,
+        by: Collection[str],
+        label: str | None = None,
+    ) -> StreamBase:
+        """Reduce rows sharing a tag tuple into one packet per group.
+
+        Group-key columns stay scalar tags; every other column becomes
+        list-valued.  See ``orcapod.core.operators.GroupBy``.
+
+        Args:
+            by: Tag column names to group on.
+            label: Optional node label for the pipeline graph.
+
+        Returns:
+            A stream with one row per distinct group-key tuple.
+        """
+        from orcapod.core.operators import GroupBy
+
+        return GroupBy(by=by)(self, label=label)
+
     def polars_filter(
         self,
         *predicates: Any,

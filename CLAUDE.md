@@ -185,7 +185,8 @@ src/orcapod/
 │       ├── join.py             # Join (N-ary inner join, commutative)
 │       ├── merge_join.py       # MergeJoin (binary, colliding cols → sorted list[T])
 │       ├── semijoin.py         # SemiJoin (binary, non-commutative)
-│       ├── batch.py            # Batch (group rows, types become list[T])
+│       ├── batch.py            # Batch (group rows by count, types become list[T])
+│       ├── group_by.py         # GroupBy (many→one reduction keyed on tag values)
 │       ├── column_selection.py # Select/Drop Tag/Data columns
 │       ├── mappers.py          # MapTags, MapData (rename columns)
 │       └── filters.py          # PolarsFilter
@@ -266,6 +267,10 @@ FunctionNode.
 | Synthesizes new values | No | Yes |
 | Stream arity | Configurable | Single in, single out |
 
+`GroupBy` is the only operator that reduces row count many→one: it collapses N rows sharing a
+tag tuple into one row with list-valued members. It still synthesizes no new data values —
+every emitted element came from an input row — and it keys only on tags, never on data.
+
 ### Two identity chains
 
 Every pipeline element has two parallel hashes:
@@ -301,7 +306,17 @@ Prefixes are computed from `SystemConstant` in `system_constants.py`. The `const
 2. **Name-extending** — multi-input ops (join, merge join). Each input's system tag column
    name gets `::{pipeline_hash}:{canonical_position}` appended. Commutative operators
    canonically order inputs by `pipeline_hash` and sort system tag values per row.
-3. **Type-evolving** — aggregation ops (batch). Column type changes from `str` to `list[str]`.
+3. **Reducing** — many→one ops (`Batch`, `GroupBy`). User tag and data columns become
+   `list[T]`, and source-info columns become `list[str]` with one element per member. System
+   tag columns must stay **scalar**, because `_build_record_id_preimage`
+   (`core/nodes/function_node.py`) hashes them directly to derive record identity. They fold
+   to a deterministic digest via `arrow_utils.fold_system_tag_values` and their column name
+   gains `::{pipeline_hash}` — a blend of rules 2 and 3.
+
+   The fold is SHA-based (`uuid5` for `record_id`, `combine_hashes` for `source_id`) and so is
+   stable across processes. Never use `hash()` or a set-based construction there: the digest
+   becomes a cache key, so a per-process value would look correct in a single-process test and
+   miss the cache on every new driver run.
 
 ### Schema types and ColumnConfig
 
@@ -337,4 +352,25 @@ and `as_table()` methods. `all_info=True` sets everything to True.
 - MergeJoin requires colliding data columns to have identical types; merges into sorted
   `list[T]` with source columns reordered to match.
 - Operators predict their output schema (including system tag column names) without
-  performing the actual computation.
+  performing the actual computation. Verify a prediction against
+  `unary_static_process(stream).output_schema(...)`, **not** against `process(...)` (which
+  delegates straight back to the pod, making the check circular) and **not** against
+  `as_table()` (which legitimately differs: `ArrowTableStream.output_schema` ignores
+  `columns.source`, so `_source_*`, `_content_hash`, and `_context_key` appear in the table
+  but never in the schema).
+- `GroupBy` requires every column in `by` to be a scalar tag column; it raises
+  `InputValidationError` for unknown, data, or list-valued columns (the last usually means the
+  stream came from `Batch` — group before batching, not after). Members are sorted by non-key
+  tag values with the system `record_id` as tiebreaker, so the hashed lists are stable across
+  runs. Groups themselves are emitted in key order, so a reordered input yields a
+  byte-identical table.
+- `Data` source-info values may be `str`, `None`, or `list[...]`; the Arrow and Python types
+  are derived from the value, with `None` mapping to `large_string`. A many→one operator must
+  emit a list for **every** row of a list-valued column — mixing a bare `None` into some rows
+  makes per-row `as_table()` schemas diverge and `pa.concat_tables` fail on the barrier path.
+- Aggregating operators (`Batch`, `GroupBy`) must build list-valued columns via
+  `arrow_utils.build_aggregated_table`, never `pa.list_(field.type)`. Arrow cannot embed an
+  extension type inside a list value field, so the naive call raises
+  `ArrowNotImplementedError` on any logical-typed column (e.g. a pod annotated `-> Path`).
+  The helper builds the list over the element's storage type and wraps it in the outer
+  `list[<element>]` extension type from `ListLogicalType`.

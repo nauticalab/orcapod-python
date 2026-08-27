@@ -88,38 +88,3 @@ def append_to_system_tags(df: "pl.DataFrame", value: str) -> "pl.DataFrame":
         if c.startswith(constants.SYSTEM_TAG_PREFIX)
     }
     return df.rename(column_name_map)
-
-
-def add_source_info(
-    df: "pl.DataFrame",
-    source_info: str | Collection[str] | None,
-    exclude_prefixes: Collection[str] = (
-        constants.META_PREFIX,
-        constants.DATAGRAM_PREFIX,
-    ),
-    exclude_columns: Collection[str] = (),
-) -> "pl.DataFrame":
-    """Add source information to an Arrow table."""
-    # Create a new column with the source information
-    if source_info is None or isinstance(source_info, str):
-        source_column = [source_info] * df.height
-    elif isinstance(source_info, Collection):
-        if len(source_info) != df.height:
-            raise ValueError(
-                "Length of source_info collection must match number of rows in the table."
-            )
-        source_column = source_info
-
-    # identify columns for which source columns should be created
-
-    for col in df.columns:
-        if col.startswith(tuple(exclude_prefixes)) or col in exclude_columns:
-            continue
-        source_column = pl.Series(
-            f"{constants.SOURCE_PREFIX}{col}",
-            [f"{source_val}::{col}" for source_val in source_column],
-            dtype=pl.String(),
-        )
-        df = df.with_columns(source_column)
-
-    return df
