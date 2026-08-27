@@ -11,7 +11,7 @@ from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, Schema, SourceInfoValue
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -41,7 +41,7 @@ class ArrowTableStream(StreamBase):
         table: "pa.Table",
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        source_info: dict[str, str | None] | None = None,
+        source_info: dict[str, SourceInfoValue] | None = None,
         producer: PodProtocol | None = None,
         upstreams: tuple[StreamProtocol, ...] = (),
         **kwargs,

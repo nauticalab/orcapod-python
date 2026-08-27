@@ -174,14 +174,34 @@ class TestNameExtending:
 
 
 # ===================================================================
-# Type-evolving (aggregation ops)
+# Reducing (many->one aggregation ops)
 # ===================================================================
 
 
-class TestTypeEvolving:
-    """Per design: batch operation changes system tag type from str to list[str]."""
+class TestReducing:
+    """Per design: a many->one op list-wraps user columns but NOT system tags.
 
-    def test_batch_evolves_system_tag_type(self):
+    System tag columns must stay scalar, because ``_build_record_id_preimage``
+    hashes them directly to derive record identity. They fold to a
+    deterministic digest and their column name gains ``::{pipeline_hash}``.
+    """
+
+    def test_batch_list_wraps_user_columns(self):
+        source = _make_source(
+            {"group": pa.array(["a", "a", "b"], type=pa.large_string())},
+            {"value": pa.array([1, 2, 3], type=pa.int64())},
+            ["group"],
+        )
+        result_table = Batch().process(source).as_table(all_info=True)
+
+        for col_name in ("group", "value"):
+            col_type = result_table.schema.field(col_name).type
+            assert pa.types.is_list(col_type) or pa.types.is_large_list(col_type), (
+                f"Expected list type for user column {col_name} after batch, "
+                f"got {col_type}"
+            )
+
+    def test_batch_keeps_system_tags_scalar(self):
         source = _make_source(
             {"group": pa.array(["a", "a", "b"], type=pa.large_string())},
             {"value": pa.array([1, 2, 3], type=pa.int64())},
@@ -198,12 +218,18 @@ class TestTypeEvolving:
         # System tag columns should exist in output
         assert len(result_tag_cols) == len(source_tag_cols)
 
-        # The type should have evolved to list
+        # They must stay scalar -- record identity hashes them directly.
         for col_name in result_tag_cols:
             col_type = result_table.schema.field(col_name).type
-            assert pa.types.is_list(col_type) or pa.types.is_large_list(
+            assert not pa.types.is_list(col_type) and not pa.types.is_large_list(
                 col_type
-            ), f"Expected list type for {col_name} after batch, got {col_type}"
+            ), f"Expected scalar type for {col_name} after batch, got {col_type}"
+
+        # ...and their names gain a ::{pipeline_hash} block.
+        for src_col, out_col in zip(sorted(source_tag_cols), sorted(result_tag_cols)):
+            assert out_col.count("::") > src_col.count("::"), (
+                f"Expected name-extension on {out_col}"
+            )
 
 
 # ===================================================================
@@ -234,7 +260,7 @@ class TestFullProvenanceChain:
         filt = PolarsFilter(constraints={"group": "x"})
         filtered = filt.process(joined)
 
-        # Step 3: Batch (type-evolving)
+        # Step 3: Batch (reducing)
         batch = Batch()
         batched = batch.process(filtered)
 
@@ -244,7 +270,16 @@ class TestFullProvenanceChain:
         # After all three stages, system tags should exist
         assert len(tag_cols) > 0
 
-        # After batch, types should be lists
+        # After batch, system tags stay scalar (record identity hashes them),
+        # while the user columns are the ones that become lists.
         for col_name in tag_cols:
             col_type = table.schema.field(col_name).type
-            assert pa.types.is_list(col_type) or pa.types.is_large_list(col_type)
+            assert not pa.types.is_list(col_type) and not pa.types.is_large_list(
+                col_type
+            ), f"Expected scalar system tag {col_name}, got {col_type}"
+
+        for col_name in ("group", "a", "b"):
+            col_type = table.schema.field(col_name).type
+            assert pa.types.is_list(col_type) or pa.types.is_large_list(col_type), (
+                f"Expected list type for user column {col_name}, got {col_type}"
+            )

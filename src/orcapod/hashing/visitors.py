@@ -198,21 +198,101 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         extension_type: "pa.ExtensionType",
         storage_value: Any,
     ) -> tuple["pa.DataType", Any]:
-        """Hash an extension type value to pa.large_binary(), or passthrough."""
+        """Hash an extension type value to ``pa.large_binary()``, or passthrough.
+
+        For list-backed extension types (e.g. ``extension<list[orcapod.file]>``),
+        delegates to ``_visit_list_elements`` with a virtual
+        ``large_list(elem_ext_type)`` so that each element is hashed identically
+        to the scalar ``visit_extension`` path. This covers ``list[T]``,
+        ``set[T]``, and arbitrary nesting depth via recursion.
+
+        Three passthrough cases (extension type and storage value returned unchanged):
+        - ``storage_value`` is ``None``.
+        - The Python type could not be resolved (``typing.Any`` or not a plain ``type``).
+        - The element type has no registered semantic handler and is not a nested list/set.
+
+        Args:
+            extension_type: The Arrow extension type to process.
+            storage_value: The storage-level value (result of ``to_pylist()`` on the column).
+
+        Returns:
+            Tuple of ``(new_arrow_type, new_data)``. For hashable scalar types returns
+            ``(pa.large_binary(), hash_bytes)``. For list/set-backed types returns
+            ``(pa.large_list(...), [hash_bytes, ...])``. Passthroughs return the
+            original ``(extension_type, storage_value)``.
+        """
         if storage_value is None:
             return extension_type, None
 
         # Resolve extension type → Python type.
         python_type = self._type_converter.arrow_type_to_python_type(extension_type)
 
+        # Detect list-backed extension types: extension<list[orcapod.file]>,
+        # extension<set[orcapod.file]>, etc.  list[File] is a types.GenericAlias
+        # (not isinstance(..., type)), so the guard below would incorrectly skip it.
+        # We intercept here and hash each element, folding the outer extension name
+        # into the result (mirrors the scalar path) to prevent list[T]/set[T] collisions.
+        if (
+            typing.get_origin(python_type) in (list, set)
+            and pa.types.is_large_list(extension_type.storage_type)
+        ):
+            args = typing.get_args(python_type)
+            # Defensive guard: a well-formed list[T]/set[T] always has args, but if
+            # not, fall through to the isinstance(python_type, type) passthrough below.
+            if args:
+                elem_python_type = args[0]
+
+                # Type-driven hashability: unwrap list/set nesting to the innermost
+                # non-container type and check whether it has a semantic handler.
+                # Decision is made once per column (not per row) so empty and null
+                # inner lists are handled correctly without crashing.
+                inner = elem_python_type
+                while typing.get_origin(inner) in (list, set):
+                    inner_args = typing.get_args(inner)
+                    if not inner_args:
+                        break
+                    inner = inner_args[0]
+                hashable = (
+                    isinstance(inner, type)
+                    and self._python_hasher.type_handler_registry.has_handler(inner)
+                )
+                if not hashable:
+                    # Innermost element type has no semantic handler — whole-column
+                    # passthrough, identical to main-branch behaviour.
+                    return extension_type, storage_value
+
+                # Hashable: delegate element-level hashing to _visit_list_elements.
+                # Using the converter's element arrow type (which may itself be an
+                # extension<list[...]>) ensures each element recurses back into
+                # visit_extension, producing large_binary() per element.
+                # We discard the returned list type (it may hold an extension type
+                # when data is empty) and derive the output type from the outer name.
+                elem_arrow_type = self._type_converter.python_type_to_arrow_type(
+                    elem_python_type
+                )
+                virtual_list_type = pa.large_list(elem_arrow_type)
+                _, list_data = self._visit_list_elements(virtual_list_type, storage_value)
+
+                # Fold the outer extension name into the result, the same way the
+                # scalar path does.  This ensures list[T] and set[T] with identical
+                # contents produce distinct hashes.
+                type_name = extension_type.extension_name.replace(".", ":")
+                combined = (
+                    type_name.encode("utf-8")
+                    + b"::"
+                    + b"\x00".join(
+                        elem if isinstance(elem, bytes) else b""
+                        for elem in (list_data or [])
+                    )
+                )
+                return pa.large_binary(), combined
+
         # If the converter couldn't resolve to a concrete class, passthrough.
         if python_type is typing.Any or not isinstance(python_type, type):
             return extension_type, storage_value
 
         # Only hash if a semantic hasher is registered for this Python type.
-        if not self._python_hasher.type_handler_registry.has_handler(
-            python_type
-        ):
+        if not self._python_hasher.type_handler_registry.has_handler(python_type):
             return extension_type, storage_value
 
         # Convert storage value → Python object and hash it.

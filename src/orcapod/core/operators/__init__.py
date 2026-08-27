@@ -6,6 +6,7 @@ from .column_selection import (
     SelectTagColumns,
 )
 from .filters import PolarsFilter
+from .group_by import GroupBy
 from .index import Index
 from .join import Join
 from .mappers import MapData, MapTags
@@ -20,6 +21,7 @@ __all__ = [
     "MapTags",
     "MapData",
     "Batch",
+    "GroupBy",
     "SelectTagColumns",
     "SelectDataColumns",
     "DropTagColumns",

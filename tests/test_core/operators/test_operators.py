@@ -433,6 +433,48 @@ class TestBatchBehavior:
         with pytest.raises(ValueError, match="non-negative"):
             Batch(batch_size=-1)
 
+    def test_batch_system_tags_are_scalar(self):
+        """System tags must stay scalar -- record identity hashes them directly."""
+        from orcapod.core.sources import ArrowTableSource
+        from orcapod.system_constants import constants
+
+        table = pa.table(
+            {
+                "animal": ["cat", "dog"],
+                "weight": [4.0, 12.0],
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["animal"], infer_nullable=True)
+        out = Batch(batch_size=0).process(source)
+        result = out.as_table(columns={"source": True, "system_tags": True})
+
+        sys_cols = [
+            c for c in result.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        ]
+        assert sys_cols, "expected system tag columns on the batched output"
+        for col in sys_cols:
+            assert not pa.types.is_list(result.schema.field(col).type)
+            assert not pa.types.is_large_list(result.schema.field(col).type)
+
+    def test_batch_source_columns_are_lists(self):
+        """Provenance stays per-member rather than collapsing."""
+        from orcapod.core.sources import ArrowTableSource
+        from orcapod.system_constants import constants
+
+        table = pa.table(
+            {
+                "animal": ["cat", "dog"],
+                "weight": [4.0, 12.0],
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["animal"], infer_nullable=True)
+        out = Batch(batch_size=0).process(source)
+        result = out.as_table(columns={"source": True, "system_tags": True})
+
+        src_col = f"{constants.SOURCE_PREFIX}weight"
+        assert src_col in result.column_names
+        assert len(result.column(src_col).to_pylist()[0]) == 2
+
 
 class TestJoinBehavior:
     def test_join_combines_streams_on_shared_tags(self, simple_stream, disjoint_stream):
@@ -463,6 +505,60 @@ class TestJoinBehavior:
         op = Join()
         sym = op.argument_symmetry([simple_stream, disjoint_stream])
         assert isinstance(sym, frozenset)
+
+
+class TestJoinWithListExtensionColumn:
+    """Regression tests for ITL-627 Defect 1: Join Polars round-trip with list extension columns."""
+
+    def test_join_preserves_list_extension_column(self):
+        """Join must not raise and must preserve extension<list[orcapod.path]>.
+
+        Before Fix 1, df.to_arrow() inside static_process called _deserialize
+        with b'' (no metadata), raising ValueError.
+        """
+        import pyarrow as pa
+        from pathlib import Path
+        from orcapod.contexts import get_default_context
+
+        # Use the shared type-converter cache so both Arrow and Polars always see
+        # the same extension class object, avoiding ArrowTypeError on table.cast().
+        ctx = get_default_context()
+        ctx.type_converter.register_python_class(list[Path])
+        ext_type = ctx.type_converter.python_type_to_arrow_type(list[Path])
+
+        storage = pa.array(
+            [["/a.txt", "/b.txt"], ["/c.txt"]],
+            type=pa.large_list(pa.large_string()),
+        )
+        ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
+        left_table = pa.table({
+            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+            "paths": ext_array,
+        })
+        left_stream = ArrowTableStream(left_table, tag_columns=["animal"])
+
+        right_table = pa.table({
+            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+            "speed": pa.array([30.0, 45.0], type=pa.float64()),
+        })
+        right_stream = ArrowTableStream(right_table, tag_columns=["animal"])
+
+        op = Join()
+        result = op.static_process(left_stream, right_stream)  # must not raise
+        out_table = result.as_table()
+
+        paths_type = out_table.schema.field("paths").type
+        assert isinstance(paths_type, pa.ExtensionType), (
+            f"'paths' column must remain an extension type, got {paths_type}"
+        )
+        assert paths_type.extension_name == "list[orcapod.path]"
+
+        # Data integrity: 2 rows (inner join on "cat" and "dog")
+        assert len(out_table) == 2
+        # Values are preserved
+        paths_values = out_table.column("paths").to_pylist()
+        assert len(paths_values) == 2
+        assert all(len(row) >= 1 for row in paths_values)  # each row has at least one path
 
 
 class TestJoinMetaColumnCollision:

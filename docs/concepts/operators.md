@@ -1,10 +1,10 @@
 # Operators
 
 Operators are structural transforms that reshape [streams](streams.md) without inspecting or
-synthesizing data values. They join, filter, batch, rename, and select columns -- operations
-that affect the *structure* of the data (which rows exist, which columns are present, how
-columns are named) but never compute new values from data content. This is the key
-distinction from [function pods](function-pods.md), which do the opposite: they transform
+synthesizing data values. They join, filter, batch, group, rename, and select columns --
+operations that affect the *structure* of the data (which rows exist, which columns are
+present, how columns are named) but never compute new values from data content. This is the
+key distinction from [function pods](function-pods.md), which do the opposite: they transform
 data values but never touch tags or stream structure.
 
 ## The operator / function pod boundary
@@ -23,12 +23,17 @@ This boundary ensures that structural operations (joins, filters) and value comp
 (transformations, model inference) are cleanly separated, making pipelines easier to reason
 about and optimize.
 
+`GroupBy` is the one operator that reduces row count many-to-one: it collapses N rows sharing
+a tag tuple into a single row with list-valued members. It stays on the operator side of the
+boundary because it synthesizes no new data values -- every element of every emitted list came
+from an input row -- and it keys only on tags, never on data content.
+
 ## Operator categories
 
 ### `UnaryOperator` -- single input
 
-Takes one stream, produces one stream. Used for filtering, column selection, renaming, and
-batching.
+Takes one stream, produces one stream. Used for filtering, column selection, renaming,
+batching, and grouping.
 
 ### `BinaryOperator` -- two inputs
 
@@ -117,6 +122,56 @@ Pass `batch_size=N` to create fixed-size batches instead of grouping everything:
 
 ```python
 batch = Batch(batch_size=10, drop_partial_batch=False)
+```
+
+### GroupBy
+
+Collapses every set of rows that share a tag tuple into a single row -- the one many-to-one
+operator. Where `Batch` partitions by row count, `GroupBy` partitions by tag *value*, which is
+what lets a downstream function pod receive a complete logical unit (all of a recording
+session's probes, say) in one call.
+
+```python
+from orcapod.sources import DictSource
+from orcapod.operators import GroupBy
+
+source = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "probe": "imec0", "spike_count": 1200},
+        {"subject_id": "mouse_01", "probe": "imec1", "spike_count": 980},
+        {"subject_id": "mouse_02", "probe": "imec0", "spike_count": 1450},
+    ],
+    tag_columns=["subject_id", "probe"],
+)
+
+grouped = GroupBy(by=["subject_id"]).process(source)
+for tag, data in grouped.iter_data():
+    print("Tags:", tag.as_dict(), "Data:", data.as_dict())
+    # Tags: {'subject_id': 'mouse_01'} Data: {'probe': ['imec0', 'imec1'], 'spike_count': [1200, 980]}
+    # Tags: {'subject_id': 'mouse_02'} Data: {'probe': ['imec0'], 'spike_count': [1450]}
+```
+
+The output schema follows three rules:
+
+- **Group keys stay scalar** and remain the output's tag columns (`subject_id: str`).
+- **Non-key tag columns are promoted to list-valued data columns** (`probe: list[str]`), so a
+  consumer can tell which member each list element came from.
+- **Data columns become `list[T]`** (`spike_count: list[int]`).
+
+Ordering is deterministic by construction, because orcapod hashes the emitted lists to build
+cache keys: members are sorted by their non-key tag values (with the internal record id as a
+final tiebreaker), and groups are emitted in group-key order. A reordered input therefore
+produces a byte-identical output table.
+
+Every name in `by` must be a **scalar tag column** of the input. `GroupBy` raises
+`InputValidationError` for an unknown column, a data column, or a list-valued tag column --
+the last usually means the stream came from `Batch`, so group *before* batching rather than
+after.
+
+Streams also expose this as a fluent method:
+
+```python
+grouped = source.group_by(["subject_id"])
 ```
 
 ### Column selection

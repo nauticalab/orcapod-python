@@ -47,6 +47,11 @@ TagValue: TypeAlias = int | str | date | datetime | None | Collection["TagValue"
 arbitrarily nested collection thereof. Tags are used to label and organise
 data and datagrams."""
 
+SourceInfoValue: TypeAlias = str | None | list["SourceInfoValue"]
+"""A per-column provenance token: a string, ``None`` when the provenance is
+unknown, or -- for many-to-one operators such as ``GroupBy`` and
+``MergeJoin`` -- a list of tokens, one per aggregated member."""
+
 PathSet: TypeAlias = PathLike | Collection[PathLike | None]
 """A single path or an arbitrarily nested collection of paths (with optional
 ``None`` entries). Used when operations need to address multiple files at
