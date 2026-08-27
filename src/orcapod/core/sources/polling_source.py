@@ -258,6 +258,7 @@ class PollingSource(RootSource, Generic[T]):
         self._cursor: Cursor[T] | None = None
         self._batches: list[ArrowTableStream] = []
         self._state_lock: threading.Lock = threading.Lock()
+        self._canonical_arrow_schema: pa.Schema | None = None
         # Derive source_id from impl identity if not explicitly provided
         if self._source_id is None:
             self._source_id = str(self._impl.identity())
@@ -628,7 +629,33 @@ class PollingSource(RootSource, Generic[T]):
         df = polars_data_utils.drop_system_columns(df)
 
         arrow_table = df.to_arrow()
-        arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+
+        # Establish canonical schema on first call; apply it on every call.
+        if self._canonical_arrow_schema is None:
+            if self._tag_schema is not None and self._data_schema is not None:
+                # Declared-schema path: derive Arrow schema from declared Python types.
+                # T | None → nullable=True; plain T → nullable=False. No inference.
+                combined = {**dict(self._tag_schema), **dict(self._data_schema)}
+                self._canonical_arrow_schema = (
+                    self.data_context.type_converter.python_schema_to_arrow_schema(combined)
+                )
+            else:
+                # Infer-once path: first batch establishes canonical nullability.
+                logger.warning(
+                    "PollingSource %r: no schema declared via impl.schema(); "
+                    "inferring nullability from first batch. Implement impl.schema() "
+                    "to avoid schema drift on zero-row polls or null-free batches.",
+                    self._source_id,
+                )
+                self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(arrow_table)
+
+        # Apply canonical nullability by column name (order-safe).
+        canonical_nullable = {f.name: f.nullable for f in self._canonical_arrow_schema}
+        target_schema = pa.schema([
+            pa.field(f.name, f.type, nullable=canonical_nullable.get(f.name, f.nullable))
+            for f in arrow_table.schema
+        ])
+        arrow_table = arrow_table.cast(target_schema)
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
