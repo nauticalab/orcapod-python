@@ -1308,13 +1308,6 @@ class TestPollingSourceZeroRowBatch:
             def identity(self):
                 return ("EmitOnceThenEmpty",)
 
-            def to_config(self):
-                return None
-
-            @classmethod
-            def from_config(cls, config):
-                raise NotImplementedError
-
             def schema(self):
                 return None  # no declared schema — exercises the infer-once path
 
@@ -1408,13 +1401,6 @@ class TestPollingSourceZeroRowBatch:
 
             def identity(self):
                 return ("DeclaredNullableImpl",)
-
-            def to_config(self):
-                return None
-
-            @classmethod
-            def from_config(cls, config):
-                raise NotImplementedError
 
             def schema(self):
                 # note is declared nullable via str | None
