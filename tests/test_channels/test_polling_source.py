@@ -1270,3 +1270,223 @@ class TestPollingSourceSyncAccessDuringAsyncRun:
         # they should use _batches[0] bypass once the first batch exists.
         # Exactly 3 fetches: one per batch, all by the async loop.
         assert len(fake.fetch_cursors) == 3
+
+
+# ===========================================================================
+# Zero-row batch regression (ENG-952)
+# ===========================================================================
+
+
+class TestPollingSourceZeroRowBatch:
+    """Regression tests for ENG-952.
+
+    PollingSource must not crash when a poll returns a zero-row batch after
+    a batch that contained a null value in some column.  The root cause was
+    per-batch nullability re-inference: a zero-row table has null_count == 0
+    for every column, so every field was inferred non-nullable, conflicting
+    with the accumulated stream's nullable schema.
+
+    The fix establishes a canonical Arrow schema once (from impl.schema() when
+    declared, or from the first batch otherwise) and casts every subsequent
+    batch to it by column name.
+    """
+
+    # ------------------------------------------------------------------
+    # Shared impl used by tests 1 and 2 (infer-once path, no declared schema)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_emit_once_then_empty_impl():
+        """Return a DynamicSourceProtocol impl that emits one nullable row then empty frames."""
+
+        class EmitOnceThenEmpty:
+            """Emits one row with a null 'note' on fetch 1, then zero-row frames."""
+
+            def __init__(self):
+                self.n = 0
+
+            def identity(self):
+                return ("EmitOnceThenEmpty",)
+
+            def to_config(self):
+                return None
+
+            @classmethod
+            def from_config(cls, config):
+                raise NotImplementedError
+
+            def schema(self):
+                return None  # no declared schema — exercises the infer-once path
+
+            async def poll(self, cursor=None):
+                return True  # always claims new data
+
+            async def fetch(self, cursor=None):
+                self.n += 1
+                if self.n == 1:
+                    # First fetch: one row, nullable 'note' column contains None.
+                    data = {
+                        "id": pa.array([1], type=pa.int64()),
+                        "val": pa.array([1.0], type=pa.float64()),
+                        "note": pa.array([None], type=pa.large_utf8()),
+                    }
+                else:
+                    # Subsequent fetches: zero-row frame, same columns.
+                    data = {
+                        "id": pa.array([], type=pa.int64()),
+                        "val": pa.array([], type=pa.float64()),
+                        "note": pa.array([], type=pa.large_utf8()),
+                    }
+                return Cursor.now(self.n), data
+
+            async def close(self):
+                return None
+
+        return EmitOnceThenEmpty()
+
+    # ------------------------------------------------------------------
+    # Test 1: core regression — source must not crash
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_zero_row_batch_after_nullable_column_streams_cleanly(self):
+        """Zero-row poll after a nullable column must not raise SchemaInconsistencyError.
+
+        This is the exact scenario from ENG-952: fetch 1 returns a row with a
+        null in 'note' (inferred nullable=True); fetches 2+ return zero-row frames
+        (would be inferred nullable=False without the fix).  The source must stream
+        the single real row and then terminate cleanly after the duration expires.
+        """
+        src = PollingSource(
+            self._make_emit_once_then_empty_impl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        rows = []
+        async for tag, data in src.async_iter_data():
+            rows.append((tag, data))
+
+        assert len(rows) == 1
+
+    # ------------------------------------------------------------------
+    # Test 2: zero-row batches must not accumulate
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_zero_row_batch_is_not_accumulated(self):
+        """After zero-row polls, the internal accumulated stream must hold only the real rows."""
+        src = PollingSource(
+            self._make_emit_once_then_empty_impl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        async for _ in src.async_iter_data():
+            pass
+
+        assert len(src._batches) == 1, "_batches must contain exactly one batch after iteration"
+        cached = list(src._batches[0].iter_data())
+        assert len(cached) == 1
+
+    # ------------------------------------------------------------------
+    # Test 3: declared-schema path — zero-row polls, no warning
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_declared_schema_zero_row_batch_no_warning(self, caplog):
+        """Declared-schema path: zero-row polls stream cleanly and emit no WARNING.
+
+        When impl.schema() returns a Schema, nullability is derived from the
+        Python type annotations (str | None → nullable=True) without inference.
+        No warning must be logged even when the first batch carries a null.
+        """
+
+        class DeclaredNullableImpl:
+            def __init__(self):
+                self.n = 0
+
+            def identity(self):
+                return ("DeclaredNullableImpl",)
+
+            def to_config(self):
+                return None
+
+            @classmethod
+            def from_config(cls, config):
+                raise NotImplementedError
+
+            def schema(self):
+                # note is declared nullable via str | None
+                return Schema({"id": int, "val": float, "note": str | None})
+
+            async def poll(self, cursor=None):
+                return True
+
+            async def fetch(self, cursor=None):
+                self.n += 1
+                if self.n == 1:
+                    data = {
+                        "id": pa.array([1], type=pa.int64()),
+                        "val": pa.array([1.0], type=pa.float64()),
+                        "note": pa.array([None], type=pa.large_utf8()),
+                    }
+                else:
+                    data = {
+                        "id": pa.array([], type=pa.int64()),
+                        "val": pa.array([], type=pa.float64()),
+                        "note": pa.array([], type=pa.large_utf8()),
+                    }
+                return Cursor.now(self.n), data
+
+            async def close(self):
+                return None
+
+        src = PollingSource(
+            DeclaredNullableImpl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="orcapod.core.sources.polling_source"):
+            rows = []
+            async for tag, data in src.async_iter_data():
+                rows.append((tag, data))
+
+        assert len(rows) == 1
+        inference_warnings = [
+            r for r in caplog.records if "inferring nullability" in r.message
+        ]
+        assert len(inference_warnings) == 0, (
+            "Declared-schema path must not emit an inference warning"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 4: infer-once path emits exactly one WARNING
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_infer_once_emits_exactly_one_warning(self, caplog):
+        """When impl.schema() returns None, exactly one WARNING is logged for schema inference.
+
+        The warning must be emitted on the first batch only — not on every subsequent
+        poll — because _canonical_arrow_schema is set after the first call.
+        """
+        # Two batches so _build_stream_from_df is called twice; warning fires only once.
+        fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="orcapod.core.sources.polling_source"):
+            async for _ in src.async_iter_data():
+                pass
+
+        inference_warnings = [
+            r for r in caplog.records if "inferring nullability" in r.message
+        ]
+        assert len(inference_warnings) == 1, (
+            f"Expected exactly one inference warning, got {len(inference_warnings)}"
+        )
