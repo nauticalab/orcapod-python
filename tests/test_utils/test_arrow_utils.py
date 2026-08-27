@@ -867,8 +867,10 @@ class TestFoldSystemTagValues:
         such a fold is self-consistent within one process and only diverges
         on a new driver run.
         """
+        import os
         import subprocess
         import sys
+        from pathlib import Path
 
         script = (
             "from orcapod.utils.arrow_utils import fold_system_tag_values\n"
@@ -877,11 +879,20 @@ class TestFoldSystemTagValues:
             "print(fold_system_tag_values('_tag_record_id::abc123', rids).hex())\n"
             "print(fold_system_tag_values('_tag_source_id::abc123', ['src_a','src_b']))\n"
         )
+        # The subprocess does not inherit pytest.ini's `pythonpath = src`, so
+        # pass it explicitly rather than relying on orcapod being installed in
+        # the active environment.
+        src_dir = Path(__file__).resolve().parents[2] / "src"
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(src_dir), env["PYTHONPATH"]] if env.get("PYTHONPATH") else [str(src_dir)]
+        )
         out = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
             text=True,
             check=True,
+            env=env,
         ).stdout.split()
         assert out[0] == self.EXPECTED_RID.hex()
         assert out[1] == self.EXPECTED_SID

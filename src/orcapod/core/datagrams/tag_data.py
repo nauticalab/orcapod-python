@@ -245,6 +245,12 @@ class Tag(Datagram):
 # ---------------------------------------------------------------------------
 
 
+# TODO(NPIPE-204): these two helpers only understand scalars and ``list[T]``.
+# Structured source-info values (a struct/dataclass token, or a mapping) will need
+# their own branches, and the recursion should dispatch on a logical type rather
+# than on ``isinstance(value, list)``. Deriving the type from the first element is
+# also a shortcut: it is correct for the homogeneous lists many->one operators
+# produce, but not in general. Raised in review on PR #250.
 def _source_info_arrow_type(value: "SourceInfoValue") -> "pa.DataType":
     """Derive the Arrow type for a single source-info value.
 
@@ -270,7 +276,8 @@ def _source_info_arrow_type(value: "SourceInfoValue") -> "pa.DataType":
 def _source_info_python_type(value: "SourceInfoValue") -> DataType:
     """Derive the Python type for a single source-info value.
 
-    Mirrors ``_source_info_arrow_type`` for the ``Schema`` representation.
+    Mirrors ``_source_info_arrow_type`` for the ``Schema`` representation, and
+    shares its list-only limitation -- see the TODO above that function.
 
     Args:
         value: The stored provenance token.

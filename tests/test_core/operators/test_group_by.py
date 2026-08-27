@@ -80,6 +80,21 @@ class TestGroupByShape:
 
 
 class TestGroupByOrdering:
+    """Member and group ordering.
+
+    Determinism here is load-bearing rather than cosmetic: orcapod hashes the
+    emitted lists to build the memoization key, so an unstable order makes an
+    unchanged member set hash differently and triggers a spurious recompute.
+    Upstream emission order is not stable across runs (Ray executor scheduling,
+    DB fetch order), so the operator cannot inherit it.
+
+    TODO(NPIPE-204): *that* ordering must be deterministic is a requirement;
+    *which* order to use, and whether to promise one publicly, is an open design
+    question -- as is empty-group handling (see ``TestGroupByEmptyInput``).
+    Deferred to a follow-up per review on PR #250. These tests pin current
+    behaviour so a change is deliberate, not accidental.
+    """
+
     def test_members_sorted_by_non_key_tags(self, session_source):
         """probe=[1,0] on input must emit as [0,1]."""
         out = GroupBy(by=["subject", "date"]).process(session_source)
@@ -188,6 +203,15 @@ class TestGroupByValidation:
 
 
 class TestGroupByEmptyInput:
+    """Empty-input behaviour.
+
+    TODO(NPIPE-204): current behaviour is "zero rows in, zero groups out", which
+    is the least surprising default but was never designed. Whether a reduction
+    should instead emit nothing, emit an empty group, or error is deferred to the
+    same follow-up as ordering (see ``TestGroupByOrdering``), per review on
+    PR #250. This test pins the status quo.
+    """
+
     def test_empty_input_yields_zero_groups(self):
         table = pa.table({
             "subject": pa.array([], pa.large_string()),
