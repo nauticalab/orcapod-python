@@ -88,12 +88,14 @@ class TestGroupByOrdering:
     Upstream emission order is not stable across runs (Ray executor scheduling,
     DB fetch order), so the operator cannot inherit it.
 
-    TODO(NPIPE-204): *that* ordering must be deterministic is a requirement;
-    *which* order to use, and whether to promise one publicly, is an open design
-    question -- as is empty-group handling (see ``TestGroupByEmptyInput``).
-    Deferred to a follow-up per review on PR #250. These tests pin current
-    behaviour so a change is deliberate, not accidental.
+    *That* ordering must be deterministic is a requirement; *which* order to
+    use, and whether to promise one publicly, is an open design question -- as
+    is empty-group handling (see ``TestGroupByEmptyInput``). These tests pin
+    current behaviour so a change is deliberate, not accidental.
     """
+
+    # TODO(ITL-630): decide whether GroupBy guarantees an ordering or only
+    # determinism, and which sort key. Deferred per review on PR #250.
 
     def test_members_sorted_by_non_key_tags(self, session_source):
         """probe=[1,0] on input must emit as [0,1]."""
@@ -205,12 +207,14 @@ class TestGroupByValidation:
 class TestGroupByEmptyInput:
     """Empty-input behaviour.
 
-    TODO(NPIPE-204): current behaviour is "zero rows in, zero groups out", which
-    is the least surprising default but was never designed. Whether a reduction
-    should instead emit nothing, emit an empty group, or error is deferred to the
-    same follow-up as ordering (see ``TestGroupByOrdering``), per review on
-    PR #250. This test pins the status quo.
+    Current behaviour is "zero rows in, zero groups out" -- the least
+    surprising default, but never designed. Whether a reduction should instead
+    emit nothing, emit an empty group, or raise is open. This test pins the
+    status quo.
     """
+
+    # TODO(ITL-630): decide empty-input behaviour for reductions. Deferred per
+    # review on PR #250, same follow-up as ordering.
 
     def test_empty_input_yields_zero_groups(self):
         table = pa.table({
