@@ -628,7 +628,7 @@ class TestPollingSourceAsyncMode:
 
     @pytest.mark.asyncio
     async def test_duration_limit_terminates_source(self):
-        """Source stops naturally after config.duration seconds."""
+        """Source stops naturally after config.duration seconds; emits zero rows when no batches."""
         fake = FakeDynamicSource(batches=[], poll_always_false=True)
         src = PollingSource(
             fake,
@@ -641,6 +641,7 @@ class TestPollingSourceAsyncMode:
             items.append((tag, data))
 
         assert fake.close_called
+        assert len(items) == 0  # poll_always_false → nothing committed
 
     @pytest.mark.asyncio
     async def test_indefinite_mode_runs_until_cancelled(self):
@@ -687,6 +688,27 @@ class TestPollingSourceAsyncMode:
         assert fake.fetch_cursors[0] is None
         assert fake.fetch_cursors[1] is not None
         assert fake.fetch_cursors[1].value == 1
+
+    @pytest.mark.asyncio
+    async def test_last_batch_yielded_before_duration_exit(self):
+        """A batch committed in the same iteration that hits the duration limit must be yielded.
+
+        Regression test for the bug where ``return`` (now ``break``) skipped the
+        drain step, losing any batch committed in the final iteration.  The repro
+        uses ``fetch_delay > duration`` so the single fetch outlives the duration
+        budget: commit and duration-check land in the same iteration, and without
+        the final drain the generator exits with ``len(rows) == 0`` while
+        ``len(src._batches) == 1``.
+        """
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], fetch_delay=0.05)
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.01, max_missed_intervals=1000),
+        )
+
+        rows = [item async for item in src.async_iter_data()]
+        assert len(rows) == 1   # must not be 0
 
 
 # ===========================================================================
@@ -807,8 +829,11 @@ class TestPollingSourceErrorHandling:
         async for tag, data in src.async_iter_data():
             items.append((tag, data))
 
-        # Terminated due to overrun; close() must have been called
+        # Terminated due to overrun; close() must have been called.
+        # At least the first committed batch must be yielded — rows committed
+        # in the final iteration before the overrun break must not be lost.
         assert fake.close_called
+        assert len(items) > 0
 
     @pytest.mark.asyncio
     async def test_schema_mismatch_raises_on_column_change(self):

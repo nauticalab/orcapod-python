@@ -874,7 +874,7 @@ class PollingSource(RootSource, Generic[T]):
                             self._source_id,
                             cfg.max_consecutive_errors,
                         )
-                        return
+                        break
                     await asyncio.sleep(backoff)
                     continue  # retry — do not advance next_tick
 
@@ -897,7 +897,7 @@ class PollingSource(RootSource, Generic[T]):
                             "Terminating source.",
                             self._source_id,
                         )
-                        return
+                        break
                 else:
                     consecutive_misses = 0
                 next_tick += (intervals_consumed + 1) * cfg.interval
@@ -910,7 +910,17 @@ class PollingSource(RootSource, Generic[T]):
                         self._source_id,
                         cfg.duration,
                     )
-                    return
+                    break
+
+            # ── Final drain ───────────────────────────────────────────────────
+            # Yield any batch committed in the last iteration before a
+            # duration/overrun/max-errors break.  CancelledError and fatal
+            # raises skip this intentionally — their consumers will not read
+            # further items.
+            while local_batch_idx < len(self._batches):
+                for item in self._batches[local_batch_idx].iter_data():
+                    yield item
+                local_batch_idx += 1
 
         except asyncio.CancelledError:
             logger.info(
