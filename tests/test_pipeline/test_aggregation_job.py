@@ -17,7 +17,8 @@ import pytest
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Batch, GroupBy, MergeJoin
-from orcapod.core.sources import ArrowTableSource
+from orcapod import File
+from orcapod.core.sources import ArrowTableSource, DictSource
 from orcapod.databases import DeltaTableDatabase
 from orcapod.pipeline import PipelineJob
 
@@ -32,7 +33,7 @@ from orcapod.pipeline import PipelineJob
 # a memoization test performs.
 # ---------------------------------------------------------------------------
 
-_CALLS: dict[str, list[list[str]]] = {"path": [], "v": []}
+_CALLS: dict[str, list] = {"path": [], "v": [], "cfg": []}
 
 
 def count_paths(path: list[str]) -> int:
@@ -209,3 +210,88 @@ class TestMergeJoinRegression:
         assert len(_CALLS["v"]) == 2
         # MergeJoin merges colliding `v` columns into a sorted 2-element list.
         assert sorted(_CALLS["v"]) == [["l1", "r1"], ["l2", "r2"]]
+
+
+# ---------------------------------------------------------------------------
+# list[File] content hashing through a reduction — ITL-627 Defect 2
+# ---------------------------------------------------------------------------
+
+
+def reduce_configs(probe: list[int], cfg: list[File]) -> int:
+    """Record each member's file *contents* so a stale cache is visible."""
+    _CALLS["cfg"].append([Path(c).read_text().strip() for c in cfg])
+    return len(cfg)
+
+
+def read_config(cfg: File) -> int:
+    """Per-row control: scalar File columns are known to hash by content."""
+    _CALLS["cfg"].append(Path(cfg).read_text().strip())
+    return 1
+
+
+class TestFileContentHashingThroughReduction:
+    """A `list[File]` column must invalidate on content change, like a scalar one.
+
+    A `File` column exists so that orcapod hashes the file's *contents* — editing
+    a file re-runs its consumer even though the path is unchanged. ITL-627
+    Defect 2 was that list-wrapping lost this: `build_aggregated_table` produced
+    a `list[orcapod.file]` hashed by its storage values (JSON path strings), so a
+    content edit silently failed to invalidate.
+
+    The unit-level hashing contract is covered by
+    `tests/test_hashing/test_extension_type_hashing.py::TestListExtensionHashing`.
+    This test covers the job level, which is where the failure was observed and
+    where it fails *silently* rather than raising.
+    """
+
+    @staticmethod
+    def _source(cfg_paths):
+        return DictSource(
+            [
+                {"date": "d1", "probe": i, "cfg": File(p)}
+                for i, p in enumerate(cfg_paths)
+            ],
+            tag_columns=["date", "probe"],
+            data_schema={"date": str, "probe": int, "cfg": File},
+            source_id="cfgsrc",
+        )
+
+    def _run(self, store, cfg_paths, *, grouped):
+        _CALLS["cfg"].clear()
+        source = self._source(cfg_paths)
+        job = PipelineJob(name="filehash", store=store)
+        with job:
+            if grouped:
+                pod = FunctionPod(
+                    PythonDataFunction(reduce_configs, output_keys="n")
+                )
+                pod(GroupBy(by=["date"])(source, label="agg"), label="cc")
+            else:
+                pod = FunctionPod(PythonDataFunction(read_config, output_keys="n"))
+                pod(source, label="cc")
+        job.run()
+        return list(_CALLS["cfg"])
+
+    @pytest.mark.parametrize("grouped", [False, True], ids=["per_row", "grouped"])
+    def test_content_edit_invalidates(self, tmp_path, grouped):
+        store = DeltaTableDatabase(base_path=tmp_path / "store")
+        a = tmp_path / "a.toml"
+        b = tmp_path / "b.toml"
+        a.write_text("entities = 'A'\n")
+        b.write_text("entities = 'B'\n")
+
+        assert self._run(store, [a, b], grouped=grouped), "cold run must execute"
+        assert self._run(store, [a, b], grouped=grouped) == [], (
+            "identical re-run must hit the cache"
+        )
+
+        # Same path, new contents.
+        a.write_text("entities = 'A_CHANGED'\n")
+        after = self._run(store, [a, b], grouped=grouped)
+
+        assert after, (
+            "a content edit must invalidate; an empty call log means the "
+            "File column was hashed by path rather than by contents (ITL-627)"
+        )
+        flattened = after[0] if grouped else after
+        assert "entities = 'A_CHANGED'" in flattened
