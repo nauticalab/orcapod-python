@@ -1476,3 +1476,69 @@ class TestPollingSourceZeroRowBatch:
         assert len(inference_warnings) == 1, (
             f"Expected exactly one inference warning, got {len(inference_warnings)}"
         )
+
+    # ------------------------------------------------------------------
+    # Test 5: infer-once path — zero-row first batch must not lock in nullable=False
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_zero_row_first_batch_then_nullable_column_streams_cleanly(self):
+        """Infer-once path: zero-row first batch must not lock in nullable=False.
+
+        If the first batch is zero-row, _canonical_arrow_schema must remain None
+        until a non-empty batch arrives.  A subsequent batch with a null value
+        must stream cleanly — not raise SchemaInconsistencyError.
+        """
+
+        class ZeroFirstImpl:
+            def __init__(self):
+                self.n = 0
+
+            def identity(self):
+                return ("ZeroFirstImpl",)
+
+            def schema(self):
+                return None  # infer-once path
+
+            async def poll(self, cursor=None):
+                return True
+
+            async def fetch(self, cursor=None):
+                self.n += 1
+                if self.n == 1:
+                    # First fetch: zero-row frame.
+                    data = {
+                        "id": pa.array([], type=pa.int64()),
+                        "val": pa.array([], type=pa.float64()),
+                        "note": pa.array([], type=pa.large_utf8()),
+                    }
+                elif self.n == 2:
+                    # Second fetch: one row with a null 'note'.
+                    data = {
+                        "id": pa.array([1], type=pa.int64()),
+                        "val": pa.array([1.0], type=pa.float64()),
+                        "note": pa.array([None], type=pa.large_utf8()),
+                    }
+                else:
+                    # Subsequent fetches: zero-row frames.
+                    data = {
+                        "id": pa.array([], type=pa.int64()),
+                        "val": pa.array([], type=pa.float64()),
+                        "note": pa.array([], type=pa.large_utf8()),
+                    }
+                return Cursor.now(self.n), data
+
+            async def close(self):
+                return None
+
+        src = PollingSource(
+            ZeroFirstImpl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        rows = []
+        async for tag, data in src.async_iter_data():
+            rows.append((tag, data))
+
+        assert len(rows) == 1

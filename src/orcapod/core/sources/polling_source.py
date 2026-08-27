@@ -614,7 +614,7 @@ class PollingSource(RootSource, Generic[T]):
             return None
         return self._build_stream_from_df(df)
 
-    def _build_stream_from_df(self, df: pl.DataFrame) -> ArrowTableStream:
+    def _build_stream_from_df(self, df: pl.DataFrame) -> ArrowTableStream | None:
         """Build an ``ArrowTableStream`` from a Polars DataFrame."""
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
@@ -640,14 +640,23 @@ class PollingSource(RootSource, Generic[T]):
                     self.data_context.type_converter.python_schema_to_arrow_schema(combined)
                 )
             else:
-                # Infer-once path: first batch establishes canonical nullability.
-                logger.warning(
-                    "PollingSource %r: no schema declared via impl.schema(); "
-                    "inferring nullability from first batch. Implement impl.schema() "
-                    "to avoid schema drift on zero-row polls or null-free batches.",
-                    self._source_id,
-                )
-                self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(arrow_table)
+                # Infer-once path: first non-empty batch establishes canonical nullability.
+                # Skip zero-row tables: null_count is always 0 for empty tables, so
+                # inference would set every field nullable=False — the original ENG-952 bug.
+                if arrow_table.num_rows > 0:
+                    logger.warning(
+                        "PollingSource %r: no schema declared via impl.schema(); "
+                        "inferring nullability from first batch. Implement impl.schema() "
+                        "to avoid schema drift on zero-row polls or null-free batches.",
+                        self._source_id,
+                    )
+                    self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(arrow_table)
+
+        # If _canonical_arrow_schema is still None here, this is a zero-row frame
+        # on the infer-once path before any real data has arrived.  Skip it —
+        # the caller (_try_build_stream) will return None and the frame is ignored.
+        if self._canonical_arrow_schema is None:
+            return None  # type: ignore[return-value]
 
         # Apply canonical nullability by column name (order-safe).
         canonical_nullable = {f.name: f.nullable for f in self._canonical_arrow_schema}
