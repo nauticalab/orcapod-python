@@ -615,7 +615,12 @@ class PollingSource(RootSource, Generic[T]):
         return self._build_stream_from_df(df)
 
     def _build_stream_from_df(self, df: pl.DataFrame) -> ArrowTableStream | None:
-        """Build an ``ArrowTableStream`` from a Polars DataFrame."""
+        """Build an ``ArrowTableStream`` from a Polars DataFrame.
+
+        Returns ``None`` on the infer-once path when the batch has zero rows and
+        no canonical schema has been established yet — the frame is silently
+        skipped so that a spurious all-non-nullable schema is never recorded.
+        """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
         # Handle Object-dtype columns (same pattern as DataFrameSource)
@@ -656,7 +661,7 @@ class PollingSource(RootSource, Generic[T]):
         # on the infer-once path before any real data has arrived.  Skip it —
         # the caller (_try_build_stream) will return None and the frame is ignored.
         if self._canonical_arrow_schema is None:
-            return None  # type: ignore[return-value]
+            return None
 
         # Apply canonical nullability by column name (order-safe).
         canonical_nullable = {f.name: f.nullable for f in self._canonical_arrow_schema}
