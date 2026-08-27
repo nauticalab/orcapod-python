@@ -40,67 +40,117 @@ immediately (not charged against `max_consecutive_errors`). One zero-row poll ki
 
 ---
 
-## Chosen fix: Fix B — zero-row guard in `_combine`
+## Design principle
 
-Add an early-return guard at the top of `PollingSource._combine`: if `new_stream` has zero
-rows, return `existing` unchanged — skip validation and concatenation entirely.
+The deeper problem is that `_build_stream_from_df` re-infers the Arrow schema nullability on
+**every batch**, from that batch's own data. This is wrong: the schema is a property of the
+source, not of any individual batch. A zero-row batch, a null-free batch, and a batch with
+nulls all represent data from the same source — they should produce streams with the same
+schema.
+
+The fix establishes a **canonical Arrow schema** exactly once and applies it to every
+subsequent batch. There are two paths:
+
+- **Declared-schema path** — when `impl.schema()` returns a non-`None` ``Schema``, the
+  canonical Arrow schema is derived from those Python type annotations at construction time.
+  `T | None` maps to `nullable=True`; plain `T` maps to `nullable=False`. No inference
+  happens.
+
+- **Infer-once path** — when `impl.schema()` returns `None`, the canonical schema is inferred
+  from the **first** batch (which contains real data, so inference is meaningful). A
+  `WARNING`-level log is emitted to prompt the caller to declare a schema. All subsequent
+  batches are cast to the canonical schema instead of re-inferring.
+
+This eliminates the zero-row crash, the "residual" nullability drift on null-free batches, and
+the need for the `_combine` short-circuit (Fix B) that the issue originally recommended.
+
+---
+
+## Implementation
+
+### New attribute
+
+Add to `PollingSource.__init__`:
 
 ```python
-def _combine(self, existing, new_stream):
-    if new_stream.as_table().num_rows == 0:
-        logger.debug(
-            "PollingSource %r: zero-row batch — skipping combine", self._source_id
-        )
-        return existing
-    self._validate_combining_schemas(existing, new_stream)
-    ...
+self._canonical_arrow_schema: pa.Schema | None = None
 ```
 
-### Why Fix B over the alternatives
+### Modified `_build_stream_from_df`
 
-**Fix A** (return `None` from `_try_build_stream` for zero-row frames) was measured to regress
-the first-fetch-empty case: `keys()` raises `ValueError: no data available yet`. A narrowed
-version (skip only when `_accumulated_stream` is already set) would work, but it introduces
-hidden state coupling into a method whose docstring says it should be stateless.
+Replace the single line:
 
-**Fix C** (change `infer_schema_nullable` to not use `null_count`) would affect
-`pipeline_identity_structure`, moving cache identity — a much larger change than this defect
-warrants.
+```python
+arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+```
 
-**Fix B properties:**
+with:
 
-- `_combine` is only called after `_accumulated_stream` is populated (the first-fetch-empty
-  regression from Fix A cannot happen here).
-- Strictly cheaper on the common poll: skips `_validate_combining_schemas`,
-  `pa.concat_tables`, and `ArrowTableStream` construction for every zero-row batch.
-- Matches the reference shim in `orcapod-sync-and-qc` (`StreamingPollingSource._combine`)
-  that has been running in production.
+```python
+# Establish canonical schema on first call; apply it on every call.
+if self._canonical_arrow_schema is None:
+    if self._tag_schema is not None and self._data_schema is not None:
+        # Declared-schema path: derive Arrow schema from declared Python types.
+        # T | None → nullable=True; plain T → nullable=False. No inference.
+        combined = {**dict(self._tag_schema), **dict(self._data_schema)}
+        self._canonical_arrow_schema = (
+            self.data_context.type_converter.python_schema_to_arrow_schema(combined)
+        )
+    else:
+        # Infer-once path: first batch establishes canonical nullability.
+        logger.warning(
+            "PollingSource %r: no schema declared via impl.schema(); "
+            "inferring nullability from first batch. Implement impl.schema() "
+            "to avoid schema drift on zero-row polls or null-free batches.",
+            self._source_id,
+        )
+        self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(arrow_table)
 
-### Interaction with PR #260 (ITL-617)
+# Apply canonical nullability by column name (order-safe).
+canonical_nullable = {f.name: f.nullable for f in self._canonical_arrow_schema}
+target_schema = pa.schema([
+    pa.field(f.name, f.type, nullable=canonical_nullable.get(f.name, f.nullable))
+    for f in arrow_table.schema
+])
+arrow_table = arrow_table.cast(target_schema)
+```
 
-PR #260 (`_accumulated_stream` → optimistic-lock batch list) is open and conflicts at
-`_combine`. Its checklist states `_combine` is unchanged, and its async loop stops calling
-`_combine` entirely — it appends and validates directly against `_batches[0]`. If PR #260
-lands before this fix, Fix B must be re-expressed against `_validate_combining_schemas`
-(or `_try_build_stream` narrowed). Landing this fix first is cheaper.
+The cast overrides only the `nullable` flag; the Arrow type (from Polars conversion) is
+preserved. Column matching is done by name, not position, so it is safe even if column order
+in the DataFrame ever differs from the declared schema's field order.
+
+### No changes elsewhere
+
+- `_try_build_stream` — unchanged. Zero-row frames still pass through; the canonical-schema
+  cast in `_build_stream_from_df` gives them the correct schema.
+- `_combine` / `_validate_combining_schemas` — unchanged. Schema is now consistent across
+  batches, so the comparison passes correctly.
+- `async_iter_data` / `_run_sync` — unchanged.
 
 ---
 
 ## Test plan
 
 Add class `TestPollingSourceZeroRowBatch` to `tests/test_channels/test_polling_source.py`
-with two async tests:
+with four async or sync tests:
 
 1. **`test_zero_row_batch_after_nullable_column_streams_cleanly`** — impl emits one row with a
    nullable column (containing `None`), then zero-row frames for the remaining duration. Assert
-   the source completes without exception and emits exactly 1 row.
+   the source completes without exception and emits exactly 1 row. (Regression for the exact
+   repro in the Linear issue; no declared schema → infer-once path.)
 
 2. **`test_zero_row_batch_is_not_accumulated`** — same impl; assert `_accumulated_stream`
-   still contains only the original row after zero-row polls (zero-row batches are not
-   concatenated).
+   contains only the original row after zero-row polls.
 
-The impl pattern follows the inline-class style already used by `DriftingImpl` in
-`test_schema_mismatch_raises_on_column_change`.
+3. **`test_declared_schema_no_inference_warning`** — impl declares a schema with a nullable
+   field, emits a null-bearing row, then zero-row frames. Assert the source streams cleanly
+   **and** no WARNING is emitted. Verifies the declared-schema path skips inference entirely.
+
+4. **`test_infer_schema_emits_warning`** — impl with `schema()` returning `None` emits one
+   row. Assert that a `WARNING` log containing `"inferring nullability from first batch"` is
+   emitted exactly once (not on subsequent polls).
+
+The impl pattern follows the inline-class style used in `test_schema_mismatch_raises_on_column_change`.
 
 ---
 
@@ -108,10 +158,20 @@ The impl pattern follows the inline-class style already used by `DriftingImpl` i
 
 Add new entry **PS4** under `src/orcapod/core/sources/polling_source.py`:
 
-> ### PS4 — `PollingSource` dies when a poll returns a zero-row batch after a nullable column
+> ### PS4 — `PollingSource` re-infers Arrow schema nullability per batch, crashing on zero-row polls
 > **Status:** resolved
 > **Severity:** high
 > **Issue:** ENG-952
+>
+> `_build_stream_from_df` called `infer_schema_nullable` on every batch. A zero-row batch has
+> `null_count == 0` for all columns, so every field was inferred non-nullable.
+> `_validate_combining_schemas` then rejected the batch against the accumulated stream's
+> nullable schema.
+>
+> **Fix:** `_build_stream_from_df` now establishes a `_canonical_arrow_schema` exactly once —
+> from `impl.schema()` when declared (no inference, no warning), or from the first batch
+> otherwise (with a `WARNING`-level log). All subsequent batches are cast to the canonical
+> schema by column name. Per-batch nullability inference is eliminated.
 
 ---
 
