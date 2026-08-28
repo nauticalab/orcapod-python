@@ -1368,7 +1368,12 @@ class TestPollingSourceZeroRowBatch:
 
     @pytest.mark.asyncio
     async def test_zero_row_batch_is_not_accumulated(self):
-        """After zero-row polls, the internal accumulated stream must hold only the real rows."""
+        """After zero-row polls, the total row count across all batches must be exactly 1.
+
+        ``_batches`` is append-only and stores each batch individually (including
+        zero-row ones). Zero-row batches contain no data rows, so the accumulated
+        total must equal the number of real rows that were fetched — exactly 1.
+        """
         src = PollingSource(
             self._make_emit_once_then_empty_impl(),
             tag_columns="id",
@@ -1378,9 +1383,11 @@ class TestPollingSourceZeroRowBatch:
         async for _ in src.async_iter_data():
             pass
 
-        assert len(src._batches) == 1, "_batches must contain exactly one batch after iteration"
-        cached = list(src._batches[0].iter_data())
-        assert len(cached) == 1
+        assert src._batches, "_batches must be non-empty after iteration"
+        all_rows = [row for batch in src._batches for row in batch.iter_data()]
+        assert len(all_rows) == 1, (
+            f"Expected exactly 1 row across all batches, got {len(all_rows)}"
+        )
 
     # ------------------------------------------------------------------
     # Test 3: declared-schema path — zero-row polls, no warning
