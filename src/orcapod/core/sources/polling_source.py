@@ -258,6 +258,7 @@ class PollingSource(RootSource, Generic[T]):
         self._cursor: Cursor[T] | None = None
         self._batches: list[ArrowTableStream] = []
         self._state_lock: threading.Lock = threading.Lock()
+        self._canonical_arrow_schema: pa.Schema | None = None
         # Derive source_id from impl identity if not explicitly provided
         if self._source_id is None:
             self._source_id = str(self._impl.identity())
@@ -613,8 +614,13 @@ class PollingSource(RootSource, Generic[T]):
             return None
         return self._build_stream_from_df(df)
 
-    def _build_stream_from_df(self, df: pl.DataFrame) -> ArrowTableStream:
-        """Build an ``ArrowTableStream`` from a Polars DataFrame."""
+    def _build_stream_from_df(self, df: pl.DataFrame) -> ArrowTableStream | None:
+        """Build an ``ArrowTableStream`` from a Polars DataFrame.
+
+        Returns ``None`` on the infer-once path when the batch has zero rows and
+        no canonical schema has been established yet — the frame is silently
+        skipped so that a spurious all-non-nullable schema is never recorded.
+        """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
         # Handle Object-dtype columns (same pattern as DataFrameSource)
@@ -628,7 +634,42 @@ class PollingSource(RootSource, Generic[T]):
         df = polars_data_utils.drop_system_columns(df)
 
         arrow_table = df.to_arrow()
-        arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+
+        # Establish canonical schema on first call; apply it on every call.
+        if self._canonical_arrow_schema is None:
+            if self._tag_schema is not None and self._data_schema is not None:
+                # Declared-schema path: derive Arrow schema from declared Python types.
+                # T | None → nullable=True; plain T → nullable=False. No inference.
+                combined = {**dict(self._tag_schema), **dict(self._data_schema)}
+                self._canonical_arrow_schema = (
+                    self.data_context.type_converter.python_schema_to_arrow_schema(combined)
+                )
+            else:
+                # Infer-once path: first non-empty batch establishes canonical nullability.
+                # Skip zero-row tables: null_count is always 0 for empty tables, so
+                # inference would set every field nullable=False — the original ENG-952 bug.
+                if arrow_table.num_rows > 0:
+                    logger.warning(
+                        "PollingSource %r: no schema declared via impl.schema(); "
+                        "inferring nullability from first batch. Implement impl.schema() "
+                        "to avoid schema drift on zero-row polls or null-free batches.",
+                        self._source_id,
+                    )
+                    self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(arrow_table)
+
+        # If _canonical_arrow_schema is still None here, this is a zero-row frame
+        # on the infer-once path before any real data has arrived.  Skip it —
+        # the caller (_try_build_stream) will return None and the frame is ignored.
+        if self._canonical_arrow_schema is None:
+            return None
+
+        # Apply canonical nullability by column name (order-safe).
+        canonical_nullable = {f.name: f.nullable for f in self._canonical_arrow_schema}
+        target_schema = pa.schema([
+            pa.field(f.name, f.type, nullable=canonical_nullable.get(f.name, f.nullable))
+            for f in arrow_table.schema
+        ])
+        arrow_table = arrow_table.cast(target_schema)
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
