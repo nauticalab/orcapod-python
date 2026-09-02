@@ -37,7 +37,7 @@ ANNOTATION_CASES: dict[str, object] = {
     "op.File": op.File,
     "op.Directory": op.Directory,
     "op.Path": op.Path,
-    "op.UUID": UUID,
+    "op.UUID": UUID,  # UUID *class* as annotation; routes through TypeObjectHandler, not UUIDHandler
     "list[int]": list[int],
     "dict[str, int]": dict[str, int],
     "list[op.File]": list[op.File],
