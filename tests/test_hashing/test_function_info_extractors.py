@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import types as _types
+import typing
 from pathlib import Path
 
 import pytest
@@ -196,6 +198,9 @@ class TestFunctionSignatureExtractorWithRegistry:
             ...
 
         info = extractor.extract_function_info(fn)
+        assert not isinstance(info["returns"], str), (
+            f"parts['returns'] must not be a string — got {info['returns']!r}"
+        )
         assert info["returns"] is op.File, (
             f"Expected op.File type object, got {type(info['returns'])}: {info['returns']!r}"
         )
@@ -206,6 +211,9 @@ class TestFunctionSignatureExtractorWithRegistry:
             ...
 
         info = extractor.extract_function_info(fn)
+        assert not isinstance(info["returns"], str), (
+            f"parts['returns'] must not be a string — got {info['returns']!r}"
+        )
         assert info["returns"] is float, (
             f"Expected float type object, got {info['returns']!r}"
         )
@@ -238,15 +246,55 @@ class TestFunctionSignatureExtractorWithRegistry:
         TypeObjectHandler handles each union member individually at hash time;
         no string conversion happens in the extractor.
         """
-        import types as _types
-
         def fn(s: str) -> op.File | None:
             ...
 
         info = extractor.extract_function_info(fn)
+        assert not isinstance(info["returns"], str), (
+            f"parts['returns'] must not be a string — got {info['returns']!r}"
+        )
         assert isinstance(info["returns"], _types.UnionType), (
             f"Expected UnionType, got {type(info['returns'])}: {info['returns']!r}"
         )
+
+    def test_return_annotation_is_never_a_string(self, extractor):
+        """``parts['returns']`` must never be a plain ``str`` for any annotation shape.
+
+        Regression guard: an earlier implementation converted registered return
+        types to their ``logical_type_name`` string (e.g. ``"orcapod.file"``) and
+        stored that in ``parts["returns"]``, losing the ``"type:"`` prefix that
+        ``TypeObjectHandler`` would normally add.  Every case below asserts the
+        stored value is NOT a str, regardless of whether the annotation contains
+        a registered orcapod type, a builtin, a union, or a generic alias.
+        """
+        def fn_bare_file(s: str) -> op.File: ...
+        def fn_bare_directory(s: str) -> op.Directory: ...
+        def fn_union_file_none(s: str) -> op.File | None: ...
+        def fn_optional_file(s: str) -> typing.Optional[op.File]: ...  # noqa: UP007
+        def fn_union_two(s: str) -> op.File | op.Directory: ...
+        def fn_generic_file(s: str) -> list[op.File]: ...
+        def fn_float(s: str) -> float: ...
+        def fn_list_int(s: str) -> list[int]: ...
+
+        cases = [
+            (fn_bare_file,        "op.File bare registered type"),
+            (fn_bare_directory,   "op.Directory bare registered type"),
+            (fn_union_file_none,  "op.File | None union"),
+            (fn_optional_file,    "typing.Optional[op.File] union"),
+            (fn_union_two,        "op.File | op.Directory multi-registered union"),
+            (fn_generic_file,     "list[op.File] generic wrapping registered type"),
+            (fn_float,            "float builtin"),
+            (fn_list_int,         "list[int] builtin generic"),
+        ]
+
+        for fn, label in cases:
+            info = extractor.extract_function_info(fn, function_name="fn")
+            assert "returns" in info, f"{label}: 'returns' key missing from info dict"
+            assert not isinstance(info["returns"], str), (
+                f"{label}: parts['returns'] must not be a plain string — "
+                f"TypeObjectHandler is responsible for serialisation, not the extractor. "
+                f"Got {type(info['returns'])!r}: {info['returns']!r}"
+            )
 
     def test_builtin_annotations_unchanged(self, extractor):
         """Functions with only builtin annotations are unaffected.
