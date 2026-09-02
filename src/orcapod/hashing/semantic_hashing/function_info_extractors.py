@@ -7,42 +7,7 @@ from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from orcapod.types import Schema
 
 if TYPE_CHECKING:
-    from orcapod.logical_types.registry import LogicalTypeRegistry
     from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
-
-
-def _annotation_contains_registered_type(
-    annotation: object, type_converter: "TypeConverterProtocol"
-) -> bool:
-    """Return ``True`` if *annotation* or any nested type argument is registered.
-
-    This is used to decide whether a return annotation should be stored as a
-    canonical string (when it contains an orcapod logical type) or as the raw
-    type object (when it only contains builtins/user types, preserving existing
-    hashes).
-
-    Args:
-        annotation: A type annotation to inspect.
-        type_converter: The ``TypeConverterProtocol`` to consult via
-            ``get_logical_type()``.
-
-    Returns:
-        ``True`` if any component of the annotation is registered.
-    """
-    if isinstance(annotation, type):
-        return type_converter.get_logical_type(annotation) is not None
-    # Union types: check any member
-    if is_union_annotation(annotation):
-        args = getattr(annotation, "__args__", ()) or ()
-        return any(_annotation_contains_registered_type(a, type_converter) for a in args)
-    # Generic aliases (list[X], dict[K, V], etc.): check origin AND args
-    origin = getattr(annotation, "__origin__", None)
-    if origin is not None:
-        args = getattr(annotation, "__args__", None) or ()
-        return _annotation_contains_registered_type(origin, type_converter) or any(
-            _annotation_contains_registered_type(a, type_converter) for a in args
-        )
-    return False
 
 
 class FunctionNameExtractor:
@@ -70,13 +35,14 @@ class FunctionSignatureExtractor:
     ``"orcapod.logical_types.file_type.File"``).  This prevents internal
     module reorganisations from invalidating cached function-pod signatures.
 
-    For **parameter** annotations the canonical string replaces the
-    annotation substring in the ``str(param)`` representation.
+    For **parameter** annotations the canonical string replaces the annotation
+    substring in the ``str(param)`` representation (via ``canonical_annotation_str``).
 
-    For **return** annotations the canonical string replaces the raw type
-    object *only when the annotation contains a registered type*.  When it
-    contains only builtins or user types the raw type object is kept so that
-    existing cached hashes are not invalidated.
+    For **return** annotations the raw annotation object is stored unchanged.
+    Canonicalisation happens at hash time: ``TypeObjectHandler`` (wired with the
+    same ``type_converter``) resolves registered types to their stable name, so
+    both registered and unregistered return types are handled consistently
+    without any special casing here.
     """
 
     def __init__(
@@ -141,16 +107,14 @@ class FunctionSignatureExtractor:
         parts["params"] = ", ".join(param_strs)
 
         # Add return annotation if present.
-        # When the return type contains a registered logical type, store a
-        # canonical string so that module relocations don't change the hash.
-        # Otherwise keep the raw type object to avoid invalidating existing
-        # cached hashes (a string and a type object hash to different values).
+        # The raw annotation object is stored here and hashed by the type
+        # handler registry — TypeObjectHandler (configured with a type_converter)
+        # canonicalises registered logical types to their stable
+        # ``logical_type_name`` (e.g. ``"type:orcapod.file"``), so no special
+        # casing is required here.
         ret_ann = sig.return_annotation
         if ret_ann is not inspect.Signature.empty:
-            if tc is not None and _annotation_contains_registered_type(ret_ann, tc):
-                parts["returns"] = canonical_annotation_str(ret_ann, tc)
-            else:
-                parts["returns"] = ret_ann
+            parts["returns"] = ret_ann
 
         return parts
 

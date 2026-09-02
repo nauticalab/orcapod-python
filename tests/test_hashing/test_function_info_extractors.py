@@ -186,16 +186,19 @@ class TestFunctionSignatureExtractorWithRegistry:
             type_converter=get_default_context().type_converter,
         )
 
-    def test_return_annotation_is_canonical_string(self, extractor):
-        """parts['returns'] is a canonical string for a registered orcapod type."""
+    def test_return_annotation_registered_type_is_type_object(self, extractor):
+        """parts['returns'] is the raw type object even for registered orcapod types.
+
+        TypeObjectHandler (wired with the same type_converter) canonicalises it to
+        ``"type:orcapod.file"`` at hash time — no special casing in the extractor.
+        """
         def fn(s: str) -> op.File:
             ...
 
         info = extractor.extract_function_info(fn)
-        assert isinstance(info["returns"], str), (
-            f"Expected str, got {type(info['returns'])}: {info['returns']!r}"
+        assert info["returns"] is op.File, (
+            f"Expected op.File type object, got {type(info['returns'])}: {info['returns']!r}"
         )
-        assert info["returns"] == "orcapod.file"
 
     def test_return_annotation_builtin_keeps_type_object(self, extractor):
         """Non-registered return types keep their type-object form (hash unchanged)."""
@@ -229,15 +232,21 @@ class TestFunctionSignatureExtractorWithRegistry:
         assert "orcapod.file" in info["params"]
         assert "logical_types" not in info["params"]
 
-    def test_union_return_annotation_canonical(self, extractor):
-        """op.File | None return is a canonical string."""
+    def test_union_return_annotation_is_raw_union(self, extractor):
+        """op.File | None return annotation is stored as a raw union type object.
+
+        TypeObjectHandler handles each union member individually at hash time;
+        no string conversion happens in the extractor.
+        """
+        import types as _types
+
         def fn(s: str) -> op.File | None:
             ...
 
         info = extractor.extract_function_info(fn)
-        assert isinstance(info["returns"], str)
-        assert "orcapod.file" in info["returns"]
-        assert "logical_types" not in info["returns"]
+        assert isinstance(info["returns"], _types.UnionType), (
+            f"Expected UnionType, got {type(info['returns'])}: {info['returns']!r}"
+        )
 
     def test_builtin_annotations_unchanged(self, extractor):
         """Functions with only builtin annotations are unaffected.
@@ -253,8 +262,13 @@ class TestFunctionSignatureExtractorWithRegistry:
         assert "str" in info["params"]
         assert info["returns"] is float  # type object, not string "float"
 
-    def test_return_and_param_use_same_canonical_form(self, extractor):
-        """op.File in param and op.File as return use the same canonical string."""
+    def test_param_canonical_string_and_return_type_object(self, extractor):
+        """op.File in a param uses canonical string; op.File as return is type object.
+
+        Params are embedded in strings so ``canonical_annotation_str`` replaces the
+        module path inline.  Return annotations are raw objects — ``TypeObjectHandler``
+        canonicalises them (to ``"type:orcapod.file"``) at hash time.
+        """
         def fn_param(f: op.File) -> str:
             ...
 
@@ -265,7 +279,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         info_return = extractor.extract_function_info(fn_return)
 
         assert "orcapod.file" in info_param["params"]
-        assert info_return["returns"] == "orcapod.file"
+        assert info_return["returns"] is op.File
 
     def test_simulated_relocation_stable(self, extractor):
         """Patching __module__ on op.File does not change the extracted info."""
@@ -284,32 +298,3 @@ class TestFunctionSignatureExtractorWithRegistry:
         assert info_before["params"] == info_after["params"]
         assert info_before["returns"] == info_after["returns"]
 
-    def test_registered_type_as_generic_origin_detected(self, extractor):
-        """_annotation_contains_registered_type checks origin, not just args.
-
-        If a registered type appears as the *origin* of a generic alias (rather
-        than inside its args), it must still be detected so that the return
-        annotation is stored as a canonical string.  Concretely, this guards
-        against the bug where ``any(...args...)`` was the only check and the
-        origin was silently skipped.
-        """
-        import types as _types
-
-        # Construct a fake generic alias whose __origin__ is op.File (a
-        # registered type) and whose __args__ are plain builtins.
-        # This is deliberately artificial — real user code won't normally do
-        # this, but it exercises the origin-check code path directly.
-        class FakeGeneric:
-            __origin__ = op.File   # registered type as origin
-            __args__ = (int,)      # unregistered args
-
-        from orcapod.hashing.semantic_hashing.function_info_extractors import (
-            _annotation_contains_registered_type,
-        )
-        from orcapod.contexts import get_default_context
-
-        tc = get_default_context().type_converter
-        assert _annotation_contains_registered_type(FakeGeneric(), tc), (
-            "Registered type in __origin__ must be detected by "
-            "_annotation_contains_registered_type"
-        )
