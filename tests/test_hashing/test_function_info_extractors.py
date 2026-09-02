@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import orcapod as op
 
 
 class TestFunctionNameExtractor:
@@ -168,3 +169,121 @@ class TestFunctionInfoExtractorFactory:
     def test_invalid_strategy_raises_value_error(self):
         with pytest.raises(ValueError, match="Unknown strategy"):
             self._factory().create_function_info_extractor("invalid_strategy")
+
+
+class TestFunctionSignatureExtractorWithRegistry:
+    """FunctionSignatureExtractor canonicalizes both param and return annotations."""
+
+    @pytest.fixture
+    def registry(self):
+        from orcapod.contexts import get_default_context
+        return get_default_context().type_converter._logical_type_registry
+
+    @pytest.fixture
+    def extractor(self, registry):
+        from orcapod.hashing.semantic_hashing.function_info_extractors import (
+            FunctionSignatureExtractor,
+        )
+        return FunctionSignatureExtractor(
+            include_module=True,
+            include_defaults=True,
+            logical_type_registry=registry,
+        )
+
+    def test_return_annotation_is_canonical_string(self, extractor):
+        """parts['returns'] is a canonical string for a registered orcapod type."""
+        def fn(s: str) -> op.File:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert isinstance(info["returns"], str), (
+            f"Expected str, got {type(info['returns'])}: {info['returns']!r}"
+        )
+        assert info["returns"] == "orcapod.file"
+
+    def test_return_annotation_builtin_keeps_type_object(self, extractor):
+        """Non-registered return types keep their type-object form (hash unchanged)."""
+        def fn(x: int) -> float:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert info["returns"] is float, (
+            f"Expected float type object, got {info['returns']!r}"
+        )
+
+    def test_param_annotation_is_canonical_string(self, extractor):
+        """Parameter annotation for a registered orcapod type uses logical_type_name."""
+        def fn(f: op.File) -> str:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert "orcapod.file" in info["params"], (
+            f"Expected 'orcapod.file' in params, got: {info['params']!r}"
+        )
+        assert "logical_types" not in info["params"], (
+            f"Module path leaked into params: {info['params']!r}"
+        )
+
+    def test_generic_param_annotation_canonical(self, extractor):
+        """list[op.File] in a parameter is canonicalized."""
+        def fn(files: list[op.File]) -> str:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert "orcapod.file" in info["params"]
+        assert "logical_types" not in info["params"]
+
+    def test_union_return_annotation_canonical(self, extractor):
+        """op.File | None return is a canonical string."""
+        def fn(s: str) -> op.File | None:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert isinstance(info["returns"], str)
+        assert "orcapod.file" in info["returns"]
+        assert "logical_types" not in info["returns"]
+
+    def test_builtin_annotations_unchanged(self, extractor):
+        """Functions with only builtin annotations are unaffected.
+
+        In particular, the 'returns' for float stays as the float type object
+        so existing cached hashes are not invalidated.
+        """
+        def fn(x: int, y: str) -> float:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert "int" in info["params"]
+        assert "str" in info["params"]
+        assert info["returns"] is float  # type object, not string "float"
+
+    def test_return_and_param_use_same_canonical_form(self, extractor):
+        """op.File in param and op.File as return use the same canonical string."""
+        def fn_param(f: op.File) -> str:
+            ...
+
+        def fn_return(s: str) -> op.File:
+            ...
+
+        info_param = extractor.extract_function_info(fn_param)
+        info_return = extractor.extract_function_info(fn_return)
+
+        assert "orcapod.file" in info_param["params"]
+        assert info_return["returns"] == "orcapod.file"
+
+    def test_simulated_relocation_stable(self, extractor):
+        """Patching __module__ on op.File does not change the extracted info."""
+        def fn(f: op.File) -> op.File:
+            ...
+
+        info_before = extractor.extract_function_info(fn)
+
+        original = op.File.__module__
+        try:
+            op.File.__module__ = "orcapod.extension_types.file_type"
+            info_after = extractor.extract_function_info(fn)
+        finally:
+            op.File.__module__ = original
+
+        assert info_before["params"] == info_after["params"]
+        assert info_before["returns"] == info_after["returns"]
