@@ -133,6 +133,52 @@ class TestFunctionSignatureExtractor:
         r2 = self._make(include_module=False).extract_function_info(fn2, function_name="fn")
         assert r1["params"] == r2["params"]
 
+    def test_annotation_containing_equals_preserved_when_defaults_stripped(self):
+        """Annotations containing '=' are not truncated when include_defaults=False.
+
+        The old approach stripped defaults via ``str(param).split('=')[0]``, which
+        would corrupt any annotation that legitimately contains ``=`` — for example
+        ``Literal["a=b"]`` would become ``Literal["a``.  The component-based
+        ``_format_param`` checks ``param.default is not inspect.Parameter.empty``
+        directly, so the annotation is preserved in full.
+        """
+        from typing import Literal
+
+        def fn(x: Literal["a=b"] = "default_value") -> None:
+            pass
+
+        result = self._make(include_defaults=False).extract_function_info(fn)
+        # The full annotation must be present
+        assert "Literal" in result["params"]
+        assert "a=b" in result["params"]
+        # The default value must be absent
+        assert "default_value" not in result["params"]
+
+    def test_default_value_repr_containing_annotation_substring_not_duplicated(self):
+        """Annotation text that reappears inside a default value's repr is not mangled.
+
+        The old approach used ``str(param).replace(': <ann>', ': <canonical>', 1)``.
+        If a default value's repr happened to contain ``: <ann>``, the ``count=1``
+        guard protected the *first* occurrence (the real annotation) but could not
+        prevent matching further into the string.  The component-based approach
+        builds the string from parts, so the annotation and default are never mixed.
+        """
+
+        class WeirdDefault:
+            """Whose repr looks like an annotation substring."""
+
+            def __repr__(self) -> str:
+                return "WeirdDefault(': int')"
+
+        def fn(x: int = WeirdDefault()) -> None:  # type: ignore[assignment]
+            pass
+
+        result = self._make(include_defaults=True).extract_function_info(fn)
+        # Annotation intact
+        assert result["params"].startswith("x: int")
+        # Default repr preserved verbatim
+        assert "WeirdDefault" in result["params"]
+
     def test_eval_str_fallback_on_unresolvable_annotation(self):
         """When eval_str=True fails, falls back to unresolved signature."""
         # Create a function with an annotation that cannot be resolved at eval time

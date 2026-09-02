@@ -10,6 +10,62 @@ if TYPE_CHECKING:
     from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 
+def _format_param(
+    param: inspect.Parameter,
+    canonical_annotation: str | None,
+    include_defaults: bool,
+) -> str:
+    """Reconstruct a parameter string from its structured components.
+
+    Produces output identical to ``str(inspect.Parameter)`` for normal inputs,
+    but substitutes ``canonical_annotation`` for the raw annotation string without
+    any string search/replace.  This avoids two failure modes of the substitution
+    approach:
+
+    1. Accidentally matching the annotation string inside a complex default
+       value's ``repr`` (e.g. a dataclass whose repr embeds the type name).
+    2. Truncating annotations that contain ``=`` (e.g. ``Literal["a=b"]``) when
+       stripping defaults via ``str.split("=")``.
+
+    The format follows CPython's ``inspect.Parameter.__str__`` exactly:
+
+    - With annotation and default:  ``name: type = repr(default)``
+    - With annotation, no default:  ``name: type``
+    - No annotation, with default:  ``name=repr(default)``  (no spaces around ``=``)
+    - No annotation, no default:    ``name``
+    - ``*args`` / ``**kwargs`` get the corresponding prefix.
+
+    Args:
+        param: The parameter to format.
+        canonical_annotation: Canonical string for the annotation, or ``None``
+            when the parameter carries no annotation.
+        include_defaults: Whether to include the default value.
+
+    Returns:
+        A formatted parameter string.
+    """
+    if param.kind == inspect.Parameter.VAR_POSITIONAL:
+        prefix = "*"
+    elif param.kind == inspect.Parameter.VAR_KEYWORD:
+        prefix = "**"
+    else:
+        prefix = ""
+
+    base = f"{prefix}{param.name}"
+    has_default = include_defaults and param.default is not inspect.Parameter.empty
+
+    if canonical_annotation is not None:
+        # "name: type" or "name: type = default"
+        if has_default:
+            return f"{base}: {canonical_annotation} = {repr(param.default)}"
+        return f"{base}: {canonical_annotation}"
+    else:
+        # "name" or "name=default"  (CPython omits spaces around = without annotation)
+        if has_default:
+            return f"{base}={repr(param.default)}"
+        return base
+
+
 class FunctionNameExtractor:
     """Extractor that only uses the function name for information extraction."""
 
@@ -35,8 +91,9 @@ class FunctionSignatureExtractor:
     ``"orcapod.logical_types.file_type.File"``).  This prevents internal
     module reorganisations from invalidating cached function-pod signatures.
 
-    For **parameter** annotations the canonical string replaces the annotation
-    substring in the ``str(param)`` representation (via ``canonical_annotation_str``).
+    For **parameter** annotations each parameter string is reconstructed from
+    its structured components (name, kind, canonical annotation, default) via
+    ``_format_param``, avoiding any string search/replace.
 
     For **return** annotations the raw annotation object is stored unchanged.
     Canonicalisation happens at hash time: ``TypeObjectHandler`` (wired with the
@@ -67,7 +124,7 @@ class FunctionSignatureExtractor:
 
         # Use eval_str=True so that string annotations produced by
         # ``from __future__ import annotations`` (PEP 563) are resolved to live
-        # type objects before we check for union types.
+        # type objects before we canonicalise them.
         try:
             sig = inspect.signature(func, eval_str=True)
         except (NameError, TypeError, AttributeError, SyntaxError):
@@ -87,22 +144,19 @@ class FunctionSignatureExtractor:
 
         tc = self._type_converter
 
-        # Add parameters, replacing annotation substrings with canonical forms
+        # Build each parameter string from structured components.
+        # Using _format_param instead of str(param) + string substitution avoids
+        # accidentally matching the annotation text inside a default value's repr,
+        # and correctly handles annotations that contain '=' (e.g. Literal["a=b"]).
         param_strs = []
-        for name, param in sig.parameters.items():
-            param_str = str(param)
+        for _, param in sig.parameters.items():
             annotation = param.annotation
-            if annotation is not inspect.Parameter.empty:
-                old_ann = inspect.formatannotation(annotation)
-                new_ann = canonical_annotation_str(annotation, tc)
-                if old_ann != new_ann:
-                    # Replace ": <old_ann>" with ": <new_ann>" (first occurrence
-                    # only).  The ": " prefix avoids accidentally replacing the
-                    # annotation string inside a default value.
-                    param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
-            if not self.include_defaults and "=" in param_str:
-                param_str = param_str.split("=")[0].strip()
-            param_strs.append(param_str)
+            canonical_ann = (
+                canonical_annotation_str(annotation, tc)
+                if annotation is not inspect.Parameter.empty
+                else None
+            )
+            param_strs.append(_format_param(param, canonical_ann, self.include_defaults))
 
         parts["params"] = ", ".join(param_strs)
 
