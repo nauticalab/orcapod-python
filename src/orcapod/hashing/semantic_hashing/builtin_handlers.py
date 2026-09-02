@@ -100,7 +100,8 @@ class TypeObjectHandler:
         if self._logical_type_registry is not None:
             return self._logical_type_registry
         from orcapod.contexts import get_default_context
-        return get_default_context().type_converter._logical_type_registry
+        ctx = get_default_context()
+        return getattr(ctx.type_converter, "_logical_type_registry", None)
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, type):

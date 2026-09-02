@@ -1475,7 +1475,7 @@ class TestUniformHasherPropagation:
 
 
 # ---------------------------------------------------------------------------
-# 13. TypeObjectHandler with registry (ITL-638)
+# 20. TypeObjectHandler with registry (ITL-638)
 # ---------------------------------------------------------------------------
 
 
@@ -1525,6 +1525,10 @@ class TestTypeObjectHandlerWithRegistry:
     def test_simulated_module_relocation_stable(self, registry, hasher):
         """Relocating a class's __module__ does not change the hash if its
         logical_type_name is unchanged in the registry.
+
+        Uses an isolated ``PythonTypeHandlerRegistry`` with the explicit *registry*
+        fixture wired into ``TypeObjectHandler`` so this test does not rely on the
+        global default context's registry state.
         """
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
             TypeObjectHandler,
@@ -1540,6 +1544,9 @@ class TestTypeObjectHandlerWithRegistry:
 
         reg = PythonTypeHandlerRegistry()
         register_builtin_python_type_handlers(reg)
+        # Explicitly override the type handler with one that has the test registry
+        # wired in, so we test canonical-name resolution, not the lazy fallback path.
+        reg.register(type, TypeObjectHandler(logical_type_registry=registry))
         h = SemanticAwarePythonHasher(hasher_id="test_v1", type_handler_registry=reg)
 
         hash_before = h.hash_object(op.File)
