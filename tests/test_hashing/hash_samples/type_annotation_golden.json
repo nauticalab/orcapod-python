@@ -1,0 +1,37 @@
+{
+  "annotation_hashes": {
+    "int": "semantic_v0.1:24be397c58c33686e96b4f85a9f443fd2483564ec7dee1c14b96da3e60ec16ac",
+    "str": "semantic_v0.1:309d607de6633b959ae5118171f079b2830f4b1340064fac065652e305b038ad",
+    "float": "semantic_v0.1:0059c08fc7dfe19dc8d095b7e95d56e8d377bbe49ac30376a00105eca2e7c75f",
+    "bytes": "semantic_v0.1:f65cea8d1f29ca5b96d67caf1ced2f630b509e32574a7b78b9071958818a1c59",
+    "op.File": "semantic_v0.1:4d23315b4ab558db547fb9e23e4c2ddfc68602ccd54ab5f13875d76cb30a917a",
+    "op.Directory": "semantic_v0.1:089ecc3b98bd9289499bfedf61b4129ad7ebc213f75ac81d76e432cb2b9c9d1c",
+    "op.Path": "semantic_v0.1:0cd349d3a0de173ca0f433ba66905a77254bb482bc895438720bb59c8e686a49",
+    "op.UUID": "semantic_v0.1:b250d78a250c09a0e88200a76bd4ed3c52201d0207f9abffe713418b0e5aa25a",
+    "list[int]": "semantic_v0.1:5c376e29b0cfebd85277c71c07c9996afaf06fab35f81681b82f705c9feafa3e",
+    "dict[str, int]": "semantic_v0.1:f0d36b085fa65f3368d1d98687ffcb6c80099a418419e45a77d434b37e4393dd",
+    "list[op.File]": "semantic_v0.1:b398d17ead5323e1f1ceeac4846b294fa7d16d18d5a3f79ea0fb570fea7edcce",
+    "dict[str, op.File]": "semantic_v0.1:f43466ebdb6e8f5eba007c982edaef7a1dd8cecff597fc6f2e2ca3542b49ed54",
+    "int | str": "semantic_v0.1:99532275ec7a3749a300da6f3f6b7d056eb1a024815308b7557cf86eea9f80b7",
+    "op.File | None": "semantic_v0.1:7816cc078cf2984dd36907c954daf1faff0272a8f7b66faa1ca5443e0552d8f9",
+    "Optional[op.File]": "semantic_v0.1:7816cc078cf2984dd36907c954daf1faff0272a8f7b66faa1ca5443e0552d8f9"
+  },
+  "function_info_hashes": {
+    "fn_no_annotations": "semantic_v0.1:f532906f6c4fff6ed9b18cffaf4d152941a550b3bfad16569f4ae2e7e42f643e",
+    "fn_builtin_param": "semantic_v0.1:5cc929495a43174036e36e355ec723b6b0acb78ef196c7501c0c2032ab06cf94",
+    "fn_orcapod_param": "semantic_v0.1:6a4e0bc9ec5e507361a8625f3e2ed9a3d99230870adc6328d30e6f896c744d4e",
+    "fn_orcapod_return": "semantic_v0.1:31e2403f5e6ba118664062deca7c609d6d196e61c758565a1488f1a7a8ea56a6",
+    "fn_generic_orcapod": "semantic_v0.1:9f2a25e4e82d6c157d56f0ef695429abf4f66eaf94a1c8dae988cce75e6eb1c1",
+    "fn_union_orcapod": "semantic_v0.1:338d916d0d54cbc3409861b69044127f58cd0964c56a42f6a469b78e468f442e",
+    "fn_mixed": "semantic_v0.1:b733ef99d80cfbe3a434f7f6de8f84b0ad405d9e7d0d8f78274282a68b9dc60e"
+  },
+  "function_object_hashes": {
+    "fn_no_annotations": "semantic_v0.1:f532906f6c4fff6ed9b18cffaf4d152941a550b3bfad16569f4ae2e7e42f643e",
+    "fn_builtin_param": "semantic_v0.1:5cc929495a43174036e36e355ec723b6b0acb78ef196c7501c0c2032ab06cf94",
+    "fn_orcapod_param": "semantic_v0.1:6a4e0bc9ec5e507361a8625f3e2ed9a3d99230870adc6328d30e6f896c744d4e",
+    "fn_orcapod_return": "semantic_v0.1:31e2403f5e6ba118664062deca7c609d6d196e61c758565a1488f1a7a8ea56a6",
+    "fn_generic_orcapod": "semantic_v0.1:9f2a25e4e82d6c157d56f0ef695429abf4f66eaf94a1c8dae988cce75e6eb1c1",
+    "fn_union_orcapod": "semantic_v0.1:338d916d0d54cbc3409861b69044127f58cd0964c56a42f6a469b78e468f442e",
+    "fn_mixed": "semantic_v0.1:b733ef99d80cfbe3a434f7f6de8f84b0ad405d9e7d0d8f78274282a68b9dc60e"
+  }
+}
