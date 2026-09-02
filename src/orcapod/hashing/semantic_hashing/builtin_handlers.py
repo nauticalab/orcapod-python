@@ -440,6 +440,7 @@ def register_builtin_python_type_handlers(
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
     directory_hasher: Any = None,
+    logical_type_registry: Any = None,
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
@@ -470,6 +471,11 @@ def register_builtin_python_type_handlers(
             When ``None``, lazy resolution via the default context is used.
         directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
             Defaults to ``BasicDirectoryHasher(sha256)``.
+        logical_type_registry: Optional ``LogicalTypeRegistry`` forwarded to
+            ``TypeObjectHandler`` and ``FunctionSignatureExtractor`` for stable
+            canonical type-name resolution.  When ``None`` (the default), both
+            handlers resolve the registry lazily from ``get_default_context()``
+            at call time — identical behaviour to the previous API.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import FileHasher
@@ -489,6 +495,7 @@ def register_builtin_python_type_handlers(
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
+            logical_type_registry=logical_type_registry,
         )
 
     bytes_hasher = BytesHandler()
@@ -510,7 +517,7 @@ def register_builtin_python_type_handlers(
     registry.register(_types.BuiltinFunctionType, function_hasher)
     registry.register(_types.MethodType, function_hasher)
 
-    registry.register(type, TypeObjectHandler())
+    registry.register(type, TypeObjectHandler(logical_type_registry=logical_type_registry))
     registry.register(_types.UnionType, UnionTypeHandler())
 
     generic_alias_hasher = GenericAliasHandler()
