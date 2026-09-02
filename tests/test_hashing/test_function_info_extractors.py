@@ -283,3 +283,33 @@ class TestFunctionSignatureExtractorWithRegistry:
 
         assert info_before["params"] == info_after["params"]
         assert info_before["returns"] == info_after["returns"]
+
+    def test_registered_type_as_generic_origin_detected(self, extractor):
+        """_annotation_contains_registered_type checks origin, not just args.
+
+        If a registered type appears as the *origin* of a generic alias (rather
+        than inside its args), it must still be detected so that the return
+        annotation is stored as a canonical string.  Concretely, this guards
+        against the bug where ``any(...args...)`` was the only check and the
+        origin was silently skipped.
+        """
+        import types as _types
+
+        # Construct a fake generic alias whose __origin__ is op.File (a
+        # registered type) and whose __args__ are plain builtins.
+        # This is deliberately artificial — real user code won't normally do
+        # this, but it exercises the origin-check code path directly.
+        class FakeGeneric:
+            __origin__ = op.File   # registered type as origin
+            __args__ = (int,)      # unregistered args
+
+        from orcapod.hashing.semantic_hashing.function_info_extractors import (
+            _annotation_contains_registered_type,
+        )
+        from orcapod.contexts import get_default_context
+
+        tc = get_default_context().type_converter
+        assert _annotation_contains_registered_type(FakeGeneric(), tc), (
+            "Registered type in __origin__ must be detected by "
+            "_annotation_contains_registered_type"
+        )

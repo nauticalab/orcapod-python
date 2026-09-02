@@ -35,11 +35,13 @@ def _annotation_contains_registered_type(
     if is_union_annotation(annotation):
         args = getattr(annotation, "__args__", ()) or ()
         return any(_annotation_contains_registered_type(a, type_converter) for a in args)
-    # Generic aliases (list[X], dict[K, V], etc.): check args
+    # Generic aliases (list[X], dict[K, V], etc.): check origin AND args
     origin = getattr(annotation, "__origin__", None)
     if origin is not None:
         args = getattr(annotation, "__args__", None) or ()
-        return any(_annotation_contains_registered_type(a, type_converter) for a in args)
+        return _annotation_contains_registered_type(origin, type_converter) or any(
+            _annotation_contains_registered_type(a, type_converter) for a in args
+        )
     return False
 
 
