@@ -2,6 +2,8 @@
 import inspect
 from pathlib import Path
 
+import pytest
+
 from orcapod.hashing.hash_utils import (
     canonical_annotation_str,
     get_function_signature,
@@ -369,3 +371,71 @@ class TestGetFunctionComponents:
 
         result = self._get(my_func)
         assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# Tests for canonical_annotation_str with registry (ITL-638)
+# ---------------------------------------------------------------------------
+import typing
+from uuid import UUID
+
+import orcapod as op
+
+
+class TestCanonicalAnnotationStrWithRegistry:
+    """canonical_annotation_str resolves registered logical types to stable names."""
+
+    @pytest.fixture
+    def registry(self):
+        from orcapod.contexts import get_default_context
+        return get_default_context().type_converter._logical_type_registry
+
+    def test_builtin_type_unchanged(self, registry):
+        assert canonical_annotation_str(int, registry) == "int"
+
+    def test_builtin_str_unchanged(self, registry):
+        assert canonical_annotation_str(str, registry) == "str"
+
+    def test_registered_file_uses_logical_name(self, registry):
+        result = canonical_annotation_str(op.File, registry)
+        assert result == "orcapod.file"
+
+    def test_registered_directory_uses_logical_name(self, registry):
+        result = canonical_annotation_str(op.Directory, registry)
+        assert result == "orcapod.directory"
+
+    def test_registered_path_uses_logical_name(self, registry):
+        import pathlib
+        result = canonical_annotation_str(pathlib.Path, registry)
+        assert result == "orcapod.path"
+
+    def test_registered_uuid_uses_logical_name(self, registry):
+        result = canonical_annotation_str(UUID, registry)
+        assert result == "orcapod.uuid"
+
+    def test_generic_list_of_registered_type(self, registry):
+        result = canonical_annotation_str(list[op.File], registry)
+        assert result == "list[orcapod.file]"
+
+    def test_generic_dict_with_registered_value(self, registry):
+        result = canonical_annotation_str(dict[str, op.File], registry)
+        assert result == "dict[str, orcapod.file]"
+
+    def test_union_with_registered_type(self, registry):
+        result = canonical_annotation_str(op.File | None, registry)
+        # Members sorted; NoneType sorts before orcapod.file
+        assert result == "NoneType | orcapod.file"
+
+    def test_optional_registered_type(self, registry):
+        result = canonical_annotation_str(typing.Optional[op.File], registry)
+        assert result == "NoneType | orcapod.file"
+
+    def test_no_registry_fallback(self):
+        """Without registry, behaviour is identical to the existing function."""
+        result = canonical_annotation_str(op.File, None)
+        assert result == inspect.formatannotation(op.File)
+
+    def test_stable_across_calls(self, registry):
+        r1 = canonical_annotation_str(op.File, registry)
+        r2 = canonical_annotation_str(op.File, registry)
+        assert r1 == r2

@@ -6,11 +6,15 @@ import typing
 import zlib
 from collections.abc import Callable, Collection
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import xxhash
 from upath import UPath
 
 from orcapod.types import ContentHash, PathLike
+
+if TYPE_CHECKING:
+    from orcapod.logical_types.registry import LogicalTypeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -32,29 +36,56 @@ def is_union_annotation(annotation: object) -> bool:
     return getattr(annotation, "__origin__", None) is typing.Union
 
 
-def canonical_annotation_str(annotation: object) -> str:
+def canonical_annotation_str(
+    annotation: object,
+    registry: "LogicalTypeRegistry | None" = None,
+) -> str:
     """Return a stable, canonical string for a type annotation.
+
+    Resolves types registered in *registry* (e.g. ``orcapod.File``) to their
+    stable ``logical_type_name`` (e.g. ``"orcapod.file"``) so that internal
+    module relocations do not change the string representation.
 
     For union types (both PEP 604 ``X | Y`` and ``typing.Union[X, Y]``),
     members are sorted byte-wise so that ``str | Path`` and ``Path | str``
-    produce the same canonical string.  Non-union types fall through to
-    ``inspect.formatannotation``, preserving existing behaviour exactly.
+    produce the same canonical string.
 
-    The canonical ordering key is the fully qualified type name produced by
-    ``inspect.formatannotation`` (e.g. ``"pathlib.Path"``, ``"str"``),
-    sorted lexicographically.  This is stable across Python versions and
-    machines and does not depend on ``id()`` or ``__hash__``.
+    For generic aliases (``list[X]``, ``dict[K, V]``), args are recursed with
+    the same registry so nested orcapod types are also canonicalized.
+
+    Non-union, non-generic types not found in the registry fall through to
+    ``inspect.formatannotation``, preserving existing behaviour exactly.
 
     Args:
         annotation: A type annotation object.
+        registry: Optional ``LogicalTypeRegistry``. When provided, registered
+            logical types resolve to their stable ``logical_type_name``.
 
     Returns:
         A canonical string representation.
     """
+    # Registered logical type: use stable canonical name (e.g. "orcapod.file")
+    if registry is not None and isinstance(annotation, type):
+        lt = registry.get_by_python_type(annotation)
+        if lt is not None:
+            return lt.logical_type_name
+
+    # Union types (PEP 604 X | Y and typing.Union): sort members for order-independence
     if is_union_annotation(annotation):
         args = getattr(annotation, "__args__", ()) or ()
-        member_strs = sorted(canonical_annotation_str(a) for a in args)
+        member_strs = sorted(canonical_annotation_str(a, registry) for a in args)
         return " | ".join(member_strs)
+
+    # Generic aliases (list[X], dict[K, V], etc.): recurse over args
+    origin = getattr(annotation, "__origin__", None)
+    if origin is not None and not is_union_annotation(annotation):
+        args = getattr(annotation, "__args__", None) or ()
+        origin_str = canonical_annotation_str(origin, registry)
+        if args:
+            args_str = ", ".join(canonical_annotation_str(a, registry) for a in args)
+            return f"{origin_str}[{args_str}]"
+        return origin_str
+
     return inspect.formatannotation(annotation)
 
 
