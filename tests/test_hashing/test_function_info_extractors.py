@@ -85,19 +85,14 @@ class TestFunctionSignatureExtractor:
             pass
 
         result = self._make(include_defaults=False).extract_function_info(fn)
-        # Default values should be stripped
-        assert "42" not in result["params"]
-        assert "hi" not in result["params"]
-        # Parameter names should still be present
-        assert "x" in result["params"]
-        assert "y" in result["params"]
+        assert result["params"] == "x: int, y: str"
 
     def test_include_defaults_true_keeps_defaults(self):
         def fn(x: int = 42) -> None:
             pass
 
         result = self._make(include_defaults=True).extract_function_info(fn)
-        assert "42" in result["params"]
+        assert result["params"] == "x: int = 42"
 
     def test_return_annotation_present(self):
         def fn() -> str:
@@ -122,7 +117,7 @@ class TestFunctionSignatureExtractor:
         assert result["name"] == "overridden"
 
     def test_union_annotation_canonicalized(self):
-        """Union annotations are canonicalized for order stability."""
+        """Union annotations are sorted byte-wise for order stability."""
         def fn1(x: str | Path) -> None:
             pass
 
@@ -131,7 +126,8 @@ class TestFunctionSignatureExtractor:
 
         r1 = self._make(include_module=False).extract_function_info(fn1, function_name="fn")
         r2 = self._make(include_module=False).extract_function_info(fn2, function_name="fn")
-        assert r1["params"] == r2["params"]
+        assert r1["params"] == "x: pathlib.Path | str"
+        assert r2["params"] == "x: pathlib.Path | str"
 
     def test_annotation_containing_equals_preserved_when_defaults_stripped(self):
         """Annotations containing ``=`` are not truncated when include_defaults=False.
@@ -148,11 +144,16 @@ class TestFunctionSignatureExtractor:
             pass
 
         result = self._make(include_defaults=False).extract_function_info(fn)
-        # The full annotation must be present
-        assert "Literal" in result["params"]
-        assert "a=b" in result["params"]
-        # The default value must be absent
+        # With from __future__ import annotations the annotation is stored as a
+        # string; eval_str=True cannot resolve Literal from fn's globals, so it
+        # falls back and formatannotation wraps the string literal in quotes.
+        # The key property is that the full annotation is present and the default
+        # value ("default_value") is absent — verified exactly here.
+        assert "Literal" in result["params"] and "a=b" in result["params"]
         assert "default_value" not in result["params"]
+        # No '=' from the default assignment should survive (annotation may contain
+        # its own '=' as part of Literal, but the default is stripped cleanly).
+        assert result["params"].count("=") == result["params"].count("a=b")
 
     def test_varargs_and_kwargs_with_annotations(self):
         """*args and **kwargs with annotations are formatted correctly.
@@ -165,8 +166,7 @@ class TestFunctionSignatureExtractor:
             pass
 
         result = self._make().extract_function_info(fn)
-        assert "*args: int" in result["params"]
-        assert "**kwargs: str" in result["params"]
+        assert result["params"] == "*args: int, **kwargs: str"
 
     def test_keyword_only_param_formatted_without_star_prefix(self):
         """Keyword-only parameters appear without a ``*`` prefix in params.
@@ -179,10 +179,7 @@ class TestFunctionSignatureExtractor:
             pass
 
         result = self._make().extract_function_info(fn)
-        assert "a: int" in result["params"]
-        assert "b: str" in result["params"]
-        # 'b' must not have a '*' prefix (bare * separator is not a param)
-        assert "*b" not in result["params"]
+        assert result["params"] == "a: int, b: str"
 
     def test_eval_str_fallback_on_unresolvable_annotation(self):
         """When eval_str=True fails, falls back to unresolved signature."""
@@ -275,12 +272,7 @@ class TestFunctionSignatureExtractorWithRegistry:
             ...
 
         info = extractor.extract_function_info(fn)
-        assert "orcapod.file" in info["params"], (
-            f"Expected 'orcapod.file' in params, got: {info['params']!r}"
-        )
-        assert "logical_types" not in info["params"], (
-            f"Module path leaked into params: {info['params']!r}"
-        )
+        assert info["params"] == "f: orcapod.file"
 
     def test_generic_param_annotation_canonical(self, extractor):
         """list[op.File] in a parameter is canonicalized."""
@@ -288,8 +280,7 @@ class TestFunctionSignatureExtractorWithRegistry:
             ...
 
         info = extractor.extract_function_info(fn)
-        assert "orcapod.file" in info["params"]
-        assert "logical_types" not in info["params"]
+        assert info["params"] == "files: list[orcapod.file]"
 
     def test_union_return_annotation_is_raw_union(self, extractor):
         """op.File | None return annotation is stored as a raw union type object.
@@ -357,8 +348,7 @@ class TestFunctionSignatureExtractorWithRegistry:
             ...
 
         info = extractor.extract_function_info(fn)
-        assert "int" in info["params"]
-        assert "str" in info["params"]
+        assert info["params"] == "x: int, y: str"
         assert info["returns"] is float  # type object, not string "float"
 
     def test_param_canonical_string_and_return_type_object(self, extractor):
@@ -377,7 +367,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         info_param = extractor.extract_function_info(fn_param)
         info_return = extractor.extract_function_info(fn_return)
 
-        assert "orcapod.file" in info_param["params"]
+        assert info_param["params"] == "f: orcapod.file"
         assert info_return["returns"] is op.File
 
     def test_simulated_relocation_stable(self, extractor):
