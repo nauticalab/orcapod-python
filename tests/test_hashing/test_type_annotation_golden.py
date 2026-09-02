@@ -1,10 +1,14 @@
 """Golden-value regression tests for type annotation hashing (ITL-638).
 
-Two test classes:
-  TestGoldenStability   -- builtins must be UNCHANGED after the fix.
-  TestGoldenCanonical   -- orcapod logical types must produce NEW canonical hashes.
+Three test classes:
+  TestGoldenStability       -- builtins must be UNCHANGED after the fix.
+  TestGoldenCanonical       -- orcapod logical types must produce NEW canonical hashes.
+  TestSchemaHashStability   -- Schema hashes (including orcapod types) must stay stable
+                               after any future code change.
 
-The golden JSON was generated pre-fix by generate_type_annotation_golden.py.
+The annotation/function golden JSON was generated pre-fix by generate_type_annotation_golden.py.
+The schema golden JSON (hash_samples/schema_hash_golden.json) was generated post-fix and
+locks in the stable canonical hash values.
 """
 from __future__ import annotations
 
@@ -20,9 +24,13 @@ from orcapod.hashing.defaults import get_default_semantic_hasher
 from orcapod.hashing.semantic_hashing.function_info_extractors import (
     FunctionSignatureExtractor,
 )
+from orcapod.types import Schema
 
 GOLDEN_PATH = (
     pathlib.Path(__file__).parent / "hash_samples" / "type_annotation_golden.json"
+)
+SCHEMA_GOLDEN_PATH = (
+    pathlib.Path(__file__).parent / "hash_samples" / "schema_hash_golden.json"
 )
 
 # ---------------------------------------------------------------------------
@@ -186,4 +194,75 @@ class TestGoldenCanonical:
         assert not unchanged, (
             f"Expected these function hashes to change after the fix, but they didn't:\n"
             + "\n".join(f"  {k}: {v}" for k, v in unchanged.items())
+        )
+
+
+# ---------------------------------------------------------------------------
+# Schema hash cases — covers both builtin and orcapod logical types.
+# All entries are POST-FIX canonical values and must remain stable forever.
+# ---------------------------------------------------------------------------
+
+SCHEMA_CASES: dict[str, Schema] = {
+    "Schema({x: int})": Schema({"x": int}),
+    "Schema({x: int, y: str})": Schema({"x": int, "y": str}),
+    "Schema({f: op.File})": Schema({"f": op.File}),
+    "Schema({d: op.Directory})": Schema({"d": op.Directory}),
+    "Schema({p: op.Path})": Schema({"p": op.Path}),
+    "Schema({x: int, f: op.File})": Schema({"x": int, "f": op.File}),
+    "Schema({f: op.File, d: op.Directory})": Schema({"f": op.File, "d": op.Directory}),
+    "Schema({f: op.File | None})": Schema({"f": op.File | None}),
+}
+
+
+@pytest.fixture(scope="module")
+def schema_golden() -> dict:
+    assert SCHEMA_GOLDEN_PATH.exists(), (
+        f"Schema golden file not found: {SCHEMA_GOLDEN_PATH}. "
+        "Regenerate it by running: "
+        "uv run python -c \"<see generate_type_annotation_golden.py for pattern>\""
+    )
+    return json.loads(SCHEMA_GOLDEN_PATH.read_text())
+
+
+class TestSchemaHashStability:
+    """Schema hashes must stay stable after any code change.
+
+    The golden file (hash_samples/schema_hash_golden.json) was generated
+    post-fix (ITL-638) and captures the canonical hash for each schema.
+    Every entry — including schemas that contain orcapod logical types such
+    as ``op.File`` and ``op.Directory`` — must remain byte-identical across
+    future refactors.
+
+    If a hash changes unexpectedly, investigate whether:
+    - ``TypeObjectHandler`` serialization changed for a logical type.
+    - A logical type's ``logical_type_name`` was renamed.
+    - The semantic hasher version was bumped (which intentionally changes all hashes).
+
+    To intentionally update the golden values (e.g. after a deliberate hash-scheme
+    change), recompute and overwrite ``hash_samples/schema_hash_golden.json``.
+    """
+
+    def test_schema_hashes_stable(self, schema_golden, hasher):
+        """Every schema in the golden file must hash to the same value."""
+        mismatches = {}
+        for key, schema in SCHEMA_CASES.items():
+            current = hasher.hash_object(schema).to_string()
+            expected = schema_golden[key]
+            if current != expected:
+                mismatches[key] = {"expected": expected, "current": current}
+        assert not mismatches, (
+            "Schema hash values changed — this may indicate an unintended regression "
+            "in TypeObjectHandler or canonical_annotation_str:\n"
+            + "\n".join(
+                f"  {k}:\n    expected: {v['expected']}\n    current:  {v['current']}"
+                for k, v in mismatches.items()
+            )
+        )
+
+    def test_all_golden_keys_covered(self, schema_golden):
+        """Every key in the golden file must have a corresponding SCHEMA_CASES entry."""
+        missing = set(schema_golden.keys()) - set(SCHEMA_CASES.keys())
+        assert not missing, (
+            f"Golden file contains keys not covered by SCHEMA_CASES: {missing}\n"
+            "Add the missing schema(s) to SCHEMA_CASES or regenerate the golden file."
         )
