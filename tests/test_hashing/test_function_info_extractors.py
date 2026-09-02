@@ -175,19 +175,15 @@ class TestFunctionSignatureExtractorWithRegistry:
     """FunctionSignatureExtractor canonicalizes both param and return annotations."""
 
     @pytest.fixture
-    def registry(self):
+    def extractor(self):
         from orcapod.contexts import get_default_context
-        return get_default_context().type_converter._logical_type_registry
-
-    @pytest.fixture
-    def extractor(self, registry):
         from orcapod.hashing.semantic_hashing.function_info_extractors import (
             FunctionSignatureExtractor,
         )
         return FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
-            logical_type_registry=registry,
+            type_converter=get_default_context().type_converter,
         )
 
     def test_return_annotation_is_canonical_string(self, extractor):

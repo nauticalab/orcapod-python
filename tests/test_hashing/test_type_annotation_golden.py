@@ -126,7 +126,12 @@ def hasher():
 
 @pytest.fixture(scope="module")
 def extractor():
-    return FunctionSignatureExtractor(include_module=True, include_defaults=True)
+    from orcapod.contexts import get_default_context
+    return FunctionSignatureExtractor(
+        include_module=True,
+        include_defaults=True,
+        type_converter=get_default_context().type_converter,
+    )
 
 
 class TestGoldenStability:

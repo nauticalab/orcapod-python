@@ -8,6 +8,8 @@ from orcapod.types import DataType, Schema, SchemaLike
 if TYPE_CHECKING:
     import pyarrow as pa
 
+    from orcapod.logical_types.protocols import LogicalTypeProtocol
+
 
 class TypeConverterProtocol(Protocol):
     def python_type_to_arrow_type(self, python_type: DataType) -> "pa.DataType": ...
@@ -52,5 +54,7 @@ class TypeConverterProtocol(Protocol):
     ) -> "Callable[[Any], Any]": ...
 
     def ensure_types_registered_for_schemas(self, *schemas: Schema) -> None: ...
+
+    def get_logical_type(self, python_type: type) -> "LogicalTypeProtocol | None": ...
 
 

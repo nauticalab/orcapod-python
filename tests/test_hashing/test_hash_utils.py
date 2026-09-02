@@ -385,56 +385,56 @@ class TestCanonicalAnnotationStrWithRegistry:
     """canonical_annotation_str resolves registered logical types to stable names."""
 
     @pytest.fixture
-    def registry(self):
+    def type_converter(self):
         from orcapod.contexts import get_default_context
-        return get_default_context().type_converter._logical_type_registry
+        return get_default_context().type_converter
 
-    def test_builtin_type_unchanged(self, registry):
-        assert canonical_annotation_str(int, registry) == "int"
+    def test_builtin_type_unchanged(self, type_converter):
+        assert canonical_annotation_str(int, type_converter) == "int"
 
-    def test_builtin_str_unchanged(self, registry):
-        assert canonical_annotation_str(str, registry) == "str"
+    def test_builtin_str_unchanged(self, type_converter):
+        assert canonical_annotation_str(str, type_converter) == "str"
 
-    def test_registered_file_uses_logical_name(self, registry):
-        result = canonical_annotation_str(op.File, registry)
+    def test_registered_file_uses_logical_name(self, type_converter):
+        result = canonical_annotation_str(op.File, type_converter)
         assert result == "orcapod.file"
 
-    def test_registered_directory_uses_logical_name(self, registry):
-        result = canonical_annotation_str(op.Directory, registry)
+    def test_registered_directory_uses_logical_name(self, type_converter):
+        result = canonical_annotation_str(op.Directory, type_converter)
         assert result == "orcapod.directory"
 
-    def test_registered_path_uses_logical_name(self, registry):
+    def test_registered_path_uses_logical_name(self, type_converter):
         import pathlib
-        result = canonical_annotation_str(pathlib.Path, registry)
+        result = canonical_annotation_str(pathlib.Path, type_converter)
         assert result == "orcapod.path"
 
-    def test_registered_uuid_uses_logical_name(self, registry):
-        result = canonical_annotation_str(UUID, registry)
+    def test_registered_uuid_uses_logical_name(self, type_converter):
+        result = canonical_annotation_str(UUID, type_converter)
         assert result == "orcapod.uuid"
 
-    def test_generic_list_of_registered_type(self, registry):
-        result = canonical_annotation_str(list[op.File], registry)
+    def test_generic_list_of_registered_type(self, type_converter):
+        result = canonical_annotation_str(list[op.File], type_converter)
         assert result == "list[orcapod.file]"
 
-    def test_generic_dict_with_registered_value(self, registry):
-        result = canonical_annotation_str(dict[str, op.File], registry)
+    def test_generic_dict_with_registered_value(self, type_converter):
+        result = canonical_annotation_str(dict[str, op.File], type_converter)
         assert result == "dict[str, orcapod.file]"
 
-    def test_union_with_registered_type(self, registry):
-        result = canonical_annotation_str(op.File | None, registry)
+    def test_union_with_registered_type(self, type_converter):
+        result = canonical_annotation_str(op.File | None, type_converter)
         # Members sorted; NoneType sorts before orcapod.file
         assert result == "NoneType | orcapod.file"
 
-    def test_optional_registered_type(self, registry):
-        result = canonical_annotation_str(typing.Optional[op.File], registry)
+    def test_optional_registered_type(self, type_converter):
+        result = canonical_annotation_str(typing.Optional[op.File], type_converter)
         assert result == "NoneType | orcapod.file"
 
-    def test_no_registry_fallback(self):
-        """Without registry, behaviour is identical to the existing function."""
+    def test_no_type_converter_fallback(self):
+        """Without type_converter, falls back to inspect.formatannotation."""
         result = canonical_annotation_str(op.File, None)
         assert result == inspect.formatannotation(op.File)
 
-    def test_stable_across_calls(self, registry):
-        r1 = canonical_annotation_str(op.File, registry)
-        r2 = canonical_annotation_str(op.File, registry)
+    def test_stable_across_calls(self, type_converter):
+        r1 = canonical_annotation_str(op.File, type_converter)
+        r2 = canonical_annotation_str(op.File, type_converter)
         assert r1 == r2

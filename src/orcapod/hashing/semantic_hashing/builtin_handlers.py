@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         HandlerRegistryProtocol,
         SemanticHasherProtocol,
     )
+    from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -83,34 +84,30 @@ class FunctionHandler:
 class TypeObjectHandler:
     """Hasher for type objects (classes passed as values).
 
-    Resolves types registered in *logical_type_registry* to their stable
-    ``logical_type_name`` (e.g. ``"type:orcapod.file"`` for ``op.File``).
-    Falls back to ``"type:<module>.<qualname>"`` for unregistered types.
+    Resolves types registered in the ``LogicalTypeRegistry`` exposed by
+    *type_converter* to their stable ``logical_type_name``
+    (e.g. ``"type:orcapod.file"`` for ``op.File``).
+    Falls back to ``"type:<module>.<qualname>"`` for unregistered types or
+    when no ``type_converter`` is provided.
 
     Args:
-        logical_type_registry: Optional ``LogicalTypeRegistry``. When ``None``,
-            the default context's registry is resolved lazily at call time,
-            following the same pattern as ``ArrowTableHandler``.
+        type_converter: Optional ``TypeConverterProtocol``.  When provided,
+            ``type_converter.get_logical_type_registry()`` is called to resolve
+            registered logical types to their stable canonical name.  When
+            ``None`` (the default), the fallback ``"type:<module>.<qualname>"``
+            serialisation is always used.
     """
 
-    def __init__(self, logical_type_registry: Any = None) -> None:
-        self._logical_type_registry = logical_type_registry
-
-    def _get_registry(self) -> Any:
-        if self._logical_type_registry is not None:
-            return self._logical_type_registry
-        from orcapod.contexts import get_default_context
-        ctx = get_default_context()
-        return getattr(ctx.type_converter, "_logical_type_registry", None)
+    def __init__(self, type_converter: "TypeConverterProtocol | None" = None) -> None:
+        self._type_converter = type_converter
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, type):
             raise TypeError(
                 f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
             )
-        registry = self._get_registry()
-        if registry is not None:
-            lt = registry.get_by_python_type(obj)
+        if self._type_converter is not None:
+            lt = self._type_converter.get_logical_type(obj)
             if lt is not None:
                 return f"type:{lt.logical_type_name}"
         module: str = obj.__module__ or "<unknown>"
@@ -440,7 +437,7 @@ def register_builtin_python_type_handlers(
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
     directory_hasher: Any = None,
-    logical_type_registry: Any = None,
+    type_converter: "TypeConverterProtocol | None" = None,
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
@@ -471,11 +468,11 @@ def register_builtin_python_type_handlers(
             When ``None``, lazy resolution via the default context is used.
         directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
             Defaults to ``BasicDirectoryHasher(sha256)``.
-        logical_type_registry: Optional ``LogicalTypeRegistry`` forwarded to
+        type_converter: Optional ``TypeConverterProtocol`` forwarded to
             ``TypeObjectHandler`` and ``FunctionSignatureExtractor`` for stable
-            canonical type-name resolution.  When ``None`` (the default), both
-            handlers resolve the registry lazily from ``get_default_context()``
-            at call time — identical behaviour to the previous API.
+            canonical type-name resolution via ``get_logical_type_registry()``.
+            When ``None`` (the default), both handlers fall back to the raw
+            ``"type:<module>.<qualname>"`` serialisation.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import FileHasher
@@ -495,7 +492,7 @@ def register_builtin_python_type_handlers(
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
-            logical_type_registry=logical_type_registry,
+            type_converter=type_converter,
         )
 
     bytes_hasher = BytesHandler()
@@ -517,7 +514,7 @@ def register_builtin_python_type_handlers(
     registry.register(_types.BuiltinFunctionType, function_hasher)
     registry.register(_types.MethodType, function_hasher)
 
-    registry.register(type, TypeObjectHandler(logical_type_registry=logical_type_registry))
+    registry.register(type, TypeObjectHandler(type_converter=type_converter))
     registry.register(_types.UnionType, UnionTypeHandler())
 
     generic_alias_hasher = GenericAliasHandler()

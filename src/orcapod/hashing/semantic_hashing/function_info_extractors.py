@@ -8,9 +8,12 @@ from orcapod.types import Schema
 
 if TYPE_CHECKING:
     from orcapod.logical_types.registry import LogicalTypeRegistry
+    from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 
-def _annotation_contains_registered_type(annotation: object, registry: "LogicalTypeRegistry") -> bool:
+def _annotation_contains_registered_type(
+    annotation: object, type_converter: "TypeConverterProtocol"
+) -> bool:
     """Return ``True`` if *annotation* or any nested type argument is registered.
 
     This is used to decide whether a return annotation should be stored as a
@@ -20,22 +23,23 @@ def _annotation_contains_registered_type(annotation: object, registry: "LogicalT
 
     Args:
         annotation: A type annotation to inspect.
-        registry: The ``LogicalTypeRegistry`` to consult.
+        type_converter: The ``TypeConverterProtocol`` to consult via
+            ``get_logical_type()``.
 
     Returns:
         ``True`` if any component of the annotation is registered.
     """
     if isinstance(annotation, type):
-        return registry.get_by_python_type(annotation) is not None
+        return type_converter.get_logical_type(annotation) is not None
     # Union types: check any member
     if is_union_annotation(annotation):
         args = getattr(annotation, "__args__", ()) or ()
-        return any(_annotation_contains_registered_type(a, registry) for a in args)
+        return any(_annotation_contains_registered_type(a, type_converter) for a in args)
     # Generic aliases (list[X], dict[K, V], etc.): check args
     origin = getattr(annotation, "__origin__", None)
     if origin is not None:
         args = getattr(annotation, "__args__", None) or ()
-        return any(_annotation_contains_registered_type(a, registry) for a in args)
+        return any(_annotation_contains_registered_type(a, type_converter) for a in args)
     return False
 
 
@@ -58,10 +62,9 @@ class FunctionNameExtractor:
 class FunctionSignatureExtractor:
     """Extractor that uses the function signature for information extraction.
 
-    When a ``logical_type_registry`` is provided (or resolvable from the
-    default context), orcapod logical types in annotations are replaced with
-    their stable ``logical_type_name`` (e.g. ``"orcapod.file"``) rather than
-    the full import path (e.g.
+    When a ``type_converter`` is provided, orcapod logical types in annotations
+    are replaced with their stable ``logical_type_name``
+    (e.g. ``"orcapod.file"``) rather than the full import path (e.g.
     ``"orcapod.logical_types.file_type.File"``).  This prevents internal
     module reorganisations from invalidating cached function-pod signatures.
 
@@ -78,20 +81,11 @@ class FunctionSignatureExtractor:
         self,
         include_module: bool = True,
         include_defaults: bool = True,
-        logical_type_registry: "LogicalTypeRegistry | None" = None,
+        type_converter: "TypeConverterProtocol | None" = None,
     ):
         self.include_module = include_module
         self.include_defaults = include_defaults
-        self._logical_type_registry = logical_type_registry
-
-    def _get_registry(self) -> "LogicalTypeRegistry | None":
-        """Return the logical type registry, resolving the lazy fallback if needed."""
-        if self._logical_type_registry is not None:
-            return self._logical_type_registry
-        from orcapod.contexts import get_default_context
-
-        ctx = get_default_context()
-        return getattr(ctx.type_converter, "_logical_type_registry", None)
+        self._type_converter = type_converter
 
     def extract_function_info(
         self,
@@ -123,7 +117,7 @@ class FunctionSignatureExtractor:
         # Add function name
         parts["name"] = function_name or func.__name__
 
-        registry = self._get_registry()
+        tc = self._type_converter
 
         # Add parameters, replacing annotation substrings with canonical forms
         param_strs = []
@@ -132,7 +126,7 @@ class FunctionSignatureExtractor:
             annotation = param.annotation
             if annotation is not inspect.Parameter.empty:
                 old_ann = inspect.formatannotation(annotation)
-                new_ann = canonical_annotation_str(annotation, registry)
+                new_ann = canonical_annotation_str(annotation, tc)
                 if old_ann != new_ann:
                     # Replace ": <old_ann>" with ": <new_ann>" (first occurrence
                     # only).  The ": " prefix avoids accidentally replacing the
@@ -151,8 +145,8 @@ class FunctionSignatureExtractor:
         # cached hashes (a string and a type object hash to different values).
         ret_ann = sig.return_annotation
         if ret_ann is not inspect.Signature.empty:
-            if registry is not None and _annotation_contains_registered_type(ret_ann, registry):
-                parts["returns"] = canonical_annotation_str(ret_ann, registry)
+            if tc is not None and _annotation_contains_registered_type(ret_ann, tc):
+                parts["returns"] = canonical_annotation_str(ret_ann, tc)
             else:
                 parts["returns"] = ret_ann
 

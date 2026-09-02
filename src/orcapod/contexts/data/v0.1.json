@@ -95,7 +95,8 @@
         "_class": "orcapod.hashing.semantic_hashing.function_info_extractors.FunctionSignatureExtractor",
         "_config": {
             "include_module": true,
-            "include_defaults": true
+            "include_defaults": true,
+            "type_converter": {"_ref": "type_converter"}
         }
     },
     "python_type_handler_registry": {
@@ -110,7 +111,7 @@
                 [{"_type": "types.FunctionType"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "types.BuiltinFunctionType"},{"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",    "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
                 [{"_type": "types.MethodType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",     "_config": {"function_info_extractor": {"_ref": "function_semantic_hasher"}}}],
-                [{"_type": "builtins.type"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",   "_config": {}}],
+                [{"_type": "builtins.type"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",   "_config": {"type_converter": {"_ref": "type_converter"}}}],
                 [{"_type": "types.GenericAlias"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler", "_config": {}}],
                 [{"_type": "types.UnionType"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeHandler",    "_config": {}}],
                 [{"_type": "typing._GenericAlias"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler", "_config": {}}],

@@ -1483,14 +1483,14 @@ class TestTypeObjectHandlerWithRegistry:
     """TypeObjectHandler uses stable canonical names for registered logical types."""
 
     @pytest.fixture
-    def registry(self):
+    def type_converter(self):
         from orcapod.contexts import get_default_context
-        return get_default_context().type_converter._logical_type_registry
+        return get_default_context().type_converter
 
     @pytest.fixture
-    def handler(self, registry):
+    def handler(self, type_converter):
         from orcapod.hashing.semantic_hashing.builtin_handlers import TypeObjectHandler
-        return TypeObjectHandler(logical_type_registry=registry)
+        return TypeObjectHandler(type_converter=type_converter)
 
     def test_registered_file_returns_canonical_name(self, handler, hasher):
         import orcapod as op
@@ -1513,22 +1513,24 @@ class TestTypeObjectHandlerWithRegistry:
         assert "type:" in result
         assert "_Local" in result
 
-    def test_lazy_fallback_without_registry(self, hasher):
-        """TypeObjectHandler with no registry arg resolves registry lazily from default context."""
+    def test_no_type_converter_falls_back_to_module_qualname(self, hasher):
+        """TypeObjectHandler with no type_converter always uses module.qualname."""
         from orcapod.hashing.semantic_hashing.builtin_handlers import TypeObjectHandler
         import orcapod as op
-        handler_lazy = TypeObjectHandler()  # no registry arg
-        result = handler_lazy.handle(op.File, hasher)
-        # With lazy fallback to default context, should resolve to canonical name
-        assert result == "type:orcapod.file"
+        handler_plain = TypeObjectHandler()  # no type_converter
+        result = handler_plain.handle(op.File, hasher)
+        # Without a type_converter, canonical resolution is unavailable
+        assert result.startswith("type:")
+        assert "orcapod" in result
+        assert "File" in result
 
-    def test_simulated_module_relocation_stable(self, registry, hasher):
+    def test_simulated_module_relocation_stable(self, type_converter, hasher):
         """Relocating a class's __module__ does not change the hash if its
         logical_type_name is unchanged in the registry.
 
-        Uses an isolated ``PythonTypeHandlerRegistry`` with the explicit *registry*
-        fixture wired into ``TypeObjectHandler`` so this test does not rely on the
-        global default context's registry state.
+        Uses an isolated ``PythonTypeHandlerRegistry`` with the explicit
+        ``type_converter`` fixture wired into ``TypeObjectHandler`` so this test
+        does not rely on the global default context's registry state.
         """
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
             TypeObjectHandler,
@@ -1544,9 +1546,9 @@ class TestTypeObjectHandlerWithRegistry:
 
         reg = PythonTypeHandlerRegistry()
         register_builtin_python_type_handlers(reg)
-        # Explicitly override the type handler with one that has the test registry
-        # wired in, so we test canonical-name resolution, not the lazy fallback path.
-        reg.register(type, TypeObjectHandler(logical_type_registry=registry))
+        # Explicitly override the type handler with one that has the test
+        # type_converter wired in, so we test canonical-name resolution.
+        reg.register(type, TypeObjectHandler(type_converter=type_converter))
         h = SemanticAwarePythonHasher(hasher_id="test_v1", type_handler_registry=reg)
 
         hash_before = h.hash_object(op.File)
