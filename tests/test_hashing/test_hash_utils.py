@@ -1,7 +1,10 @@
 """Tests for hash_utils helpers, specifically canonical union annotation strings."""
 import inspect
+import typing
 from pathlib import Path
+from uuid import UUID
 
+import orcapod as op
 import pytest
 
 from orcapod.hashing.hash_utils import (
@@ -376,10 +379,6 @@ class TestGetFunctionComponents:
 # ---------------------------------------------------------------------------
 # Tests for canonical_annotation_str with registry (ITL-638)
 # ---------------------------------------------------------------------------
-import typing
-from uuid import UUID
-
-import orcapod as op
 
 
 class TestCanonicalAnnotationStrWithRegistry:
