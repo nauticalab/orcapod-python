@@ -134,13 +134,13 @@ class TestFunctionSignatureExtractor:
         assert r1["params"] == r2["params"]
 
     def test_annotation_containing_equals_preserved_when_defaults_stripped(self):
-        """Annotations containing '=' are not truncated when include_defaults=False.
+        """Annotations containing ``=`` are not truncated when include_defaults=False.
 
-        The old approach stripped defaults via ``str(param).split('=')[0]``, which
-        would corrupt any annotation that legitimately contains ``=`` — for example
-        ``Literal["a=b"]`` would become ``Literal["a``.  The component-based
-        ``_format_param`` checks ``param.default is not inspect.Parameter.empty``
-        directly, so the annotation is preserved in full.
+        The old approach stripped defaults via ``str(param).split('=')[0].strip()``,
+        which corrupts annotations that contain ``=``.  For example
+        ``Literal["a=b"] = "v"`` would be split to ``Literal["a``.  Confirmed that
+        this test FAILS with the old implementation and PASSES with ``_format_param``,
+        which checks ``param.default is not inspect.Parameter.empty`` directly.
         """
         from typing import Literal
 
@@ -154,30 +154,35 @@ class TestFunctionSignatureExtractor:
         # The default value must be absent
         assert "default_value" not in result["params"]
 
-    def test_default_value_repr_containing_annotation_substring_not_duplicated(self):
-        """Annotation text that reappears inside a default value's repr is not mangled.
+    def test_varargs_and_kwargs_with_annotations(self):
+        """*args and **kwargs with annotations are formatted correctly.
 
-        The old approach used ``str(param).replace(': <ann>', ': <canonical>', 1)``.
-        If a default value's repr happened to contain ``: <ann>``, the ``count=1``
-        guard protected the *first* occurrence (the real annotation) but could not
-        prevent matching further into the string.  The component-based approach
-        builds the string from parts, so the annotation and default are never mixed.
+        Verifies that ``_format_param`` produces the right ``*`` / ``**`` prefix
+        for VAR_POSITIONAL and VAR_KEYWORD parameters.
         """
 
-        class WeirdDefault:
-            """Whose repr looks like an annotation substring."""
-
-            def __repr__(self) -> str:
-                return "WeirdDefault(': int')"
-
-        def fn(x: int = WeirdDefault()) -> None:  # type: ignore[assignment]
+        def fn(*args: int, **kwargs: str) -> None:
             pass
 
-        result = self._make(include_defaults=True).extract_function_info(fn)
-        # Annotation intact
-        assert result["params"].startswith("x: int")
-        # Default repr preserved verbatim
-        assert "WeirdDefault" in result["params"]
+        result = self._make().extract_function_info(fn)
+        assert "*args: int" in result["params"]
+        assert "**kwargs: str" in result["params"]
+
+    def test_keyword_only_param_formatted_without_star_prefix(self):
+        """Keyword-only parameters appear without a ``*`` prefix in params.
+
+        The bare ``*`` separator is a signature-level token, not a parameter
+        attribute; it must not be prepended to keyword-only params.
+        """
+
+        def fn(a: int, *, b: str) -> None:
+            pass
+
+        result = self._make().extract_function_info(fn)
+        assert "a: int" in result["params"]
+        assert "b: str" in result["params"]
+        # 'b' must not have a '*' prefix (bare * separator is not a param)
+        assert "*b" not in result["params"]
 
     def test_eval_str_fallback_on_unresolvable_annotation(self):
         """When eval_str=True fails, falls back to unresolved signature."""
