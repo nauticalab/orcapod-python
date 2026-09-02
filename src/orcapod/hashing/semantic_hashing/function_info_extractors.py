@@ -2,7 +2,7 @@ import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
-from orcapod.hashing.hash_utils import canonical_annotation_str, is_union_annotation
+from orcapod.hashing.hash_utils import canonical_annotation_str
 from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from orcapod.types import Schema
 

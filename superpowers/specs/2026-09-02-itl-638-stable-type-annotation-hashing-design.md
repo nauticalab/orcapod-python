@@ -15,8 +15,9 @@ identity with stable canonical names drawn from `LogicalTypeRegistry`.
 - Moving a type between internal modules (e.g. `extension_types` → `logical_types`) does **not**
   change the hash of any function pod signature, provided the type's `logical_type_name` is
   unchanged.
-- Parameter annotations and return annotations are treated consistently: both go through the
-  same `canonical_annotation_str` helper.
+- Parameter annotations are canonicalized at extraction time via `canonical_annotation_str`;
+  return annotations are stored as raw type objects and canonicalized by `TypeObjectHandler`
+  at hash time.  The end result is stable across module relocations in both positions.
 - Builtin types (`int`, `str`, `list[int]`, etc.) and user types not registered in the logical
   type registry are unaffected — their hashes remain identical to the pre-fix values.
 - A pre-fix golden-value fixture captures current hash values. Post-fix tests assert that only
@@ -29,12 +30,11 @@ identity with stable canonical names drawn from `LogicalTypeRegistry`.
 In scope:
 
 - `TypeObjectHandler` — resolves bare type objects to canonical names via registry.
-- `FunctionSignatureExtractor` — parameter annotation strings and the return annotation must
-  be made consistent: currently params are serialized to a string via `str(param)` at extraction
-  time while the return annotation is stored as a raw type object and dispatched to
-  `TypeObjectHandler` later. Both must go through the same `canonical_annotation_str` helper
-  so that the treatment of type info is identical regardless of whether it appears in a
-  parameter position or a return position.
+- `FunctionSignatureExtractor` — parameter annotation substrings are replaced with canonical
+  forms via `canonical_annotation_str` at extraction time.  Return annotations remain as raw
+  type objects (`parts["returns"] = sig.return_annotation`); `TypeObjectHandler` (configured
+  with the same `type_converter`) canonicalises them at hash time.  This avoids special-casing
+  in the extractor and keeps the `"type:"` prefix consistent for all return types.
 - `canonical_annotation_str` in `hash_utils.py` — extended with an optional `LogicalTypeRegistry`
   parameter and generic-alias recursion.
 - `register_builtin_python_type_handlers` — threads `logical_type_registry` through to both
@@ -124,21 +124,17 @@ if old_ann != new_ann:
     param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
 ```
 
-**Return annotation** — was stored as raw type object (`parts["returns"] = sig.return_annotation`),
-then handled by `TypeObjectHandler` at hash time. Now stored as canonical string upfront,
-consistent with how params are handled:
+**Return annotation** — stored as the raw type object, unchanged from before:
 
 ```python
-# Before
-parts["returns"] = sig.return_annotation   # raw type object
-
-# After
-parts["returns"] = canonical_annotation_str(sig.return_annotation, registry)  # canonical string
+parts["returns"] = sig.return_annotation   # raw type object (same as before)
 ```
 
-This eliminates the asymmetry and means `TypeObjectHandler` no longer participates in the
-return annotation path (params and returns are both plain strings by the time the hasher sees
-them).
+`TypeObjectHandler` (configured with the same `type_converter`) canonicalises it at hash time
+via `type_converter.get_logical_type(obj)`, producing `"type:orcapod.file"` instead of
+`"type:orcapod.logical_types.file_type.File"`.  The `"type:"` prefix is therefore present
+consistently for all return types, registered or not — there is no special-casing in the
+extractor.
 
 **Concrete example.** For `def fn(f: op.File, n: int) -> op.Directory`, `extract_function_info`
 currently produces:
@@ -160,9 +156,10 @@ After the fix:
 {
     "module": "mymodule",
     "name": "fn",
-    "params": "f: orcapod.file, n: int",   # canonical name; int unchanged
-    "returns": "orcapod.directory",         # canonical string, same path as params
+    "params": "f: orcapod.file, n: int",                            # canonical name; int unchanged
+    "returns": <class 'orcapod.logical_types.directory_type.Directory'>,  # still a raw type object
 }
+# TypeObjectHandler then hashes parts["returns"] to "type:orcapod.directory"
 ```
 
 ## Affected Hash Values
@@ -212,8 +209,7 @@ identically to the golden. Any deviation is an unintended regression.
   will fall back to module-path form. Tests that need canonical names must inject the registry
   explicitly. This is correct behavior and is tested.
 - **`FunctionInfoExtractorProtocol`**: The protocol in `hashing_protocols.py` defines
-  `extract_function_info(func, ...) -> dict`. The return value changes for functions with
-  orcapod type annotations (`"returns"` becomes a string instead of a type object). During
-  implementation, verify that no caller inspects `info["returns"]` as a type object rather
-  than passing it directly to the hasher. A `grep` for `\["returns"\]` and `\.get\("returns"\)`
-  across the source tree should confirm there are no such callers outside the hashing path.
+  `extract_function_info(func, ...) -> dict`. The `"returns"` value remains a raw type
+  object (or union/generic alias) for all annotations — only `"params"` changes for
+  functions with orcapod type annotations (the annotation substring is replaced with the
+  canonical name).  `TypeObjectHandler` canonicalises `"returns"` at hash time.

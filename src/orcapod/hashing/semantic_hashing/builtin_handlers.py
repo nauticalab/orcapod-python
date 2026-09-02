@@ -92,7 +92,7 @@ class TypeObjectHandler:
 
     Args:
         type_converter: Optional ``TypeConverterProtocol``.  When provided,
-            ``type_converter.get_logical_type_registry()`` is called to resolve
+            ``type_converter.get_logical_type(obj)`` is called to resolve
             registered logical types to their stable canonical name.  When
             ``None`` (the default), the fallback ``"type:<module>.<qualname>"``
             serialisation is always used.
@@ -470,7 +470,7 @@ def register_builtin_python_type_handlers(
             Defaults to ``BasicDirectoryHasher(sha256)``.
         type_converter: Optional ``TypeConverterProtocol`` forwarded to
             ``TypeObjectHandler`` and ``FunctionSignatureExtractor`` for stable
-            canonical type-name resolution via ``get_logical_type_registry()``.
+            canonical type-name resolution via ``get_logical_type()``.
             When ``None`` (the default), both handlers fall back to the raw
             ``"type:<module>.<qualname>"`` serialisation.
     """
