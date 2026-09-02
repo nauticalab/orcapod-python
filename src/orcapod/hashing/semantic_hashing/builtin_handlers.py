@@ -83,14 +83,35 @@ class FunctionHandler:
 class TypeObjectHandler:
     """Hasher for type objects (classes passed as values).
 
-    Returns a stable string of the form ``"type:<module>.<qualname>"``.
+    Resolves types registered in *logical_type_registry* to their stable
+    ``logical_type_name`` (e.g. ``"type:orcapod.file"`` for ``op.File``).
+    Falls back to ``"type:<module>.<qualname>"`` for unregistered types.
+
+    Args:
+        logical_type_registry: Optional ``LogicalTypeRegistry``. When ``None``,
+            the default context's registry is resolved lazily at call time,
+            following the same pattern as ``ArrowTableHandler``.
     """
+
+    def __init__(self, logical_type_registry: Any = None) -> None:
+        self._logical_type_registry = logical_type_registry
+
+    def _get_registry(self) -> Any:
+        if self._logical_type_registry is not None:
+            return self._logical_type_registry
+        from orcapod.contexts import get_default_context
+        return get_default_context().type_converter._logical_type_registry
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, type):
             raise TypeError(
                 f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
             )
+        registry = self._get_registry()
+        if registry is not None:
+            lt = registry.get_by_python_type(obj)
+            if lt is not None:
+                return f"type:{lt.logical_type_name}"
         module: str = obj.__module__ or "<unknown>"
         qualname: str = obj.__qualname__
         return f"type:{module}.{qualname}"
