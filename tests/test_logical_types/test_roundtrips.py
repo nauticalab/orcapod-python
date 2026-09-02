@@ -694,3 +694,232 @@ def test_fresh_converter_reads_list_of_uuid(
     rows = read_converter.arrow_table_to_python_dicts(result)
     assert rows[0]["ids"] == [u1]
     assert isinstance(rows[0]["ids"][0], uuid_module.UUID)
+
+
+# ── set[T] native element write-path unit tests (ITL-611) ─────────────────────
+
+
+def test_converter_set_of_int_produces_extension_type() -> None:
+    """converter.python_type_to_arrow_type(set[int]) returns Arrow extension type 'set[int]'."""
+    from orcapod.contexts import create_registry
+    converter = create_registry().get_context().type_converter
+    arrow_type = converter.python_type_to_arrow_type(set[int])
+    assert isinstance(arrow_type, pa.ExtensionType), (
+        f"Expected pa.ExtensionType for set[int], got {arrow_type!r}"
+    )
+    assert arrow_type.extension_name == "set[int]"
+
+
+def test_converter_set_of_str_produces_extension_type() -> None:
+    """converter.python_type_to_arrow_type(set[str]) returns Arrow extension type 'set[str]'."""
+    from orcapod.contexts import create_registry
+    converter = create_registry().get_context().type_converter
+    arrow_type = converter.python_type_to_arrow_type(set[str])
+    assert isinstance(arrow_type, pa.ExtensionType)
+    assert arrow_type.extension_name == "set[str]"
+
+
+def test_converter_list_of_int_unchanged_regression() -> None:
+    """list[int] still produces plain large_list(int64) — no ListLogicalType wrapping (regression)."""
+    from orcapod.contexts import create_registry
+    converter = create_registry().get_context().type_converter
+    result = converter.python_type_to_arrow_type(list[int])
+    assert not isinstance(result, pa.ExtensionType), (
+        f"list[int] must NOT be wrapped as extension type, got {result!r}"
+    )
+    assert pa.types.is_large_list(result)
+    assert result.value_type == pa.int64()
+
+
+def test_schema_round_trip_set_of_int() -> None:
+    """arrow_schema_to_python_schema reconstructs set[int] (not list[int] or set[Any])."""
+    from orcapod.contexts import create_registry
+    converter = create_registry().get_context().type_converter
+    python_schema = {"s": set[int]}
+    arrow_schema = converter.python_schema_to_arrow_schema(python_schema)
+    recovered = converter.arrow_schema_to_python_schema(arrow_schema)
+    assert recovered["s"] == set[int], (
+        f"Expected set[int], got {recovered['s']!r}"
+    )
+
+
+def test_schema_round_trip_set_of_str() -> None:
+    """arrow_schema_to_python_schema reconstructs set[str]."""
+    from orcapod.contexts import create_registry
+    converter = create_registry().get_context().type_converter
+    python_schema = {"tags": set[str]}
+    arrow_schema = converter.python_schema_to_arrow_schema(python_schema)
+    recovered = converter.arrow_schema_to_python_schema(arrow_schema)
+    assert recovered["tags"] == set[str]
+
+
+def test_explicit_native_list_construction() -> None:
+    """ListLogicalType(int, is_set=False) builds a functional list[int] extension type."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=False)
+    assert lt.logical_type_name == "list[int]"
+    assert lt.python_type == list[int]
+    storage = lt.python_to_storage([1, 2, 3], converter=None)
+    assert storage == [1, 2, 3]
+    result = lt.storage_to_python([1, 2, 3], converter=None)
+    assert result == [1, 2, 3]
+
+
+# ── set[T] native element full round-trip tests (ITL-611) ─────────────────────
+
+
+def test_set_of_int_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[int] values round-trip as sets, not lists; extension name is 'set[int]'."""
+    data = {1, 2, 3}
+    result, read_converter = _write_and_read(
+        {"s": set[int]},
+        [{"s": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("s")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on 's', got {field.type!r}"
+    )
+    assert field.type.extension_name == "set[int]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    assert isinstance(rows[0]["s"], set), f"Expected set, got {type(rows[0]['s'])}"
+    assert rows[0]["s"] == data
+
+
+def test_set_of_str_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[str] values round-trip as sets; extension name is 'set[str]'."""
+    data = {"alpha", "beta", "gamma"}
+    result, read_converter = _write_and_read(
+        {"tags": set[str]},
+        [{"tags": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("tags")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[str]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["tags"], set)
+    assert rows[0]["tags"] == data
+
+
+def test_set_of_float_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[float] values round-trip as sets; extension name is 'set[float]'."""
+    data = {1.0, 2.5, 3.14}
+    result, read_converter = _write_and_read(
+        {"values": set[float]},
+        [{"values": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("values")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[float]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["values"], set)
+    assert rows[0]["values"] == data
+
+
+def test_set_of_bool_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[bool] values round-trip as sets; extension name is 'set[bool]'."""
+    data = {True, False}
+    result, read_converter = _write_and_read(
+        {"flags": set[bool]},
+        [{"flags": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("flags")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[bool]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["flags"], set)
+    assert rows[0]["flags"] == data
+
+
+def test_set_of_bytes_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[bytes] values round-trip as sets; extension name is 'set[bytes]'."""
+    data = {b"foo", b"bar", b"baz"}
+    result, read_converter = _write_and_read(
+        {"blobs": set[bytes]},
+        [{"blobs": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("blobs")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[bytes]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["blobs"], set)
+    assert rows[0]["blobs"] == data
+
+
+def test_set_of_datetime_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[datetime] values round-trip as sets of timezone-aware datetimes."""
+    from datetime import datetime, timezone
+    dt1 = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    dt2 = datetime(2024, 6, 15, 12, 30, 0, tzinfo=timezone.utc)
+    data = {dt1, dt2}
+    result, read_converter = _write_and_read(
+        {"timestamps": set[datetime]},
+        [{"timestamps": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("timestamps")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[datetime]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["timestamps"], set)
+    assert rows[0]["timestamps"] == data
+
+
+def test_set_of_date_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+    """set[date] values round-trip as sets; extension name is 'set[date]'."""
+    from datetime import date
+    d1 = date(2024, 1, 1)
+    d2 = date(2024, 6, 15)
+    d3 = date(2025, 12, 31)
+    data = {d1, d2, d3}
+    result, read_converter = _write_and_read(
+        {"dates": set[date]},
+        [{"dates": data}],
+        storage_backend,
+        tmp_path,
+    )
+    field = result.schema.field("dates")
+    assert hasattr(field.type, "extension_name")
+    assert field.type.extension_name == "set[date]"
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["dates"], set)
+    assert rows[0]["dates"] == data
+
+
+def test_fresh_converter_reads_set_of_int(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
+    """A fresh converter (no prior registration) reconstructs set[int] via load_logical_types."""
+    data = {1, 2, 3}
+
+    # Write with converter A.
+    write_converter = _fresh_converter()
+    write_converter.register_python_class(set[int])
+    arrow_schema = write_converter.python_schema_to_arrow_schema({"s": set[int]})
+    table = write_converter.python_dicts_to_arrow_table([{"s": data}], arrow_schema=arrow_schema)
+    storage_backend.write(table, tmp_path)
+
+    # Read with converter B — no prior registration; load_logical_types triggers factory.
+    read_converter = _fresh_converter()
+    result = storage_backend.read(tmp_path, read_converter)
+
+    field = result.schema.field("s")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type after fresh-converter read, got {field.type!r}"
+    )
+    assert field.type.extension_name == "set[int]"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert isinstance(rows[0]["s"], set)
+    assert rows[0]["s"] == data

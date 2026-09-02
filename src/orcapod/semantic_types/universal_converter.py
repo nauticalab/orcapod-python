@@ -369,6 +369,11 @@ class UniversalTypeConverter:
                 element_lt = self._logical_type_registry.get_by_arrow_extension_name(inner.extension_name)
                 if element_lt is not None:
                     return self._make_or_get_list_logical_type(element_lt, is_set=True)
+            # NEW (ITL-611): wrap primitive T in native-mode ListLogicalType to preserve set semantics.
+            if self._logical_type_registry is not None:
+                from orcapod.logical_types.list_logical_type_factory import _NATIVE_ELEMENT_TYPES
+                if isinstance(args[0], type) and args[0].__name__ in _NATIVE_ELEMENT_TYPES:
+                    return self._make_or_get_native_list_logical_type(args[0], is_set=True)
             return pa.large_list(inner)
 
         # dict[K, V] → pa.large_list(struct{key: K, value: V}).
@@ -468,6 +473,37 @@ class UniversalTypeConverter:
         lt = self._logical_type_registry.get_by_arrow_extension_name(list_ext_name)
         if lt is None:
             lt = ListLogicalType(element_logical_type, is_set=is_set)
+            self._logical_type_registry.register_logical_type(lt)
+        return lt.get_arrow_extension_type()
+
+    def _make_or_get_native_list_logical_type(
+        self,
+        python_type: type,
+        is_set: bool,
+    ) -> "pa.ExtensionType":
+        """Return (creating and registering if needed) a native-mode ``ListLogicalType``.
+
+        Mirrors ``_make_or_get_list_logical_type`` for plain Python types (e.g. ``int``,
+        ``str``) that have no ``LogicalTypeProtocol``. The resulting extension type
+        preserves set/list semantics through Parquet round-trips for primitive scalars.
+
+        Args:
+            python_type: A plain Python type present in ``_NATIVE_ELEMENT_TYPES``
+                (e.g. ``int``, ``str``, ``datetime``).
+            is_set: ``True`` for ``set[T]``, ``False`` for ``list[T]``.
+
+        Returns:
+            The ``pa.ExtensionType`` of the created-or-existing native ``ListLogicalType``.
+        """
+        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+
+        prefix = "set" if is_set else "list"
+        list_ext_name = f"{prefix}[{python_type.__name__}]"
+
+        # Idempotency: look up by extension name first.
+        lt = self._logical_type_registry.get_by_arrow_extension_name(list_ext_name)
+        if lt is None:
+            lt = ListLogicalType(python_type, is_set=is_set)
             self._logical_type_registry.register_logical_type(lt)
         return lt.get_arrow_extension_type()
 
@@ -1270,6 +1306,11 @@ class UniversalTypeConverter:
                 element_lt = self._logical_type_registry.get_by_arrow_extension_name(element_type.extension_name)
                 if element_lt is not None:
                     return self._make_or_get_list_logical_type(element_lt, is_set=True)
+            # NEW (ITL-611): wrap primitive T in native-mode ListLogicalType to preserve set semantics.
+            if self._logical_type_registry is not None:
+                from orcapod.logical_types.list_logical_type_factory import _NATIVE_ELEMENT_TYPES
+                if isinstance(args[0], type) and args[0].__name__ in _NATIVE_ELEMENT_TYPES:
+                    return self._make_or_get_native_list_logical_type(args[0], is_set=True)
             return pa.large_list(element_type)
 
         else:

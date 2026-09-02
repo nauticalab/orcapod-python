@@ -367,3 +367,208 @@ class TestListLogicalTypePolarsMetadata:
 
         assert isinstance(result.schema.field("paths").type, pa.ExtensionType)
         assert result.schema.field("paths").type.extension_name == "list[orcapod.path]"
+
+
+# ── Native element mode (ITL-611) ─────────────────────────────────────────────
+
+
+def test_native_list_logical_type_name_int():
+    """ListLogicalType(int, is_set=True) has logical_type_name 'set[int]'."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    assert lt.logical_type_name == "set[int]"
+
+
+def test_native_list_logical_type_python_type_set():
+    """ListLogicalType(int, is_set=True) has python_type == set[int]."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    assert lt.python_type == set[int]
+
+
+def test_native_list_logical_type_python_type_list():
+    """ListLogicalType(str, is_set=False) has python_type == list[str]."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(str, is_set=False)
+    assert lt.python_type == list[str]
+
+
+def test_native_list_logical_type_arrow_extension_name():
+    """ListLogicalType(int, is_set=True) arrow extension name is 'set[int]'."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    ext = lt.get_arrow_extension_type()
+    assert ext.extension_name == "set[int]"
+
+
+def test_native_list_logical_type_storage_type_int():
+    """ListLogicalType(int, is_set=True) storage type is large_list(int64)."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    ext = lt.get_arrow_extension_type()
+    assert pa.types.is_large_list(ext.storage_type)
+    assert ext.storage_type.value_type == pa.int64()
+
+
+def test_native_list_logical_type_storage_type_str():
+    """ListLogicalType(str) storage type is large_list(large_string)."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(str, is_set=True)
+    ext = lt.get_arrow_extension_type()
+    assert pa.types.is_large_list(ext.storage_type)
+    assert ext.storage_type.value_type == pa.large_string()
+
+
+def test_native_list_logical_type_metadata_format():
+    """Native mode metadata contains element_kind='native' and element_python_type."""
+    import json
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    ext = lt.get_arrow_extension_type()
+    meta = json.loads(ext.__arrow_ext_serialize__().decode("utf-8"))
+    assert meta["category"] == "set"
+    assert meta["element_kind"] == "native"
+    assert meta["element_python_type"] == "int"
+    assert "element_ext_name" not in meta
+
+
+def test_native_list_logical_type_storage_to_python_returns_set():
+    """storage_to_python returns a set for native is_set=True."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    result = lt.storage_to_python([1, 2, 3], converter=None)
+    assert isinstance(result, set)
+    assert result == {1, 2, 3}
+
+
+def test_native_list_logical_type_python_to_storage_sorted():
+    """python_to_storage for native set[int] returns a sorted list."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    result = lt.python_to_storage({3, 1, 2}, converter=None)
+    assert result == [1, 2, 3]
+
+
+def test_native_list_logical_type_invalid_type_raises():
+    """ListLogicalType with an unsupported native type raises ValueError."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    with pytest.raises(ValueError, match="not in the native element map"):
+        ListLogicalType(list, is_set=True)
+
+
+def test_native_list_logical_type_all_supported_types():
+    """All 7 native element types (int, str, float, bool, bytes, datetime, date) construct without error."""
+    from datetime import date, datetime
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    for py_type in (int, str, float, bool, bytes, datetime, date):
+        lt = ListLogicalType(py_type, is_set=True)
+        assert lt.python_type == set[py_type], f"Failed for {py_type}"
+
+
+def test_native_list_logical_type_cached_arrow_ext():
+    """get_arrow_extension_type() is cached (same object on repeated calls)."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    lt = ListLogicalType(int, is_set=True)
+    assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
+
+
+def test_native_and_extension_mode_independent():
+    """ListLogicalType(int) and ListLogicalType(LogicalUUID()) are distinct types."""
+    from orcapod.logical_types.list_logical_type_factory import ListLogicalType
+    from orcapod.logical_types.builtin_logical_types import LogicalUUID
+    native_lt = ListLogicalType(int, is_set=True)
+    ext_lt = ListLogicalType(LogicalUUID(), is_set=True)
+    assert native_lt.logical_type_name != ext_lt.logical_type_name
+    assert native_lt.python_type != ext_lt.python_type
+
+
+# ── Native mode reconstruct_from_arrow (ITL-611) ─────────────────────────────
+
+
+def test_list_logical_type_factory_reconstruct_native_set_of_int():
+    """reconstruct_from_arrow with element_kind=native rebuilds set[int]."""
+    from orcapod.logical_types.list_logical_type_factory import (
+        ListLogicalTypeFactory, SET_CATEGORY,
+    )
+    from orcapod.contexts import create_registry
+    factory = ListLogicalTypeFactory()
+    storage_type = pa.large_list(pa.int64())
+    metadata = {
+        "category": SET_CATEGORY,
+        "element_kind": "native",
+        "element_python_type": "int",
+    }
+    converter = create_registry().get_context().type_converter
+    lt = factory.reconstruct_from_arrow("set[int]", storage_type, metadata, converter)
+    assert lt.logical_type_name == "set[int]"
+    assert lt.python_type == set[int]
+
+
+def test_list_logical_type_factory_reconstruct_native_list_of_str():
+    """reconstruct_from_arrow with element_kind=native rebuilds list[str]."""
+    from orcapod.logical_types.list_logical_type_factory import (
+        ListLogicalTypeFactory, LIST_CATEGORY,
+    )
+    from orcapod.contexts import create_registry
+    factory = ListLogicalTypeFactory()
+    storage_type = pa.large_list(pa.large_string())
+    metadata = {
+        "category": LIST_CATEGORY,
+        "element_kind": "native",
+        "element_python_type": "str",
+    }
+    converter = create_registry().get_context().type_converter
+    lt = factory.reconstruct_from_arrow("list[str]", storage_type, metadata, converter)
+    assert lt.logical_type_name == "list[str]"
+    assert lt.python_type == list[str]
+
+
+def test_list_logical_type_factory_reconstruct_native_unknown_type_raises():
+    """reconstruct_from_arrow raises ValueError for unknown native element type."""
+    from orcapod.logical_types.list_logical_type_factory import (
+        ListLogicalTypeFactory, SET_CATEGORY,
+    )
+    from orcapod.contexts import create_registry
+    factory = ListLogicalTypeFactory()
+    storage_type = pa.large_list(pa.null())
+    metadata = {
+        "category": SET_CATEGORY,
+        "element_kind": "native",
+        "element_python_type": "frozenset",
+    }
+    converter = create_registry().get_context().type_converter
+    with pytest.raises(ValueError, match="unknown native element type"):
+        factory.reconstruct_from_arrow("set[frozenset]", storage_type, metadata, converter)
+
+
+def test_list_logical_type_factory_reconstruct_native_missing_python_type_raises():
+    """reconstruct_from_arrow raises ValueError if element_python_type is absent."""
+    from orcapod.logical_types.list_logical_type_factory import (
+        ListLogicalTypeFactory, SET_CATEGORY,
+    )
+    from orcapod.contexts import create_registry
+    factory = ListLogicalTypeFactory()
+    storage_type = pa.large_list(pa.int64())
+    metadata = {"category": SET_CATEGORY, "element_kind": "native"}
+    converter = create_registry().get_context().type_converter
+    with pytest.raises(ValueError, match="element_python_type"):
+        factory.reconstruct_from_arrow("set[int]", storage_type, metadata, converter)
+
+
+def test_list_logical_type_factory_reconstruct_native_storage_type_mismatch_raises():
+    """reconstruct_from_arrow raises ValueError when storage value type doesn't match metadata."""
+    from orcapod.logical_types.list_logical_type_factory import (
+        ListLogicalTypeFactory, SET_CATEGORY,
+    )
+    from orcapod.contexts import create_registry
+    factory = ListLogicalTypeFactory()
+    # Metadata says int, but actual storage value type is large_string — mismatch.
+    storage_type = pa.large_list(pa.large_string())
+    metadata = {
+        "category": SET_CATEGORY,
+        "element_kind": "native",
+        "element_python_type": "int",
+    }
+    converter = create_registry().get_context().type_converter
+    with pytest.raises(ValueError, match="storage type mismatch"):
+        factory.reconstruct_from_arrow("set[int]", storage_type, metadata, converter)
