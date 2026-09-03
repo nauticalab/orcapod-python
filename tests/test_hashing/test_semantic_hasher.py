@@ -1502,6 +1502,18 @@ class TestTypeObjectHandlerWithRegistry:
         result = handler.handle(op.Directory, hasher)
         assert result == "type:orcapod.directory"
 
+    def test_registered_path_returns_canonical_name(self, handler, hasher):
+        """pathlib.Path (op.Path) resolves to 'type:orcapod.path', not 'type:pathlib.Path'."""
+        from pathlib import Path
+        result = handler.handle(Path, hasher)
+        assert result == "type:orcapod.path"
+
+    def test_registered_uuid_returns_canonical_name(self, handler, hasher):
+        """uuid.UUID (op.UUID) resolves to 'type:orcapod.uuid', not 'type:uuid.UUID'."""
+        import uuid
+        result = handler.handle(uuid.UUID, hasher)
+        assert result == "type:orcapod.uuid"
+
     def test_unregistered_type_falls_back_to_module_qualname(self, handler, hasher):
         result = handler.handle(int, hasher)
         assert result == "type:builtins.int"

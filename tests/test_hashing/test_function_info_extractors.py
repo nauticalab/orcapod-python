@@ -427,3 +427,35 @@ class TestFunctionSignatureExtractorWithRegistry:
         info = extractor.extract_function_info(fn)
         assert info["params"] == "x: orcapod.path | str"
 
+    def test_path_return_annotation_type_object_hashes_to_canonical(self, extractor):
+        """pathlib.Path as return: extractor stores raw type, TypeObjectHandler gives 'type:orcapod.path'.
+
+        Two-step verification:
+        1. The extractor stores the raw ``pathlib.Path`` type object in ``parts["returns"]``
+           (not a string — TypeObjectHandler, not the extractor, is responsible for serialisation).
+        2. When that raw type object is passed through ``TypeObjectHandler`` (wired with the
+           same ``type_converter``), it produces ``"type:orcapod.path"`` — the stable canonical
+           form — not ``"type:pathlib.Path"`` (the old module-path form).
+        """
+        from orcapod.contexts import get_default_context
+        from orcapod.hashing.semantic_hashing.builtin_handlers import TypeObjectHandler
+
+        def fn(s: str) -> Path:
+            ...
+
+        info = extractor.extract_function_info(fn)
+
+        # Step 1: extractor stores raw type object, never a string
+        assert info["returns"] is Path, (
+            f"Expected pathlib.Path type object in returns, got {info['returns']!r}"
+        )
+
+        # Step 2: TypeObjectHandler serializes it to the canonical name
+        tc = get_default_context().type_converter
+        handler = TypeObjectHandler(type_converter=tc)
+        hasher = get_default_context().semantic_hasher
+        serialized = handler.handle(info["returns"], hasher)
+        assert serialized == "type:orcapod.path", (
+            f"Expected 'type:orcapod.path', got {serialized!r}"
+        )
+
