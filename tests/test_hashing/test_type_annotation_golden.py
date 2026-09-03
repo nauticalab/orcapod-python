@@ -271,3 +271,75 @@ class TestSchemaHashStability:
             f"Golden file contains keys not covered by SCHEMA_CASES: {missing}\n"
             "Add the missing schema(s) to SCHEMA_CASES or regenerate the golden file."
         )
+
+
+# ---------------------------------------------------------------------------
+# ITL-639 behaviour tests
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaHashBehavior:
+    """Explicit behavioural tests for SchemaHandler routing and validation.
+
+    Verifies that after ITL-639:
+    - Schema objects are dispatched to SchemaHandler (not _expand_mapping).
+    - Schema hash is stable across module renames of orcapod logical types.
+    - Unregistered types raise TypeError with a clear diagnostic message.
+    - Schema.optional_fields is intentionally excluded from the hash.
+    """
+
+    @pytest.fixture
+    def hasher(self):
+        """Function-scoped hasher so monkeypatch can safely patch handler instances."""
+        return get_default_semantic_hasher()
+
+    def test_schema_routes_to_schema_handler(self, hasher, monkeypatch):
+        """SchemaHandler.handle must be called when hashing a Schema."""
+        from orcapod.hashing.semantic_hashing.builtin_handlers import SchemaHandler
+
+        called = []
+        original_handle = SchemaHandler.handle
+
+        def patched(self, obj, h):
+            called.append(obj)
+            return original_handle(self, obj, h)
+
+        monkeypatch.setattr(SchemaHandler, "handle", patched)
+        hasher.hash_object(Schema({"x": int}))
+        assert len(called) == 1, (
+            "SchemaHandler.handle was not called — Schema is still being routed "
+            "through _expand_mapping instead of the registered SchemaHandler."
+        )
+
+    def test_schema_hash_stable_across_module_rename(self, hasher):
+        """Schema hash must not change when op.File.__module__ is mutated."""
+        schema = Schema({"f": op.File})
+        before = hasher.hash_object(schema).to_string()
+        original_module = op.File.__module__
+        try:
+            op.File.__module__ = "orcapod.extension_types.file_type"  # simulate old path
+            after = hasher.hash_object(schema).to_string()
+        finally:
+            op.File.__module__ = original_module
+        assert before == after, (
+            "Schema hash changed on module rename — TypeObjectHandler is not using "
+            "logical_type_name for this type."
+        )
+
+    def test_schema_handler_rejects_unregistered_type(self, hasher):
+        """Hashing a schema with an unregistered type must raise TypeError."""
+        class _Unregistered:
+            pass
+
+        schema = Schema({"x": _Unregistered})
+        with pytest.raises(TypeError, match="not Arrow-translatable"):
+            hasher.hash_object(schema)
+
+    def test_schema_hash_ignores_optional_fields(self, hasher):
+        """Two schemas that differ only in optional_fields must hash identically."""
+        s1 = Schema({"f": op.File})
+        s2 = Schema({"f": op.File}, optional_fields={"f"})
+        assert hasher.hash_object(s1).to_string() == hasher.hash_object(s2).to_string(), (
+            "Schema hashes differ based on optional_fields — "
+            "optionality must not be part of the schema hash."
+        )

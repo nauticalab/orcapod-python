@@ -169,16 +169,8 @@ class SemanticAwarePythonHasher:
         if isinstance(obj, (type(None), bool, int, float, str)):
             return self._hash_to_content_hash(obj)
 
-        # Structures: expand into a tagged tree, then hash the tree.
-        if _is_structure(obj):
-            expanded = self._expand_structure(
-                obj, _visited=frozenset(), resolver=resolver
-            )
-            return self._hash_to_content_hash(expanded)
-
-        # Semantic hasher dispatch: handler returns a representative Python structure
-        # (or a ContentHash as terminal); feed the result back into hash_object so
-        # that returning a plain structure is equivalent to calling hash_object on it.
+        # Registered handler dispatch (BEFORE _is_structure — ensures SchemaHandler
+        # takes priority over _expand_mapping for Schema objects, which are Mappings).
         handler = self._registry.get_handler(obj)
         if handler is not None:
             logger.debug(
@@ -188,6 +180,13 @@ class SemanticAwarePythonHasher:
             )
             result = handler.handle(obj, self)
             return self.hash_object(result, resolver=resolver)
+
+        # Structures: expand into a tagged tree, then hash the tree.
+        if _is_structure(obj):
+            expanded = self._expand_structure(
+                obj, _visited=frozenset(), resolver=resolver
+            )
+            return self._hash_to_content_hash(expanded)
 
         # ContentIdentifiableProtocol: use resolver if provided, else content_hash().
         if isinstance(obj, hp.ContentIdentifiableProtocol):
