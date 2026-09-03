@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types as _types
 import typing
+import uuid
 from pathlib import Path
 
 import pytest
@@ -386,4 +387,43 @@ class TestFunctionSignatureExtractorWithRegistry:
 
         assert info_before["params"] == info_after["params"]
         assert info_before["returns"] == info_after["returns"]
+
+    def test_path_param_annotation_is_canonical_string(self, extractor):
+        """pathlib.Path in a param annotation is canonicalized to 'orcapod.path'.
+
+        op.Path is pathlib.Path — the same type object registered under
+        logical_type_name 'orcapod.path'.  With the registry wired in, the
+        extractor must emit the canonical name rather than the module path.
+        """
+        def fn(p: Path) -> str:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert info["params"] == "p: orcapod.path"
+
+    def test_uuid_param_annotation_is_canonical_string(self, extractor):
+        """uuid.UUID in a param annotation is canonicalized to 'orcapod.uuid'.
+
+        op.UUID is uuid.UUID — the same type object registered under
+        logical_type_name 'orcapod.uuid'.
+        """
+        def fn(u: uuid.UUID) -> str:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert info["params"] == "u: orcapod.uuid"
+
+    def test_union_with_path_canonical(self, extractor):
+        """str | Path union param: Path is canonicalized to 'orcapod.path'.
+
+        Without the registry, str | Path produces 'pathlib.Path | str' (sorting
+        by the repr string).  With the registry, Path maps to 'orcapod.path',
+        so the output is 'orcapod.path | str' — sort order is preserved since
+        'orcapod.path' < 'str' lexicographically.
+        """
+        def fn(x: str | Path) -> None:
+            ...
+
+        info = extractor.extract_function_info(fn)
+        assert info["params"] == "x: orcapod.path | str"
 
