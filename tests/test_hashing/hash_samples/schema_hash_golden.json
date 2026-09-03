@@ -1,0 +1,10 @@
+{
+  "Schema({x: int})": "semantic_v0.1:158169963faab1bebfc2362a12c0bcd08a151025297bb82bac32f76fd3919892",
+  "Schema({x: int, y: str})": "semantic_v0.1:aea243d4bb7e401c0c64522207f569e3cd4e3bbacbd825ee59858a875b20af3a",
+  "Schema({f: op.File})": "semantic_v0.1:0b6ba627f6df1cc38924fa523ac58eed8794504a3c433ee9996526a6e4d92e99",
+  "Schema({d: op.Directory})": "semantic_v0.1:4771cda927b245f75922f4adbae627f8b326d37562871d00f56bd8f49cf0913a",
+  "Schema({p: op.Path})": "semantic_v0.1:339f1894b80c5992fba7f0a9065aaa8192fb9fa858b631a837df0cc3260781b0",
+  "Schema({x: int, f: op.File})": "semantic_v0.1:5736104378d995bbc5a3b4fb3bbf1d15054a648d1ac357004cbc2a6997265472",
+  "Schema({f: op.File, d: op.Directory})": "semantic_v0.1:eb2bbcffef31c18e291616e46d1d135363a5ccdd5df4ef1ce3bda123e5f3ad27",
+  "Schema({f: op.File | None})": "semantic_v0.1:d03ce7c8cce4c8f4b96932cb4d1198d4b29b30e38180f98c93d0dba7fe53aea3"
+}

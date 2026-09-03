@@ -36,6 +36,7 @@ if TYPE_CHECKING:
         HandlerRegistryProtocol,
         SemanticHasherProtocol,
     )
+    from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +84,32 @@ class FunctionHandler:
 class TypeObjectHandler:
     """Hasher for type objects (classes passed as values).
 
-    Returns a stable string of the form ``"type:<module>.<qualname>"``.
+    Resolves types registered in the ``LogicalTypeRegistry`` exposed by
+    *type_converter* to their stable ``logical_type_name``
+    (e.g. ``"type:orcapod.file"`` for ``op.File``).
+    Falls back to ``"type:<module>.<qualname>"`` for unregistered types or
+    when no ``type_converter`` is provided.
+
+    Args:
+        type_converter: Optional ``TypeConverterProtocol``.  When provided,
+            ``type_converter.get_logical_type(obj)`` is called to resolve
+            registered logical types to their stable canonical name.  When
+            ``None`` (the default), the fallback ``"type:<module>.<qualname>"``
+            serialisation is always used.
     """
+
+    def __init__(self, type_converter: "TypeConverterProtocol | None" = None) -> None:
+        self._type_converter = type_converter
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, type):
             raise TypeError(
                 f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
             )
+        if self._type_converter is not None:
+            lt = self._type_converter.get_logical_type(obj)
+            if lt is not None:
+                return f"type:{lt.logical_type_name}"
         module: str = obj.__module__ or "<unknown>"
         qualname: str = obj.__qualname__
         return f"type:{module}.{qualname}"
@@ -418,6 +437,7 @@ def register_builtin_python_type_handlers(
     function_info_extractor: Any = None,
     arrow_hasher: "ArrowHasherProtocol | None" = None,
     directory_hasher: Any = None,
+    type_converter: "TypeConverterProtocol | None" = None,
 ) -> None:
     """Register all built-in semantic hashers into *registry*.
 
@@ -448,6 +468,11 @@ def register_builtin_python_type_handlers(
             When ``None``, lazy resolution via the default context is used.
         directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
             Defaults to ``BasicDirectoryHasher(sha256)``.
+        type_converter: Optional ``TypeConverterProtocol`` forwarded to
+            ``TypeObjectHandler`` and ``FunctionSignatureExtractor`` for stable
+            canonical type-name resolution via ``get_logical_type()``.
+            When ``None`` (the default), both handlers fall back to the raw
+            ``"type:<module>.<qualname>"`` serialisation.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import FileHasher
@@ -467,6 +492,7 @@ def register_builtin_python_type_handlers(
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
+            type_converter=type_converter,
         )
 
     bytes_hasher = BytesHandler()
@@ -488,7 +514,7 @@ def register_builtin_python_type_handlers(
     registry.register(_types.BuiltinFunctionType, function_hasher)
     registry.register(_types.MethodType, function_hasher)
 
-    registry.register(type, TypeObjectHandler())
+    registry.register(type, TypeObjectHandler(type_converter=type_converter))
     registry.register(_types.UnionType, UnionTypeHandler())
 
     generic_alias_hasher = GenericAliasHandler()

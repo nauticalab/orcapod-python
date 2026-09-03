@@ -1472,3 +1472,108 @@ class TestUniformHasherPropagation:
         own = inner.content_hash()
         assert own is not first
         assert own.method == "hasher_a"
+
+
+# ---------------------------------------------------------------------------
+# 20. TypeObjectHandler with registry (ITL-638)
+# ---------------------------------------------------------------------------
+
+
+class TestTypeObjectHandlerWithRegistry:
+    """TypeObjectHandler uses stable canonical names for registered logical types."""
+
+    @pytest.fixture
+    def type_converter(self):
+        from orcapod.contexts import get_default_context
+        return get_default_context().type_converter
+
+    @pytest.fixture
+    def handler(self, type_converter):
+        from orcapod.hashing.semantic_hashing.builtin_handlers import TypeObjectHandler
+        return TypeObjectHandler(type_converter=type_converter)
+
+    def test_registered_file_returns_canonical_name(self, handler, hasher):
+        import orcapod as op
+        result = handler.handle(op.File, hasher)
+        assert result == "type:orcapod.file"
+
+    def test_registered_directory_returns_canonical_name(self, handler, hasher):
+        import orcapod as op
+        result = handler.handle(op.Directory, hasher)
+        assert result == "type:orcapod.directory"
+
+    def test_registered_path_returns_canonical_name(self, handler, hasher):
+        """pathlib.Path (op.Path) resolves to 'type:orcapod.path', not 'type:pathlib.Path'."""
+        from pathlib import Path
+        result = handler.handle(Path, hasher)
+        assert result == "type:orcapod.path"
+
+    def test_registered_uuid_returns_canonical_name(self, handler, hasher):
+        """uuid.UUID (op.UUID) resolves to 'type:orcapod.uuid', not 'type:uuid.UUID'."""
+        import uuid
+        result = handler.handle(uuid.UUID, hasher)
+        assert result == "type:orcapod.uuid"
+
+    def test_unregistered_type_falls_back_to_module_qualname(self, handler, hasher):
+        result = handler.handle(int, hasher)
+        assert result == "type:builtins.int"
+
+    def test_custom_class_falls_back_to_module_qualname(self, handler, hasher):
+        class _Local:
+            pass
+        result = handler.handle(_Local, hasher)
+        assert "type:" in result
+        assert "_Local" in result
+
+    def test_no_type_converter_falls_back_to_module_qualname(self, hasher):
+        """TypeObjectHandler with no type_converter always uses module.qualname."""
+        from orcapod.hashing.semantic_hashing.builtin_handlers import TypeObjectHandler
+        import orcapod as op
+        handler_plain = TypeObjectHandler()  # no type_converter
+        result = handler_plain.handle(op.File, hasher)
+        # Without a type_converter, canonical resolution is unavailable
+        assert result.startswith("type:")
+        assert "orcapod" in result
+        assert "File" in result
+
+    def test_simulated_module_relocation_stable(self, type_converter, hasher):
+        """Relocating a class's __module__ does not change the hash if its
+        logical_type_name is unchanged in the registry.
+
+        Uses an isolated ``PythonTypeHandlerRegistry`` with the explicit
+        ``type_converter`` fixture wired into ``TypeObjectHandler`` so this test
+        does not rely on the global default context's registry state.
+        """
+        from orcapod.hashing.semantic_hashing.builtin_handlers import (
+            TypeObjectHandler,
+            register_builtin_python_type_handlers,
+        )
+        from orcapod.hashing.semantic_hashing.type_handler_registry import (
+            PythonTypeHandlerRegistry,
+        )
+        from orcapod.hashing.semantic_hashing.semantic_hasher import (
+            SemanticAwarePythonHasher,
+        )
+        import orcapod as op
+
+        reg = PythonTypeHandlerRegistry()
+        register_builtin_python_type_handlers(reg)
+        # Explicitly override the type handler with one that has the test
+        # type_converter wired in, so we test canonical-name resolution.
+        reg.register(type, TypeObjectHandler(type_converter=type_converter))
+        h = SemanticAwarePythonHasher(hasher_id="test_v1", type_handler_registry=reg)
+
+        hash_before = h.hash_object(op.File)
+
+        # Simulate module relocation by temporarily patching __module__
+        original_module = op.File.__module__
+        try:
+            op.File.__module__ = "orcapod.extension_types.file_type"
+            hash_after = h.hash_object(op.File)
+        finally:
+            op.File.__module__ = original_module
+
+        assert hash_before == hash_after, (
+            "Hash changed when op.File.__module__ was altered — "
+            "registry lookup is not being used."
+        )
