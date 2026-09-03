@@ -528,10 +528,11 @@ def register_builtin_python_type_handlers(
         directory_hasher: Optional ``DirectoryHasherProtocol`` for directory tree hashing.
             Defaults to ``BasicDirectoryHasher(sha256)``.
         type_converter: Optional ``TypeConverterProtocol`` forwarded to
-            ``TypeObjectHandler`` and ``FunctionSignatureExtractor`` for stable
-            canonical type-name resolution via ``get_logical_type()``.
-            When ``None`` (the default), both handlers fall back to the raw
-            ``"type:<module>.<qualname>"`` serialisation.
+            ``TypeObjectHandler``, ``FunctionSignatureExtractor``, and
+            ``SchemaHandler`` for stable canonical type-name resolution via
+            ``get_logical_type()`` and Arrow-translatability validation.
+            When ``None`` (the default), all three handlers fall back to the raw
+            ``"type:<module>.<qualname>"`` serialisation and skip Arrow validation.
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import FileHasher
