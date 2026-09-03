@@ -184,14 +184,73 @@ class ArrowTableHandler:
 
 
 class SchemaHandler:
-    """Hasher for ``Schema`` objects."""
+    """Hasher for ``Schema`` objects.
+
+    Canonical, explicit path for schema hashing. For each field, hashes the Python
+    type via ``hasher.hash_object`` (which dispatches to ``TypeObjectHandler``, using
+    the stable ``logical_type_name`` / Arrow extension name for registered types and the
+    stable ``builtins.*`` / stdlib path for native types). Field names are sorted so the
+    hash is deterministic regardless of insertion order.
+
+    This produces the same hash as the previous accidental path through ``_expand_mapping``
+    (Schema is a Mapping), preserving all existing hash values.
+
+    ``Schema.optional_fields`` is intentionally excluded from the hash. Two schemas with
+    the same field names and types but different optionality are hash-equivalent.
+    Optionality is a Python-level execution contract (which parameters have defaults),
+    not part of the structural identity used for caching or pipeline routing.
+
+    When ``type_converter`` is provided, every field type is verified to be
+    Arrow-translatable before hashing. A type that cannot be converted raises
+    ``TypeError`` with a diagnostic message, catching unregistered types at hash time
+    rather than silently falling back to a potentially unstable Python module path.
+
+    Args:
+        type_converter: Optional ``TypeConverterProtocol``. When provided, validates
+            Arrow-translatability per field. When ``None`` (e.g. in tests without a
+            full ``DataContext``), validation is skipped.
+    """
+
+    def __init__(self, type_converter: "TypeConverterProtocol | None" = None) -> None:
+        self._type_converter = type_converter
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        """Hash ``obj`` by hashing each field type individually and sorting by name.
+
+        Args:
+            obj: A ``Schema`` instance.
+            hasher: The calling ``SemanticHasherProtocol`` — used to hash each field's
+                Python type.
+
+        Returns:
+            A ``dict[str, str]`` mapping field name to the ``to_string()`` of each
+            field type's hash, sorted by field name for determinism.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``Schema``, or if ``type_converter`` is
+                provided and a field type is not Arrow-translatable.
+        """
         if not isinstance(obj, Schema):
             raise TypeError(
                 f"SchemaHandler: expected a Schema, got {type(obj)!r}"
             )
-        raise NotImplementedError("SchemaHandler is not yet implemented.")
+        result: dict[str, str] = {}
+        for field_name, python_type in obj.items():
+            if self._type_converter is not None:
+                try:
+                    self._type_converter.python_type_to_arrow_type(python_type)
+                except (TypeError, ValueError) as exc:
+                    raise TypeError(
+                        f"SchemaHandler: field {field_name!r} has type "
+                        f"{python_type!r} that is not Arrow-translatable. "
+                        f"Every type in a schema must be Arrow-convertible — "
+                        f"register it as an orcapod logical type or use a "
+                        f"supported native type (int, str, float, bool, bytes, "
+                        f"datetime, date)."
+                    ) from exc
+            result[field_name] = hasher.hash_object(python_type).to_string()
+        # Sort by field name for determinism — matches _expand_mapping's sort_keys.
+        return dict(sorted(result.items()))
 
 
 class FileHandler:
@@ -526,7 +585,7 @@ def register_builtin_python_type_handlers(
     except AttributeError:
         pass
 
-    registry.register(Schema, SchemaHandler())
+    registry.register(Schema, SchemaHandler(type_converter=type_converter))
 
     import pyarrow as _pa
     arrow_table_hasher = ArrowTableHandler(arrow_hasher)

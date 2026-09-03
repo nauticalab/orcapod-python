@@ -120,7 +120,8 @@
                 [{"_type": "pyarrow.RecordBatch"},      {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",   "_config": {}}],
                 [{"_type": "numpy.ndarray"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",        "_config": {}}],
                 [{"_type": "pandas.DataFrame"},         {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasDataFrameHandler",  "_config": {}}],
-                [{"_type": "pandas.Series"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",      "_config": {}}]
+                [{"_type": "pandas.Series"},            {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",      "_config": {}}],
+                [{"_type": "orcapod.types.Schema"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SchemaHandler",            "_config": {"type_converter": {"_ref": "type_converter"}}}]
             ]
         }
     },
@@ -160,7 +161,8 @@
             "Added spikeinterface.core.motion.Motion as a native value type via LogicalSIMotion (large_binary/.npz) and SIMotionHandler (SHA-256 of .npz bytes); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-470)",
             "Added spikeinterface.core.SortingAnalyzer as a native value type via LogicalSISortingAnalyzer (large_string/JSON path reference {folder, format}) and SISortingAnalyzerHandler (SHA-256 of folder path string, phase 1); auto-registered when spikeinterface is installed via _optional entries in v0.1.json (ITL-469)",
             "Wired file_hasher reference into BasicDirectoryHasher so op.Directory hashing uses the same FileContentHasherProtocol as op.File hashing; required file_hasher constructor arg enforces explicit injection",
-            "Moved SpikeInterface types (LogicalSIRecording, LogicalSISorting, LogicalSIMotion, LogicalSISortingAnalyzer) and their handlers to the standalone orcapod-extension-spikeinterface package; removed all SI _optional entries from this spec and SI deps from pyproject.toml; introduced OrcapodExtension protocol and op.register_extension() for normalized extension registration (ITL-473)"
+            "Moved SpikeInterface types (LogicalSIRecording, LogicalSISorting, LogicalSIMotion, LogicalSISortingAnalyzer) and their handlers to the standalone orcapod-extension-spikeinterface package; removed all SI _optional entries from this spec and SI deps from pyproject.toml; introduced OrcapodExtension protocol and op.register_extension() for normalized extension registration (ITL-473)",
+            "Registered SchemaHandler for orcapod.types.Schema in the context registry; moved handler dispatch before _is_structure check in hash_object so SchemaHandler takes priority over _expand_mapping for Schema objects (ITL-639)"
         ]
     }
 }
