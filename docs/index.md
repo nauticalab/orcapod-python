@@ -19,6 +19,10 @@ For the latest development version, install directly from GitHub:
 uv add git+https://github.com/walkerlab/orcapod-python.git
 ```
 
+Rendering pipeline graphs additionally requires the [Graphviz](https://graphviz.org/download/)
+`dot` binary on your `PATH`. It is optional: everything else works without it, and no
+Graphviz development headers are needed.
+
 ## Quick example
 
 Create a data source, apply a transformation, and inspect the results -- all in a few lines:

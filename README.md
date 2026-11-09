@@ -29,6 +29,10 @@ uv run pytest -m "not postgres"
 uv run pytest -m "not postgres" --cov=src --cov-report=term-missing
 ```
 
+No Graphviz development headers are needed. The Graphviz `dot` binary is an optional
+runtime requirement, used only to render pipeline graphs (e.g. `brew install graphviz` or
+`apt-get install graphviz`).
+
 ### Running PostgreSQL Integration Tests Locally
 
 The PostgreSQL integration tests require a running PostgreSQL instance. The easiest way is Docker:

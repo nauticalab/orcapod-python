@@ -40,6 +40,15 @@ f2 = File("s3://my-bucket/out.parquet")  # works with any UPath backend
 
 ### Changed
 
+#### Removed the `pygraphviz` dependency (ITL-134)
+
+`pygraphviz` was declared as a dependency but never imported. It is built from
+source against the Graphviz C headers, so installing Orcapod failed on systems
+without `libgraphviz-dev` (or with a Graphviz newer than `pygraphviz` supports).
+Installing Orcapod no longer needs a C toolchain or Graphviz headers. Rendering
+pipeline graphs still uses the pure-Python `graphviz` package and therefore the
+optional Graphviz `dot` binary at render time.
+
 #### starfix v0.3.0 adoption + schema-metadata cleaner (PLT-1737)
 
 Bumped `starfix` dependency to `~=0.3.0` and introduced a schema-metadata
