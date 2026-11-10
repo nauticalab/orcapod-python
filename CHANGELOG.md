@@ -73,6 +73,14 @@ recomputed.
 `has_extension_metadata` are available as semi-public utilities for other
 Orcapod code that needs to inspect or clean Arrow schema metadata.
 
+#### `GroupBy` and `Batch` accept already aggregated streams (ITL-849)
+
+`GroupBy` or `Batch` after `MergeJoin`, `Batch` or `GroupBy` no longer raises
+`ArrowTypeError: Expected bytes, got a 'list' object` when its rows are materialized. A list
+column becomes a list of its incoming list type (`large_list<large_list<int8>>`, element types
+unchanged, `Path` as `list[list[Path]]`), and its source info is a list of the members' source
+info. Hashes of pipelines that already worked are unchanged.
+
 ### Breaking Changes
 
 #### Operator outputs keep their inputs' Arrow types, normalized to large variants (ITL-832, ITL-813)

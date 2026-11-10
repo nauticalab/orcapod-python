@@ -3,7 +3,7 @@
 import pyarrow as pa
 import pytest
 
-from orcapod.types import ColumnConfig
+from orcapod.types import ColumnConfig, SourceInfoValue
 from orcapod.utils.arrow_utils import (
     add_source_info,
     apply_column_config,
@@ -15,6 +15,7 @@ from orcapod.utils.arrow_utils import (
     normalize_table_view_types,
     normalize_view_types,
     prepare_prefixed_columns,
+    source_info_arrow_type,
 )
 
 
@@ -964,3 +965,118 @@ class TestConcatTablesByName:
         """An empty sequence raises ``ValueError`` instead of reaching ``pa.concat_tables``."""
         with pytest.raises(ValueError, match="empty sequence of tables"):
             concat_tables_by_name([])
+
+
+class TestPreparePrefixedColumnsSourceInfoTokens:
+    """Python-supplied source-info tokens are typed by ``source_info_arrow_type`` (ITL-849).
+
+    A token is a string, ``None``, or -- after a many->one operator -- a list of
+    tokens, which a second aggregation nests again. Before ITL-849 every list
+    token was typed ``list<large_string>``, so a nested token raised
+    ``ArrowTypeError: Expected bytes, got a 'list' object``.
+    """
+
+    @staticmethod
+    def _source_column(token: SourceInfoValue) -> tuple[pa.DataType, bool]:
+        """Broadcast ``token`` and return the ``_source_v`` type and nullability."""
+        table = pa.table({"v": pa.array([1, 2], type=pa.int64())})
+        _, prefixed = prepare_prefixed_columns(table, {"_source_": {"v": token}})
+        result = prefixed["_source_"]
+        assert result.column("_source_v").to_pylist() == [token, token]
+        field = result.schema.field("_source_v")
+        return field.type, field.nullable
+
+    def test_string_token_is_large_string(self) -> None:
+        assert self._source_column("tok") == (pa.large_string(), False)
+
+    def test_none_token_is_nullable_large_string(self) -> None:
+        assert self._source_column(None) == (pa.large_string(), True)
+
+    def test_list_token_is_large_list_of_large_string(self) -> None:
+        assert self._source_column(["a", "b"]) == (
+            pa.large_list(pa.large_string()),
+            False,
+        )
+
+    def test_nested_list_token_nests_the_list_type(self) -> None:
+        assert self._source_column([["a"], ["b", "c"]]) == (
+            pa.large_list(pa.large_list(pa.large_string())),
+            False,
+        )
+
+    def test_stream_with_nested_source_info_iterates(self) -> None:
+        """``ArrowTableStream(source_info=...)`` accepts a nested token."""
+        from orcapod.core.streams import ArrowTableStream
+
+        token: SourceInfoValue = [["a", None], ["b"]]
+        stream = ArrowTableStream(
+            pa.table({"id": [1, 2], "v": [10, 20]}),
+            tag_columns=["id"],
+            source_info={"v": token},
+        )
+        assert [d.source_info()["v"] for _, d in stream.iter_data()] == [token, token]
+        schema = stream.as_table(columns={"source": True}).schema
+        assert schema.field("_source_v").type == pa.large_list(
+            pa.large_list(pa.large_string())
+        )
+
+
+class TestSourceInfoArrowType:
+    """``source_info_arrow_type`` types a token at its full nesting depth (ITL-849).
+
+    An empty list or ``None`` says nothing about the levels below it, so each
+    list level takes its element type from the first element that does.
+    """
+
+    @pytest.mark.parametrize(
+        ("token", "expected"),
+        [
+            ("tok", pa.large_string()),
+            (None, pa.large_string()),
+            ([], pa.large_list(pa.large_string())),
+            (["a", "b"], pa.large_list(pa.large_string())),
+            ([None, "a"], pa.large_list(pa.large_string())),
+            ([None, None], pa.large_list(pa.large_string())),
+            ([[], []], pa.large_list(pa.large_list(pa.large_string()))),
+            ([[], ["a"]], pa.large_list(pa.large_list(pa.large_string()))),
+            ([None, ["a"]], pa.large_list(pa.large_list(pa.large_string()))),
+            (
+                [[], [["a"]]],
+                pa.large_list(pa.large_list(pa.large_list(pa.large_string()))),
+            ),
+            (
+                [[None], [["a"]]],
+                pa.large_list(pa.large_list(pa.large_list(pa.large_string()))),
+            ),
+        ],
+        ids=repr,
+    )
+    def test_type_has_the_full_depth(
+        self, token: SourceInfoValue, expected: pa.DataType
+    ) -> None:
+        assert source_info_arrow_type(token) == expected
+        # The type must hold the token itself.
+        held = pa.Table.from_arrays([pa.array([token], type=expected)], names=["t"])
+        assert held.column("t").to_pylist() == [token]
+
+    @pytest.mark.parametrize("token", [[[], [["a"]]], [None, ["a"]]], ids=repr)
+    def test_data_serializes_a_token_with_an_uninformative_first_element(
+        self, token: SourceInfoValue
+    ) -> None:
+        """``Data.as_table`` no longer raises when the first element is empty or None."""
+        from orcapod.core.datagrams import Data
+
+        data = Data({"x": 1}, source_info={"x": token})
+        field = data.as_table(columns={"source": True}).schema.field("_source_x")
+        assert field.type == source_info_arrow_type(token)
+        assert data.as_table(columns={"source": True}).column(
+            "_source_x"
+        ).to_pylist() == [token]
+
+    def test_data_schema_matches_the_serialized_depth(self) -> None:
+        """``Data.schema`` reports the same depth as the Arrow type it serializes."""
+        from orcapod.core.datagrams import Data
+
+        data = Data({"x": 1}, source_info={"x": [[], [["a"]]]})
+        schema = data.schema(columns={"source": True})
+        assert schema["_source_x"] == list[list[list[str]]]

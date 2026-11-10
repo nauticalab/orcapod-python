@@ -245,51 +245,30 @@ class Tag(Datagram):
 # ---------------------------------------------------------------------------
 
 
-# TODO(NPIPE-204): these two helpers only understand scalars and ``list[T]``.
-# Structured source-info values (a struct/dataclass token, or a mapping) will need
-# their own branches, and the recursion should dispatch on a logical type rather
-# than on ``isinstance(value, list)``. Deriving the type from the first element is
-# also a shortcut: it is correct for the homogeneous lists many->one operators
-# produce, but not in general. Raised in review on PR #250.
-def _source_info_arrow_type(value: "SourceInfoValue") -> "pa.DataType":
-    """Derive the Arrow type for a single source-info value.
-
-    Scalars and unknowns map to ``large_string``; lists map to ``large_list``
-    of their element type, recursively.  An empty list defaults to
-    ``large_list(large_string)``.
-
-    Args:
-        value: The stored provenance token.
-
-    Returns:
-        The Arrow type to declare for this value.
-    """
-    import pyarrow as _pa
-
-    if isinstance(value, list):
-        if not value:
-            return _pa.large_list(_pa.large_string())
-        return _pa.large_list(_source_info_arrow_type(value[0]))
-    return _pa.large_string()
-
-
 def _source_info_python_type(value: "SourceInfoValue") -> DataType:
     """Derive the Python type for a single source-info value.
 
-    Mirrors ``_source_info_arrow_type`` for the ``Schema`` representation, and
-    shares its list-only limitation -- see the TODO above that function.
+    Read off ``arrow_utils.source_info_arrow_type``, the one source-info type
+    rule, so the ``Schema`` and the Arrow table always agree on a token's depth.
 
     Args:
         value: The stored provenance token.
 
     Returns:
-        ``str`` for scalars and unknowns, ``list[...]`` for lists.
+        ``str`` for scalars and unknowns, ``list[...]`` nested to the token's
+        depth for lists.
     """
-    if isinstance(value, list):
-        if not value:
-            return list[str]
-        return list[_source_info_python_type(value[0])]  # type: ignore[misc]
-    return str
+    import pyarrow as _pa
+
+    arrow_type = arrow_utils.source_info_arrow_type(value)
+    depth = 0
+    while _pa.types.is_large_list(arrow_type):
+        arrow_type = arrow_type.value_type
+        depth += 1
+    python_type: DataType = str
+    for _ in range(depth):
+        python_type = list[python_type]  # type: ignore[valid-type]
+    return python_type
 
 
 class Data(Datagram):
@@ -395,7 +374,7 @@ class Data(Datagram):
                 }
                 schema = _pa.schema(
                     [
-                        _pa.field(k, _source_info_arrow_type(v))
+                        _pa.field(k, arrow_utils.source_info_arrow_type(v))
                         for k, v in prefixed.items()
                     ]
                 )

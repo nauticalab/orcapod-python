@@ -289,3 +289,59 @@ def test_system_tags_pair_with_ordinary_tags_and_data(
         for tag, data in pairs
     ]
     assert actual == expected
+
+
+NESTED_SOURCE_TYPE = pa.large_list(pa.large_list(pa.large_string()))
+
+
+@pytest.mark.parametrize("tag_sizes,data_sizes,source_sizes", SOURCE_LAYOUTS)
+def test_nested_source_info_pairs_with_its_own_row(
+    tag_sizes: list[int], data_sizes: list[int], source_sizes: list[int]
+) -> None:
+    """A list-of-lists source-info column (a second aggregation) follows its row.
+
+    ``iter_data`` hands each row's source info to ``Data`` as Arrow columns, so
+    the nested type is kept rather than re-inferred (ITL-849).
+    """
+    n = sum(data_sizes)
+    tokens = [[[f"src::{i}::a"], [f"src::{i}::b", f"src::{i}::c"]] for i in range(n)]
+    table = pa.Table.from_pydict(
+        {
+            "id": _chunked(list(range(n)), tag_sizes, pa.int64()),
+            "x": _chunked([i * 10 for i in range(n)], data_sizes, pa.int64()),
+            SOURCE_X: _chunked(tokens, source_sizes, NESTED_SOURCE_TYPE),
+        }
+    )
+    stream = ArrowTableStream(table, tag_columns=["id"])
+    pairs = list(stream.iter_data())
+    assert len(pairs) == n
+    for row, (tag, data) in enumerate(pairs):
+        assert tag["id"] == row
+        assert data["x"] == row * 10
+        assert data.source_info()["x"] == tokens[row]
+        source_schema = data.as_table(columns={"source": True}).schema
+        assert source_schema.field(SOURCE_X).type == NESTED_SOURCE_TYPE
+
+
+def test_iter_data_keeps_the_source_info_arrow_type() -> None:
+    """``Data`` receives the stream's source-info column, not a re-inferred type.
+
+    The first element of this token is an empty list, which says nothing about
+    the depth below it. ``iter_data`` passes the Arrow column through
+    (ITL-849), and ``Data`` serializes the token at its full depth.
+    """
+    source_type = pa.large_list(NESTED_SOURCE_TYPE)
+    tokens = [[[], [["a"]]], [[["b"]], [["c"], []]]]
+    table = pa.table(
+        {
+            "id": pa.array([0, 1], type=pa.int64()),
+            "x": pa.array([0, 10], type=pa.int64()),
+            SOURCE_X: pa.array(tokens, type=source_type),
+        }
+    )
+    stream = ArrowTableStream(table, tag_columns=["id"])
+    rows = list(stream.iter_data())
+    assert [data.source_info()["x"] for _, data in rows] == tokens
+    for _, data in rows:
+        source_table = data.as_table(columns={"source": True})
+        assert source_table.schema.field(SOURCE_X).type == source_type

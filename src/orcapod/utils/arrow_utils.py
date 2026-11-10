@@ -3,11 +3,11 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from collections.abc import Mapping, Collection, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 from orcapod.hashing.hash_utils import combine_hashes
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig
+from orcapod.types import ColumnConfig, SourceInfoValue
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -761,6 +761,66 @@ def split_by_column_groups(
     return (remaining_table, *tables)
 
 
+# TODO(NPIPE-204): this only understands scalars and ``list[T]``. Structured
+# source-info values (a struct/dataclass token, or a mapping) will need their own
+# branches, and the recursion should dispatch on a logical type rather than on
+# ``isinstance(value, list)``. It also exists only because ``Data`` stores its
+# source info as Python values; a ``Data`` that kept the Arrow source-info table
+# it was built from would not need to re-type anything. Raised in review on
+# PR #250 and PR #281.
+def source_info_arrow_type(value: SourceInfoValue) -> "pa.DataType":
+    """Return the Arrow type of one source-info provenance token.
+
+    This is the single definition of the source-info type rule, used wherever a
+    token arrives as a Python value with no Arrow type attached (``Data``
+    serializing its source info, ``prepare_prefixed_columns`` broadcasting a
+    supplied token). A token is a string, ``None``, or a list of tokens, one per
+    member of a many->one operator; aggregating an already aggregated stream
+    nests the list again (ITL-849). Scalars and ``None`` map to
+    ``large_string``; a list maps to ``large_list`` of its element type.
+
+    ``None`` and an empty list say nothing about the levels below them, so each
+    list level takes its element type from the first element that does (a
+    string, or a list holding one). ``[[], [["a"]]]`` is therefore three list
+    levels deep, not two. A list with no such element falls back to its first
+    element's type, and an empty list to ``large_list<large_string>``.
+
+    Args:
+        value: The provenance token.
+
+    Returns:
+        The Arrow type of the token.
+    """
+    return _source_info_arrow_type_and_depth_known(value)[0]
+
+
+def _source_info_arrow_type_and_depth_known(
+    value: SourceInfoValue,
+) -> tuple["pa.DataType", bool]:
+    """Type a token, reporting whether the token itself determined its depth.
+
+    Args:
+        value: The provenance token.
+
+    Returns:
+        ``(arrow_type, depth_known)``. ``depth_known`` is ``False`` for ``None``
+        and for a list whose elements are all ``None`` or empty lists.
+    """
+    if not isinstance(value, list):
+        return pa.large_string(), value is not None
+    if not value:
+        return pa.large_list(pa.large_string()), False
+    element_types = (_source_info_arrow_type_and_depth_known(v) for v in value)
+    fallback: "pa.DataType | None" = None
+    for element_type, depth_known in element_types:
+        if depth_known:
+            return pa.large_list(element_type), True
+        if fallback is None:
+            fallback = element_type
+    assert fallback is not None
+    return pa.large_list(fallback), False
+
+
 def prepare_prefixed_columns(
     table: "pa.Table | pa.RecordBatch",
     prefix_info: Collection[str]
@@ -866,15 +926,14 @@ def prepare_prefixed_columns(
                 value = value_lut
 
             if value is not None:
-                # Concrete value supplied — column is never null.
-                # TODO: clean up the logic here
-                if not isinstance(value, str) and isinstance(value, Collection):
-                    # TODO: this won't work other data types!!!
-                    column_values = pa.array(
-                        [value] * num_rows, type=pa.list_(pa.large_string())
-                    )
-                else:
-                    column_values = pa.array([value] * num_rows, type=pa.large_string())
+                # Concrete token supplied as a Python value — column is never
+                # null. No Arrow type is attached, so the source-info rule
+                # types it (a list token, nested or not, keeps its depth).
+                # Every caller passes source-info tokens here.
+                token = cast(SourceInfoValue, value)
+                column_values = pa.array(
+                    [token] * num_rows, type=source_info_arrow_type(token)
+                )
                 col_nullable = False
             elif col_name in existing_columns:
                 # Pass-through from the source table — inherit its nullable flag.

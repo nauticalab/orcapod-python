@@ -271,19 +271,26 @@ class ArrowTableStream(StreamBase):
         if self._cached_elements is None:
             cached_elements = []
             tag_columns = list(self._all_tag_columns)
-            data_columns = list(self._data_columns)
+            # Each row's source info goes to ``Data`` as Arrow columns, so it
+            # keeps the type it has here: re-typing it from Python values
+            # (``to_pylist``) would infer a type the stream already knows.
+            source_columns = list(self._source_info_table.column_names)
+            data_columns = list(self._data_columns) + source_columns
 
-            # Indexed by absolute row position: the source-info table has its
-            # own chunk layout, so it must never be indexed batch-locally.
-            source_info_rows = self._source_info_table.to_pylist()
-
-            # Batch the whole table once. ``Table.to_batches`` cuts at the union
-            # of the chunk boundaries of every column, so the tag and data
-            # columns of a batch always cover the same rows. Batching the tag
-            # and data selections separately and zipping them drops or
-            # mis-pairs rows whenever the two are chunked differently.
-            row_offset = 0
-            for batch in self._table.to_batches():
+            # The source-info table has its own chunk layout, so append its
+            # columns to the backing table and batch that once.
+            # ``Table.to_batches`` cuts at the union of the chunk boundaries of
+            # every column, so the tag, data and source-info columns of a batch
+            # always cover the same rows. Batching any of them separately and
+            # zipping the results drops or mis-pairs rows whenever they are
+            # chunked differently.
+            batching_table = self._table
+            for name in source_columns:
+                batching_table = batching_table.append_column(
+                    self._source_info_table.schema.field(name),
+                    self._source_info_table.column(name),
+                )
+            for batch in batching_table.to_batches():
                 tag_batch = batch.select(tag_columns)
                 data_batch = batch.select(data_columns)
                 for i in range(batch.num_rows):
@@ -297,15 +304,13 @@ class ArrowTableStream(StreamBase):
                         tag = Tag({})
 
                     data = Data(
-                        data_batch.slice(i, 1),
-                        source_info=source_info_rows[row_offset + i],
+                        data_batch.slice(i, 1),  # type: ignore
                         data_context=self.data_context,
                     )
 
                     yield tag, data
 
                     cached_elements.append((tag, data))
-                row_offset += batch.num_rows
             self._cached_elements = cached_elements
         else:
             yield from self._cached_elements
