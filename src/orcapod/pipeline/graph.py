@@ -102,7 +102,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
     # Graph display
     # ------------------------------------------------------------------
 
-    def show_graph(self, **kwargs) -> str | None:
+    def show_graph(self, **kwargs: Any) -> str | None:
         """Render the pipeline's node graph.
 
         Args:

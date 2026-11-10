@@ -55,6 +55,19 @@ Never mix in ReST markup. Do not use :meth:, :class:, :exc:, :attr:, :func:, or 
 other ReST cross-reference roles. Use plain ``backtick`` notation to refer to names
 (e.g. ``PollingSource``, ``iter_data``, ``CursorInvalidatedError``).
 
+## Documentation samples
+
+Every fenced python block in README.md, docs/index.md, docs/getting-started.md,
+docs/concepts/ and docs/reference/ is executed by tests/test_docs/test_doc_samples.py,
+and tests/test_docs/test_mkdocs_build.py runs mkdocs build --strict. When writing docs:
+
+- Blocks on one page share a namespace and run top to bottom.
+- Every line a block prints must appear as a "# ..." comment in that block; "..." inside the
+  comment is a wildcard for hashes and other run-dependent values.
+- Put <!-- docs-test: skip --> on the line above a fence only when the sample needs
+  infrastructure the test run lacks (e.g. a Postgres server) — never to hide a wrong sample.
+- If a sample fails because the library changed, fix the page to match the code.
+
 ## Linear issue tracking
 
 All work must be linked to a Linear issue. Before starting any feature, bug fix, or

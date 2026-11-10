@@ -386,9 +386,6 @@ class DeltaTableDatabase:
         Insert new records. By default, never overwrites existing records.
 
         Args:
-            arrow_table: Arrow table to insert
-            id_columns: Single column name or list of column names that form the record ID.
-                       For composite keys, values are concatenated with '|' separator.
             schema_handling: How to handle schema differences
             skip_duplicates: If True, skip records with IDs that already exist.
                            If False, raise error on duplicates.
@@ -791,8 +788,6 @@ class DeltaTableDatabase:
         Args:
             record_path: Tuple of path components
             record_ids: Entry IDs to retrieve
-            add_record_id_column: Control entry ID column inclusion
-            preserve_input_order: If True, return results in input order with nulls for missing
 
         Returns:
             Arrow table containing all found records with original schema, or None if no records found

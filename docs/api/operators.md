@@ -25,3 +25,7 @@ Operators perform structural transformations on streams without inspecting or sy
 ::: orcapod.core.operators.MapData
 
 ::: orcapod.core.operators.PolarsFilter
+
+::: orcapod.core.operators.Pick
+
+::: orcapod.core.operators.Index

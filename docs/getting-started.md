@@ -50,9 +50,9 @@ Use `output_schema()` to see the tag and data column types:
 ```python
 tag_schema, data_schema = source.output_schema()
 print(tag_schema)
-# Schema({'experiment': <class 'str'>})
+# Schema({'experiment': str})
 print(data_schema)
-# Schema({'temperature': <class 'float'>, 'pressure': <class 'float'>})
+# Schema({'temperature': float, 'pressure': float})
 ```
 
 ### Column names
@@ -94,7 +94,7 @@ print(table.to_pandas())
 
 ## Applying a function pod
 
-A **function pod** transforms data data row by row. Use the `@function_pod` decorator
+A **function pod** transforms data row by row. Use the `@function_pod` decorator
 to turn a plain Python function into a reusable, trackable transformation:
 
 ```python
@@ -110,8 +110,13 @@ def analyze_conditions(temperature: float, pressure: float) -> tuple[float, bool
 A few things to note about function pods:
 
 - **Parameter names match data column names.** The function's parameter names
-  (`temperature`, `pressure`) must match the data column names from the input stream.
-  Orcapod uses type annotations to validate compatibility at process time.
+  (`temperature`, `pressure`) must match the data column names from the input stream
+  exactly -- one parameter per data column. A stream with extra data columns is rejected;
+  narrow it first with `source.select_data_columns([...])`
+  (see [Function Pods](concepts/function-pods.md#input-columns-must-match-exactly)).
+- **Type annotations define the schemas.** Orcapod uses them to build the output schema and
+  to validate compatibility when the pod is applied. A parameter without an annotation needs
+  its type in the decorator's `input_schema` mapping instead.
 - **`output_keys` names the output columns.** Since the function returns a tuple of two
   values, `output_keys` must be a list of two names. For a function returning a single
   value, pass a single string (e.g., `output_keys="result"`).
@@ -138,9 +143,9 @@ The result stream supports the same inspection methods as the source:
 ```python
 tag_schema, data_schema = result.output_schema()
 print(tag_schema)
-# Schema({'experiment': <class 'str'>})
+# Schema({'experiment': str})
 print(data_schema)
-# Schema({'temp_fahrenheit': <class 'float'>, 'is_high_pressure': <class 'bool'>})
+# Schema({'temp_fahrenheit': float, 'is_high_pressure': bool})
 ```
 
 The tag schema is unchanged -- function pods never modify tags. The data schema
@@ -200,6 +205,13 @@ print(result.as_table().to_pandas())
 # 1    exp_002            72.14             False
 # 2    exp_003            67.64              True
 ```
+
+## Keeping results
+
+Everything above runs in memory: results are recomputed each time and nothing is stored. To
+save results in a database and have later runs compute only what is new, record the same
+steps inside a `PipelineJob`. See
+[`PipelineJob` -- database-backed, cached execution](concepts/function-pods.md#pipelinejob-database-backed-cached-execution).
 
 ## Next steps
 

@@ -7,17 +7,12 @@ content-addressable, and reproducible by design.
 
 ## Installation
 
-Install from [PyPI](https://pypi.org/project/orcapod/) using [uv](https://docs.astral.sh/uv/):
+Orcapod supports Python 3.11, 3.12 and 3.13. Install it from your organization's internal
+package index by pointing pip or uv at that index.
 
-```bash
-uv add orcapod
-```
-
-For the latest development version, install directly from GitHub:
-
-```bash
-uv add git+https://github.com/walkerlab/orcapod-python.git
-```
+!!! note "Install command pending"
+    The index URL and the exact install command are not settled yet; this section will give
+    them once they are. Until then, ask the Orcapod maintainers which index to use.
 
 Rendering pipeline graphs additionally requires the [Graphviz](https://graphviz.org/download/)
 `dot` binary on your `PATH`. It is optional: everything else works without it, and no

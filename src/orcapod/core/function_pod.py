@@ -679,7 +679,7 @@ class FunctionPod(_FunctionPodBase):
         version: str = "v1.0",
         pod_config: PodConfig | None = None,
         label: str | None = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> "FunctionPod":
         """Construct a ``FunctionPod`` directly from a callable.
 
@@ -1120,7 +1120,7 @@ def function_pod(
     pod_cache_database: ArrowDatabaseProtocol | None = None,
     executor: DataFunctionExecutorProtocol | None = None,
     post_run_hooks: Sequence[PostRunHook] | None = None,
-    **kwargs,
+    **kwargs: Any,
 ) -> Callable[..., CallableWithPodProtocol]:
     """Decorator that attaches a ``FunctionPod`` as a ``pod`` attribute.
 

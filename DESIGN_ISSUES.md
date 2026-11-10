@@ -882,6 +882,32 @@ and harmful for a reduction.
 
 ---
 
+### O6 — `MapTags` / `MapData` with `drop_unmapped=True` predict a schema their output does not have when no key matches
+**Status:** open
+**Severity:** medium
+**Issue:** ITL-820
+
+When no key of `name_map` names a column of the stream, `unary_static_process` returns the
+input stream unchanged (`core/operators/mappers.py:51-53` for `MapData`, `196-198` for
+`MapTags`), ignoring `drop_unmapped`. The predicted output schema does apply `drop_unmapped`
+and drops every data column (`MapData`) or every tag column (`MapTags`). So the schema and the
+rows disagree:
+
+```python
+s = DictSource(data=[{"a": "x", "b": "y", "v": 1, "w": 2}], tag_columns=["a", "b"])
+out = MapTags(name_map={"zz": "q"}, drop_unmapped=True)(s)
+out.keys()                  # ((), ('v', 'w'))
+out.as_table().column_names # ['a', 'b', 'v', 'w']
+# MapData(name_map={"zz": "q"}, drop_unmapped=True): keys() == (('a', 'b'), ()), same table
+```
+
+Found by CodeRabbit on PR #271 (docs). The concepts page does not document this case until the
+intended behaviour is decided: drop every unmapped column (what the flag says) or be a no-op.
+A fix needs a regression test comparing `output_schema()` with
+`unary_static_process(stream).output_schema()`.
+
+---
+
 ## `src/orcapod/core/` — AddResult pod and Pod Groups
 
 ### G1 — `AddResult`: a first-class pod type for data enrichment
@@ -1680,6 +1706,33 @@ must drop and recreate the affected pipeline DB tables manually.
 
 A proper migration utility (analogous to `migrate_pipeline_v0_to_v1`) should be implemented
 before v0.1.0 ship.
+
+---
+
+## `docs/` (user-facing documentation)
+
+### DOC1 — Documentation samples and behavioural claims had drifted from the code
+**Status:** resolved
+**Severity:** high
+**Issue:** PLT-4816 (related: ITL-807)
+
+Nothing executed the code samples in the user-facing docs, so they drifted as the library
+changed. Against `main` at `61d0f18e`, 24 of 45 samples failed, and several prose claims
+described behaviour the code does not have: that a function pod picks the columns it needs
+out of a wider stream (it rejects extra data columns — ITL-807), that editing a function's
+body invalidates its cached results (only its name, output schema and major version do), a
+database-backed `FunctionNode(..., pipeline_database=..., result_database=...)` API that no
+longer exists, `_tag::` as the system tag column prefix (the columns are `_tag_source_id::` and
+`_tag_record_id::`), and `op.enable_file_hash_caching` (the function is in `orcapod.contexts`).
+`mkdocs build --strict` also failed, on stale docstring parameters.
+
+**Fix:** Added `tests/test_docs/`, which runs every fenced `python` block in `README.md`,
+`docs/index.md`, `docs/getting-started.md`, `docs/concepts/` and `docs/reference/` (except the
+two PostgreSQL samples in `docs/concepts/file-hash-caching.md`, marked
+`<!-- docs-test: skip -->`) and checks the printed output against the output shown in the
+sample, and which builds the site with `mkdocs build --strict`. Fixed every failing sample and the wrong prose to match the code;
+library behaviour was not changed. What the docs still do not cover is listed in
+`superpowers/plans/2026-11-09-docs-gap-report.md`.
 
 ---
 

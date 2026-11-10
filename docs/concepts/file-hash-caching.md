@@ -37,19 +37,28 @@ Call `enable_file_hash_caching()` once at application startup, before any
 hashing takes place:
 
 ```python
-import orcapod as op
-op.enable_file_hash_caching()
+from orcapod.contexts import enable_file_hash_caching
+
+enable_file_hash_caching()
 ```
 
-You can also supply an explicit path for the SQLite database:
+`enable_file_hash_caching` lives in `orcapod.contexts`; it is not re-exported from the
+top-level `orcapod` namespace.
+
+You can also supply an explicit path for the SQLite database, as a `pathlib.Path`. Parent
+directories are created if they do not exist:
 
 ```python
-op.enable_file_hash_caching(db_path="/path/to/cache.db")
+from pathlib import Path
+
+enable_file_hash_caching(db_path=Path("cache/file_hash_cache.db"))
 ```
 
 Calling the function more than once is safe. Orcapod logs a warning and
-replaces the active cacher with the new one, so the prior cache entries
-remain accessible at the same path if you use the same `db_path`.
+replaces the active cacher with the new one (there is always exactly one
+caching layer), so the prior cache entries remain accessible at the same path
+if you use the same `db_path`. `db_path` and `conninfo` are mutually
+exclusive; passing both raises `ValueError`.
 
 ## Controlling when the cache is written
 
@@ -64,9 +73,11 @@ cache pre-populated by `populate_hash_cache()` without polluting it with
 ad-hoc entries.
 
 ```python
-import orcapod as op
+from pathlib import Path
 
-op.enable_file_hash_caching(db_path="/shared/cache.db", read_only=True)
+from orcapod.contexts import enable_file_hash_caching
+
+enable_file_hash_caching(db_path=Path("shared/cache.db"), read_only=True)
 ```
 
 Cache hits still work normally. On a miss, the file is hashed directly and
@@ -79,10 +90,10 @@ files. For small files, the disk I/O bottleneck does not apply, so the
 cache lookup and write add latency without meaningful savings.
 
 ```python
-import orcapod as op
+from orcapod.contexts import enable_file_hash_caching
 
 # Skip caching for files smaller than 1 MB
-op.enable_file_hash_caching(min_cache_size_bytes=1_048_576)
+enable_file_hash_caching(min_cache_size_bytes=1_048_576)
 ```
 
 Files smaller than the threshold are still hashed and the hash is returned
@@ -98,12 +109,14 @@ when enabled, no entry is ever written regardless of file size.
 cacher is writable.
 
 ```python
-import orcapod as op
+from pathlib import Path
+
+from orcapod.contexts import enable_file_hash_caching
 
 # Read-only + skip files below 512 KB (threshold is moot when read-only,
 # but harmless and documents intent)
-op.enable_file_hash_caching(
-    db_path="/shared/cache.db",
+enable_file_hash_caching(
+    db_path=Path("shared/cache.db"),
     read_only=True,
     min_cache_size_bytes=524_288,
 )
@@ -135,9 +148,9 @@ Set `match_mtime=False` to drop mtime from the lookup criterion. A cache hit the
 requires only **path and size** to match:
 
 ```python
-import orcapod as op
+from orcapod.contexts import enable_file_hash_caching
 
-op.enable_file_hash_caching(match_mtime=False)
+enable_file_hash_caching(match_mtime=False)
 ```
 
 When multiple cache entries share the same path and size (recorded at different
@@ -238,27 +251,34 @@ Orcapod ships two hash cache backends. Pick based on your deployment:
 ### Using the SQLite backend (default)
 
 ```python
-import orcapod as op
+from pathlib import Path
 
-op.enable_file_hash_caching()  # uses ~/.orcapod/file_hash_cache.db
+from orcapod.contexts import enable_file_hash_caching
+
+enable_file_hash_caching()  # uses ~/.orcapod/file_hash_cache.db
 # or specify a path:
-op.enable_file_hash_caching(db_path="/shared/nfs/cache.db")
+enable_file_hash_caching(db_path=Path("shared/nfs/cache.db"))
 ```
 
 ### Using the Postgres backend
 
-Requires `psycopg` (install with `pip install 'orcapod[postgresql]'`):
+Requires `psycopg` (install with `pip install 'orcapod[postgresql]'`) and a reachable
+Postgres server:
+
+<!-- docs-test: skip -->
 
 ```python
-import orcapod as op
+from orcapod.contexts import enable_file_hash_caching
 
-op.enable_file_hash_caching(
+enable_file_hash_caching(
     conninfo="postgresql://user:pass@db-host:5432/orcapod_cache"
 )
 ```
 
 You can also construct `PostgresHashCacher` directly and pass it to
 `CachedFileHasher` for advanced configurations:
+
+<!-- docs-test: skip -->
 
 ```python
 from orcapod.hashing import CachedFileHasher, FileHasher, PostgresHashCacher

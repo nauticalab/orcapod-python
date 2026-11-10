@@ -1,17 +1,24 @@
 # Orcapod Python
-Orcapod's Python library for developing reproducbile scientific pipelines.
+Orcapod's Python library for developing reproducible scientific pipelines.
+
+User documentation lives in [`docs/`](docs/index.md) (start with
+[Getting Started](docs/getting-started.md)) and is built with `uv run mkdocs build --strict`.
+`tests/test_docs/` executes the Python samples in this README, `docs/index.md`,
+`docs/getting-started.md`, `docs/concepts/` and `docs/reference/`, except the two samples in
+`docs/concepts/file-hash-caching.md` that need a PostgreSQL server.
 
 ## Releasing
 
 To cut a release, tag a commit on `main` — `hatch-vcs` derives the version
-automatically and CI publishes to PyPI. See [RELEASING.md](RELEASING.md) for the
-full workflow.
+automatically and the release workflow publishes the package. Orcapod is distributed through
+the organization's internal package index; the release workflow still targets PyPI and has
+not been moved to that index yet. See [RELEASING.md](RELEASING.md) for the full workflow.
 
 ## Continuous Integration
 
 This project uses GitHub Actions for continuous integration:
 
-- **Run Tests**: Runs the full unit test suite on Ubuntu with Python 3.11 and 3.12. PostgreSQL integration tests are excluded.
+- **Run Tests**: Runs the full unit test suite on Ubuntu with Python 3.11, 3.12 and 3.13. PostgreSQL integration tests are excluded.
 - **Run PostgreSQL Tests**: Runs only the `@pytest.mark.postgres` integration tests against a PostgreSQL 16 service container.
 
 ### Running Tests Locally
@@ -78,7 +85,7 @@ While the following is subject to change based on future development, it represe
 ### Construct PIPELINE using with pipeline
 
   "Compile" PIPELINE
-  - auto_compile=False is default
+  - auto_compile=True is the default (compile runs when the `with` block exits)
   - Walk the DAG, wrap each element in a node that owns execution logic, fixates input stream, attaches caching
   - Nodes (function, operator) are associated with storage/DB
   - If a function node has no executor, Pipeline.compile() assigns LocalExecutor() by default — so capture/logging works out of the box without explicit executor setup

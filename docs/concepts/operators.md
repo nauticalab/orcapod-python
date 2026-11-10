@@ -85,12 +85,68 @@ Binary join that handles colliding data columns by merging their values into sor
 `list[T]`. Both inputs must have the same type for any colliding data columns. MergeJoin
 is **commutative** -- the order of the two input streams does not affect the result.
 
+```python
+from orcapod.sources import DictSource
+from orcapod.operators import MergeJoin
+
+scale_a = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "weight": 25.3},
+        {"subject_id": "mouse_02", "weight": 22.1},
+    ],
+    tag_columns=["subject_id"],
+)
+scale_b = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "weight": 24.9},
+        {"subject_id": "mouse_02", "weight": 22.6},
+    ],
+    tag_columns=["subject_id"],
+)
+
+merged = MergeJoin()(scale_a, scale_b)
+for tag, data in merged.iter_data():
+    print(tag.as_dict(), "->", data.as_dict())
+# {'subject_id': 'mouse_01'} -> {'weight': [24.9, 25.3]}
+# {'subject_id': 'mouse_02'} -> {'weight': [22.1, 22.6]}
+```
+
+Passing the same two streams to `Join` instead raises `InputValidationError`, because both
+carry a `weight` data column.
+
 ### SemiJoin
 
 Binary join that filters the left stream to only include rows whose tags match the right
 stream. The right stream's data columns are discarded. SemiJoin is **not commutative** --
 the order of inputs matters. The first stream is the one being filtered; the second stream
 provides the set of matching tags.
+
+```python
+from orcapod.sources import DictSource
+from orcapod.operators import SemiJoin
+
+all_subjects = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "age": 12},
+        {"subject_id": "mouse_02", "age": 8},
+        {"subject_id": "mouse_03", "age": 15},
+    ],
+    tag_columns=["subject_id"],
+)
+weighed = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "weight": 25.3},
+        {"subject_id": "mouse_02", "weight": 22.1},
+    ],
+    tag_columns=["subject_id"],
+)
+
+only_weighed = SemiJoin()(all_subjects, weighed)
+for tag, data in only_weighed.iter_data():
+    print(tag.as_dict(), "->", data.as_dict())
+# {'subject_id': 'mouse_01'} -> {'age': 12}
+# {'subject_id': 'mouse_02'} -> {'age': 8}
+```
 
 ### Batch
 
@@ -118,10 +174,11 @@ for tag, data in batched.iter_data():
     # Data: {'age': [12, 8]}
 ```
 
-Pass `batch_size=N` to create fixed-size batches instead of grouping everything:
+Pass `batch_size=N` to create fixed-size batches instead of grouping everything. The last
+batch may be smaller; pass `drop_partial_batch=True` to discard it:
 
 ```python
-batch = Batch(batch_size=10, drop_partial_batch=False)
+batch = Batch(batch_size=10, drop_partial_batch=True)
 ```
 
 ### GroupBy
@@ -184,17 +241,42 @@ Four operators for including or excluding columns:
 - **`DropDataColumns(columns=["col1"])`** -- remove the specified data columns
 
 ```python
+from orcapod.sources import DictSource
 from orcapod.operators import SelectDataColumns
+
+source = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "age": 12, "weight": 25.3},
+        {"subject_id": "mouse_02", "age": 8, "weight": 22.1},
+        {"subject_id": "mouse_03", "age": 15, "weight": 27.8},
+    ],
+    tag_columns=["subject_id"],
+)
 
 select = SelectDataColumns(columns=["weight"])
 result = select.process(source)
 print(result.keys()[1])  # ('weight',)
 ```
 
+Selecting a column that does not exist raises `InputValidationError`; pass `strict=False` to
+ignore missing columns instead.
+
+`SelectDataColumns` is also how you narrow a stream before a
+[function pod](function-pods.md), which accepts only the data columns its function declares.
+
 ### Column renaming
 
-- **`MapTags(mapping={"old_name": "new_name"})`** -- rename tag columns
-- **`MapData(mapping={"old_name": "new_name"})`** -- rename data columns
+- **`MapTags(name_map={"old_name": "new_name"})`** -- rename tag columns
+- **`MapData(name_map={"old_name": "new_name"})`** -- rename data columns
+
+Columns that are not in `name_map` are kept unless you pass `drop_unmapped=True`.
+
+```python
+from orcapod.operators import MapData
+
+renamed = MapData(name_map={"age": "age_weeks"})(source)
+print(renamed.keys()[1])  # ('age_weeks', 'weight')
+```
 
 ### PolarsFilter
 
@@ -216,7 +298,15 @@ You can also filter by exact values using `constraints`:
 
 ```python
 filt = PolarsFilter(constraints={"subject_id": "mouse_01"})
+print(filt(source).as_table().to_pylist())
+# [{'subject_id': 'mouse_01', 'age': 12, 'weight': 25.3}]
 ```
+
+### Pick and Index
+
+`Pick(column, key)` extracts one entry from a struct- or dict-typed data column, and
+`Index(column, i)` extracts one element from a list-typed data column (for example, a column
+produced by `Batch` or `GroupBy`). See the [API reference](../api/operators.md).
 
 ## Using operators
 
@@ -224,18 +314,39 @@ All operators follow the same interface. Call `.process()` with one or more inpu
 
 ```python
 operator = Join()
-result_stream = operator.process(stream_a, stream_b)
+result_stream = operator.process(subjects, measurements)
 ```
 
 All standard operators also support `__call__` as a shorthand for `.process()`, so you can
 write:
 
 ```python
-result_stream = Join()(stream_a, stream_b)
+result_stream = Join()(subjects, measurements)
 ```
 
 The result is a new [stream](streams.md) that you can inspect, iterate, or pass to further
 operators or function pods.
+
+### Fluent methods
+
+Every stream also exposes the operators as methods, which reads well when chaining:
+`join`, `semi_join`, `batch`, `group_by`, `select_tag_columns`, `select_data_columns`,
+`drop_tag_columns`, `drop_data_columns`, `map_tags`, `map_data`, `polars_filter`, `pick` and
+`index`.
+
+```python
+import polars as pl
+
+adults = subjects.join(measurements).polars_filter(pl.col("age") > 10)
+for tag, data in adults.iter_data():
+    print(tag.as_dict(), "->", data.as_dict())
+# {'subject_id': 'mouse_01'} -> {'age': 12, 'weight': 25.3}
+```
+
+!!! note
+    The fluent `map_tags` and `map_data` methods default to `drop_unmapped=True`, the
+    opposite of the `MapTags` and `MapData` operator classes. Pass `drop_unmapped`
+    explicitly when you rename only some of the columns.
 
 ## How it connects to other concepts
 

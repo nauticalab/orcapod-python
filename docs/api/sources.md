@@ -16,6 +16,12 @@ enrichment (provenance columns, system tags, hashing).
 
 ::: orcapod.core.sources.DeltaTableSource
 
+::: orcapod.core.sources.SQLiteTableSource
+
+::: orcapod.core.sources.PostgreSQLTableSource
+
+::: orcapod.core.sources.PollingSource
+
 ::: orcapod.core.sources.DerivedSource
 
 ::: orcapod.core.sources.CachedSource
