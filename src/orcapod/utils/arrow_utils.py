@@ -546,6 +546,28 @@ def select_arrow_schema(schema: "pa.Schema", columns: Collection[str]) -> "pa.Sc
     return pa.schema(selected_fields)
 
 
+def column_arrow_type(schema: pa.Schema, name: str) -> pa.DataType:
+    """Return the Arrow type of the column ``name`` in ``schema``.
+
+    Reads ``schema.types`` by index rather than ``schema.field(name).type``,
+    which the pyarrow stubs leave untyped.
+
+    Args:
+        schema: The schema to look the column up in.
+        name: The column name; it must occur exactly once in ``schema``.
+
+    Returns:
+        The column's Arrow type, exactly as declared in ``schema``.
+
+    Raises:
+        KeyError: If ``name`` is absent from ``schema`` or occurs more than once.
+    """
+    index = schema.get_field_index(name)
+    if index < 0:
+        raise KeyError(f"Column {name!r} is absent from the schema or not unique")
+    return schema.types[index]
+
+
 def concat_tables_by_name(tables: "Sequence[pa.Table]") -> "pa.Table":
     """Vertically concatenate tables, matching columns by name rather than position.
 

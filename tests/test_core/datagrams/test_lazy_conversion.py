@@ -227,14 +227,16 @@ class TestDatagramArrowBacked:
         assert d._data_table is not None
         assert d._data_dict is not None
 
-    def test_update_after_dict_load_invalidates_table(self):
-        """Once the dict is loaded, update() goes through the dict path and
-        sets _data_table=None so the old Arrow table is not silently reused."""
+    def test_update_after_dict_load_stays_arrow_native(self):
+        """Even with the dict loaded, update() rewrites the Arrow table (keeping
+        each column's Arrow type, ITL-834) and invalidates the stale dict cache."""
         d = Datagram(arrow_table(a=1, b=2))
         _ = d.as_dict()  # force dict load
         d2 = d.update(a=99)
-        assert d2._data_dict is not None
-        assert d2._data_table is None
+        assert d2._data_table is not None
+        assert d2._data_dict is None
+        assert d2.as_dict() == {"a": 99, "b": 2}
+        assert d.as_dict() == {"a": 1, "b": 2}
 
 
 # ---------------------------------------------------------------------------
@@ -275,12 +277,14 @@ class TestDatagramCopy:
         d2 = d.copy(include_cache=True)
         assert d2._content_hash_cache  # preserved on copy with cache
 
-    def test_copy_without_cache_drops_meta_table(self):
+    def test_copy_without_cache_keeps_meta_table(self):
+        """The meta table carries the meta columns' Arrow types (ITL-834), so a
+        cache-less copy keeps it rather than rebuilding it from Python types."""
         d = Datagram({"a": 1, f"{META}info": "v1"})
         _ = d.as_table(all_info=True)  # builds meta table
         assert d._meta_table is not None
         d2 = d.copy(include_cache=False)
-        assert d2._meta_table is None
+        assert d2._meta_table is d._meta_table
 
     def test_copy_without_cache_drops_context_table(self):
         d = Datagram({"a": 1})

@@ -7,6 +7,7 @@ from orcapod.types import ColumnConfig
 from orcapod.utils.arrow_utils import (
     add_source_info,
     apply_column_config,
+    column_arrow_type,
     concat_tables_by_name,
     infer_schema_nullable,
     make_schema_non_nullable,
@@ -918,6 +919,34 @@ class TestFoldSystemTagValues:
         ).stdout.split()
         assert out[0] == self.EXPECTED_RID.hex()
         assert out[1] == self.EXPECTED_SID
+
+
+class TestColumnArrowType:
+    """``column_arrow_type`` returns a column's declared Arrow type verbatim."""
+
+    def test_returns_exact_declared_type(self) -> None:
+        """Narrow, layout-specific and nested types come back unchanged."""
+        schema = pa.schema(
+            [
+                pa.field("i8", pa.int8()),
+                pa.field("s", pa.string()),
+                pa.field("l8", pa.list_(pa.int8())),
+            ]
+        )
+        assert column_arrow_type(schema, "i8") == pa.int8()
+        assert column_arrow_type(schema, "s") == pa.string()
+        assert column_arrow_type(schema, "l8") == pa.list_(pa.int8())
+
+    def test_missing_column_raises_key_error(self) -> None:
+        """An absent column raises ``KeyError``, as ``Schema.field`` does."""
+        with pytest.raises(KeyError):
+            _ = column_arrow_type(pa.schema([pa.field("a", pa.int8())]), "b")
+
+    def test_duplicate_column_raises_key_error(self) -> None:
+        """An ambiguous (duplicated) column name raises ``KeyError``."""
+        schema = pa.schema([pa.field("a", pa.int8()), pa.field("a", pa.int16())])
+        with pytest.raises(KeyError):
+            _ = column_arrow_type(schema, "a")
 
 
 class TestConcatTablesByName:
