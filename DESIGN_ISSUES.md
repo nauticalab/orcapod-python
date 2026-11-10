@@ -1785,6 +1785,55 @@ CI job failed.
 
 ---
 
+## System tag run stability (ITL-817)
+
+### RS1 — Tag column order through `Join` / `MergeJoin` depended on `PYTHONHASHSEED`
+**Status:** resolved
+**Severity:** high
+**Issue:** ITL-817
+
+`Join.static_process` and `MergeJoin.binary_static_process` built `tag_columns` from a `set`,
+so the order of user tag columns on every emitted `Tag` changed from process to process.
+`FunctionJobNode._load_cached_entries` rebuilds cached rows with the compile-time tag order,
+so a node output mixing cached and freshly computed rows could not be concatenated:
+`SyncPipelineOrchestrator._materialize_as_stream` raised
+`ArrowInvalid: Schema at index N was different`.
+
+**Fix:** Column order follows the operator's argument symmetry. `Join` and `MergeJoin` are
+commutative, so they list tag and data columns by first appearance across the inputs in
+canonical `pipeline_hash` order: `Join(a, b)` and `Join(b, a)` give the same keys, schema,
+table columns and per-row keys, in every process and on the async path. The order is defined
+once, in `output_schema` / `binary_output_schema`; `static_process` reads it back and lays
+the table out to match. `SemiJoin` is ordered and keeps the left operand's columns.
+`arrow_utils.concat_tables_by_name` aligns per-row tables by column name in both buffer
+materializers, so any operator that emits a different column order is tolerated. Column
+order only: `arrow_hasher.hash_table` and the semantic hasher ignore column and key order,
+so no record ID, system tag, `content_hash` or `pipeline_hash` changes.
+
+### RS2 — Default source record IDs are positional
+**Status:** open
+**Severity:** high
+**Issue:** ITL-817
+
+Without `record_id_column`, `stream_builder._make_provenance_token` derives a row's record ID
+from its position (`row_{index}`). When the same rows arrive in a different order under the
+same `source_id`, a moved row gets a different record ID while its user tags and data stay
+correct. Every identity built on the system tags of a moved row then changes, and because
+those identities also include the hash of the row's own data, the row is treated as a new
+entry: a `sink_pod` re-delivers it on every run (all rows when every row moves) and a
+function node records a second entry with identical tag values and a distinct record ID. No
+result is paired with the wrong row. `record_id_column` alone does not prevent this when `source_id` is left to
+default, because the default `source_id` is the table hash, which also changes with row order. This reproduces the signature reported
+in ITL-817 exactly; whether it is the reporter's cause depends on how their sources are built.
+
+The behavior is now documented on `ArrowTableSource`, `SourceStreamBuilder.build` and in
+`docs/concepts/sources.md`, and `record_id_column` is pinned as order-independent by
+`tests/test_pipeline/test_system_tag_run_stability.py`. Changing the default to a
+content-derived record ID invalidates stored identities and is proposed, not implemented, in
+`superpowers/specs/2026-11-09-itl-817-content-derived-record-ids.md`.
+
+---
+
 ## `src/orcapod/utils/canonical_type_names.py`
 
 ### PY313 — Type names in identity strings depended on the Python version

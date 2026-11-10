@@ -546,6 +546,43 @@ def select_arrow_schema(schema: "pa.Schema", columns: Collection[str]) -> "pa.Sc
     return pa.schema(selected_fields)
 
 
+def concat_tables_by_name(tables: "Sequence[pa.Table]") -> "pa.Table":
+    """Vertically concatenate tables, matching columns by name rather than position.
+
+    ``pa.concat_tables`` requires every table to list its columns in the same
+    order. Per-row tables collected from a node's output do not always agree:
+    a ``FunctionJobNode`` serves cached rows with the tag column order recorded
+    at compile time and fresh rows with the order its upstream emitted. Each
+    table is therefore reordered to the first table's column order before
+    concatenating.
+
+    Only the column order is reconciled. Tables whose column name sets differ
+    are passed through unchanged so that ``pa.concat_tables`` raises as usual.
+
+    Args:
+        tables: Tables to concatenate, in row order.
+
+    Returns:
+        The concatenated table, with the first table's column order.
+
+    Raises:
+        ValueError: If ``tables`` is empty.
+    """
+    if not tables:
+        raise ValueError("Cannot concatenate an empty sequence of tables")
+    names = tables[0].column_names
+    name_set = set(names)
+    aligned = [
+        table.select(names)
+        if table.column_names != names
+        and len(table.column_names) == len(names)
+        and set(table.column_names) == name_set
+        else table
+        for table in tables
+    ]
+    return pa.concat_tables(aligned)
+
+
 def hstack_tables(*tables: "pa.Table") -> "pa.Table":
     """
     Horizontally stack multiple PyArrow tables by concatenating their columns.

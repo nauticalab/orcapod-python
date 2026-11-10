@@ -51,6 +51,12 @@ N-ary inner join on shared tag columns. Requires that input streams have non-ove
 data columns (raises `InputValidationError` on collision). Join is **commutative** -- the
 order of input streams does not affect the result.
 
+Column order follows each operator's argument symmetry: commutative operators (`Join`,
+`MergeJoin`) list tag and data columns by first appearance across their inputs in canonical
+pipeline-hash order, so `Join()(a, b)` and `Join()(b, a)` have the same columns in the same
+order, while ordered operators such as `SemiJoin` keep operand order; either way, address
+columns by name rather than by position.
+
 ```python
 from orcapod.sources import DictSource
 from orcapod.operators import Join

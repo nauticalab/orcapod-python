@@ -63,13 +63,61 @@ class Join(NonZeroInputOperator):
             # if single stream, simply return the output schema of the single input stream
             return streams[0].output_schema(columns=columns, all_info=all_info)
 
-        # Always get input schemas WITHOUT system tags for the base computation.
-        # System tags are computed separately because the join renames them.
-        stream = streams[0]
+        tag_schema, data_schema = self._joined_user_schemas(*streams)
+
+        # Add system tag columns if requested
+        if columns_config.system_tags:
+            system_tag_schema = self._predict_system_tag_schema(*streams)
+            tag_schema = schema_utils.union_schemas(tag_schema, system_tag_schema)
+
+        return tag_schema, data_schema
+
+    def _joined_user_schemas(
+        self, *streams: StreamProtocol, check_data_overlap: bool = True
+    ) -> tuple[Schema, Schema]:
+        """Union the inputs' tag and data schemas in Join's column order.
+
+        Join is commutative, so its column order must not depend on operand
+        order: tag and data columns are listed by first appearance across the
+        inputs in canonical ``pipeline_hash`` order (``order_input_streams``;
+        inputs with equal pipeline hashes keep call order). This is the single
+        definition of the order: ``output_schema`` returns it and
+        ``static_process`` lays its table out by it.
+
+        System tags are excluded: the join renames them, and
+        ``_predict_system_tag_schema`` computes them separately.
+
+        Args:
+            *streams: Two or more input streams.
+            check_data_overlap: If ``True``, raise when two inputs share a
+                data column. ``static_process`` passes ``False``: it does not
+                validate its inputs, and renames colliding columns itself.
+
+        Returns:
+            The ``(tag_schema, data_schema)`` of the joined user columns.
+
+        Raises:
+            InputValidationError: If ``check_data_overlap`` is ``True`` and two
+                inputs share a data column.
+        """
+        ordered_streams = self.order_input_streams(*streams)
+        stream = ordered_streams[0]
         tag_schema, data_schema = stream.output_schema()
-        for other_stream in streams[1:]:
+        for other_stream in ordered_streams[1:]:
             other_tag_schema, other_data_schema = other_stream.output_schema()
             tag_schema = schema_utils.union_schemas(tag_schema, other_tag_schema)
+            if not check_data_overlap:
+                data_schema = Schema(
+                    {
+                        **data_schema,
+                        **{
+                            key: data_type
+                            for key, data_type in other_data_schema.items()
+                            if key not in data_schema
+                        },
+                    }
+                )
+                continue
             intersection_data_schema = schema_utils.intersection_schemas(
                 data_schema, other_data_schema
             )
@@ -78,12 +126,6 @@ class Join(NonZeroInputOperator):
                 raise InputValidationError(
                     f"Datas should not have overlapping keys, but {data_schema.keys()} found in {stream} and {other_stream}."
                 )
-
-        # Add system tag columns if requested
-        if columns_config.system_tags:
-            system_tag_schema = self._predict_system_tag_schema(*streams)
-            tag_schema = schema_utils.union_schemas(tag_schema, system_tag_schema)
-
         return tag_schema, data_schema
 
     def _predict_system_tag_schema(self, *streams: StreamProtocol) -> Schema:
@@ -218,13 +260,25 @@ class Join(NonZeroInputOperator):
         # Sort system tag values for same-pipeline-hash streams to ensure commutativity
         table = arrow_utils.sort_system_tag_values(table)
 
-        reordered_columns = [col for col in table.column_names if col in tag_keys]
-        reordered_columns += [col for col in table.column_names if col not in tag_keys]
-
-        result_table = table.select(reordered_columns)
+        # Lay the columns out in the order ``output_schema`` defines (see
+        # ``_joined_user_schemas``): tags, then data, then the hidden columns.
+        # ``ArrowTableStream`` reads its schema from the physical order and its
+        # keys from ``tag_columns``, so both must follow it. No hash or record
+        # ID depends on column order.
+        tag_schema, data_schema = self._joined_user_schemas(
+            *streams, check_data_overlap=False
+        )
+        tag_order = list(tag_schema.keys())
+        data_order = list(data_schema.keys())
+        listed = {*tag_order, *data_order}
+        result_table = table.select(
+            tag_order
+            + data_order
+            + [col for col in table.column_names if col not in listed]
+        )
         return ArrowTableStream(
             result_table,
-            tag_columns=tuple(tag_keys),
+            tag_columns=tuple(tag_order),
         )
 
     # ------------------------------------------------------------------
@@ -332,6 +386,10 @@ class Join(NonZeroInputOperator):
         block_sep = constants.BLOCK_SEPARATOR
 
         if n == 2:
+            # Join in canonical order so the merged tag and data keys follow
+            # the order ``output_schema`` defines, whatever the operand order.
+            left_idx, right_idx = self._canonical_input_order(suffixes)
+            pair_suffixes = [suffixes[left_idx], suffixes[right_idx]]
 
             def merge_fn(
                 lt: TagProtocol,
@@ -339,13 +397,36 @@ class Join(NonZeroInputOperator):
                 rt: TagProtocol,
                 rp: DataProtocol,
             ) -> tuple[TagProtocol, DataProtocol]:
-                return self._merge_pair_rename(lt, lp, rt, rp, suffixes, block_sep)
+                return self._merge_pair_rename(lt, lp, rt, rp, pair_suffixes, block_sep)
 
-            await self._binary_streaming_join(inputs[0], inputs[1], output, merge_fn)
+            await self._binary_streaming_join(
+                inputs[left_idx], inputs[right_idx], output, merge_fn
+            )
             return
 
         # N >= 3: staggered pairwise joins matching static_process
         await self._staggered_join(inputs, output, suffixes)
+
+    @staticmethod
+    def _canonical_input_order(suffixes: Sequence[str]) -> list[int]:
+        """Return the input indices in canonical order.
+
+        The canonical position is encoded in each suffix: ``"hash:position"``
+        when pipeline hashes are provided, or plain ``"0"``, ``"1"``, ...
+        (call order) otherwise.
+
+        Args:
+            suffixes: Per-input system-tag suffixes (positional).
+
+        Returns:
+            The input indices sorted by canonical position.
+        """
+
+        def _canon_pos(i: int) -> int:
+            parts = suffixes[i].rsplit(":", 1)
+            return int(parts[1]) if len(parts) == 2 else int(parts[0])
+
+        return sorted(range(len(suffixes)), key=_canon_pos)
 
     async def _staggered_join(
         self,
@@ -373,18 +454,10 @@ class Join(NonZeroInputOperator):
         """
         from orcapod.channels import Channel
 
-        n = len(inputs)
         block_sep = constants.BLOCK_SEPARATOR
         sys_prefix = constants.SYSTEM_TAG_PREFIX
 
-        # Canonical order: sorted by canonical position encoded in suffixes.
-        # Suffixes are "hash:position" when pipeline hashes are provided,
-        # or plain "0", "1", ... otherwise.
-        def _canon_pos(i: int) -> int:
-            parts = suffixes[i].rsplit(":", 1)
-            return int(parts[1]) if len(parts) == 2 else int(parts[0])
-
-        canon_order = sorted(range(n), key=_canon_pos)
+        canon_order = self._canonical_input_order(suffixes)
 
         async with asyncio.TaskGroup() as tg:
             # Pre-rename system tags for each input so binary joins

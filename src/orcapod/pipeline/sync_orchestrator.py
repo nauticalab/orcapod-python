@@ -184,9 +184,6 @@ class SyncPipelineOrchestrator:
             An ArrowTableStream.
         """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-        from orcapod.utils.lazy_module import LazyModule
-
-        pa = LazyModule("pyarrow")
 
         if not buf:
             # Build an empty stream preserving declared field nullability.
@@ -208,8 +205,10 @@ class SyncPipelineOrchestrator:
         tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in buf]
         data_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
 
-        combined_tags = pa.concat_tables(tag_tables)
-        combined_data = pa.concat_tables(data_tables)
+        # Rows may list the same columns in a different order (cached vs
+        # freshly computed), so match columns by name.
+        combined_tags = arrow_utils.concat_tables_by_name(tag_tables)
+        combined_data = arrow_utils.concat_tables_by_name(data_tables)
 
         user_tag_keys = tuple(buf[0][0].keys())
         source_info = buf[0][1].source_info()

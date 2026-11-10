@@ -48,6 +48,18 @@ def _make_provenance_token(
     When *record_id_column* is given the token is ``"{column}={value}"``,
     giving a stable, human-readable key that survives row reordering.
     When no column is specified the fallback is ``"row_{index}"``.
+
+    The fallback is positional: the token names a row position, not a row.
+    If the same rows are supplied in a different order under the same
+    ``source_id``, a moved row gets a different record ID. Downstream record
+    identities (``FunctionJobNode`` pipeline entries, ``SideEffectPod``
+    completion records) are derived from the system tags plus the row's data
+    hash, so the moved row is treated as a new entry: it is recorded again,
+    giving two entries with identical tag values but distinct record IDs, and
+    a ``SideEffectPod`` delivers it again. Because every identity includes the
+    row's own data hash, no result is ever paired with the wrong row. Pass
+    ``record_id_column`` (with a stable ``source_id``) whenever row order is
+    not guaranteed to be identical between runs.
     """
     if record_id_column is not None:
         return f"{record_id_column}={row[record_id_column]}"
@@ -120,8 +132,14 @@ class SourceStreamBuilder:
         Args:
             table: Arrow table with nullable flags already set correctly.
             tag_columns: Column names forming the tag for each row.
-            source_id: Canonical source name. Defaults to table hash.
-            record_id_column: Column for stable record IDs in provenance.
+            source_id: Canonical source name. Defaults to the table hash,
+                which changes when rows are reordered; pass an explicit value
+                when record IDs must survive reordering.
+            record_id_column: Column whose value identifies a row, giving
+                record IDs that follow the row regardless of its position
+                (given a stable ``source_id``). When ``None`` the record ID is
+                derived from the row's position (``row_{index}``), so it is
+                stable only while row order is.
             system_tag_columns: Additional system-level tag columns.
 
         Returns:

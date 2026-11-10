@@ -80,10 +80,19 @@ class MergeJoin(BinaryOperator):
     ) -> tuple[Schema, Schema]:
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
+        # MergeJoin is commutative, so its column order must not depend on
+        # operand order: tag and data columns are listed by first appearance
+        # across the inputs in canonical ``pipeline_hash`` order. This is the
+        # single definition of the order; ``binary_static_process`` reads it
+        # back from here.
+        #
         # Always get input schemas WITHOUT system tags for the base computation.
         # System tags are computed separately because the join renames them.
-        left_tag_schema, left_data_schema = left_stream.output_schema()
-        right_tag_schema, right_data_schema = right_stream.output_schema()
+        (first_stream, _), (second_stream, _) = self._canonical_order(
+            left_stream, right_stream
+        )
+        left_tag_schema, left_data_schema = first_stream.output_schema()
+        right_tag_schema, right_data_schema = second_stream.output_schema()
 
         # Tag schema: union of both tag schemas
         tag_schema = schema_utils.union_schemas(left_tag_schema, right_tag_schema)
@@ -94,7 +103,9 @@ class MergeJoin(BinaryOperator):
         )
 
         merged_data_schema = {}
-        all_data_keys = set(left_data_schema.keys()) | set(right_data_schema.keys())
+        all_data_keys = [*left_data_schema] + [
+            key for key in right_data_schema if key not in left_data_schema
+        ]
         for key in all_data_keys:
             if key in colliding_schema:
                 merged_data_schema[key] = list[colliding_schema[key]]
@@ -167,12 +178,16 @@ class MergeJoin(BinaryOperator):
             )
             tables[orig_idx] = table
 
-        left_table = tables[0]
-        right_table = tables[1]
+        # Join in canonical order, so "left" and "right" below are the
+        # canonically first and second inputs and the physical columns come
+        # out the same for MergeJoin(a, b) and MergeJoin(b, a).
+        (first_stream, first_idx), (second_stream, second_idx) = canonical
+        left_table = tables[first_idx]
+        right_table = tables[second_idx]
 
         # Determine shared tag keys for inner join
-        left_tag_keys, left_data_keys = left_stream.keys()
-        right_tag_keys, right_data_keys = right_stream.keys()
+        left_tag_keys, left_data_keys = first_stream.keys()
+        right_tag_keys, right_data_keys = second_stream.keys()
         shared_tag_keys = set(left_tag_keys) & set(right_tag_keys)
 
         # Find colliding data columns
@@ -340,11 +355,16 @@ class MergeJoin(BinaryOperator):
         # Sort system tag values for same-pipeline-hash streams to ensure commutativity
         joined = arrow_utils.sort_system_tag_values(joined)
 
-        # Reorder: tag columns first, then data columns
-        all_tag_keys = set(left_tag_keys) | set(right_tag_keys)
-        tag_cols = [c for c in joined.column_names if c in all_tag_keys]
-        other_cols = [c for c in joined.column_names if c not in all_tag_keys]
-        joined = joined.select(tag_cols + other_cols)
+        # Lay the columns out in the order ``binary_output_schema`` defines:
+        # tags, then data, then the hidden columns. ``ArrowTableStream`` reads
+        # its schema from the physical order and its keys from ``tag_columns``,
+        # so both must follow it. No hash or record ID depends on column order.
+        tag_schema, data_schema = self.binary_output_schema(left_stream, right_stream)
+        tag_cols = list(tag_schema.keys())
+        data_cols = list(data_schema.keys())
+        listed = {*tag_cols, *data_cols}
+        other_cols = [c for c in joined.column_names if c not in listed]
+        joined = joined.select(tag_cols + data_cols + other_cols)
 
         # Reconstruct schema from captured input nullable flags.
         # Fall back to null-count inference for any unexpected columns.
@@ -366,7 +386,7 @@ class MergeJoin(BinaryOperator):
         )
         return ArrowTableStream(
             joined,
-            tag_columns=tuple(all_tag_keys),
+            tag_columns=tuple(tag_cols),
         )
 
     def identity_structure(self) -> Any:

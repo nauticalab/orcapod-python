@@ -213,8 +213,10 @@ class StaticOutputOperatorPod(TraceableBase):
             tag_tables.append(tag.as_table(columns={"system_tags": True}))
             data_tables.append(data.as_table(columns={"source": True}))
 
-        combined_tags = pa.concat_tables(tag_tables)
-        combined_data = pa.concat_tables(data_tables)
+        # Rows may list the same columns in a different order (cached vs
+        # freshly computed), so match columns by name.
+        combined_tags = arrow_utils.concat_tables_by_name(tag_tables)
+        combined_data = arrow_utils.concat_tables_by_name(data_tables)
 
         user_tag_keys = tuple(rows[0][0].keys())
 
