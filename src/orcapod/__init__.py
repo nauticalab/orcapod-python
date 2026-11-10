@@ -1,3 +1,13 @@
+try:
+    from ._version import __version__
+except ImportError:  # source tree without the hatch-vcs generated _version.py
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        __version__ = version("orcapod")
+    except PackageNotFoundError:
+        __version__ = "0.0.0+unknown"
+
 from .config import (
     DEFAULT_CONFIG,
     DisplayConfig,
@@ -62,6 +72,7 @@ from .hooks import (
 )
 
 __all__ = [
+    "__version__",
     "DEFAULT_CONFIG",
     "DisplayConfig",
     "HashingConfig",
