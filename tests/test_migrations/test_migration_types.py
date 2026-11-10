@@ -1,4 +1,5 @@
 """Tests for MigrationResult dataclass."""
+
 from __future__ import annotations
 
 from orcapod.migrations.types import MigrationResult

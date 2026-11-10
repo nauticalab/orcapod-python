@@ -15,6 +15,7 @@ Example::
     db.add_record(("results", "my_fn"), record_id=b"sha256:abc", record=table)
     db.flush()
 """
+
 from __future__ import annotations
 
 import re
@@ -75,12 +76,22 @@ class ConnectorArrowDatabase:
         self._path_prefix = _path_prefix
         self._root = _root
         self._scoped_path = _scoped_path
-        self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
-        self._pending_record_ids: dict[str, set[bytes]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
+        self._pending_batches: dict[str, pa.Table] = (
+            _shared_pending_batches if _shared_pending_batches is not None else {}
+        )
+        self._pending_record_ids: dict[str, set[bytes]] = (
+            _shared_pending_record_ids
+            if _shared_pending_record_ids is not None
+            else defaultdict(set)
+        )
         # Per-batch flag: True when the batch was added with skip_duplicates=True,
         # so flush() can pass skip_existing=True to the connector and let it use
         # native INSERT-OR-IGNORE semantics rather than Python-side prefiltering.
-        self._pending_skip_existing: dict[str, bool] = _shared_pending_skip_existing if _shared_pending_skip_existing is not None else {}
+        self._pending_skip_existing: dict[str, bool] = (
+            _shared_pending_skip_existing
+            if _shared_pending_skip_existing is not None
+            else {}
+        )
 
     # ── Path helpers ──────────────────────────────────────────────────────────
 
@@ -130,9 +141,7 @@ class ConnectorArrowDatabase:
     ) -> pa.Table:
         record_id = coerce_record_id(record_id)
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
-            key_array = pa.array(
-                [record_id] * len(arrow_data), type=pa.large_binary()
-            )
+            key_array = pa.array([record_id] * len(arrow_data), type=pa.large_binary())
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
@@ -173,16 +182,12 @@ class ConnectorArrowDatabase:
 
     # ── Committed data access ─────────────────────────────────────────────────
 
-    def _get_committed_table(
-        self, record_path: tuple[str, ...]
-    ) -> pa.Table | None:
+    def _get_committed_table(self, record_path: tuple[str, ...]) -> pa.Table | None:
         """Fetch all committed records for a path from the connector."""
         table_name = self._path_to_table_name(self._path_prefix + record_path)
         if table_name not in self._connector.get_table_names():
             return None
-        batches = list(
-            self._connector.iter_batches(f'SELECT * FROM "{table_name}"')
-        )
+        batches = list(self._connector.iter_batches(f'SELECT * FROM "{table_name}"'))
         if not batches:
             return None
         return pa.Table.from_batches(batches)
@@ -331,7 +336,9 @@ class ConnectorArrowDatabase:
         """
         for i, component in enumerate(path_components):
             if not component or not isinstance(component, str):
-                raise ValueError(f"at() path component {i} is invalid: {repr(component)}")
+                raise ValueError(
+                    f"at() path component {i} is invalid: {repr(component)}"
+                )
             if "/" in component or "\0" in component:
                 raise ValueError(
                     f"at() path component {repr(component)} contains an invalid character "
@@ -375,10 +382,14 @@ class ConnectorArrowDatabase:
                 }
                 pending_cols = {c.name: c.arrow_type for c in columns}
                 if existing_cols != pending_cols:
+
                     def _fmt(cols: dict) -> str:
-                        return "{" + ", ".join(
-                            f"{k}: {v}" for k, v in sorted(cols.items())
-                        ) + "}"
+                        return (
+                            "{"
+                            + ", ".join(f"{k}: {v}" for k, v in sorted(cols.items()))
+                            + "}"
+                        )
+
                     raise ValueError(
                         f"Schema mismatch for table {table_name!r}: "
                         f"existing={_fmt(existing_cols)}, "

@@ -48,9 +48,7 @@ class NoOpObserver:
     shared ``_NOOP_LOGGER`` singleton.
     """
 
-    def contextualize(
-        self, *identity_path: str
-    ) -> NoOpObserver:
+    def contextualize(self, *identity_path: str) -> NoOpObserver:
         return self
 
     def on_run_start(
@@ -68,9 +66,7 @@ class NoOpObserver:
     ) -> None:
         pass
 
-    def on_node_end(
-        self, node_label: str, node_hash: str
-    ) -> None:
+    def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
 
     def on_data_start(

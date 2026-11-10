@@ -4,6 +4,7 @@ SourceNode — schema-only input-slot declaration.
 SourceJobNode — execution variant that wraps a concrete StreamProtocol.
 Both share SourceNodeBase which provides schema-based identity.
 """
+
 from __future__ import annotations
 
 import functools
@@ -190,7 +191,9 @@ class SourceNodeBase(TraceableBase, ABC):
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         tag_schema = self._tag_schema
         if columns_config.system_tags:
-            source_id_col, record_id_col = system_tag_column_names(self._schema_hash_str)
+            source_id_col, record_id_col = system_tag_column_names(
+                self._schema_hash_str
+            )
             tag_schema = Schema(
                 {**dict(tag_schema), source_id_col: str, record_id_col: str}
             )
@@ -442,6 +445,7 @@ class SourceNode(SourceNodeBase):
             # Local import avoids a module-level circular dependency between
             # core.nodes and core.sources.
             from orcapod.core.sources.base import RootSource
+
             if isinstance(stream, RootSource):
                 slot_name = stream.source_id
             else:
@@ -699,10 +703,13 @@ class SourceJobNode(SourceNodeBase):
                     # Local import avoids a module-level circular dependency between
                     # core.nodes and core.sources.
                     from orcapod.core.sources.base import RootSource
+
                     if isinstance(stream, RootSource):
                         slot_name = stream.source_id
                     else:
-                        slot_name = f"{stream.label}:{stream.content_hash().to_string()}"
+                        slot_name = (
+                            f"{stream.label}:{stream.content_hash().to_string()}"
+                        )
                 return cls(
                     name=slot_name,
                     tag_schema=tag_schema,

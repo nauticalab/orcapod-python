@@ -16,6 +16,7 @@ Python-type-level compatibility
     property that prevents silent data corruption when two unrelated dataclasses
     happen to share the same fields.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -30,6 +31,7 @@ from orcapod.utils.schema_utils import check_schema_compatibility
 # Module-level dataclasses — DataclassLogicalTypeFactory rejects local classes
 # because they have no stable fully-qualified class name for reconstruction.
 
+
 @dataclasses.dataclass
 class _PointA:
     x: int
@@ -39,6 +41,7 @@ class _PointA:
 @dataclasses.dataclass
 class _PointB:
     """Same struct shape as _PointA but a different class name."""
+
     x: int
     y: int
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import pathlib
 import tempfile
 import uuid
@@ -13,13 +12,22 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from orcapod.logical_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
-from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type, _canonical_storage
+from orcapod.logical_types.protocols import (
+    LogicalTypeProtocol,
+    LogicalTypeFactoryProtocol,
+)
+from orcapod.logical_types.registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+    make_polars_extension_type,
+    _canonical_storage,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _unique_name() -> str:
     """Unique extension name to avoid cross-test global-registry collisions."""
@@ -49,6 +57,7 @@ def _make_stub(
     class _PolarsExt(pl.BaseExtension):
         def __init__(self):
             super().__init__(_arrow_name, _pl_storage, None)
+
         @classmethod
         def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
             return cls()
@@ -77,7 +86,9 @@ def _make_stub(
     return _Stub()
 
 
-def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalTypeFactoryProtocol:
+def _make_stub_factory(
+    return_lt: LogicalTypeProtocol | None = None,
+) -> LogicalTypeFactoryProtocol:
     """Factory for minimal LogicalTypeFactoryProtocol conforming stubs.
 
     If ``return_lt`` is given, ``reconstruct_from_arrow`` returns it; otherwise
@@ -110,6 +121,7 @@ def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalT
 # ---------------------------------------------------------------------------
 # make_arrow_extension_type tests
 # ---------------------------------------------------------------------------
+
 
 def test_make_arrow_extension_type_returns_class():
     """make_arrow_extension_type returns a pa.ExtensionType subclass."""
@@ -153,6 +165,7 @@ def test_make_arrow_extension_type_metadata_roundtrip():
 # touch the global PA/Polars registries, but unique extension names (via
 # _unique_name()) prevent cross-test collisions.
 # ---------------------------------------------------------------------------
+
 
 def test_register_stores_logical_type():
     registry = LogicalTypeRegistry()
@@ -249,13 +262,19 @@ def test_get_by_arrow_extension_name_miss():
 # LogicalTypeRegistry constructor logical_types param tests
 # ---------------------------------------------------------------------------
 
+
 def test_registry_init_with_logical_types_preregisters():
     """LogicalTypeRegistry(logical_types=[lt]) makes the type immediately retrievable."""
     lt = _make_stub()
     registry = LogicalTypeRegistry(logical_types=[lt])
     assert registry.get_by_logical_name(lt.logical_type_name) is lt
     assert registry.get_by_python_type(lt.python_type) is lt
-    assert registry.get_by_arrow_extension_name(lt.get_arrow_extension_type().extension_name) is lt
+    assert (
+        registry.get_by_arrow_extension_name(
+            lt.get_arrow_extension_type().extension_name
+        )
+        is lt
+    )
 
 
 def test_registry_init_with_none_is_empty():
@@ -283,11 +302,14 @@ def test_registry_init_with_multiple_logical_types():
 # register_logical_type_factory tests
 # ---------------------------------------------------------------------------
 
+
 def test_register_logical_type_factory_no_error():
     """register_logical_type_factory completes without raising."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory(factory, category="TestCat")  # should not raise
+    registry.register_logical_type_factory(
+        factory, category="TestCat"
+    )  # should not raise
 
 
 def test_register_logical_type_factory_same_instance_idempotent():
@@ -326,7 +348,9 @@ def test_register_logical_type_factory_both_axes():
     """register_logical_type_factory accepts both category and python_bases."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory(factory, category="Cat", python_bases=[str, int])
+    registry.register_logical_type_factory(
+        factory, category="Cat", python_bases=[str, int]
+    )
 
 
 def test_register_logical_type_factory_no_axes_raises():
@@ -354,9 +378,11 @@ def test_register_logical_type_factory_python_base_same_factory_idempotent():
     registry.register_logical_type_factory(factory, python_bases=[str])
     registry.register_logical_type_factory(factory, python_bases=[str])  # no error
 
+
 # ---------------------------------------------------------------------------
 # PyArrow global registry tests
 # ---------------------------------------------------------------------------
+
 
 def test_register_populates_arrow_registry():
     """After register(), PA global registry contains the extension type."""
@@ -377,8 +403,10 @@ def test_register_arrow_preexisting_external_accepted_silently():
     class _External(pa.ExtensionType):
         def __init__(self):
             pa.ExtensionType.__init__(self, pa.large_utf8(), name)
+
         def __arrow_ext_serialize__(self):
             return b""
+
         @classmethod
         def __arrow_ext_deserialize__(cls, st, se):
             return cls()
@@ -398,13 +426,16 @@ def test_register_same_instance_two_registries():
     r1 = LogicalTypeRegistry()
     r2 = LogicalTypeRegistry()
     r1.register_logical_type(lt)
-    r2.register_logical_type(lt)  # should not raise (same instance, PA/Polars accept silently)
+    r2.register_logical_type(
+        lt
+    )  # should not raise (same instance, PA/Polars accept silently)
     assert r2.get_by_logical_name(lt.logical_type_name) is lt
 
 
 # ---------------------------------------------------------------------------
 # Polars global registry tests
 # ---------------------------------------------------------------------------
+
 
 def test_register_populates_polars_registry():
     """After register(), Polars knows the extension type."""
@@ -433,6 +464,7 @@ def test_register_polars_preexisting_external_accepted_silently():
     class _ExternalPL(pl.BaseExtension):
         def __init__(self):
             super().__init__(name, pl.String, None)
+
         @classmethod
         def ext_from_params(cls, n, s, m):
             return cls()
@@ -440,8 +472,10 @@ def test_register_polars_preexisting_external_accepted_silently():
     class _ExternalPA(pa.ExtensionType):
         def __init__(self):
             pa.ExtensionType.__init__(self, pa.large_utf8(), name)
+
         def __arrow_ext_serialize__(self):
             return b""
+
         @classmethod
         def __arrow_ext_deserialize__(cls, st, se):
             return cls()
@@ -462,10 +496,13 @@ def test_register_polars_preexisting_external_accepted_silently():
 
 class _Color:
     """Minimal Python class used to exercise the LogicalTypeProtocol contract end-to-end."""
+
     def __init__(self, hex_str: str) -> None:
         self.hex_str = hex_str
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, _Color) and self.hex_str == other.hex_str
+
     def __repr__(self) -> str:
         return f"Color({self.hex_str!r})"
 
@@ -473,11 +510,14 @@ class _Color:
 def _make_color_logical_type() -> LogicalTypeProtocol:
     """LogicalTypeProtocol for _Color, backed by pa.large_utf8() storage."""
     _name = _unique_name()
-    _ArrowExtClass = make_arrow_extension_type(_name, pa.large_utf8(), metadata=b"test.color")
+    _ArrowExtClass = make_arrow_extension_type(
+        _name, pa.large_utf8(), metadata=b"test.color"
+    )
 
     class _PolarsExt(pl.BaseExtension):
         def __init__(self):
             super().__init__(_name, pl.String, "test.color")
+
         @classmethod
         def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
             return cls()
@@ -579,7 +619,9 @@ def test_parquet_round_trip():
         pq.write_table(table, path)
         table_back = pq.read_table(path)
 
-    assert table_back.schema.field("color").type.extension_name == arrow_ext.extension_name
+    assert (
+        table_back.schema.field("color").type.extension_name == arrow_ext.extension_name
+    )
     storage_arr = table_back.column("color").combine_chunks().storage
     recovered = [lt.storage_to_python(v.as_py()) for v in storage_arr]
     assert recovered == originals
@@ -629,8 +671,6 @@ def test_make_polars_extension_type_with_metadata():
     assert inst.ext_name() == name
 
 
-
-
 def test_registry_does_not_expose_ensure_methods():
     """ensure_logical_type_for_python_class and ensure_extension_type are removed."""
     registry = LogicalTypeRegistry()
@@ -641,6 +681,7 @@ def test_registry_does_not_expose_ensure_methods():
 # ---------------------------------------------------------------------------
 # _canonical_storage helper
 # ---------------------------------------------------------------------------
+
 
 class TestCanonicalStorage:
     """Unit tests for the _canonical_storage helper."""
@@ -677,6 +718,7 @@ class TestCanonicalStorage:
 # ---------------------------------------------------------------------------
 # __arrow_ext_deserialize__ storage-family tolerance (ITL-602)
 # ---------------------------------------------------------------------------
+
 
 def _make_large_string_ext(name: str) -> pa.ExtensionType:
     """Return an extension type instance backed by large_string."""
@@ -803,13 +845,16 @@ class TestDeserializeStorageFamilyTolerance:
 # Parquet roundtrip with non-canonical physical storage (ITL-602)
 # ---------------------------------------------------------------------------
 
+
 def _write_string_backed_parquet(path: str, ext_name: str) -> None:
     """Write a parquet file where the physical type is string but extension metadata
     records ext_name.  Simulates the output of delta-rs optimize.compact().
     """
     write_cls = make_arrow_extension_type(ext_name, pa.string())
     write_ext = write_cls()
-    arr = pa.ExtensionArray.from_storage(write_ext, pa.array(["hello", "world"], type=pa.string()))
+    arr = pa.ExtensionArray.from_storage(
+        write_ext, pa.array(["hello", "world"], type=pa.string())
+    )
     pq.write_table(pa.table({"col": arr}), path)
     # Unregister write-side type so the read-side (large_string) handler takes over.
     try:
@@ -853,7 +898,11 @@ def test_register_logical_type_conflict_error_uses_repr_for_generic_alias():
     """Conflict error message for GenericAlias python_type must not raise AttributeError."""
     import uuid
     import pyarrow as pa
-    from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
+    from orcapod.logical_types.registry import (
+        LogicalTypeRegistry,
+        make_arrow_extension_type,
+        make_polars_extension_type,
+    )
     from orcapod.logical_types.base_logical_type import BaseLogicalType
 
     class _FakeListLT(BaseLogicalType):

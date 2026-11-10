@@ -5,7 +5,10 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 from starfix import ArrowDigester
 
-from orcapod.hashing.schema_cleaner import clean_schema_for_hashing, has_extension_metadata
+from orcapod.hashing.schema_cleaner import (
+    clean_schema_for_hashing,
+    has_extension_metadata,
+)
 from orcapod.hashing.visitors import SemanticHashingVisitor
 from orcapod.utils.arrow_utils import normalize_extension_columns
 from orcapod.types import ContentHash
@@ -88,7 +91,9 @@ class StarfixArrowHasher:
                 continue
 
             column_data = table.column(i).to_pylist()
-            visitor = SemanticHashingVisitor(self._type_converter, self._semantic_hasher)
+            visitor = SemanticHashingVisitor(
+                self._type_converter, self._semantic_hasher
+            )
 
             try:
                 new_type: pa.DataType | None = None

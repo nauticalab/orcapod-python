@@ -19,8 +19,14 @@ from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
 @pytest.fixture
 def spec_pipeline(tmp_path):
     """A compiled Pipeline using SourceNode leaves."""
+
     def _src(tag, data):
-        tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
+        tbl = pa.table(
+            {
+                tag: pa.array(["a"], type=pa.large_string()),
+                data: pa.array([1], type=pa.int64()),
+            }
+        )
         return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
 
     src_a = _src("key", "value")
@@ -67,7 +73,8 @@ class TestPipelineBlueprintSave:
         pipeline.save(str(path))
         data = json.loads(path.read_text())
         source_nodes = [
-            n for n in data["nodes"].values()
+            n
+            for n in data["nodes"].values()
             if n.get("node_type") == "source"
             and n.get("source_config", {}).get("source_type") == "node"
         ]
@@ -141,23 +148,29 @@ class TestPipelineBlueprintLoad:
 
         # Build concrete sources matching the SourceSpec schemas declared in spec_pipeline
         src_a = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a", "b"], type=pa.large_string()),
-                "value": pa.array([1, 2], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a", "b"], type=pa.large_string()),
+                    "value": pa.array([1, 2], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a", "b"], type=pa.large_string()),
-                "score": pa.array([10, 20], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a", "b"], type=pa.large_string()),
+                    "score": pa.array([10, 20], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             infer_nullable=True,
         )
         store = InMemoryArrowDatabase()
-        job = PipelineJob.from_pipeline(loaded, sources={"source_a": src_a, "source_b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(
+            loaded, sources={"source_a": src_a, "source_b": src_b}, store=store
+        )
         completed = job.run()
         assert completed._has_run is True
         # Verify all source specs were resolved (no unresolved specs)
@@ -182,8 +195,14 @@ class TestPipelineBlueprintLoad:
 @pytest.fixture
 def compiled_pipeline():
     """A compiled Pipeline using SourceNode leaves (no tmp_path coupling)."""
+
     def _src(tag, data):
-        tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
+        tbl = pa.table(
+            {
+                tag: pa.array(["a"], type=pa.large_string()),
+                data: pa.array([1], type=pa.int64()),
+            }
+        )
         return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
 
     from orcapod.core.operators import Join
@@ -230,9 +249,9 @@ class TestNewSerializationFormat:
 
         for node_data in data.get("nodes", {}).values():
             if node_data.get("node_type") == "source":
-                assert node_data.get("source_config", {}).get("source_type") == "node", (
-                    f"Expected source_type='node', got {node_data.get('source_config')}"
-                )
+                assert (
+                    node_data.get("source_config", {}).get("source_type") == "node"
+                ), f"Expected source_type='node', got {node_data.get('source_config')}"
 
     def test_format_version_is_0_1_0(self, tmp_path, compiled_pipeline):
         """Saved format version is 0.1.0."""

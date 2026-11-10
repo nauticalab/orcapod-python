@@ -8,6 +8,7 @@ reproducible across runs.
 
 Run with:  uv run python superpowers/scripts/hash_audit_example.py
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -56,7 +57,7 @@ def main() -> None:
     scores = DictSource(
         [
             {"student": "alice", "math": 90},
-            {"student": "bob",   "math": 75},
+            {"student": "bob", "math": 75},
         ],
         tag_columns=["student"],
         source_id="scores_v1",
@@ -64,7 +65,7 @@ def main() -> None:
     attendance = DictSource(
         [
             {"student": "alice", "days": 180},
-            {"student": "bob",   "days": 160},
+            {"student": "bob", "days": 160},
         ],
         tag_columns=["student"],
         source_id="attendance_v1",
@@ -97,7 +98,9 @@ def main() -> None:
     sub("FunctionPod")
     print(f"    pod.content_hash()          = {pod.content_hash()}")
     print(f"    pod.pipeline_hash()         = {pod.pipeline_hash()}")
-    print(f"    pod.ctx_arg_name            = {pod.ctx_arg_name!r}  (None → content == pipeline)")
+    print(
+        f"    pod.ctx_arg_name            = {pod.ctx_arg_name!r}  (None → content == pipeline)"
+    )
 
     sub("DataFunction URI components")
     data_fn = pod._data_function
@@ -110,20 +113,24 @@ def main() -> None:
 
     sub("Site 3 — Schema hash embedded in system-tag column names")
     tag_schema, data_schema = scores.output_schema()
-    schema_hash = compute_schema_hash(tag_schema, data_schema, semantic_hasher, schema_n_char)
+    schema_hash = compute_schema_hash(
+        tag_schema, data_schema, semantic_hasher, schema_n_char
+    )
     print(f"    (tag_schema, data_schema)   = ({tag_schema!r}, {data_schema!r})")
     print(f"    schema_hash (char_count={schema_n_char!r}) = {schema_hash!r}")
 
     sub("Site 4 — Default source_id (explicit in this example → no hash computed)")
-    print(f"    scores.source_id            = {scores.source_id!r}  (explicit; skips Arrow hash)")
+    print(
+        f"    scores.source_id            = {scores.source_id!r}  (explicit; skips Arrow hash)"
+    )
 
     sub("Sites 3 + 5 — System tag column names and per-row record_id values")
     scores_rows = list(scores.iter_data())
     alice_tag_src, _ = scores_rows[0]
-    bob_tag_src,   _ = scores_rows[1]
+    bob_tag_src, _ = scores_rows[1]
 
     alice_sys = alice_tag_src.as_table(columns={"system_tags": True})
-    bob_sys   = bob_tag_src.as_table(columns={"system_tags": True})
+    bob_sys = bob_tag_src.as_table(columns={"system_tags": True})
 
     print(f"    system tag columns          = {alice_sys.schema.names!r}")
 
@@ -131,13 +138,17 @@ def main() -> None:
     source_id_col = next(n for n in alice_sys.schema.names if "source_id" in n)
 
     print(f"    alice {source_id_col!r}  = {alice_sys[source_id_col][0].as_py()!r}")
-    print(f"    alice {record_id_col!r}  = {alice_sys[record_id_col][0].as_py().hex()!r}  (UUID v5 bytes)")
-    print(f"    bob   {record_id_col!r}  = {bob_sys[record_id_col][0].as_py().hex()!r}  (UUID v5 bytes)")
+    print(
+        f"    alice {record_id_col!r}  = {alice_sys[record_id_col][0].as_py().hex()!r}  (UUID v5 bytes)"
+    )
+    print(
+        f"    bob   {record_id_col!r}  = {bob_sys[record_id_col][0].as_py().hex()!r}  (UUID v5 bytes)"
+    )
 
     sub("Site 6 — Post-join system tag column names (topology suffix appended)")
     joined_rows = list(joined.iter_data())
     alice_tag_j, alice_data_j = joined_rows[0]
-    bob_tag_j,   bob_data_j   = joined_rows[1]
+    bob_tag_j, bob_data_j = joined_rows[1]
 
     alice_joined_sys = alice_tag_j.as_table(columns={"system_tags": True})
     print(f"    post-join system tag cols   = {alice_joined_sys.schema.names!r}")
@@ -157,13 +168,17 @@ def main() -> None:
 
     sub("Site 7 — compute_base_entry_id() — recomputation-index-free")
     alice_base = node.compute_base_entry_id(alice_tag_j, alice_data_j)
-    bob_base   = node.compute_base_entry_id(bob_tag_j, bob_data_j)
+    bob_base = node.compute_base_entry_id(bob_tag_j, bob_data_j)
     print(f"    alice base_entry_id (hex)   = {alice_base.hex()!r}")
     print(f"    bob   base_entry_id (hex)   = {bob_base.hex()!r}")
 
     sub("Site 8 — compute_pipeline_entry_id() — includes recomputation_index=0")
-    alice_pipe = node.compute_pipeline_entry_id(alice_tag_j, alice_data_j, recomputation_index=0)
-    bob_pipe   = node.compute_pipeline_entry_id(bob_tag_j, bob_data_j,   recomputation_index=0)
+    alice_pipe = node.compute_pipeline_entry_id(
+        alice_tag_j, alice_data_j, recomputation_index=0
+    )
+    bob_pipe = node.compute_pipeline_entry_id(
+        bob_tag_j, bob_data_j, recomputation_index=0
+    )
     print(f"    alice pipeline_entry_id (hex) = {alice_pipe.hex()!r}")
     print(f"    bob   pipeline_entry_id (hex) = {bob_pipe.hex()!r}")
 
@@ -199,7 +214,9 @@ def main() -> None:
     sub("Site 11 — output_schema_hash embedded in data_function.uri")
     print(f"    data_function.uri           = {data_fn.uri!r}")
     print(f"    output_schema_hash (site 11)= {data_fn.uri[1]!r}")
-    print("    uri layout: (canonical_name, output_schema_hash, major_version, type_id)")
+    print(
+        "    uri layout: (canonical_name, output_schema_hash, major_version, type_id)"
+    )
 
     # ==================================================================
     # [6]  PIPELINE RUN IDENTITY  (sites 12 + 13)
@@ -218,7 +235,7 @@ def main() -> None:
         job_scores = DictSource(
             [
                 {"student": "alice", "math": 90},
-                {"student": "bob",   "math": 75},
+                {"student": "bob", "math": 75},
             ],
             tag_columns=["student"],
             source_id="scores_v1",

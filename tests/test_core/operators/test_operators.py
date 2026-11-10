@@ -531,16 +531,20 @@ class TestJoinWithListExtensionColumn:
             type=pa.large_list(pa.large_string()),
         )
         ext_array = pa.ExtensionArray.from_storage(ext_type, storage)
-        left_table = pa.table({
-            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
-            "paths": ext_array,
-        })
+        left_table = pa.table(
+            {
+                "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+                "paths": ext_array,
+            }
+        )
         left_stream = ArrowTableStream(left_table, tag_columns=["animal"])
 
-        right_table = pa.table({
-            "animal": pa.array(["cat", "dog"], type=pa.large_string()),
-            "speed": pa.array([30.0, 45.0], type=pa.float64()),
-        })
+        right_table = pa.table(
+            {
+                "animal": pa.array(["cat", "dog"], type=pa.large_string()),
+                "speed": pa.array([30.0, 45.0], type=pa.float64()),
+            }
+        )
         right_stream = ArrowTableStream(right_table, tag_columns=["animal"])
 
         op = Join()
@@ -558,7 +562,9 @@ class TestJoinWithListExtensionColumn:
         # Values are preserved
         paths_values = out_table.column("paths").to_pylist()
         assert len(paths_values) == 2
-        assert all(len(row) >= 1 for row in paths_values)  # each row has at least one path
+        assert all(
+            len(row) >= 1 for row in paths_values
+        )  # each row has at least one path
 
 
 class TestJoinMetaColumnCollision:
@@ -897,12 +903,12 @@ class TestJoinOutputSchemaSystemTags:
             if not col_name.startswith(constants.SYSTEM_TAG_PREFIX):
                 continue
             if col_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
-                assert col_type == bytes, (
+                assert col_type is bytes, (
                     f"record_id column '{col_name}' should map to bytes, "
                     f"got {col_type!r}"
                 )
             else:
-                assert col_type == str, (
+                assert col_type is str, (
                     f"source_id column '{col_name}' should map to str, got {col_type!r}"
                 )
 
@@ -1123,9 +1129,7 @@ class TestArgumentSymmetryIdentity:
         self._check_unary_identity(SelectTagColumns(columns=["region"]), two_tag_stream)
 
     def test_select_data_columns_identity(self, simple_stream):
-        self._check_unary_identity(
-            SelectDataColumns(columns=["weight"]), simple_stream
-        )
+        self._check_unary_identity(SelectDataColumns(columns=["weight"]), simple_stream)
 
     def test_drop_tag_columns_identity(self, two_tag_stream):
         self._check_unary_identity(DropTagColumns(columns=["region"]), two_tag_stream)
@@ -1134,9 +1138,7 @@ class TestArgumentSymmetryIdentity:
         self._check_unary_identity(DropDataColumns(columns=["legs"]), simple_stream)
 
     def test_map_data_identity(self, simple_stream):
-        self._check_unary_identity(
-            MapData(name_map={"weight": "mass"}), simple_stream
-        )
+        self._check_unary_identity(MapData(name_map={"weight": "mass"}), simple_stream)
 
     def test_map_tags_identity(self, two_tag_stream):
         self._check_unary_identity(MapTags(name_map={"region": "area"}), two_tag_stream)

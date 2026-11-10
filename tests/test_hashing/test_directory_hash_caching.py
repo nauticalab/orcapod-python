@@ -98,7 +98,9 @@ class TestDirectoryHashCaching:
         h2 = hasher.hash_directory(dir_with_files)
 
         assert h1 == h2  # same directory content → same hash
-        assert counting.call_count == count_after_first  # zero new calls; all from cache
+        assert (
+            counting.call_count == count_after_first
+        )  # zero new calls; all from cache
 
     def test_cache_invalidated_on_file_change(self, dir_with_files):
         """Modifying a file (mtime_ns/size change) causes a cache miss for that file."""
@@ -112,7 +114,9 @@ class TestDirectoryHashCaching:
 
         # Write different content with a different length → size change guarantees cache miss;
         # mtime_ns also changes on most filesystems but is not relied upon here
-        (dir_with_files / "b.txt").write_bytes(b"modified_content_with_different_length")
+        (dir_with_files / "b.txt").write_bytes(
+            b"modified_content_with_different_length"
+        )
 
         hasher.hash_directory(dir_with_files)
 
@@ -129,7 +133,9 @@ class TestDirectoryHashCaching:
             )
         )
 
-        assert plain.hash_directory(dir_with_files) == cached.hash_directory(dir_with_files)
+        assert plain.hash_directory(dir_with_files) == cached.hash_directory(
+            dir_with_files
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +176,8 @@ class TestEnableFileHashCachingWiresDirectory:
         registry = context.semantic_hasher.type_handler_registry
 
         file_hasher = registry.get_handler_for_type(File).file_hasher
-        dir_file_hasher = registry.get_handler_for_type(Directory).directory_hasher.file_hasher
+        dir_file_hasher = registry.get_handler_for_type(
+            Directory
+        ).directory_hasher.file_hasher
 
         assert file_hasher is dir_file_hasher  # exact same object

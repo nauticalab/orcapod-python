@@ -16,6 +16,7 @@ from orcapod.core.data_function import DataFunctionBase
 from orcapod.errors import DataFunctionUnavailableError
 from orcapod.protocols.core_protocols import DataFunctionProtocol
 from orcapod.types import ContentHash, Schema
+from orcapod.utils.canonical_type_names import stabilize_type_names
 
 if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import (
@@ -278,7 +279,8 @@ class DataFunctionProxy(DataFunctionBase):
         if data_function.input_data_schema != self._input_data_schema:
             # Also compare via serialized form in case type repr differs
             bound_input = {
-                k: str(v) for k, v in data_function.input_data_schema.items()
+                k: stabilize_type_names(str(v), v)
+                for k, v in data_function.input_data_schema.items()
             }
             if bound_input != self._raw_input_schema_dict:
                 mismatches.append(
@@ -288,7 +290,8 @@ class DataFunctionProxy(DataFunctionBase):
 
         if data_function.output_data_schema != self._output_data_schema:
             bound_output = {
-                k: str(v) for k, v in data_function.output_data_schema.items()
+                k: stabilize_type_names(str(v), v)
+                for k, v in data_function.output_data_schema.items()
             }
             if bound_output != self._raw_output_schema_dict:
                 mismatches.append(
@@ -298,8 +301,7 @@ class DataFunctionProxy(DataFunctionBase):
 
         if tuple(data_function.uri) != tuple(self._stored_uri):
             mismatches.append(
-                f"uri: expected {self._stored_uri!r}, "
-                f"got {tuple(data_function.uri)!r}"
+                f"uri: expected {self._stored_uri!r}, got {tuple(data_function.uri)!r}"
             )
 
         if self._stored_content_hash is not None:
@@ -311,9 +313,7 @@ class DataFunctionProxy(DataFunctionBase):
                 )
 
         if mismatches:
-            raise ValueError(
-                f"Cannot bind data function: {', '.join(mismatches)}"
-            )
+            raise ValueError(f"Cannot bind data function: {', '.join(mismatches)}")
 
         self._bound_function = data_function
 

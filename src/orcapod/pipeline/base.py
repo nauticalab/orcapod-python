@@ -1,4 +1,5 @@
 """AbstractPipelineBase — shared recording mechanism for Pipeline and PipelineJob."""
+
 from __future__ import annotations
 
 import logging
@@ -100,8 +101,8 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
 
         # --- Fields populated by compile(); used by is_runnable(), run(), save() ----
         # Populated from _persistent_node_map / _hash_graph at end of compile().
-        self._node_lut: dict[str, Any] = {}       # hash → non-source compiled node
-        self._upstreams: dict[str, Any] = {}      # hash → source compiled node
+        self._node_lut: dict[str, Any] = {}  # hash → non-source compiled node
+        self._upstreams: dict[str, Any] = {}  # hash → source compiled node
         self._graph_edges: list[tuple[str, str]] = []  # edge list from _hash_graph
 
     # ------------------------------------------------------------------
@@ -354,7 +355,9 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         source_node_cls = self.source_node_class
 
         # 1. Source hashes: inputs that have no registered invocation.
-        source_hashes = set(self._source_streams.keys()) - set(self._invocation_lut.keys())
+        source_hashes = set(self._source_streams.keys()) - set(
+            self._invocation_lut.keys()
+        )
 
         # 2. Create source nodes keyed by the original stream hash.
         node_map: dict[str, Any] = {
@@ -383,11 +386,13 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
             nodes = [node_map[h] for h in hashes]
             first = nodes[0]
             schemas_differ = any(
-                n._tag_schema != first._tag_schema or n._data_schema != first._data_schema
+                n._tag_schema != first._tag_schema
+                or n._data_schema != first._data_schema
                 for n in nodes[1:]
             )
             if schemas_differ:
                 from orcapod.errors import InconsistentSourceError
+
                 raise InconsistentSourceError(
                     f"Pipeline '{'.'.join(self._name)}' has {len(hashes)} source "
                     f"nodes all named {node_name!r} but with different schemas. "
@@ -403,8 +408,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                 continue  # vertex with no invocation (e.g. pure source hash)
             inv = self._invocation_lut[key]
             upstream_nodes = [
-                node_map[up.content_hash().to_string()]
-                for up in inv.input_streams
+                node_map[up.content_hash().to_string()] for up in inv.input_streams
             ]
             if isinstance(inv, FunctionInvocation):
                 node_map[key] = self.function_node_class(
@@ -473,12 +477,10 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
 
         # 7. Populate fields used by is_runnable(), run(), and save().
         self._node_lut = {
-            h: n for h, n in node_map.items()
-            if not isinstance(n, source_node_cls)
+            h: n for h, n in node_map.items() if not isinstance(n, source_node_cls)
         }
         self._upstreams = {
-            h: n for h, n in node_map.items()
-            if isinstance(n, source_node_cls)
+            h: n for h, n in node_map.items() if isinstance(n, source_node_cls)
         }
         self._graph_edges = list(self._hash_graph.edges())
 
@@ -589,8 +591,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         """
         instance = cls(name=name)
         instance._invocation_lut = {
-            inv.content_hash().to_string(): inv
-            for inv in graph.invocations
+            inv.content_hash().to_string(): inv for inv in graph.invocations
         }
         instance._source_streams = dict(graph.source_streams)
         for inv in graph.invocations:

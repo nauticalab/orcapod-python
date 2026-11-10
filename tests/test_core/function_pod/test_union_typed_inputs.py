@@ -31,10 +31,12 @@ from ..conftest import make_int_stream
 
 def make_str_stream(n: int = 2) -> ArrowTableStream:
     """Stream with tag=id (int64), data=x (large_string / str)."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("x", pa.large_string(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.large_string(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -57,6 +59,7 @@ def make_path_stream(n: int = 2) -> ArrowTableStream:
 
 def make_union_pod() -> FunctionPod:
     """FunctionPod whose input x accepts str | Path."""
+
     def union_fn(x: str | Path) -> str:
         return str(x)
 
@@ -71,6 +74,7 @@ def make_union_pod() -> FunctionPod:
 class TestUnionInputConstruction:
     def test_pod_construction_succeeds(self):
         """Creating a FunctionPod with a union-typed input must not raise."""
+
         def union_fn(x: str | Path) -> str:
             return str(x)
 
@@ -80,6 +84,7 @@ class TestUnionInputConstruction:
 
     def test_input_schema_preserves_union_type(self):
         """The data function's input_data_schema must record the full union type."""
+
         def union_fn(x: str | Path) -> str:
             return str(x)
 
@@ -99,7 +104,7 @@ class TestUnionInputStreamBinding:
         pod_stream = pod.process(make_str_stream())
         # The upstream stream's data schema must report the concrete str type
         _, input_data_schema = pod_stream.upstreams[0].output_schema()
-        assert input_data_schema["x"] == str
+        assert input_data_schema["x"] is str
 
     def test_bind_path_stream_succeeds(self):
         """Binding a Path-typed stream to a str | Path pod must succeed."""
@@ -124,6 +129,7 @@ class TestUnionInputStreamBinding:
 class TestUnionInputDataProcessing:
     def test_process_str_input_yields_correct_output(self):
         """Processing a str-typed stream through a str | Path pod gives correct results."""
+
         def union_fn(x: str | Path) -> str:
             return str(x).upper()
 
@@ -136,6 +142,7 @@ class TestUnionInputDataProcessing:
 
     def test_process_path_input_yields_correct_output(self):
         """Processing a Path-typed stream through a str | Path pod gives correct results."""
+
         def union_fn(x: str | Path) -> str:
             return str(x)
 

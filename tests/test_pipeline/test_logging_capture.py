@@ -38,7 +38,9 @@ class TestCapturedLogs:
         assert c.success is True
 
     def test_fields(self):
-        c = CapturedLogs(stdout_log="out", stderr_log="err", traceback="tb", success=False)
+        c = CapturedLogs(
+            stdout_log="out", stderr_log="err", traceback="tb", success=False
+        )
         assert c.stdout_log == "out"
         assert c.stderr_log == "err"
         assert c.traceback == "tb"
@@ -111,8 +113,13 @@ class TestContextVarLoggingHandler:
         token = _log_capture.set(buf)
         try:
             record = logging.LogRecord(
-                name="test", level=logging.INFO,
-                pathname="", lineno=0, msg="hello log", args=(), exc_info=None
+                name="test",
+                level=logging.INFO,
+                pathname="",
+                lineno=0,
+                msg="hello log",
+                args=(),
+                exc_info=None,
             )
             handler.emit(record)
         finally:
@@ -125,8 +132,13 @@ class TestContextVarLoggingHandler:
         handler.setFormatter(logging.Formatter("%(message)s"))
         # No ContextVar buffer — emit should be a no-op
         record = logging.LogRecord(
-            name="test", level=logging.INFO,
-            pathname="", lineno=0, msg="ignored", args=(), exc_info=None
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="ignored",
+            args=(),
+            exc_info=None,
         )
         handler.emit(record)  # should not raise
 
@@ -199,9 +211,7 @@ class TestLocalCaptureContext:
             return ctx.get_captured(success=True).stdout_log
 
         async def main():
-            results = await asyncio.gather(
-                run_task("task-A"), run_task("task-B")
-            )
+            results = await asyncio.gather(run_task("task-A"), run_task("task-B"))
             return results
 
         a_out, b_out = asyncio.run(main())
@@ -283,7 +293,9 @@ class TestRayCaptureWrapper:
                 )
             raise
         return raw, CapturedLogs(
-            stdout_log=stdout_log, stderr_log=stderr_log, python_logs=python_logs,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+            python_logs=python_logs,
             success=True,
         )
 
@@ -301,6 +313,7 @@ class TestRayCaptureWrapper:
     def test_captures_stderr(self):
         def fn():
             import sys
+
             print("err line", file=sys.stderr)
             return 1
 
@@ -333,6 +346,7 @@ class TestRayCaptureWrapper:
 
         original_stdout_fd = os.dup(1)
         try:
+
             def fn():
                 raise ValueError("oops")
 

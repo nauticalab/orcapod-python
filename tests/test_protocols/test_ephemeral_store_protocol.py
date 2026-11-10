@@ -1,4 +1,3 @@
-import pytest
 from orcapod.protocols.node_protocols import FunctionNodeProtocol, OperatorNodeProtocol
 from orcapod.protocols.pipeline_protocols import PipelineProtocol
 

@@ -242,4 +242,3 @@ class LocalCaptureContext:
             traceback=tb,
             success=success,
         )
-

@@ -105,9 +105,9 @@ class DataLogger:
 
         # Context columns — prefixed with "_log_" to follow system column conventions
         columns: dict[str, pa.Array] = {
-            "_log_id":         pa.array([log_id],               type=pa.binary(16)),
-            "_log_run_id":     pa.array([self._run_id],          type=pa.large_utf8()),
-            "_log_timestamp":  pa.array([timestamp],             type=pa.large_utf8()),
+            "_log_id": pa.array([log_id], type=pa.binary(16)),
+            "_log_run_id": pa.array([self._run_id], type=pa.large_utf8()),
+            "_log_timestamp": pa.array([timestamp], type=pa.large_utf8()),
         }
 
         # Execution output columns from kwargs — prefixed with "_log_"
@@ -175,7 +175,9 @@ class LoggingObserver:
             raise ValueError(
                 "LoggingObserver.contextualize() requires a non-empty identity_path."
             )
-        return _ContextualizedLoggingObserver(self._db.at(*identity_path), self._current_run_id)
+        return _ContextualizedLoggingObserver(
+            self._db.at(*identity_path), self._current_run_id
+        )
 
     # -- lifecycle hooks --
 
@@ -189,17 +191,15 @@ class LoggingObserver:
     def on_run_end(self, run_id: str) -> None:
         pass
 
-    def on_node_start(
-        self, node_label: str, node_hash: str, tag_schema=None
-    ) -> None:
+    def on_node_start(self, node_label: str, node_hash: str, tag_schema=None) -> None:
         pass
 
-    def on_node_end(
-        self, node_label: str, node_hash: str
-    ) -> None:
+    def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
 
-    def on_data_start(self, node_label: str, tag: TagProtocol, data: DataProtocol) -> None:
+    def on_data_start(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol
+    ) -> None:
         pass
 
     def on_data_end(
@@ -223,7 +223,12 @@ class LoggingObserver:
         data: DataProtocol,
     ) -> DataLogger:
         """Return a `DataLogger` bound to *tag* context using the root DB."""
-        return DataLogger(db=self._db, log_path=DEFAULT_LOG_PATH, run_id=self._current_run_id, tag_data=dict(tag))
+        return DataLogger(
+            db=self._db,
+            log_path=DEFAULT_LOG_PATH,
+            run_id=self._current_run_id,
+            tag_data=dict(tag),
+        )
 
     # -- convenience --
 
@@ -245,7 +250,7 @@ class LoggingObserver:
 
         parts = []
         for src in sources:
-            if src[-len(DEFAULT_LOG_PATH):] == DEFAULT_LOG_PATH:
+            if src[-len(DEFAULT_LOG_PATH) :] == DEFAULT_LOG_PATH:
                 tbl = self._db.get_all_records(src)
                 if tbl is not None and tbl.num_rows > 0:
                     if "__record_id" in tbl.schema.names:
@@ -293,9 +298,7 @@ class LoggingObserver:
         """
         from orcapod.pipeline.serialization import resolve_database_from_config
 
-        db = resolve_database_from_config(
-            config["database"], db_registry=db_registry
-        )
+        db = resolve_database_from_config(config["database"], db_registry=db_registry)
         return cls(db)
 
 
@@ -333,7 +336,9 @@ class _ContextualizedLoggingObserver:
     def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
 
-    def on_data_start(self, node_label: str, tag: TagProtocol, data: DataProtocol) -> None:
+    def on_data_start(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol
+    ) -> None:
         pass
 
     def on_data_end(

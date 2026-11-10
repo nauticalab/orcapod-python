@@ -21,7 +21,10 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Data
-from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
+from orcapod.core.executors import (
+    LocalPythonFunctionExecutor,
+    PythonFunctionExecutorBase,
+)
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
@@ -32,11 +35,9 @@ from orcapod.core.data_function import (
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import (
-    DataFunctionExecutorProtocol,
     DataFunctionProtocol,
     DataProtocol,
 )
-from orcapod.types import PodConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,10 +47,16 @@ from orcapod.types import PodConfig
 def make_stream(n: int = 3) -> ArrowTableStream:
     """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
     schema = pa.schema(
-        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
     )
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "x": pa.array(list(range(n)), type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -554,7 +561,6 @@ class TestRayExecutorInitialization:
         to verify that wrap_future correctly bridges the concurrent.futures
         and asyncio worlds — not just pre-resolved futures.
         """
-        import asyncio
         import threading
         from concurrent.futures import Future
         from unittest.mock import MagicMock, patch
@@ -569,6 +575,7 @@ class TestRayExecutorInitialization:
 
         def resolve_later():
             import time
+
             time.sleep(0.05)
             cf_future.set_result((42, "", "", []))
 
@@ -577,15 +584,15 @@ class TestRayExecutorInitialization:
         mock_ref = MagicMock()
         mock_ref.future.return_value = cf_future
 
-        with patch.object(executor, '_ensure_ray_initialized'), \
-             patch.object(executor, '_get_remote_fn') as mock_get_fn:
+        with (
+            patch.object(executor, "_ensure_ray_initialized"),
+            patch.object(executor, "_get_remote_fn") as mock_get_fn,
+        ):
             mock_remote = MagicMock()
             mock_remote.options.return_value.remote.return_value = mock_ref
             mock_get_fn.return_value = mock_remote
 
-            result = asyncio.run(
-                executor.async_execute_callable(lambda **kw: kw, {})
-            )
+            result = asyncio.run(executor.async_execute_callable(lambda **kw: kw, {}))
             assert result == 42
 
     def test_get_remote_fn_caches_per_function_name(self):
@@ -636,10 +643,12 @@ class TestRayExecutorInitialization:
             if fn is not None:
                 captured_wrappers.append(fn)
                 return MagicMock()
+
             # Called as ray.remote(**opts) when opts is non-empty (factory path)
             def decorator(wrapper):
                 captured_wrappers.append(wrapper)
                 return MagicMock()
+
             return decorator
 
         mock_ray = MagicMock()
@@ -679,8 +688,7 @@ class TestExecutorProtocolTypeSafety:
         )
         fn_annotation = raw_hints.get("fn", "")
         assert "Callable" in str(fn_annotation), (
-            f"execute_callable() fn should reference Callable, "
-            f"got {fn_annotation!r}"
+            f"execute_callable() fn should reference Callable, got {fn_annotation!r}"
         )
 
     def test_protocol_async_execute_callable_annotation_is_typed(self):

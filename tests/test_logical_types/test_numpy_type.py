@@ -1,4 +1,5 @@
 """Tests for LogicalNumpyArray."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -11,31 +12,44 @@ from orcapod.logical_types.protocols import LogicalTypeProtocol
 class TestLogicalNumpyArrayProtocol:
     def test_isinstance_logical_type(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         assert isinstance(LogicalNumpyArray(), LogicalTypeProtocol)
 
     def test_logical_type_name(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         assert LogicalNumpyArray().logical_type_name == "numpy.ndarray"
 
     def test_python_type(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         assert LogicalNumpyArray().python_type is np.ndarray
 
     def test_arrow_ext_name(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
-        assert LogicalNumpyArray().get_arrow_extension_type().extension_name == "numpy.ndarray"
+
+        assert (
+            LogicalNumpyArray().get_arrow_extension_type().extension_name
+            == "numpy.ndarray"
+        )
 
     def test_arrow_ext_storage_type(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
-        assert LogicalNumpyArray().get_arrow_extension_type().storage_type == pa.large_binary()
+
+        assert (
+            LogicalNumpyArray().get_arrow_extension_type().storage_type
+            == pa.large_binary()
+        )
 
     def test_arrow_ext_is_cached(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         lt = LogicalNumpyArray()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
     def test_polars_ext_is_cached(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         lt = LogicalNumpyArray()
         assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
 
@@ -43,18 +57,21 @@ class TestLogicalNumpyArrayProtocol:
 class TestLogicalNumpyArrayStorage:
     def test_python_to_storage_returns_bytes(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         arr = np.array([1.0, 2.0, 3.0])
         result = LogicalNumpyArray().python_to_storage(arr)
         assert isinstance(result, bytes)
 
     def test_object_dtype_raises_before_save(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         arr = np.array([1, "hello", None], dtype=object)
         with pytest.raises(ValueError, match="object-dtype"):
             LogicalNumpyArray().python_to_storage(arr)
 
     def test_structured_with_object_field_raises(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         arr = np.zeros(3, dtype=[("label", object), ("value", np.int32)])
         with pytest.raises(ValueError):
             LogicalNumpyArray().python_to_storage(arr)
@@ -63,6 +80,7 @@ class TestLogicalNumpyArrayStorage:
 class TestLogicalNumpyArrayRoundTrip:
     def _rt(self, arr: np.ndarray) -> np.ndarray:
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
         lt = LogicalNumpyArray()
         return lt.storage_to_python(lt.python_to_storage(arr))
 

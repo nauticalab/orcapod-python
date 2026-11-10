@@ -45,16 +45,23 @@ async def _feed(stream: ArrowTableStream, ch: Channel) -> None:
 class _SpyObserver:
     def __init__(self):
         self.starts = []
-        self.ends = []   # [(label, tag, input, output, cached)]
+        self.ends = []  # [(label, tag, input, output, cached)]
         self.crashes = []
 
     def contextualize(self, *path):
         return self
 
-    def on_run_start(self, *a, **kw): pass
-    def on_run_end(self, *a, **kw): pass
-    def on_node_start(self, *a, **kw): pass
-    def on_node_end(self, *a, **kw): pass
+    def on_run_start(self, *a, **kw):
+        pass
+
+    def on_run_end(self, *a, **kw):
+        pass
+
+    def on_node_start(self, *a, **kw):
+        pass
+
+    def on_node_end(self, *a, **kw):
+        pass
 
     def on_data_start(self, label, tag, data):
         self.starts.append((label, tag, data))

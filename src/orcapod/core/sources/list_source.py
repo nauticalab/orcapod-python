@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.protocols.core_protocols import TagProtocol
 from orcapod.types import SchemaLike
 from orcapod.utils import arrow_utils
+from orcapod.utils.canonical_type_names import stabilize_type_names
 
 if TYPE_CHECKING:
     pass
@@ -79,7 +80,9 @@ class ListSource(RootSource):
             # defaults all fields to nullable=True. When no explicit schema is
             # given, infer the correct nullable flags from actual data so the
             # builder receives a reliable schema.
-            arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+            arrow_table = arrow_table.cast(
+                arrow_utils.infer_schema_nullable(arrow_table)
+            )
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
@@ -100,7 +103,14 @@ class ListSource(RootSource):
         elif self._tag_function_hash_mode == "signature":
             import inspect
 
-            return str(inspect.signature(self._tag_function))
+            sig = inspect.signature(self._tag_function)
+            # Name relocated stdlib types (``pathlib._local.Path`` on Python 3.13)
+            # by their public module so the string is the same on every version.
+            return stabilize_type_names(
+                str(sig),
+                *(cast(object, p.annotation) for p in sig.parameters.values()),
+                cast(object, sig.return_annotation),
+            )
         else:  # "content"
             import inspect
 

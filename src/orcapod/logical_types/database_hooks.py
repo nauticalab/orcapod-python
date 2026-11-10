@@ -58,7 +58,9 @@ def register_discovered_logical_types(
             has no registered factory or is malformed.
     """
     if converter is None:
-        logger.debug("register_discovered_logical_types: no converter provided, skipping")
+        logger.debug(
+            "register_discovered_logical_types: no converter provided, skipping"
+        )
         return
 
     found = walk_schema(schema)
@@ -163,12 +165,13 @@ def _apply_field(
         if lt is not None:
             ext_type = lt.get_arrow_extension_type()
             wrapped_chunks = [
-                pa.ExtensionArray.from_storage(ext_type, chunk)
-                for chunk in col.chunks
+                pa.ExtensionArray.from_storage(ext_type, chunk) for chunk in col.chunks
             ]
             new_col = pa.chunked_array(wrapped_chunks, type=ext_type)
             new_field = field.with_type(ext_type)
-            logger.debug("apply_logical_types: wrapped column %r as %r", field.name, ext_name)
+            logger.debug(
+                "apply_logical_types: wrapped column %r as %r", field.name, ext_name
+            )
             return new_col, new_field
 
     # ── Case 3: struct — recurse only if children carry extension metadata ──────

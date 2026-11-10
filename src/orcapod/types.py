@@ -57,7 +57,9 @@ PathSet: TypeAlias = PathLike | Collection[PathLike | None]
 ``None`` entries). Used when operations need to address multiple files at
 once, e.g. batch hashing."""
 
-SupportedNativePythonData: TypeAlias = str | int | float | bool | bytes | date | datetime
+SupportedNativePythonData: TypeAlias = (
+    str | int | float | bool | bytes | date | datetime
+)
 """The simple Python scalar types that have a direct Arrow / Polars
 correspondence, including temporal types (date and datetime)."""
 
@@ -77,6 +79,7 @@ SchemaLike: TypeAlias = Mapping[str, DataType]
 Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
 _T = TypeVar("_T")
+
 
 class Schema(Mapping[str, DataType]):
     """Immutable schema representing a mapping of field names to Python types.
@@ -200,9 +203,7 @@ class Schema(Mapping[str, DataType]):
         """
         if isinstance(other, Schema):
             return self.merge(other)
-        raise NotImplementedError(
-            f"Adding {Schema} to {type(other)} is not supported"
-        )
+        raise NotImplementedError(f"Adding {Schema} to {type(other)} is not supported")
 
     def with_values(self, other: dict[str, type] | None, **kwargs: type) -> Schema:
         """Return a new Schema with the specified fields added or overridden.
@@ -679,7 +680,7 @@ class ContentHash:
         """
         colon_idx = data.index(b":")
         method = data[:colon_idx].decode("ascii")
-        digest = data[colon_idx + 1:]
+        digest = data[colon_idx + 1 :]
         return cls(method=method, digest=digest)
 
     def __str__(self) -> str:
@@ -771,9 +772,7 @@ class PollingConfig:
 
     def __post_init__(self) -> None:
         if self.interval <= 0:
-            raise ValueError(
-                f"PollingConfig.interval must be > 0, got {self.interval}"
-            )
+            raise ValueError(f"PollingConfig.interval must be > 0, got {self.interval}")
         if self.duration < 0:
             raise ValueError(
                 f"PollingConfig.duration must be >= 0, got {self.duration}"
@@ -793,5 +792,3 @@ class PollingConfig:
                 f"PollingConfig.error_backoff_base must be > 0, "
                 f"got {self.error_backoff_base}"
             )
-
-

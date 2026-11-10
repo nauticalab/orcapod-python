@@ -1,4 +1,5 @@
 """Tests for orcapod.types — Schema operations."""
+
 from __future__ import annotations
 
 import pytest
@@ -122,10 +123,12 @@ class TestNodeConfig:
 class TestSchemaVersionError:
     def test_is_exception(self):
         from orcapod.errors import SchemaVersionError
+
         err = SchemaVersionError("test message")
         assert isinstance(err, Exception)
 
     def test_message_preserved(self):
         from orcapod.errors import SchemaVersionError
+
         err = SchemaVersionError("Pipeline DB at v0 path")
         assert "v0" in str(err)

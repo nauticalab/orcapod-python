@@ -8,7 +8,6 @@ Tests the two parallel identity chains documented in the design spec:
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join, SemiJoin
@@ -70,11 +69,17 @@ class TestPipelineHashProperties:
     def test_same_schema_different_data_same_pipeline_hash(self):
         """Same schema, different data → same pipeline_hash."""
         s1 = _make_source(
-            {"id": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())},
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "x": pa.array([10, 20], type=pa.int64()),
+            },
             ["id"],
         )
         s2 = _make_source(
-            {"id": pa.array([3, 4], type=pa.int64()), "x": pa.array([30, 40], type=pa.int64())},
+            {
+                "id": pa.array([3, 4], type=pa.int64()),
+                "x": pa.array([30, 40], type=pa.int64()),
+            },
             ["id"],
         )
         assert s1.pipeline_hash() == s2.pipeline_hash()
@@ -82,11 +87,17 @@ class TestPipelineHashProperties:
     def test_different_schema_different_pipeline_hash(self):
         """Different schema → different pipeline_hash."""
         s1 = _make_source(
-            {"id": pa.array([1], type=pa.int64()), "x": pa.array([10], type=pa.int64())},
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "x": pa.array([10], type=pa.int64()),
+            },
             ["id"],
         )
         s2 = _make_source(
-            {"id": pa.array([1], type=pa.int64()), "y": pa.array(["a"], type=pa.large_string())},
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "y": pa.array(["a"], type=pa.large_string()),
+            },
             ["id"],
         )
         assert s1.pipeline_hash() != s2.pipeline_hash()
@@ -105,12 +116,18 @@ class TestMerkleChain:
         """Different upstream sources with different schemas produce different
         downstream pipeline hashes even with the same operator/pod."""
         source_a = _make_source(
-            {"id": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())},
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "x": pa.array([10, 20], type=pa.int64()),
+            },
             ["id"],
         )
         # Different schema: tag=category instead of tag=id
         source_b = _make_source(
-            {"category": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())},
+            {
+                "category": pa.array([1, 2], type=pa.int64()),
+                "x": pa.array([10, 20], type=pa.int64()),
+            },
             ["category"],
         )
 
@@ -137,11 +154,17 @@ class TestJoinPipelineHashCommutativity:
 
     def test_commutative_join_order_independent(self):
         sa = _make_source(
-            {"id": pa.array([1, 2], type=pa.int64()), "a": pa.array([10, 20], type=pa.int64())},
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "a": pa.array([10, 20], type=pa.int64()),
+            },
             ["id"],
         )
         sb = _make_source(
-            {"id": pa.array([1, 2], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())},
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "b": pa.array([30, 40], type=pa.int64()),
+            },
             ["id"],
         )
 
@@ -153,11 +176,17 @@ class TestJoinPipelineHashCommutativity:
 
     def test_non_commutative_semijoin_order_dependent(self):
         sa = _make_source(
-            {"id": pa.array([1, 2], type=pa.int64()), "a": pa.array([10, 20], type=pa.int64())},
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "a": pa.array([10, 20], type=pa.int64()),
+            },
             ["id"],
         )
         sb = _make_source(
-            {"id": pa.array([1, 2], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())},
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "b": pa.array([30, 40], type=pa.int64()),
+            },
             ["id"],
         )
 

@@ -4,6 +4,7 @@
 Full parity with tests/test_core/side_effect_function/test_side_effect_function_pod.py,
 exercising @function_pod(ctx_arg=...) as the preferred side-effect pod entry point.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -15,10 +16,12 @@ from orcapod.side_effects import InvocationContext
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
     """Simple stream: tag=id (int), data=value (int)."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("value", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("value", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {"id": list(range(n)), "value": list(range(n))},
         schema=schema,
@@ -29,6 +32,7 @@ def _make_stream(n: int = 3) -> ArrowTableStream:
 def _make_pipeline_db():
     """Return a fresh in-memory ArrowDatabase."""
     from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+
     return InMemoryArrowDatabase()
 
 
@@ -48,14 +52,14 @@ class TestCtxArgSchema:
         # Pod's exposed input schema excludes 'ctx'
         assert "ctx" not in pod.input_data_schema
         assert "value" in pod.input_data_schema
-        assert pod.input_data_schema["value"] == int
+        assert pod.input_data_schema["value"] is int
 
         # Underlying data function retains full schema (ctx included for hashing)
         assert "ctx" in pod._data_function.input_data_schema
 
         # Output schema has the declared key
         assert "result" in pod._data_function.output_data_schema
-        assert pod._data_function.output_data_schema["result"] == str
+        assert pod._data_function.output_data_schema["result"] is str
 
     def test_ctx02_ctx_arg_name_property(self):
         """Scenario 2: pod.ctx_arg_name reflects the configured arg name."""
@@ -245,6 +249,7 @@ class TestCtxArgInvalidParam:
         from orcapod.core.function_pod import function_pod
 
         with pytest.raises(ValueError, match="ctx_arg_name"):
+
             @function_pod(output_keys="result", ctx_arg="nonexistent_param")
             def my_fn(value: int) -> str:
                 return str(value)

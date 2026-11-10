@@ -21,7 +21,6 @@ import pytest
 from deltalake import write_deltalake
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, OperatorNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
@@ -41,10 +40,12 @@ def _write_delta(path: Path, table: pa.Table, *, mode: str = "error") -> None:
 
 
 def _make_patients(path: Path, ids: list[str], ages: list[int]) -> pa.Table:
-    schema = pa.schema([
-        pa.field("patient_id", pa.large_string(), nullable=False),
-        pa.field("age", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("patient_id", pa.large_string(), nullable=False),
+            pa.field("age", pa.int64(), nullable=False),
+        ]
+    )
     t = pa.table(
         {
             "patient_id": ids,
@@ -57,10 +58,12 @@ def _make_patients(path: Path, ids: list[str], ages: list[int]) -> pa.Table:
 
 
 def _make_labs(path: Path, ids: list[str], chols: list[int]) -> pa.Table:
-    schema = pa.schema([
-        pa.field("patient_id", pa.large_string(), nullable=False),
-        pa.field("cholesterol", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("patient_id", pa.large_string(), nullable=False),
+            pa.field("cholesterol", pa.int64(), nullable=False),
+        ]
+    )
     t = pa.table(
         {
             "patient_id": ids,
@@ -110,20 +113,20 @@ def delta_dir(tmp_path):
 def clinic_a(delta_dir):
     """Create clinic A's Delta tables and return (patients_path, labs_path)."""
     p = delta_dir / "clinic_a_patients"
-    l = delta_dir / "clinic_a_labs"
+    labs = delta_dir / "clinic_a_labs"
     _make_patients(p, ["p1", "p2", "p3"], [30, 45, 60])
-    _make_labs(l, ["p1", "p2", "p3"], [180, 220, 260])
-    return p, l
+    _make_labs(labs, ["p1", "p2", "p3"], [180, 220, 260])
+    return p, labs
 
 
 @pytest.fixture
 def clinic_b(delta_dir):
     """Create clinic B's Delta tables and return (patients_path, labs_path)."""
     p = delta_dir / "clinic_b_patients"
-    l = delta_dir / "clinic_b_labs"
+    labs = delta_dir / "clinic_b_labs"
     _make_patients(p, ["x1", "x2"], [28, 72])
-    _make_labs(l, ["x1", "x2"], [160, 290])
-    return p, l
+    _make_labs(labs, ["x1", "x2"], [160, 290])
+    return p, labs
 
 
 @pytest.fixture
@@ -198,10 +201,12 @@ class TestSourcePodCaching:
                     "patient_id": ["p1", "p2", "p3", "p4"],
                     "age": [30, 45, 60, 25],
                 },
-                schema=pa.schema([
-                    pa.field("patient_id", pa.large_string(), nullable=False),
-                    pa.field("age", pa.int64(), nullable=False),
-                ]),
+                schema=pa.schema(
+                    [
+                        pa.field("patient_id", pa.large_string(), nullable=False),
+                        pa.field("age", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             mode="overwrite",
         )
@@ -230,10 +235,12 @@ class TestSourcePodCaching:
                     "patient_id": ["p1", "p2", "p3", "p4"],
                     "age": [30, 45, 60, 25],
                 },
-                schema=pa.schema([
-                    pa.field("patient_id", pa.large_string(), nullable=False),
-                    pa.field("age", pa.int64(), nullable=False),
-                ]),
+                schema=pa.schema(
+                    [
+                        pa.field("patient_id", pa.large_string(), nullable=False),
+                        pa.field("age", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             mode="overwrite",
         )

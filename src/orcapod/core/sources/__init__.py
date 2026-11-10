@@ -14,6 +14,7 @@ from .source_proxy import SourceProxy
 from .spiraldb_table_source import SpiralDBTableSource
 from .sqlite_table_source import SQLiteTableSource
 from .postgresql_table_source import PostgreSQLTableSource
+
 __all__ = [
     "RootSource",
     "ArrowTableSource",

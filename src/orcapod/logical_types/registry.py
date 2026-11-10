@@ -6,12 +6,14 @@ extension type in both PyArrow's and Polars' global registries.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import TYPE_CHECKING, Iterable
 
-from orcapod.logical_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
+from orcapod.logical_types.protocols import (
+    LogicalTypeProtocol,
+    LogicalTypeFactoryProtocol,
+)
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -95,7 +97,9 @@ def make_arrow_extension_type(
     """
     _name, _storage, _metadata = extension_name, storage_type, metadata or b""
 
-    def _deserialize(cls, storage_type: pa.DataType, serialized: bytes) -> pa.ExtensionType:
+    def _deserialize(
+        cls, storage_type: pa.DataType, serialized: bytes
+    ) -> pa.ExtensionType:
         # __arrow_ext_deserialize__ reconstructs the type descriptor from schema
         # metadata (called once per IPC/Parquet read, not per value). Validate the
         # incoming storage_type and serialized bytes against the expected values so
@@ -261,9 +265,9 @@ class LogicalTypeRegistry:
         self._by_python_type: dict[type, LogicalTypeProtocol] = {}
         self._category_factories: dict[str, LogicalTypeFactoryProtocol] = {}
         self._python_class_factories: dict[type, LogicalTypeFactoryProtocol] = {}
-        for lt in (logical_types or []):
+        for lt in logical_types or []:
             self.register_logical_type(lt)
-        for entry in (factories or []):
+        for entry in factories or []:
             self.register_logical_type_factory(
                 entry["factory"],
                 category=entry.get("category"),
@@ -294,7 +298,11 @@ class LogicalTypeRegistry:
         for existing, label, key in [
             (existing_by_logical, "logical_type_name", logical_name),
             (existing_by_arrow, "arrow_extension_name", arrow_ext_name),
-            (existing_by_python, "python_type", getattr(py_type, "__qualname__", repr(py_type))),
+            (
+                existing_by_python,
+                "python_type",
+                getattr(py_type, "__qualname__", repr(py_type)),
+            ),
         ]:
             if existing is not None and existing is not logical_type:
                 raise ValueError(
@@ -358,7 +366,9 @@ class LogicalTypeRegistry:
                 continue
         return None
 
-    def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalTypeProtocol | None:
+    def get_by_arrow_extension_name(
+        self, arrow_name: str
+    ) -> LogicalTypeProtocol | None:
         """Return the logical type registered under *arrow_name*, or ``None``."""
         return self._by_arrow_name.get(arrow_name)
 
@@ -405,7 +415,9 @@ class LogicalTypeRegistry:
             if existing is not factory:
                 self._category_factories[category] = factory
                 logger.debug(
-                    "registered LogicalTypeFactory for category %r: %r", category, factory
+                    "registered LogicalTypeFactory for category %r: %r",
+                    category,
+                    factory,
                 )
         # Validate all bases before writing any (prevents partial mutation on error).
         for base in python_bases_list:
@@ -421,5 +433,7 @@ class LogicalTypeRegistry:
             if self._python_class_factories.get(base) is not factory:
                 self._python_class_factories[base] = factory
                 logger.debug(
-                    "registered LogicalTypeFactory for python base %r: %r", base, factory
+                    "registered LogicalTypeFactory for python base %r: %r",
+                    base,
+                    factory,
                 )

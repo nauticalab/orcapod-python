@@ -9,6 +9,7 @@ Example::
         "postgresql://user:pass@localhost:5432/mydb", "measurements"
     )
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -73,7 +74,9 @@ class PostgreSQLTableSource(DBTableSource):
         config: OrcapodConfig | None = None,
     ) -> None:
         self._dsn = dsn  # store before try — needed by to_config even if super() raises
-        connector = PostgreSQLConnector(dsn)  # outside try — if this raises, finally never runs
+        connector = PostgreSQLConnector(
+            dsn
+        )  # outside try — if this raises, finally never runs
         try:
             super().__init__(
                 connector,
@@ -102,7 +105,9 @@ class PostgreSQLTableSource(DBTableSource):
         return {**base, "source_type": "postgresql_table", "dsn": self._dsn}
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> PostgreSQLTableSource:
+    def from_config(
+        cls, config: dict[str, Any], db_registry=None
+    ) -> PostgreSQLTableSource:
         """Reconstruct a PostgreSQLTableSource from a config dict.
 
         Args:

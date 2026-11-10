@@ -4,6 +4,7 @@ A plain struct (no ARROW:extension:* field metadata) should be inferred as a
 dynamic TypedDict by arrow_schema_to_python_schema, and that TypedDict should
 round-trip back to the identical Arrow struct type via python_type_to_arrow_type.
 """
+
 from __future__ import annotations
 
 import typing
@@ -18,10 +19,12 @@ from orcapod.contexts import get_default_context
 # Module-level constants
 # ---------------------------------------------------------------------------
 
-PLAIN_STRUCT = pa.struct([
-    pa.field("total", pa.int64()),
-    pa.field("delta", pa.int64()),
-])
+PLAIN_STRUCT = pa.struct(
+    [
+        pa.field("total", pa.int64()),
+        pa.field("delta", pa.int64()),
+    ]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +91,9 @@ def test_dynamic_typeddict_write_back(converter):
         {"result": {"total": 8, "delta": 2}},
         {"result": {"total": 17, "delta": 3}},
     ]
-    struct_dicts = converter.python_dicts_to_struct_dicts(data, python_schema=python_schema)
+    struct_dicts = converter.python_dicts_to_struct_dicts(
+        data, python_schema=python_schema
+    )
     table = pa.Table.from_pylist(struct_dicts, schema=schema)
 
     assert table.num_rows == 2

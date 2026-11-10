@@ -176,6 +176,7 @@ def get_default_python_type_handler_registry() -> "PythonTypeHandlerRegistry":
     from orcapod.hashing.defaults import (
         get_default_python_type_handler_registry as _get,
     )
+
     return _get()
 
 
@@ -191,4 +192,5 @@ class BuiltinPythonTypeHandlerRegistry(PythonTypeHandlerRegistry):
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
             register_builtin_python_type_handlers,
         )
+
         register_builtin_python_type_handlers(self, arrow_hasher=arrow_hasher)

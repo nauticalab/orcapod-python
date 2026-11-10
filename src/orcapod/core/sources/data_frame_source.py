@@ -66,7 +66,9 @@ class DataFrameSource(RootSource):
         else:
             # Polars defaults all fields to nullable=True; infer the correct
             # flags from the actual data before passing to the builder.
-            arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+            arrow_table = arrow_table.cast(
+                arrow_utils.infer_schema_nullable(arrow_table)
+            )
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

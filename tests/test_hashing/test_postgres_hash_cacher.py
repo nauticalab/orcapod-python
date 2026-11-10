@@ -362,9 +362,7 @@ class TestEnableFileHashCachingPostgres:
         handler = registry.get_handler_for_type(File)
         assert isinstance(handler.file_hasher.cacher, PostgresHashCacher)
 
-    def test_conninfo_passes_read_only(
-        self, restore_default_file_handler, pg_conninfo
-    ):
+    def test_conninfo_passes_read_only(self, restore_default_file_handler, pg_conninfo):
         """read_only=True is forwarded to PostgresHashCacher."""
         from orcapod.contexts import enable_file_hash_caching, get_default_context
         from orcapod.logical_types.file_type import File

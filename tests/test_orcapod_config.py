@@ -1,4 +1,5 @@
 """Tests for HashingConfig, DisplayConfig, OrcapodConfig, and load_config (PLT-964)."""
+
 from __future__ import annotations
 
 

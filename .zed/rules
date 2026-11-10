@@ -135,6 +135,37 @@ Examples:
 - test(function_pod): add schema validation tests
 - refactor(schema_utils): use Schema.optional_fields directly
 
+## Lint, format and type checks
+
+Every pull request must pass the metamorphic-labs required CI, which runs exactly these
+commands (pytest on Python 3.11, 3.12 and 3.13; the others on 3.11):
+
+  uv run --with ruff ruff check .
+  uv run --with ruff ruff format --check .
+  uv run --with basedpyright basedpyright
+  uv run pytest tests/
+
+- New and changed code must be ruff-clean and ruff-formatted, and must add no
+  basedpyright errors. Warnings are reported but do not fail the check
+  (`failOnWarnings = false`); still do not add them needlessly. Run
+  `uv run ruff format .` and `uv run ruff check .` before committing;
+  `uv run pre-commit install` once per clone runs both on every commit.
+- Check types with `uv run --with basedpyright basedpyright` and read its EXIT CODE:
+  non-zero means a new error and fails CI.
+- The tool versions are the ones in `uv.lock`: `--with ruff` and `--with basedpyright` are
+  satisfied by the locked dev dependencies, so a version bump in `uv.lock` can change what
+  CI reports.
+- Existing type errors and warnings are recorded in `.basedpyright/baseline.json`, a debt
+  list to pay down. Never regenerate the baseline (`basedpyright --writebaseline`) to
+  hide a new error; regenerate it only to REMOVE entries you fixed. Fix the
+  new diagnostic, or, when it is a genuine false positive, suppress that one line with a
+  targeted `# pyright: ignore[<rule>]` and a reason.
+- Do not lower the basedpyright strictness mode, and do not add repo-wide or per-directory
+  ruff ignores or excludes to make a check pass. A targeted `# noqa: <rule>` on one line
+  needs a reason.
+- The Graphviz `dot` binary is optional. The tests that render a graph to an image skip
+  when `dot` is not on `PATH` and run when it is.
+
 ---
 
 ## Project layout
@@ -326,3 +357,10 @@ Prefixes are computed from SystemConstant in system_constants.py.
   ArrowNotImplementedError on any logical-typed column (e.g. a pod annotated -> Path).
   The helper builds the list over the element's storage type and wraps it in the outer
   list[<element>] extension type from ListLogicalType.
+- Never build an identity or hash input from a type's raw __module__, or from
+  repr/str/inspect.formatannotation of a type, without going through
+  utils/canonical_type_names.py (canonical_module_name, canonical_type_name,
+  stabilize_type_names). The standard library moves classes between modules across Python
+  versions (pathlib.Path.__module__ is pathlib._local on 3.13), so the raw value makes
+  hashes differ by interpreter. Private stdlib submodules that already existed on 3.11/3.12
+  are frozen in _LEGACY_PRIVATE_STDLIB_MODULES; never add a newer one there.

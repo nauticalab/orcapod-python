@@ -1,4 +1,5 @@
 """Tests for SourceNode (schema-only slot) and SourceJobNode (execution variant)."""
+
 from __future__ import annotations
 
 import pytest
@@ -33,8 +34,12 @@ class TestSourceNodeHashStability:
     def test_content_hash_is_deterministic(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceNode
 
-        node_a = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
-        node_b = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        node_a = SourceNode(
+            name="slot_a", tag_schema=tag_schema, data_schema=data_schema
+        )
+        node_b = SourceNode(
+            name="slot_a", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert node_a.content_hash() == node_b.content_hash()
 
     def test_content_hash_stable_value(self, tag_schema, data_schema):
@@ -60,8 +65,12 @@ class TestSourceNodeHashStability:
     def test_pipeline_hash_is_deterministic(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceNode
 
-        node_a = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
-        node_b = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        node_a = SourceNode(
+            name="slot_a", tag_schema=tag_schema, data_schema=data_schema
+        )
+        node_b = SourceNode(
+            name="slot_a", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert node_a.pipeline_hash() == node_b.pipeline_hash()
 
     def test_pipeline_hash_stable_value(self, tag_schema, data_schema):
@@ -116,7 +125,9 @@ class TestSourceNodeInterface:
     def test_label_resolves_to_name(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceNode
 
-        node = SourceNode(name="my_slot", tag_schema=tag_schema, data_schema=data_schema)
+        node = SourceNode(
+            name="my_slot", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert node.label == "my_slot"
 
     def test_node_type(self, tag_schema, data_schema):
@@ -128,7 +139,9 @@ class TestSourceNodeInterface:
     def test_name_property(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceNode
 
-        node = SourceNode(name="my_slot", tag_schema=tag_schema, data_schema=data_schema)
+        node = SourceNode(
+            name="my_slot", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert node.name == "my_slot"
 
     def test_validate_compatible_source(self, tag_schema, data_schema):
@@ -153,7 +166,9 @@ class TestSourceJobNode:
     def test_unbound_iter_data_raises(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceJobNode
 
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         with pytest.raises(UnboundSourceError):
             list(job_node.iter_data())
 
@@ -162,14 +177,18 @@ class TestSourceJobNode:
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
 
         node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert job_node.content_hash() == node.content_hash()
 
     def test_pipeline_hash_matches_source_node(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
 
         node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert job_node.pipeline_hash() == node.pipeline_hash()
 
     def test_bound_content_hash_is_concrete_hash(self, tag_schema, data_schema):
@@ -198,7 +217,9 @@ class TestSourceJobNode:
     def test_as_node_returns_source_node(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
 
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         node = job_node.as_node()
         assert isinstance(node, SourceNode)
         assert node.content_hash() == job_node.content_hash()
@@ -208,18 +229,24 @@ class TestSourceJobNode:
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.core.sources.dict_source import DictSource
 
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         assert job_node.bound_source is None
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
         job_node.bound_source = src
         assert job_node.bound_source is src
 
-    def test_bound_source_setter_clears_content_hash_cache(self, tag_schema, data_schema):
+    def test_bound_source_setter_clears_content_hash_cache(
+        self, tag_schema, data_schema
+    ):
         """Setting bound_source clears the content_hash cache so stale values are not returned."""
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.core.sources.dict_source import DictSource
 
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         schema_hash = job_node.content_hash()  # populates cache with schema-based hash
 
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
@@ -239,7 +266,9 @@ class TestSourceNodeAsTable:
         with pytest.raises(UnboundSourceError):
             node.as_table()
 
-    def test_source_job_node_as_table_delegates_to_concrete(self, tag_schema, data_schema):
+    def test_source_job_node_as_table_delegates_to_concrete(
+        self, tag_schema, data_schema
+    ):
         """Bound SourceJobNode.as_table() delegates to concrete and does not raise."""
         import pyarrow as pa
 
@@ -266,7 +295,9 @@ class TestSourceNodeColumnConfig:
         assert tag_keys == ("id",)
         assert data_keys == ("value",)
 
-    def test_unbound_keys_system_tags_includes_both_system_cols(self, tag_schema, data_schema):
+    def test_unbound_keys_system_tags_includes_both_system_cols(
+        self, tag_schema, data_schema
+    ):
         """keys(system_tags=True) adds both system-tag column names to tag_keys."""
         from orcapod.core.nodes.source_node import SourceNode
         from orcapod.system_constants import constants
@@ -291,7 +322,9 @@ class TestSourceNodeColumnConfig:
         via_all_info = node.keys(all_info=True)
         assert via_system_tags == via_all_info
 
-    def test_unbound_output_schema_system_tags_adds_str_entries(self, tag_schema, data_schema):
+    def test_unbound_output_schema_system_tags_adds_str_entries(
+        self, tag_schema, data_schema
+    ):
         """output_schema(system_tags=True) tag schema includes two str-typed system-tag entries."""
         from orcapod.core.nodes.source_node import SourceNode
         from orcapod.system_constants import constants
@@ -305,7 +338,8 @@ class TestSourceNodeColumnConfig:
         assert data_schema_out == data_schema
         assert "id" in extended_tag_schema
         system_tag_entries = {
-            k: v for k, v in extended_tag_schema.items()
+            k: v
+            for k, v in extended_tag_schema.items()
             if k.startswith(constants.SYSTEM_TAG_PREFIX)
         }
         assert len(system_tag_entries) == 2
@@ -324,7 +358,9 @@ class TestSourceNodeColumnConfig:
         """Regression: unbound SourceJobNode.keys() still returns plain schema keys."""
         from orcapod.core.nodes.source_node import SourceJobNode
 
-        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         tag_keys, data_keys = job_node.keys()
         assert tag_keys == ("id",)
         assert data_keys == ("value",)
@@ -336,7 +372,9 @@ class TestSourceNodeColumnConfig:
         from orcapod.types import ColumnConfig
 
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
-        unbound = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        unbound = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
         bound = SourceJobNode(
             name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
         )
@@ -391,7 +429,9 @@ class TestSourceNodeColumnConfig:
 
         mock_source.output_schema.assert_called_once_with(columns=cfg, all_info=False)
 
-    def test_bound_output_schema_all_info_matches_source_directly(self, tag_schema, data_schema):
+    def test_bound_output_schema_all_info_matches_source_directly(
+        self, tag_schema, data_schema
+    ):
         """Bound SJN.output_schema(all_info=True) == bound_source.output_schema(all_info=True)."""
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.core.sources.dict_source import DictSource

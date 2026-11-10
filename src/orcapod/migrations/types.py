@@ -1,4 +1,5 @@
 """Migration result types for Orcapod schema migrations."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

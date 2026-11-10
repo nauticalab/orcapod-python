@@ -1699,3 +1699,74 @@ CI job failed.
 **Fix:** Removed `pygraphviz` from `pyproject.toml` and `uv.lock`, and dropped
 `libgraphviz-dev` from all workflows (the `graphviz` apt package stays for `dot`).
 `tests/test_packaging.py` guards against re-adding it.
+
+---
+
+## `src/orcapod/utils/canonical_type_names.py`
+
+### PY313 — Type names in identity strings depended on the Python version
+**Status:** resolved
+**Severity:** high
+**Issue:** ITL-825
+
+Python 3.13 moved the `pathlib` classes into the private `pathlib._local` module, so
+`pathlib.Path.__module__` is `pathlib._local` there and `pathlib` on 3.11/3.12. Every
+identity string built from a type's `__module__`, or from `repr`/`str`/
+`inspect.formatannotation` of a type, therefore differed by interpreter:
+`canonical_annotation_str`, `get_function_signature` and `get_function_components`
+(the `function_signature_hash` and `function_content_hash` stored with every cached result
+of a `PythonDataFunction`), `TypeObjectHandler` for unregistered types such as `PurePath`,
+the schema strings in `PythonDataFunction.to_config()` (a pipeline config saved on 3.12
+failed to bind on 3.13), and the `ListSource` tag-function hash in `signature` mode. `uri`, `content_hash`, `pipeline_hash` and record ids were not
+affected, because `pathlib.Path` resolves to the registered `orcapod.path` logical type.
+
+**Fix:** `canonical_module_name` resolves a standard-library type defined in a private
+submodule to the public module that exports the same object, and all the sites above go
+through it. Private submodules that were already the defining module on 3.11/3.12
+(`concurrent.futures._base`, `zipfile._path`, ...) are frozen in
+`_LEGACY_PRIVATE_STDLIB_MODULES`, so no string or hash changes on those versions.
+`tests/test_hashing/test_canonical_type_names.py` pins the names and golden hashes.
+
+**Known remainder:** `zipfile.Path` is `zipfile.Path` on 3.11 and `zipfile._path.Path` on
+3.12/3.13. This predates 3.13 and is left as is, because aligning it would change existing
+strings on 3.11 or 3.12.
+
+---
+
+## Tooling
+
+### TOOL1 — Type-check debt recorded in the basedpyright baseline
+**Status:** open
+**Severity:** medium
+**Issue:** ITL-826
+
+The org required CI runs `basedpyright` in its default (`recommended`) mode. The code was
+never type-checked, so ITL-826 recorded the existing errors in
+`.basedpyright/baseline.json` instead of fixing them: the check passes and any new error
+fails it. Baselined errors after the ITL-826 lint fixes and the ITL-825 merge: 1995 in
+total (tests/ 1238, src/ 669, test-objective/ 84, examples/ 3, superpowers/ 1); the baseline
+also records 30,279 warnings, which are reported but do not fail the check
+(`failOnWarnings = false`). Largest error rules: `reportArgumentType`,
+`reportMissingTypeArgument`, `reportAttributeAccessIssue`.
+
+Pay it down directory by directory, starting with `src/`, and regenerate the baseline only
+to remove fixed entries. Known items worth fixing first: `orcapod.hashing` exports nine
+names from a `legacy_core` module that no longer exists, so they are always `None`
+(`tests/test_hashing/generate_pathset_data_hashes.py` would call one); and 26 import
+cycles reported in `src/`.
+
+Protocols that lag their concrete classes. These baselined errors are not runtime bugs (the
+concrete classes have the method or parameter), but the protocols misdescribe what callers
+rely on. Paths are under `src/orcapod/`:
+- `FunctionPodProtocol.process_data` / `async_process_data` lack the `logger` / `run_id`
+  keyword arguments that callers pass: `core/cached_function_pod.py:138,189`,
+  `core/nodes/function_node.py:1429,1566`.
+- `StreamProtocol` lacks `data_context`, which operators use:
+  `core/operators/batch.py:99`, `core/operators/group_by.py:217`,
+  `core/operators/index.py:98`, `core/operators/pick.py:104`,
+  `core/operators/merge_join.py:252`.
+- `ArrowDatabaseProtocol` lacks `list_sources` (`pipeline/logging_observer.py:247`,
+  `pipeline/status_observer.py:199`) and `to_config(db_registry=)`
+  (`pipeline/logging_observer.py:278`, `pipeline/status_observer.py:231`).
+- `DataFunctionProtocol` lacks `data_context`:
+  `core/cached_function_pod.py:145,150,196,201`.

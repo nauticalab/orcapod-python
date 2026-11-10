@@ -13,13 +13,13 @@ Connects via standard PG* environment variables:
 
 Each test gets an isolated schema created fresh and dropped on teardown.
 """
+
 from __future__ import annotations
 
 import os
 import uuid
 from collections.abc import Iterator
 
-import pyarrow as pa
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
@@ -73,7 +73,7 @@ class TestSinglePKTable:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)'
+                    "(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)"
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
@@ -92,7 +92,7 @@ class TestSinglePKTable:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)'
+                    "(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)"
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
@@ -112,7 +112,7 @@ class TestSinglePKTable:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)'
+                    "(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)"
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
@@ -130,7 +130,7 @@ class TestSinglePKTable:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)'
+                    "(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)"
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
@@ -154,8 +154,8 @@ class TestCompositePKTable:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "events" '
-                    '(user_id TEXT, event_id INTEGER, payload TEXT, '
-                    'PRIMARY KEY (user_id, event_id))'
+                    "(user_id TEXT, event_id INTEGER, payload TEXT, "
+                    "PRIMARY KEY (user_id, event_id))"
                 )
                 cur.executemany(
                     'INSERT INTO "events" VALUES (%s, %s, %s)',
@@ -180,7 +180,7 @@ class TestExplicitTagOverride:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)'
+                    "(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)"
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
@@ -188,9 +188,7 @@ class TestExplicitTagOverride:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(
-            schema_dsn, "measurements", tag_columns=["trial"]
-        )
+        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_columns=["trial"])
         tag_schema, _ = src.output_schema()
         assert "trial" in tag_schema
         assert "session_id" not in tag_schema
@@ -213,7 +211,7 @@ class TestPipelineIntegration:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER NOT NULL, response REAL NOT NULL)'
+                    "(session_id TEXT PRIMARY KEY, trial INTEGER NOT NULL, response REAL NOT NULL)"
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
@@ -233,11 +231,15 @@ class TestPipelineIntegration:
             pod(src, label="doubler")
 
         from orcapod.pipeline.dag import OrcaDAG
+
         exec_dag: OrcaDAG = OrcaDAG()
         for node in job._persistent_node_map.values():
             exec_dag.add_node(node)
         for u_hash, v_hash in job._graph_edges:
-            if u_hash in job._persistent_node_map and v_hash in job._persistent_node_map:
+            if (
+                u_hash in job._persistent_node_map
+                and v_hash in job._persistent_node_map
+            ):
                 exec_dag.add_edge(
                     job._persistent_node_map[u_hash],
                     job._persistent_node_map[v_hash],

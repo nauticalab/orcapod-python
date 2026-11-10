@@ -5,14 +5,17 @@ from __future__ import annotations
 import uuid
 
 import pyarrow as pa
-import pytest
 
-from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.logical_types.registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _unique_name() -> str:
     return f"test.apply.{uuid.uuid4().hex[:8]}"
@@ -32,6 +35,7 @@ def _make_registry_with_type(
     class _PolarsExt(pl.BaseExtension):
         def __init__(self):
             super().__init__(arrow_name, pl_storage, None)
+
         @classmethod
         def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
             return cls()
@@ -40,15 +44,20 @@ def _make_registry_with_type(
         @property
         def logical_type_name(self):
             return arrow_name
+
         @property
         def python_type(self):
             return str
+
         def get_arrow_extension_type(self):
             return ext_type
+
         def get_polars_extension_type(self):
             return _PolarsExt()
+
         def python_to_storage(self, v):
             return str(v)
+
         def storage_to_python(self, v):
             return v
 
@@ -68,10 +77,12 @@ def _degraded_table_with_metadata(
     type was not registered at read time.
     """
     col = pa.array(values, type=storage)
-    field = pa.field("col", storage).with_metadata({
-        b"ARROW:extension:name": arrow_name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    field = pa.field("col", storage).with_metadata(
+        {
+            b"ARROW:extension:name": arrow_name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     schema = pa.schema([field])
     return pa.table({"col": col}, schema=schema)
 
@@ -79,6 +90,7 @@ def _degraded_table_with_metadata(
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_noop_when_no_extension_metadata():
     """Table with plain Arrow types is returned unchanged."""
@@ -130,10 +142,12 @@ def test_zero_copy_multiple_chunks():
     c1 = pa.array(["x"], type=pa.large_utf8())
     c2 = pa.array(["y", "z"], type=pa.large_utf8())
     chunked = pa.chunked_array([c1, c2], type=pa.large_utf8())
-    field = pa.field("col", pa.large_utf8()).with_metadata({
-        b"ARROW:extension:name": name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    field = pa.field("col", pa.large_utf8()).with_metadata(
+        {
+            b"ARROW:extension:name": name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     schema = pa.schema([field])
     table = pa.table({"col": chunked}, schema=schema)
 
@@ -155,7 +169,9 @@ def test_already_extension_type_passthrough():
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
     # Build a table with a properly typed extension column (already registered)
-    arr = pa.ExtensionArray.from_storage(ext_type, pa.array(["a"], type=pa.large_utf8()))
+    arr = pa.ExtensionArray.from_storage(
+        ext_type, pa.array(["a"], type=pa.large_utf8())
+    )
     table = pa.table({"col": arr})
 
     result = apply_logical_types(table, registry)
@@ -184,10 +200,12 @@ def test_nested_struct_extension_type():
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
 
     # Build degraded struct: inner field has extension metadata but storage type
-    inner_field = pa.field("inner", pa.large_utf8()).with_metadata({
-        b"ARROW:extension:name": name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    inner_field = pa.field("inner", pa.large_utf8()).with_metadata(
+        {
+            b"ARROW:extension:name": name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     struct_type = pa.struct([inner_field])
     inner_data = pa.array(["p", "q"], type=pa.large_utf8())
     struct_col = pa.StructArray.from_arrays([inner_data], fields=[inner_field])
@@ -210,14 +228,19 @@ def test_mixed_columns_only_ext_columns_changed():
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
 
-    ext_field = pa.field("ext_col", pa.large_utf8()).with_metadata({
-        b"ARROW:extension:name": name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    ext_field = pa.field("ext_col", pa.large_utf8()).with_metadata(
+        {
+            b"ARROW:extension:name": name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     plain_field = pa.field("plain_col", pa.int32())
     schema = pa.schema([ext_field, plain_field])
     table = pa.table(
-        {"ext_col": pa.array(["a"], type=pa.large_utf8()), "plain_col": pa.array([1], type=pa.int32())},
+        {
+            "ext_col": pa.array(["a"], type=pa.large_utf8()),
+            "plain_col": pa.array([1], type=pa.int32()),
+        },
         schema=schema,
     )
 
@@ -235,10 +258,12 @@ def test_schema_level_metadata_preserved():
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
 
-    ext_field = pa.field("col", pa.large_utf8()).with_metadata({
-        b"ARROW:extension:name": name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    ext_field = pa.field("col", pa.large_utf8()).with_metadata(
+        {
+            b"ARROW:extension:name": name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     schema_meta = {b"pandas": b'{"some": "pandas_metadata"}', b"custom": b"value"}
     schema = pa.schema([ext_field], metadata=schema_meta)
     table = pa.table({"col": pa.array(["x"], type=pa.large_utf8())}, schema=schema)
@@ -275,10 +300,12 @@ def test_struct_null_bitmap_preserved():
     name = _unique_name()
     registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
 
-    inner_field = pa.field("inner", pa.large_utf8()).with_metadata({
-        b"ARROW:extension:name": name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    inner_field = pa.field("inner", pa.large_utf8()).with_metadata(
+        {
+            b"ARROW:extension:name": name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     struct_type = pa.struct([inner_field])
     inner_data = pa.array(["a", "b", "c"], type=pa.large_utf8())
     # Build struct with a null at position 1

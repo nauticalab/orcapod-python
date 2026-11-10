@@ -30,10 +30,12 @@ from orcapod.pipeline.status_observer import StatusObserver
 
 
 def _make_source(n: int = 3) -> ArrowTableSource:
-    table = pa.table({
-        "id": pa.array([str(i) for i in range(n)], type=pa.large_string()),
-        "x": pa.array([10 * (i + 1) for i in range(n)], type=pa.int64()),
-    })
+    table = pa.table(
+        {
+            "id": pa.array([str(i) for i in range(n)], type=pa.large_string()),
+            "x": pa.array([10 * (i + 1) for i in range(n)], type=pa.int64()),
+        }
+    )
     return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
 
 
@@ -50,7 +52,9 @@ class TestSyncPipelineSuccessStatus:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            double, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_status", store=db)
@@ -84,7 +88,9 @@ class TestFailingDatasStatus:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            failing, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_fail_status", store=db)
@@ -127,7 +133,9 @@ class TestFlatStatusStorage:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            identity, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_flat_status", store=db)
@@ -156,7 +164,9 @@ class TestQueryableTagColumns:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            identity, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_tags_status", store=db)
@@ -188,7 +198,9 @@ class TestAsyncOrchestratorStatus:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            double, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_async_status", store=db)
@@ -221,7 +233,9 @@ class TestFailFastErrorPolicy:
         def failing(x: int) -> int:
             raise RuntimeError("crash")
 
-        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            failing, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_failfast_status", store=db)
@@ -253,10 +267,12 @@ class TestMixedSuccessFailure:
     def test_mixed_results_tracked_correctly(self):
         db = InMemoryArrowDatabase()
         source = ArrowTableSource(
-            pa.table({
-                "id": pa.array(["a", "b", "c"], type=pa.large_string()),
-                "x": pa.array([10, 0, 30], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "id": pa.array(["a", "b", "c"], type=pa.large_string()),
+                    "x": pa.array([10, 0, 30], type=pa.int64()),
+                }
+            ),
             tag_columns=["id"],
             infer_nullable=True,
         )
@@ -264,7 +280,9 @@ class TestMixedSuccessFailure:
         def safe_div(x: int) -> float:
             return 100 / x  # x=0 will raise ZeroDivisionError
 
-        pf = PythonDataFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            safe_div, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_mixed_status", store=db)
@@ -302,9 +320,13 @@ class TestMultipleFunctionNodesSeparateStatus:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(
+            double, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod1 = FunctionPod(pf1)
-        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(
+            triple, output_keys="final", executor=LocalPythonFunctionExecutor()
+        )
         pod2 = FunctionPod(pf2)
 
         job = PipelineJob(name="test_multi_status", store=db)
@@ -339,9 +361,13 @@ class TestGetStatusNodeSpecific:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(
+            double, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod1 = FunctionPod(pf1)
-        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(
+            triple, output_keys="final", executor=LocalPythonFunctionExecutor()
+        )
         pod2 = FunctionPod(pf2)
 
         job = PipelineJob(name="test_filter_status", store=db)
@@ -372,7 +398,9 @@ class TestStatusSchema:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            identity, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_schema", store=db)
@@ -413,7 +441,9 @@ class TestRunIdTracking:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            identity, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_runid", store=db)

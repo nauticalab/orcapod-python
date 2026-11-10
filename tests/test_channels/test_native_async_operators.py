@@ -59,9 +59,11 @@ def make_simple_stream() -> ArrowTableStream:
         ("animal", pa.large_string()), ("weight", pa.float64()), ("legs", pa.int64())
     )
     table = pa.table(
-        {"animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
-         "weight": pa.array([4.0, 12.0, 0.5], type=pa.float64()),
-         "legs": pa.array([4, 4, 2], type=pa.int64())},
+        {
+            "animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
+            "weight": pa.array([4.0, 12.0, 0.5], type=pa.float64()),
+            "legs": pa.array([4, 4, 2], type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["animal"])
@@ -70,12 +72,16 @@ def make_simple_stream() -> ArrowTableStream:
 def make_two_tag_stream() -> ArrowTableStream:
     """Stream with 2 tags (region, animal) and 1 data column (count). Uses nullable=False schema."""
     schema = _make_non_nullable_schema(
-        ("region", pa.large_string()), ("animal", pa.large_string()), ("count", pa.int64())
+        ("region", pa.large_string()),
+        ("animal", pa.large_string()),
+        ("count", pa.int64()),
     )
     table = pa.table(
-        {"region": pa.array(["east", "east", "west"], type=pa.large_string()),
-         "animal": pa.array(["cat", "dog", "cat"], type=pa.large_string()),
-         "count": pa.array([10, 5, 8], type=pa.int64())},
+        {
+            "region": pa.array(["east", "east", "west"], type=pa.large_string()),
+            "animal": pa.array(["cat", "dog", "cat"], type=pa.large_string()),
+            "count": pa.array([10, 5, 8], type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["region", "animal"])
@@ -85,7 +91,10 @@ def make_int_stream(n: int = 3) -> ArrowTableStream:
     """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
     schema = _make_non_nullable_schema(("id", pa.int64()), ("x", pa.int64()))
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "x": pa.array(list(range(n)), type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -93,11 +102,15 @@ def make_int_stream(n: int = 3) -> ArrowTableStream:
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
     """Stream with tag=id, data={x, y}. Uses nullable=False schema."""
-    schema = _make_non_nullable_schema(("id", pa.int64()), ("x", pa.int64()), ("y", pa.int64()))
+    schema = _make_non_nullable_schema(
+        ("id", pa.int64()), ("x", pa.int64()), ("y", pa.int64())
+    )
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()),
-         "x": pa.array(list(range(n)), type=pa.int64()),
-         "y": pa.array([i * 10 for i in range(n)], type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "x": pa.array(list(range(n)), type=pa.int64()),
+            "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -106,7 +119,10 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
 def make_left_stream() -> ArrowTableStream:
     schema = _make_non_nullable_schema(("id", pa.int64()), ("value_a", pa.int64()))
     table = pa.table(
-        {"id": pa.array([1, 2, 3], type=pa.int64()), "value_a": pa.array([10, 20, 30], type=pa.int64())},
+        {
+            "id": pa.array([1, 2, 3], type=pa.int64()),
+            "value_a": pa.array([10, 20, 30], type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -115,7 +131,10 @@ def make_left_stream() -> ArrowTableStream:
 def make_right_stream() -> ArrowTableStream:
     schema = _make_non_nullable_schema(("id", pa.int64()), ("value_b", pa.int64()))
     table = pa.table(
-        {"id": pa.array([2, 3, 4], type=pa.int64()), "value_b": pa.array([200, 300, 400], type=pa.int64())},
+        {
+            "id": pa.array([2, 3, 4], type=pa.int64()),
+            "value_b": pa.array([200, 300, 400], type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -123,10 +142,14 @@ def make_right_stream() -> ArrowTableStream:
 
 def make_disjoint_stream() -> ArrowTableStream:
     """Stream with same tags as simple_stream but different data columns. Uses nullable=False schema."""
-    schema = _make_non_nullable_schema(("animal", pa.large_string()), ("speed", pa.float64()))
+    schema = _make_non_nullable_schema(
+        ("animal", pa.large_string()), ("speed", pa.float64())
+    )
     table = pa.table(
-        {"animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
-         "speed": pa.array([30.0, 45.0, 80.0], type=pa.float64())},
+        {
+            "animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
+            "speed": pa.array([30.0, 45.0, 80.0], type=pa.float64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["animal"])
@@ -1117,13 +1140,22 @@ class TestJoinNativeAsync:
     async def test_matches_sync_three_way(self):
         """Three-way Staggered join must produce the same data as sync static_process."""
         t1 = pa.table(
-            {"id": pa.array([1, 2, 3], type=pa.int64()), "a": pa.array([10, 20, 30], type=pa.int64())}
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "a": pa.array([10, 20, 30], type=pa.int64()),
+            }
         )
         t2 = pa.table(
-            {"id": pa.array([1, 2, 3], type=pa.int64()), "b": pa.array([100, 200, 300], type=pa.int64())}
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "b": pa.array([100, 200, 300], type=pa.int64()),
+            }
         )
         t3 = pa.table(
-            {"id": pa.array([1, 2, 3], type=pa.int64()), "c": pa.array([1000, 2000, 3000], type=pa.int64())}
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "c": pa.array([1000, 2000, 3000], type=pa.int64()),
+            }
         )
         s1 = ArrowTableStream(t1, tag_columns=["id"])
         s2 = ArrowTableStream(t2, tag_columns=["id"])
@@ -1143,12 +1175,8 @@ class TestJoinNativeAsync:
         async_results = await out.reader.collect()
 
         assert len(async_results) == len(sync_results)
-        async_data = sorted(
-            (t.as_dict()["id"], p.as_dict()) for t, p in async_results
-        )
-        sync_data = sorted(
-            (t.as_dict()["id"], p.as_dict()) for t, p in sync_results
-        )
+        async_data = sorted((t.as_dict()["id"], p.as_dict()) for t, p in async_results)
+        sync_data = sorted((t.as_dict()["id"], p.as_dict()) for t, p in sync_results)
         assert async_data == sync_data
 
     @pytest.mark.asyncio
@@ -1192,7 +1220,12 @@ class TestJoinNativeAsync:
     async def test_four_way_join(self):
         """Four-input Staggered join produces correct results."""
         tables = [
-            pa.table({"id": pa.array([1, 2], type=pa.int64()), f"v{i}": pa.array([i * 10, i * 20], type=pa.int64())})
+            pa.table(
+                {
+                    "id": pa.array([1, 2], type=pa.int64()),
+                    f"v{i}": pa.array([i * 10, i * 20], type=pa.int64()),
+                }
+            )
             for i in range(4)
         ]
         streams = [ArrowTableStream(t, tag_columns=["id"]) for t in tables]
@@ -1202,9 +1235,7 @@ class TestJoinNativeAsync:
         out = Channel(buffer_size=64)
         for s, ch in zip(streams, channels):
             await feed(s, ch)
-        await op.async_execute(
-            [ch.reader for ch in channels], out.writer
-        )
+        await op.async_execute([ch.reader for ch in channels], out.writer)
         results = await out.reader.collect()
 
         assert len(results) == 2
@@ -1248,8 +1279,15 @@ class TestJoinNativeAsync:
     @pytest.mark.asyncio
     async def test_three_way_empty_side_produces_nothing(self):
         """If any input channel is empty, join produces no output."""
-        t1 = pa.table({"id": pa.array([1], type=pa.int64()), "a": pa.array([10], type=pa.int64())})
-        t2 = pa.table({"id": pa.array([1], type=pa.int64()), "b": pa.array([100], type=pa.int64())})
+        t1 = pa.table(
+            {"id": pa.array([1], type=pa.int64()), "a": pa.array([10], type=pa.int64())}
+        )
+        t2 = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "b": pa.array([100], type=pa.int64()),
+            }
+        )
         s1 = ArrowTableStream(t1, tag_columns=["id"])
         s2 = ArrowTableStream(t2, tag_columns=["id"])
 
@@ -1268,9 +1306,21 @@ class TestJoinNativeAsync:
     @pytest.mark.asyncio
     async def test_three_way_no_shared_tags_cartesian(self):
         """Three-way join with disjoint tag keys produces cartesian product."""
-        t1 = pa.table({"a": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())})
-        t2 = pa.table({"b": pa.array([3], type=pa.int64()), "y": pa.array([30], type=pa.int64())})
-        t3 = pa.table({"c": pa.array([5, 6], type=pa.int64()), "z": pa.array([50, 60], type=pa.int64())})
+        t1 = pa.table(
+            {
+                "a": pa.array([1, 2], type=pa.int64()),
+                "x": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        t2 = pa.table(
+            {"b": pa.array([3], type=pa.int64()), "y": pa.array([30], type=pa.int64())}
+        )
+        t3 = pa.table(
+            {
+                "c": pa.array([5, 6], type=pa.int64()),
+                "z": pa.array([50, 60], type=pa.int64()),
+            }
+        )
         s1 = ArrowTableStream(t1, tag_columns=["a"])
         s2 = ArrowTableStream(t2, tag_columns=["b"])
         s3 = ArrowTableStream(t3, tag_columns=["c"])
@@ -1443,19 +1493,19 @@ class TestJoinNativeAsync:
         assert len(sync_results) == 2
         assert len(async_results) == len(sync_results)
 
-        async_data = sorted(
-            (t.as_dict()["a"], p.as_dict()) for t, p in async_results
-        )
-        sync_data = sorted(
-            (t.as_dict()["a"], p.as_dict()) for t, p in sync_results
-        )
+        async_data = sorted((t.as_dict()["a"], p.as_dict()) for t, p in async_results)
+        sync_data = sorted((t.as_dict()["a"], p.as_dict()) for t, p in sync_results)
         assert async_data == sync_data
 
     @pytest.mark.asyncio
     async def test_input_pipeline_hashes_length_mismatch(self):
         """async_execute raises ValueError if input_pipeline_hashes length != inputs."""
-        t1 = pa.table({"id": pa.array([1], type=pa.int64()), "a": pa.array([10], type=pa.int64())})
-        t2 = pa.table({"id": pa.array([1], type=pa.int64()), "b": pa.array([20], type=pa.int64())})
+        t1 = pa.table(
+            {"id": pa.array([1], type=pa.int64()), "a": pa.array([10], type=pa.int64())}
+        )
+        t2 = pa.table(
+            {"id": pa.array([1], type=pa.int64()), "b": pa.array([20], type=pa.int64())}
+        )
         s1 = ArrowTableStream(t1, tag_columns=["id"])
         s2 = ArrowTableStream(t2, tag_columns=["id"])
 

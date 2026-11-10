@@ -1,6 +1,9 @@
 import ast
 import inspect
 from collections.abc import Callable
+from typing import cast
+
+from orcapod.utils.canonical_type_names import stabilize_type_names
 
 
 def _is_in_string(line: str, pos: int) -> bool:
@@ -126,7 +129,7 @@ def extract_decorators(func: Callable) -> list[str]:
 
 
 def get_function_components(
-    func: Callable,
+    func: Callable[..., object],
     name_override: str | None = None,
     include_name: bool = True,
     include_module: bool = True,
@@ -245,7 +248,10 @@ def get_function_components(
         and func.__annotations__
     ):
         sorted_annotations = sorted(func.__annotations__.items())
-        annotations_str = ";".join(f"{k}:{v}" for k, v in sorted_annotations)
+        annotations_str = ";".join(
+            f"{k}:{stabilize_type_names(str(v), v)}"
+            for k, v in cast("list[tuple[str, object]]", sorted_annotations)
+        )
         components.append(f"annotations:{annotations_str}")
 
     # Add default parameter values

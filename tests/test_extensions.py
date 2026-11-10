@@ -39,7 +39,9 @@ def test_register_extension_resolves_default_context_when_none():
     ext = MagicMock(spec=OrcapodExtension)
     mock_context = MagicMock()
 
-    with patch("orcapod.contexts.get_default_context", return_value=mock_context) as mock_get:
+    with patch(
+        "orcapod.contexts.get_default_context", return_value=mock_context
+    ) as mock_get:
         register_extension(ext, context=None)
 
     mock_get.assert_called_once()

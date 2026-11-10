@@ -5,7 +5,6 @@ Tests that hashing invariants hold for any valid input.
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 

@@ -63,7 +63,6 @@ from __future__ import annotations
 import random
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes.function_node import FunctionJobNode
@@ -90,10 +89,7 @@ def _make_source_stream(values: list[int]) -> ArrowTableSource:
 
 def _all_base_entry_ids(node: FunctionJobNode, stream) -> set[bytes]:
     """Return the set of base_entry_ids for all (tag, data) pairs in stream."""
-    return {
-        node.compute_base_entry_id(tag, data)
-        for tag, data in stream.iter_data()
-    }
+    return {node.compute_base_entry_id(tag, data) for tag, data in stream.iter_data()}
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +152,9 @@ class TestBaseEntryIdUniqueness:
         )
 
         ids = [node.compute_base_entry_id(tag, data) for tag, data in src.iter_data()]
-        assert len(ids) == len(set(ids)), "Every row in a source must have a unique base_entry_id."
+        assert len(ids) == len(set(ids)), (
+            "Every row in a source must have a unique base_entry_id."
+        )
 
     def test_no_collision_across_six_distinct_inputs(self, double_pf):
         """base_entry_ids for all six rows across two sources are pairwise distinct."""
@@ -175,9 +173,8 @@ class TestBaseEntryIdUniqueness:
             pipeline_database=db,
         )
 
-        all_ids = (
-            list(_all_base_entry_ids(node1, src1))
-            + list(_all_base_entry_ids(node2, src2))
+        all_ids = list(_all_base_entry_ids(node1, src1)) + list(
+            _all_base_entry_ids(node2, src2)
         )
         assert len(all_ids) == len(set(all_ids)), (
             "All six base_entry_ids must be distinct — no collisions without "
@@ -250,9 +247,10 @@ class TestPreimageShape:
             "NODE_CONTENT_HASH_COL must NOT be in the invocation context preimage."
         )
         # INPUT_DATA_HASH_COL must be large_binary (to_prefixed_digest), not large_string.
-        assert base_preimage.schema.field(constants.INPUT_DATA_HASH_COL).type == pa.large_binary(), (
-            "INPUT_DATA_HASH_COL in the preimage must be large_binary."
-        )
+        assert (
+            base_preimage.schema.field(constants.INPUT_DATA_HASH_COL).type
+            == pa.large_binary()
+        ), "INPUT_DATA_HASH_COL in the preimage must be large_binary."
 
     def test_node_content_hash_lockstep_with_base_entry_id(self, double_pf):
         """node_content_hash is always in lockstep with base_entry_id.
@@ -286,7 +284,9 @@ class TestPreimageShape:
         # Both nodes have the same content_hash (same source object → same upstream)
         nch1 = node1.content_hash()
         nch2 = node2.content_hash()
-        assert nch1 == nch2, "Nodes built from the same source must have the same content_hash."
+        assert nch1 == nch2, (
+            "Nodes built from the same source must have the same content_hash."
+        )
 
         for tag, data in src.iter_data():
             eid1 = node1.compute_base_entry_id(tag, data)
@@ -591,7 +591,9 @@ class TestTdbVersioning:
         # Write a fake "completed" entry at the OLD bare path (tdb_v0 location).
         old_path = node.node_uri + (f"schema:{node.pipeline_hash().to_string()}",)
         fake_record_id = b"\xde\xad" * 8
-        fake_row = pa.table({"record_id_hash": pa.array(["old_hash"], type=pa.large_string())})
+        fake_row = pa.table(
+            {"record_id_hash": pa.array(["old_hash"], type=pa.large_string())}
+        )
         db.add_record(old_path, fake_record_id, fake_row)
 
         # Attach — the new code uses the tdb_v1 path, not old_path.
@@ -602,4 +604,3 @@ class TestTdbVersioning:
             "New _table_path must differ from tdb_v0 bare path; old entries are orphaned."
         )
         # No error raised — orphaned entries are silently ignored.
-

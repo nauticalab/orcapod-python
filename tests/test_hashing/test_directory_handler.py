@@ -14,7 +14,9 @@ from orcapod.hashing.semantic_hashing.builtin_handlers import (
     register_builtin_python_type_handlers,
 )
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import (
+    PythonTypeHandlerRegistry,
+)
 from orcapod.types import ContentHash
 
 
@@ -178,7 +180,9 @@ class TestBasicDirectoryHasher:
         (d2 / "sub").mkdir()
         (d1 / "sub" / "app.py").write_bytes(b"code")
         (d2 / "sub" / "app.py").write_bytes(b"code")
-        (d2 / "sub" / "app.pyc").write_bytes(b"compiled")  # nested .pyc, should be excluded
+        (d2 / "sub" / "app.pyc").write_bytes(
+            b"compiled"
+        )  # nested .pyc, should be excluded
         hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         assert hasher.hash_directory(d1) == hasher.hash_directory(d2, ignore=["*.pyc"])
 
@@ -202,9 +206,13 @@ class TestBasicDirectoryHasher:
 
         hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         # "sub/*.pyc" should exclude sub/app.pyc → same hash as ref
-        assert hasher.hash_directory(base, ignore=["sub/*.pyc"]) == hasher.hash_directory(ref)
+        assert hasher.hash_directory(
+            base, ignore=["sub/*.pyc"]
+        ) == hasher.hash_directory(ref)
         # "other/*.pyc" should not match sub/app.pyc → different hash from ref
-        assert hasher.hash_directory(base, ignore=["other/*.pyc"]) != hasher.hash_directory(ref)
+        assert hasher.hash_directory(
+            base, ignore=["other/*.pyc"]
+        ) != hasher.hash_directory(ref)
 
     def test_ignore_none_is_equivalent_to_no_ignore(self, tmp_path):
         """hash(dir) == hash(dir, ignore=None) — the new arg in absent form must not shift the hash."""
@@ -224,7 +232,9 @@ class TestBasicDirectoryHasher:
         (d / "sub").mkdir()
         (d / "sub" / "nested.txt").write_bytes(b"nested")
         hasher = BasicDirectoryHasher(file_hasher=FileHasher())
-        assert hasher.hash_directory(d) == hasher.hash_directory(d, ignore=["*.nonexistent_xyz"])
+        assert hasher.hash_directory(d) == hasher.hash_directory(
+            d, ignore=["*.nonexistent_xyz"]
+        )
 
     def test_filter_identity_irrelevance(self, tmp_path):
         """Two patterns selecting the same effective file set must produce the same hash."""
@@ -238,7 +248,9 @@ class TestBasicDirectoryHasher:
         h2 = hasher.hash_directory(d, ignore=["app.pyc"])
         assert h1 == h2
 
-    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="mkfifo not available on this platform")
+    @pytest.mark.skipif(
+        not hasattr(os, "mkfifo"), reason="mkfifo not available on this platform"
+    )
     def test_special_files_skipped(self, tmp_path):
         """Named pipes (FIFOs) and other special files are silently skipped."""
         d1 = tmp_path / "d1"

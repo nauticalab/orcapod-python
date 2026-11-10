@@ -9,7 +9,11 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase, NoOpArrowDatabase
+from orcapod.databases import (
+    DeltaTableDatabase,
+    InMemoryArrowDatabase,
+    NoOpArrowDatabase,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -24,9 +28,7 @@ def _make_record(value: int = 1) -> pa.Table:
 
 def _make_records(n: int = 3) -> pa.Table:
     """Create a multi-row Arrow table for testing."""
-    return pa.table(
-        {"col_a": list(range(n)), "col_b": [f"val_{i}" for i in range(n)]}
-    )
+    return pa.table({"col_a": list(range(n)), "col_b": [f"val_{i}" for i in range(n)]})
 
 
 # ===========================================================================
@@ -122,7 +124,9 @@ class TestInMemoryArrowDatabaseSkipDuplicates:
 
         db.add_record(path, b"same_id", _make_record(1), flush=True)
         # Adding same ID again with skip_duplicates=True should not raise.
-        db.add_record(path, b"same_id", _make_record(2), skip_duplicates=True, flush=True)
+        db.add_record(
+            path, b"same_id", _make_record(2), skip_duplicates=True, flush=True
+        )
 
         result = db.get_record_by_id(path, b"same_id")
         assert result is not None
@@ -140,7 +144,9 @@ class TestInMemoryArrowDatabasePendingBatch:
         db.add_record(path, b"p1", _make_record(1))
         # Records should be accessible via public API even before flush
         result = db.get_record_by_id(path, b"p1")
-        assert result is not None, "Record should be accessible via get_record_by_id before flush"
+        assert result is not None, (
+            "Record should be accessible via get_record_by_id before flush"
+        )
 
     def test_flush_makes_records_visible(self) -> None:
         db = InMemoryArrowDatabase()

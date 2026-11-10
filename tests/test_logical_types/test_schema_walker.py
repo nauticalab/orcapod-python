@@ -6,10 +6,8 @@ import re
 import uuid
 
 import pyarrow as pa
-import pytest
 
 from orcapod.logical_types.schema_walker import (
-    ExtensionTypeInfo,
     walk_field,
     walk_schema,
 )
@@ -81,10 +79,12 @@ def test_empty_schema():
 
 
 def test_no_extension_types():
-    schema = pa.schema([
-        pa.field("x", pa.int64()),
-        pa.field("y", pa.large_utf8()),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("x", pa.int64()),
+            pa.field("y", pa.large_utf8()),
+        ]
+    )
     assert walk_schema(schema) == []
 
 
@@ -154,10 +154,12 @@ def test_deduplication():
     """Same (extension_name, extension_metadata) in two columns → one result."""
     name = _unique_name()
     meta = b"test.cat"
-    schema = pa.schema([
-        _make_reg_field("col_a", name, metadata=meta),
-        _make_reg_field("col_b", name, metadata=meta),
-    ])
+    schema = pa.schema(
+        [
+            _make_reg_field("col_a", name, metadata=meta),
+            _make_reg_field("col_b", name, metadata=meta),
+        ]
+    )
     result = walk_schema(schema)
     assert len(result) == 1
     assert result[0].extension_name == name
@@ -196,10 +198,12 @@ def test_struct_containing_registered():
     name = _unique_name()
     struct_field = pa.field(
         "col",
-        pa.struct([
-            _make_reg_field("a", name, metadata=b"my.cat"),
-            pa.field("b", pa.int64()),
-        ]),
+        pa.struct(
+            [
+                _make_reg_field("a", name, metadata=b"my.cat"),
+                pa.field("b", pa.int64()),
+            ]
+        ),
     )
     result = walk_schema(pa.schema([struct_field]))
     assert len(result) == 1
@@ -212,10 +216,12 @@ def test_struct_containing_unregistered():
     name = _unique_name()
     struct_field = pa.field(
         "col",
-        pa.struct([
-            _make_unreg_field("a", name, metadata=b"my.cat"),
-            pa.field("b", pa.int64()),
-        ]),
+        pa.struct(
+            [
+                _make_unreg_field("a", name, metadata=b"my.cat"),
+                pa.field("b", pa.int64()),
+            ]
+        ),
     )
     result = walk_schema(pa.schema([struct_field]))
     assert len(result) == 1
@@ -226,10 +232,12 @@ def test_struct_containing_unregistered():
 def test_nested_list_struct():
     """Registered extension type nested inside list<struct<...>>."""
     name = _unique_name()
-    struct_type = pa.struct([
-        _make_reg_field("x", name, metadata=b"deep.cat"),
-        pa.field("y", pa.int32()),
-    ])
+    struct_type = pa.struct(
+        [
+            _make_reg_field("x", name, metadata=b"deep.cat"),
+            pa.field("y", pa.int32()),
+        ]
+    )
     value_field = pa.field("item", struct_type)
     col = pa.field("col", pa.list_(value_field))
     result = walk_schema(pa.schema([col]))

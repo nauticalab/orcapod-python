@@ -1,4 +1,5 @@
 """Base class for all orcapod logical types."""
+
 from __future__ import annotations
 
 from orcapod.types import DataType

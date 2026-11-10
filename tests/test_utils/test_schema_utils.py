@@ -30,8 +30,9 @@ class TestComputeSchemaHash:
 
         tag = Schema({"id": int})
         data = Schema({"value": float})
-        assert compute_schema_hash(tag, data, semantic_hasher, None) == \
-               compute_schema_hash(tag, data, semantic_hasher, None)
+        assert compute_schema_hash(
+            tag, data, semantic_hasher, None
+        ) == compute_schema_hash(tag, data, semantic_hasher, None)
 
     def test_full_length_when_char_count_is_none(self, semantic_hasher):
         """When char_count is None (the default), the full SHA-256 hex digest is returned."""
@@ -55,6 +56,10 @@ class TestComputeSchemaHash:
     def test_different_schemas_produce_different_hashes(self, semantic_hasher):
         from orcapod.utils.schema_utils import compute_schema_hash
 
-        h1 = compute_schema_hash(Schema({"id": int}), Schema({"v": float}), semantic_hasher, None)
-        h2 = compute_schema_hash(Schema({"id": int}), Schema({"v": int}), semantic_hasher, None)
+        h1 = compute_schema_hash(
+            Schema({"id": int}), Schema({"v": float}), semantic_hasher, None
+        )
+        h2 = compute_schema_hash(
+            Schema({"id": int}), Schema({"v": int}), semantic_hasher, None
+        )
         assert h1 != h2

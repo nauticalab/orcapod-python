@@ -30,11 +30,13 @@ def make_hash(method: str = "sha256", digest: bytes = b"\xab" * 32) -> ContentHa
 class TestInMemoryHashCacher:
     def test_miss_returns_none(self):
         from orcapod.hashing.hash_cachers import InMemoryHashCacher
+
         cacher = InMemoryHashCacher()
         assert cacher.get(make_key("/a/b.txt")) is None
 
     def test_put_then_get_returns_hit(self):
         from orcapod.hashing.hash_cachers import InMemoryHashCacher
+
         cacher = InMemoryHashCacher()
         key = make_key("/a/b.txt")
         value = make_hash()
@@ -43,6 +45,7 @@ class TestInMemoryHashCacher:
 
     def test_different_mtime_is_different_key(self):
         from orcapod.hashing.hash_cachers import InMemoryHashCacher
+
         cacher = InMemoryHashCacher()
         key1 = make_key("/a/b.txt", mtime_ns=1000)
         key2 = make_key("/a/b.txt", mtime_ns=2000)
@@ -51,6 +54,7 @@ class TestInMemoryHashCacher:
 
     def test_different_size_is_different_key(self):
         from orcapod.hashing.hash_cachers import InMemoryHashCacher
+
         cacher = InMemoryHashCacher()
         key1 = make_key("/a/b.txt", size=100)
         key2 = make_key("/a/b.txt", size=200)
@@ -59,6 +63,7 @@ class TestInMemoryHashCacher:
 
     def test_clear_removes_all_entries(self):
         from orcapod.hashing.hash_cachers import InMemoryHashCacher
+
         cacher = InMemoryHashCacher()
         key = make_key("/a/b.txt")
         cacher.put(key, make_hash())
@@ -74,11 +79,13 @@ class TestInMemoryHashCacher:
 class TestSqliteHashCacher:
     def test_miss_returns_none(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         cacher = SqliteHashCacher(tmp_path / "cache.db")
         assert cacher.get(make_key("/a/b.txt")) is None
 
     def test_put_then_get_returns_hit(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         cacher = SqliteHashCacher(tmp_path / "cache.db")
         key = make_key("/a/b.txt")
         value = make_hash()
@@ -90,6 +97,7 @@ class TestSqliteHashCacher:
 
     def test_different_mtime_is_different_key(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         cacher = SqliteHashCacher(tmp_path / "cache.db")
         key1 = make_key("/a/b.txt", mtime_ns=1000)
         key2 = make_key("/a/b.txt", mtime_ns=2000)
@@ -98,6 +106,7 @@ class TestSqliteHashCacher:
 
     def test_different_size_is_different_key(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         cacher = SqliteHashCacher(tmp_path / "cache.db")
         key1 = make_key("/a/b.txt", size=100)
         key2 = make_key("/a/b.txt", size=200)
@@ -106,6 +115,7 @@ class TestSqliteHashCacher:
 
     def test_persistence_across_instances(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         db = tmp_path / "cache.db"
         key = make_key("/a/b.txt")
         value = make_hash()
@@ -122,6 +132,7 @@ class TestSqliteHashCacher:
 
     def test_wal_mode_enabled(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         db = tmp_path / "cache.db"
         SqliteHashCacher(db)
         with sqlite3.connect(db) as conn:
@@ -131,6 +142,7 @@ class TestSqliteHashCacher:
 
     def test_clear_empties_table(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         cacher = SqliteHashCacher(tmp_path / "cache.db")
         key = make_key("/a/b.txt")
         cacher.put(key, make_hash())
@@ -139,6 +151,7 @@ class TestSqliteHashCacher:
 
     def test_env_var_path_override(self, tmp_path, monkeypatch):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         db = tmp_path / "env_cache.db"
         monkeypatch.setenv("ORCAPOD_HASH_CACHE_DB", str(db))
         cacher = SqliteHashCacher()
@@ -146,6 +159,7 @@ class TestSqliteHashCacher:
 
     def test_context_manager_closes_connection(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         db = tmp_path / "cache.db"
         with SqliteHashCacher(db) as cacher:
             cacher.put(make_key("/a/b.txt"), make_hash())
@@ -156,6 +170,7 @@ class TestSqliteHashCacher:
 
     def test_idempotent_put(self, tmp_path):
         from orcapod.hashing.hash_cachers import SqliteHashCacher
+
         cacher = SqliteHashCacher(tmp_path / "cache.db")
         key = make_key("/a/b.txt")
         v1 = make_hash(digest=b"\xaa" * 32)
@@ -266,7 +281,9 @@ class TestEnableFileHashCaching:
         registry = context.semantic_hasher.type_handler_registry
 
         file_hasher = registry.get_handler_for_type(File).file_hasher
-        dir_file_hasher = registry.get_handler_for_type(Directory).directory_hasher.file_hasher
+        dir_file_hasher = registry.get_handler_for_type(
+            Directory
+        ).directory_hasher.file_hasher
 
         assert file_hasher is dir_file_hasher
 
@@ -566,7 +583,10 @@ class TestMigrateHashCache:
 
         before = int(time.time()) - 1
         cacher = SqliteHashCacher(db)
-        cacher.put(make_key("/new.txt", mtime_ns=5000, size=300), make_hash(digest=b"\x99" * 32))
+        cacher.put(
+            make_key("/new.txt", mtime_ns=5000, size=300),
+            make_hash(digest=b"\x99" * 32),
+        )
         cacher.close()
 
         with sqlite3.connect(db) as conn:

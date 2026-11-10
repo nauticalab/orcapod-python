@@ -3,6 +3,7 @@
 Regression for ITL-563: failed functions produced empty tables with wrong
 nullable flags, causing Join to raise InputValidationError and abort the pipeline.
 """
+
 from __future__ import annotations
 
 import pyarrow as pa
@@ -16,12 +17,16 @@ from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
 
-def _make_source_with_required_field(subjects: list[str], values: list[int]) -> ArrowTableSource:
+def _make_source_with_required_field(
+    subjects: list[str], values: list[int]
+) -> ArrowTableSource:
     """Source with tag=subject (str, non-nullable) and data=value (int, non-nullable)."""
-    schema = pa.schema([
-        pa.field("subject", pa.large_string(), nullable=False),
-        pa.field("value", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("subject", pa.large_string(), nullable=False),
+            pa.field("value", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {"subject": subjects, "value": values},
         schema=schema,
@@ -79,4 +84,4 @@ def test_empty_buffer_schema_preserves_nullability():
     tag_schema, data_schema = stream.output_schema()
 
     # "result" is declared as int (required), must NOT become int | None
-    assert data_schema["result"] == int
+    assert data_schema["result"] is int

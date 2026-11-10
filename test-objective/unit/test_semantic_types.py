@@ -6,7 +6,7 @@ documented behavior in protocols and design specification.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 import pyarrow as pa
 import pytest

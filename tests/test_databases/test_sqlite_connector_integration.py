@@ -1,4 +1,5 @@
 """Integration tests for SQLiteConnector with ConnectorArrowDatabase."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -44,7 +45,13 @@ class TestConnectorArrowDatabaseWithSQLite:
         db.add_record(("fn", "test"), record_id="r1", record=record_v1, flush=True)
 
         # skip_duplicates=True: must not raise, original value must be preserved
-        db.add_record(("fn", "test"), record_id="r1", record=record_v2, skip_duplicates=True, flush=True)
+        db.add_record(
+            ("fn", "test"),
+            record_id="r1",
+            record=record_v2,
+            skip_duplicates=True,
+            flush=True,
+        )
         result = db.get_record_by_id(("fn", "test"), "r1")
         assert result is not None
         assert result.column("x")[0].as_py() == 1  # original preserved, not overwritten
@@ -62,7 +69,9 @@ class TestConnectorArrowDatabaseWithSQLite:
         r1 = pa.table({"x": pa.array([1], type=pa.int64())})
         r2 = pa.table({"x": pa.array([2], type=pa.int64())})
         db.add_record(("fn", "test"), record_id="r1", record=r1, flush=True)
-        db.add_record(("fn", "test"), record_id="r2", record=r2, flush=True)  # second flush
+        db.add_record(
+            ("fn", "test"), record_id="r2", record=r2, flush=True
+        )  # second flush
         all_records = db.get_all_records(("fn", "test"))
         assert all_records is not None
         assert all_records.num_rows == 2
@@ -73,9 +82,11 @@ class TestConnectorArrowDatabaseWithSQLite:
         add_record deduplicates all rows to the last one, so the 3-row table
         collapses to a single row with flag=True (the last value).
         """
-        record = pa.table({
-            "flag": pa.array([False, False, True], type=pa.bool_()),
-        })
+        record = pa.table(
+            {
+                "flag": pa.array([False, False, True], type=pa.bool_()),
+            }
+        )
         db.add_record(("fn", "test"), record_id="r1", record=record, flush=True)
         result = db.get_record_by_id(("fn", "test"), "r1")
         assert result is not None
@@ -84,7 +95,9 @@ class TestConnectorArrowDatabaseWithSQLite:
         assert result.num_rows == 1
         assert flag_col[0].as_py() is True  # last row kept
 
-    def test_second_flush_schema_mismatch_raises(self, db: ConnectorArrowDatabase) -> None:
+    def test_second_flush_schema_mismatch_raises(
+        self, db: ConnectorArrowDatabase
+    ) -> None:
         """ConnectorArrowDatabase.flush() raises ValueError on schema mismatch."""
         r1 = pa.table({"x": pa.array([1], type=pa.int64())})
         db.add_record(("fn", "test"), record_id="r1", record=r1, flush=True)

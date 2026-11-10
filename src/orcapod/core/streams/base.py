@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 

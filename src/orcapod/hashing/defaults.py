@@ -10,7 +10,9 @@
 # from its JSON spec.  Constructing them here would bypass versioning and
 # produce hashers that are decoupled from the active data context.
 
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import (
+    PythonTypeHandlerRegistry,
+)
 from orcapod.protocols import hashing_protocols as hp
 
 
@@ -27,6 +29,7 @@ def get_default_python_type_handler_registry() -> PythonTypeHandlerRegistry:
             default data context.
     """
     from orcapod.contexts import get_default_context
+
     return get_default_context().semantic_hasher.type_handler_registry
 
 
@@ -60,4 +63,5 @@ def get_default_arrow_hasher() -> hp.ArrowHasherProtocol:
         ArrowHasherProtocol: The arrow hasher from the default data context.
     """
     from orcapod.contexts import get_default_context
+
     return get_default_context().arrow_hasher

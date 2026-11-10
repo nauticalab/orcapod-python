@@ -73,9 +73,7 @@ class Join(NonZeroInputOperator):
             intersection_data_schema = schema_utils.intersection_schemas(
                 data_schema, other_data_schema
             )
-            data_schema = schema_utils.union_schemas(
-                data_schema, other_data_schema
-            )
+            data_schema = schema_utils.union_schemas(data_schema, other_data_schema)
             if intersection_data_schema:
                 raise InputValidationError(
                     f"Datas should not have overlapping keys, but {data_schema.keys()} found in {stream} and {other_stream}."
@@ -134,7 +132,9 @@ class Join(NonZeroInputOperator):
         )
         # trick to get cartesian product; use int8 explicitly so that zero-row
         # tables don't produce a null-typed column that Polars rejects on join
-        table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table), type=pa.int8()))
+        table = table.add_column(
+            0, COMMON_JOIN_KEY, pa.array([0] * len(table), type=pa.int8())
+        )
         table = arrow_utils.append_to_system_tags(
             table,
             f"{stream.pipeline_hash().to_hex(n_char)}:0",
@@ -176,10 +176,17 @@ class Join(NonZeroInputOperator):
             # Build a reference schema for next_table with rename_map applied to
             # field names, preserving nullable flags — must be done BEFORE the
             # rename so we capture the original schema.
-            next_ref_schema = pa.schema([
-                pa.field(rename_map.get(f.name, f.name), f.type, nullable=f.nullable, metadata=f.metadata)
-                for f in next_table.schema
-            ])
+            next_ref_schema = pa.schema(
+                [
+                    pa.field(
+                        rename_map.get(f.name, f.name),
+                        f.type,
+                        nullable=f.nullable,
+                        metadata=f.metadata,
+                    )
+                    for f in next_table.schema
+                ]
+            )
 
             if rename_map:
                 # Use Arrow-native rename to avoid an unnecessary Polars round-trip.
@@ -198,7 +205,9 @@ class Join(NonZeroInputOperator):
                 .join(pl.DataFrame(next_table), on=list(common_tag_keys), how="inner")
                 .to_arrow()
             )
-            table = arrow_utils.restore_schema_nullability(table, table_ref_schema, next_ref_schema)
+            table = arrow_utils.restore_schema_nullability(
+                table, table_ref_schema, next_ref_schema
+            )
 
             tag_keys.update(next_tag_keys)
 
@@ -384,9 +393,7 @@ class Join(NonZeroInputOperator):
                 ReadableChannel[tuple[TagProtocol, DataProtocol]]
             ] = []
             for orig_idx in canon_order:
-                ch: Channel[tuple[TagProtocol, DataProtocol]] = Channel(
-                    buffer_size=64
-                )
+                ch: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=64)
                 tg.create_task(
                     self._rename_sys_tags(
                         inputs[orig_idx],
@@ -405,9 +412,9 @@ class Join(NonZeroInputOperator):
                 if is_last:
                     target_writer = output
                 else:
-                    intermediate: Channel[
-                        tuple[TagProtocol, DataProtocol]
-                    ] = Channel(buffer_size=64)
+                    intermediate: Channel[tuple[TagProtocol, DataProtocol]] = Channel(
+                        buffer_size=64
+                    )
                     target_writer = intermediate.writer
 
                 tg.create_task(
@@ -508,11 +515,7 @@ class Join(NonZeroInputOperator):
 
                     # Index the new row
                     td = tag.as_dict()
-                    key = (
-                        tuple(td[sk] for sk in shared_keys)
-                        if shared_keys
-                        else (0,)
-                    )
+                    key = tuple(td[sk] for sk in shared_keys) if shared_keys else (0,)
                     row_idx = len(buffers[side])
                     buffers[side].append((tag, pkt))
                     indexes[side].setdefault(key, []).append(row_idx)
@@ -550,9 +553,7 @@ class Join(NonZeroInputOperator):
                     renamed: dict = {}
                     for k, v in sys_tags.items():
                         new_key = (
-                            f"{k}{block_sep}{suffix}"
-                            if k.startswith(sys_prefix)
-                            else k
+                            f"{k}{block_sep}{suffix}" if k.startswith(sys_prefix) else k
                         )
                         renamed[new_key] = v
                     tag = Tag(tag.as_dict(), system_tags=renamed)
@@ -591,9 +592,7 @@ class Join(NonZeroInputOperator):
         for i, tag in enumerate((left_tag, right_tag)):
             for k, v in tag.system_tags().items():
                 new_key = (
-                    f"{k}{block_sep}{suffixes[i]}"
-                    if k.startswith(sys_prefix)
-                    else k
+                    f"{k}{block_sep}{suffixes[i]}" if k.startswith(sys_prefix) else k
                 )
                 merged_sys[new_key] = v
 
@@ -680,9 +679,7 @@ class Join(NonZeroInputOperator):
             field_type, bsep, prov_path = after_prefix.partition(block_sep)
             if not bsep:
                 continue
-            groups.setdefault(prov_path, {}).setdefault(position, {})[
-                field_type
-            ] = key
+            groups.setdefault(prov_path, {}).setdefault(position, {})[field_type] = key
 
         sid_field = constants.SYSTEM_TAG_SOURCE_ID_PREFIX[len(sys_prefix) :]
         rid_field = constants.SYSTEM_TAG_RECORD_ID_PREFIX[len(sys_prefix) :]

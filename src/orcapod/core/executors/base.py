@@ -117,6 +117,4 @@ class PythonFunctionExecutorBase(ABC):
 
     def get_executor_data_schema(self) -> Schema:
         """Return schema for the data returned by ``get_executor_data``."""
-        return Schema({
-            "executor_type": str
-        })
+        return Schema({"executor_type": str})

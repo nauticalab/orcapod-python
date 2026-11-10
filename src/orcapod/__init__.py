@@ -23,6 +23,7 @@ from .side_effects import (
 )
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
+
 # Subpackage re-exports for clean public API
 from . import databases  # noqa: F401
 from . import nodes  # noqa: F401
@@ -103,5 +104,3 @@ __all__ = [
     "PostRunPayload",
     "RunStats",
 ]
-
-

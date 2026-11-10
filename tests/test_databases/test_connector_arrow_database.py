@@ -20,6 +20,7 @@ Test sections:
 13. at() method and base_path attribute
 14. Extension-type write guard
 """
+
 from __future__ import annotations
 
 import re
@@ -470,27 +471,33 @@ class TestAddRecordsRoundTrip:
 
     def test_get_all_records_returns_none_when_table_has_no_rows(self, db):
         """Returns None when the table exists but iter_batches yields nothing."""
-        empty = pa.table({
-            "__record_id": pa.array([], type=pa.large_binary()),
-            "v": pa.array([], type=pa.int64()),
-        })
+        empty = pa.table(
+            {
+                "__record_id": pa.array([], type=pa.large_binary()),
+                "v": pa.array([], type=pa.int64()),
+            }
+        )
         db._connector._tables["results"] = empty
         result = db.get_all_records(("results",))
         assert result is None
 
     def test_add_records_raises_if_record_id_column_not_in_table(self, db):
-        table = pa.table({
-            "id": pa.array([b"x"], type=pa.large_binary()),
-            "v": pa.array([1]),
-        })
+        table = pa.table(
+            {
+                "id": pa.array([b"x"], type=pa.large_binary()),
+                "v": pa.array([1]),
+            }
+        )
         with pytest.raises(ValueError, match="not found in table columns"):
             db.add_records(self.PATH, table, record_id_column="nonexistent")
 
     def test_add_records_raises_if_record_id_type_is_not_binary(self, db):
-        table = pa.table({
-            "id": pa.array(["x"], type=pa.large_string()),
-            "v": pa.array([1]),
-        })
+        table = pa.table(
+            {
+                "id": pa.array(["x"], type=pa.large_string()),
+                "v": pa.array([1]),
+            }
+        )
         with pytest.raises(TypeError, match="large_binary"):
             db.add_records(self.PATH, table, record_id_column="id")
 
@@ -512,7 +519,11 @@ class TestDuplicateHandling:
     def test_skip_duplicates_preserves_original_value(self, db):
         db.add_record(self.PATH, b"dup-id", make_table(value=[1]), flush=True)
         db.add_record(
-            self.PATH, b"dup-id", make_table(value=[99]), skip_duplicates=True, flush=True
+            self.PATH,
+            b"dup-id",
+            make_table(value=[99]),
+            skip_duplicates=True,
+            flush=True,
         )
         result = db.get_record_by_id(self.PATH, b"dup-id", flush=True)
         assert result is not None
@@ -541,7 +552,11 @@ class TestDuplicateHandling:
         """When skip_duplicates=True, pending-conflict IDs are filtered out."""
         PATH = ("dup_test", "v1")
         # Add first record to pending
-        db.add_records(PATH, make_table(__record_id=[b"id1"], value=[1]), record_id_column="__record_id")
+        db.add_records(
+            PATH,
+            make_table(__record_id=[b"id1"], value=[1]),
+            record_id_column="__record_id",
+        )
         # Add again with skip_duplicates=True — id1 conflicts, id2 is new
         db.add_records(
             PATH,
@@ -559,7 +574,11 @@ class TestDuplicateHandling:
     def test_skip_duplicates_true_all_filtered_returns_early(self, db):
         """When all records conflict with pending, skip_duplicates=True returns without adding."""
         PATH = ("dup_test2", "v1")
-        db.add_records(PATH, make_table(__record_id=[b"id1"], value=[1]), record_id_column="__record_id")
+        db.add_records(
+            PATH,
+            make_table(__record_id=[b"id1"], value=[1]),
+            record_id_column="__record_id",
+        )
         # Add same id again — should be a no-op
         db.add_records(
             PATH,
@@ -615,9 +634,7 @@ class TestGetRecordsWithColumnValue:
 
     @pytest.fixture(autouse=True)
     def populate(self, db):
-        records = make_table(
-            __record_id=[b"p", b"q", b"r"], category=["A", "B", "A"]
-        )
+        records = make_table(__record_id=[b"p", b"q", b"r"], category=["A", "B", "A"])
         db.add_records(self.PATH, records, record_id_column="__record_id")
         db.flush()
 
@@ -762,7 +779,9 @@ class TestFlushBehaviour:
     def test_second_flush_on_existing_table_upserts(self, db):
         """Flushing the same path twice should not duplicate rows."""
         db.add_record(self.PATH, b"u1", make_table(v=[1]), flush=True)
-        db.add_record(self.PATH, b"u1", make_table(v=[99]), skip_duplicates=True, flush=True)
+        db.add_record(
+            self.PATH, b"u1", make_table(v=[99]), skip_duplicates=True, flush=True
+        )
         result = db.get_all_records(self.PATH)
         assert result is not None
         # skip_existing=True means original is preserved, row count stays 1
@@ -780,7 +799,9 @@ class TestFlushBehaviour:
         full-table read."""
         db.add_record(("t",), b"a", make_table(v=[1]), flush=True)
         # Second add with skip_duplicates=True should not overwrite v=1
-        db.add_record(("t",), b"a", make_table(v=[99]), skip_duplicates=True, flush=True)
+        db.add_record(
+            ("t",), b"a", make_table(v=[99]), skip_duplicates=True, flush=True
+        )
         result = db.get_record_by_id(("t",), b"a", flush=True)
         assert result is not None
         assert result["v"][0].as_py() == 1  # original preserved via skip_existing=True
@@ -856,13 +877,17 @@ class TestAtMethod:
 
     def test_scoped_write_not_visible_via_parent_at_same_path(self, db):
         scoped = db.at("pipeline", "node1")
-        scoped.add_record(("outputs",), b"id1", pa.table({"v": pa.array([1])}), flush=True)
+        scoped.add_record(
+            ("outputs",), b"id1", pa.table({"v": pa.array([1])}), flush=True
+        )
         assert db.get_record_by_id(("outputs",), b"id1") is None
 
     def test_two_scoped_views_share_storage(self, db):
         view_a = db.at("pipeline", "node1")
         view_b = db.at("pipeline", "node1")
-        view_a.add_record(("outputs",), b"id1", pa.table({"v": pa.array([99])}), flush=True)
+        view_a.add_record(
+            ("outputs",), b"id1", pa.table({"v": pa.array([99])}), flush=True
+        )
         result = view_b.get_record_by_id(("outputs",), b"id1")
         assert result is not None
         assert result.column("v").to_pylist() == [99]
@@ -870,13 +895,17 @@ class TestAtMethod:
     def test_prefix_appears_in_sql_table_name(self, db):
         """Prefix components are included in the SQL table name via _path_to_table_name."""
         scoped = db.at("pipeline", "node1")
-        scoped.add_record(("outputs",), b"id1", pa.table({"v": pa.array([1])}), flush=True)
+        scoped.add_record(
+            ("outputs",), b"id1", pa.table({"v": pa.array([1])}), flush=True
+        )
         # Table name should be pipeline__node1__outputs
         table_names = db._connector.get_table_names()
         assert "pipeline__node1__outputs" in table_names
 
     def test_validate_record_path_checks_combined_depth(self, db):
-        scoped = db.at("a", "b", "c", "d", "e", "f", "g", "h", "i")  # 9 prefix components
+        scoped = db.at(
+            "a", "b", "c", "d", "e", "f", "g", "h", "i"
+        )  # 9 prefix components
         scoped.add_record(("z",), b"id1", pa.table({"v": pa.array([1])}))
         with pytest.raises(ValueError):
             scoped.add_record(("z", "extra"), b"id2", pa.table({"v": pa.array([2])}))
@@ -995,7 +1024,9 @@ class TestMetadataWriteGuard:
             pa.int64(),
             metadata={b"unit": b"meters"},
         )
-        schema = pa.schema([pa.field("__record_id", pa.large_binary()), field_with_meta])
+        schema = pa.schema(
+            [pa.field("__record_id", pa.large_binary()), field_with_meta]
+        )
         table = pa.table(
             {
                 "__record_id": pa.array([b"id1"], type=pa.large_binary()),
@@ -1081,6 +1112,7 @@ class TestMetadataWriteGuard:
 
     def test_permissive_connector_allows_metadata(self):
         """A connector with a permissive validate_records lets metadata through."""
+
         class PermissiveConnector(MockDBConnector):
             def validate_records(self, records: pa.Table) -> None:
                 pass  # no-op — this connector supports metadata
@@ -1096,8 +1128,12 @@ class TestMetadataWriteGuard:
         )
         schema = pa.schema([pa.field("__record_id", pa.large_binary()), ext_field])
         table = pa.table(
-            {"__record_id": pa.array([b"id1"], type=pa.large_binary()),
-             "payload": pa.array(["/tmp/test"], type=pa.large_string())},
+            {
+                "__record_id": pa.array([b"id1"], type=pa.large_binary()),
+                "payload": pa.array(["/tmp/test"], type=pa.large_string()),
+            },
             schema=schema,
         )
-        db.add_records(("results",), table, record_id_column="__record_id")  # must not raise
+        db.add_records(
+            ("results",), table, record_id_column="__record_id"
+        )  # must not raise

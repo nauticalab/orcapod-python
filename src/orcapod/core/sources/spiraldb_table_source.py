@@ -32,6 +32,7 @@ Note:
     ``ValueError`` at construction time.  Either define a key schema on the
     SpiralDB table or supply explicit ``tag_columns``.
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -163,7 +164,9 @@ class SpiralDBTableSource(DBTableSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "SpiralDBTableSource":
+    def from_config(
+        cls, config: dict[str, Any], db_registry=None
+    ) -> "SpiralDBTableSource":
         """Reconstruct a SpiralDBTableSource from a config dict.
 
         Args:

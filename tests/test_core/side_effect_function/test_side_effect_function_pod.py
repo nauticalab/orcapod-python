@@ -10,10 +10,12 @@ from orcapod.side_effects import InvocationContext
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
     """Simple stream: tag=id (int), data=value (int)."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("value", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("value", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {"id": list(range(n)), "value": list(range(n))},
         schema=schema,
@@ -24,6 +26,7 @@ def _make_stream(n: int = 3) -> ArrowTableStream:
 def _make_pipeline_db():
     """Return a fresh in-memory ArrowDatabase."""
     from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+
     return InMemoryArrowDatabase()
 
 
@@ -42,14 +45,14 @@ class TestSideEffectFunctionPodSchema:
         # Pod's exposed input schema excludes 'ctx' (pod-level filter)
         assert "ctx" not in pod.input_data_schema
         assert "value" in pod.input_data_schema
-        assert pod.input_data_schema["value"] == int
+        assert pod.input_data_schema["value"] is int
 
         # Underlying data function retains full schema (ctx included)
         assert "ctx" in pod._data_function.input_data_schema
 
         # Output schema has the declared key
         assert "result" in pod._data_function.output_data_schema
-        assert pod._data_function.output_data_schema["result"] == str
+        assert pod._data_function.output_data_schema["result"] is str
 
     def test_sf02_custom_ctx_arg_name(self):
         """SF-02: ctx_arg_name='context' — stripped and injected by correct name."""
@@ -139,7 +142,9 @@ class TestSideEffectFunctionPodStreamStandalone:
             await asyncio.sleep(0)
             return f"async_{value}"
 
-        pod = FunctionPod.from_fn(my_async_fn, output_keys=["result"], ctx_arg_name="ctx")
+        pod = FunctionPod.from_fn(
+            my_async_fn, output_keys=["result"], ctx_arg_name="ctx"
+        )
         stream = _make_stream(2)
         rows = list(pod.process(stream).iter_data())
 
@@ -234,6 +239,7 @@ class TestSideEffectFunctionPodDecorator:
     def test_sf11_decorator_accessible_from_public_api(self):
         """SF-11: Decorator accessible from orcapod top-level; class removed."""
         import orcapod
+
         assert hasattr(orcapod, "side_effect_function_pod")
         assert hasattr(orcapod, "FunctionPod")
         # SideEffectFunctionPod class is no longer exported (unified into FunctionPod)
@@ -271,7 +277,8 @@ class TestSideEffectFunctionPodPipelineIntegration:
 
         # Find the side_effect_function node in the compiled graph
         sef_nodes = [
-            n for n in job.dag.nodes()
+            n
+            for n in job.dag.nodes()
             if getattr(n, "node_type", None) == "side_effect_function"
         ]
         assert len(sef_nodes) == 1
@@ -340,9 +347,7 @@ class TestSideEffectFunctionJobNodeAsync:
 
             await asyncio.gather(
                 feed(),
-                node.async_execute(
-                    ch_in.reader, ch_out.writer, run_id="test-run-sf13"
-                ),
+                node.async_execute(ch_in.reader, ch_out.writer, run_id="test-run-sf13"),
             )
             return await ch_out.reader.collect()
 
@@ -356,7 +361,7 @@ class TestSideEffectFunctionJobNodeAsync:
             assert f"async_{i}" in output_values
 
 
-class TestSideEffectFunctionPodDecorator:
+class TestSideEffectFunctionPodDecoratorForms:
     """Tests for the side_effect_function_pod decorator."""
 
     def test_direct_decoration_returns_function_pod(self):
@@ -446,7 +451,6 @@ class TestSideEffectCtxCollision:
         from orcapod.side_effects import SideEffectPod
         import pyarrow as pa
         from orcapod.core.streams import ArrowTableStream
-        from orcapod.side_effects import InvocationContext
 
         calls = []
 

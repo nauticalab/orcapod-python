@@ -16,6 +16,7 @@ peek-register-read pattern cannot auto-register extension types on the read
 path.  The ``ExtensionAwareDatabase`` wrapper behaviour over SQLite is already
 tested in ``tests/test_databases/test_extension_aware_database.py``.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -37,6 +38,7 @@ from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 # DataclassLogicalTypeFactory rejects local (in-function) classes because they
 # have no stable fully-qualified class name for reconstruction from Arrow schema.
 
+
 @dataclasses.dataclass
 class _PointA:
     x: int
@@ -46,6 +48,7 @@ class _PointA:
 @dataclasses.dataclass
 class _PointB:
     """Same struct shape as _PointA, different class name."""
+
     x: int
     y: int
 
@@ -64,6 +67,7 @@ class _Outer:
 @dataclasses.dataclass
 class _TaggedPoint:
     """Dataclass with a list[uuid.UUID] field — tests ET2 fix in DataclassLogicalTypeFactory."""
+
     name: str
     ids: list[uuid_module.UUID]
 
@@ -71,6 +75,7 @@ class _TaggedPoint:
 @dataclasses.dataclass
 class _SimplePoint:
     """Dataclass with only scalar fields — used as element of list[_SimplePoint]."""
+
     label: str
     value: int
 
@@ -89,6 +94,7 @@ class _StorageBackend:
             with extension types registered and applied.  Must return only the
             original user data columns (no ``__record_id`` or similar).
     """
+
     name: str
     write: Callable[[pa.Table, Path], None]
     read: Callable[[Path, UniversalTypeConverter], pa.Table]
@@ -104,11 +110,13 @@ def _parquet_read(base_path: Path, converter: UniversalTypeConverter) -> pa.Tabl
 
 def _delta_write(table: pa.Table, base_path: Path) -> None:
     import deltalake
+
     deltalake.write_deltalake(str(base_path / "delta"), table)
 
 
 def _delta_read(base_path: Path, converter: UniversalTypeConverter) -> pa.Table:
     import deltalake
+
     dt = deltalake.DeltaTable(str(base_path / "delta"))
     # as_large_types=True preserves large_string / large_binary rather than
     # normalising them to string / binary (Delta Lake's default behaviour).
@@ -173,7 +181,9 @@ def _write_and_read(
 # ── Built-in type round-trip tests ───────────────────────────────────────────
 
 
-def test_builtin_path_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_builtin_path_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """pathlib.Path round-trips through storage with extension name ``orcapod.path``.
 
     Built-in types (Path, UPath, UUID) are pre-registered in the default context
@@ -202,7 +212,9 @@ def test_builtin_path_round_trip(storage_backend: _StorageBackend, tmp_path: Pat
     assert rows[0]["col"] == p
 
 
-def test_builtin_upath_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_builtin_upath_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """UPath round-trips through storage with extension name ``orcapod.upath``."""
     u = UPath("s3://my-bucket/data/file.parquet")
     result, read_converter = _write_and_read(
@@ -224,7 +236,9 @@ def test_builtin_upath_round_trip(storage_backend: _StorageBackend, tmp_path: Pa
     assert str(rows[0]["col"]) == str(u)
 
 
-def test_builtin_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_builtin_uuid_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """uuid.UUID round-trips through storage with extension name ``orcapod.uuid``."""
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result, read_converter = _write_and_read(
@@ -246,7 +260,9 @@ def test_builtin_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Pat
     assert rows[0]["col"] == u
 
 
-def test_builtin_ndarray_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_builtin_ndarray_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """numpy.ndarray round-trips through storage with extension name ``numpy.ndarray``.
 
     Tests both a simple 1-D float64 array and a structured (record) array with
@@ -257,7 +273,9 @@ def test_builtin_ndarray_round_trip(storage_backend: _StorageBackend, tmp_path: 
     import numpy as np
 
     arr_simple = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-    arr_struct = np.array([(1.0, 10), (2.0, 20)], dtype=np.dtype([("x", np.float64), ("y", np.int32)]))
+    arr_struct = np.array(
+        [(1.0, 10), (2.0, 20)], dtype=np.dtype([("x", np.float64), ("y", np.int32)])
+    )
 
     # Simple 1-D float64 array
     simple_path = tmp_path / "simple"
@@ -303,7 +321,9 @@ def test_builtin_ndarray_round_trip(storage_backend: _StorageBackend, tmp_path: 
 # ── Dataclass round-trip tests ────────────────────────────────────────────────
 
 
-def test_simple_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_simple_dataclass_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """Simple dataclass round-trips with correct FQCN as the Arrow extension name.
 
     The read-side converter starts with no knowledge of _PointA.  After read,
@@ -364,7 +384,9 @@ def test_two_dataclasses_same_shape_distinct_extension_names(
     assert not isinstance(reconstructed, _PointB)
 
 
-def test_nested_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_nested_dataclass_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """Nested dataclass: _Outer and _Inner both registered; full object reconstructed.
 
     register_discovered_logical_types triggers DataclassLogicalTypeFactory for _Outer.
@@ -382,12 +404,14 @@ def test_nested_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path:
     fqcn_outer = f"{_Outer.__module__}.{_Outer.__qualname__}"
     fqcn_inner = f"{_Inner.__module__}.{_Inner.__qualname__}"
 
-    assert read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn_outer) is not None, (
-        "_Outer should be registered after read"
-    )
-    assert read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn_inner) is not None, (
-        "_Inner should be registered transitively after read"
-    )
+    assert (
+        read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn_outer)
+        is not None
+    ), "_Outer should be registered after read"
+    assert (
+        read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn_inner)
+        is not None
+    ), "_Inner should be registered transitively after read"
 
     rows = read_converter.arrow_table_to_python_dicts(result)
     assert len(rows) == 1
@@ -444,9 +468,12 @@ def test_delta_polars_read_delta(tmp_path: Path) -> None:
     )
 
 
-def test_builtin_dataframe_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_builtin_dataframe_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """pd.DataFrame round-trips through storage with extension name ``pandas.dataframe``."""
     import pandas as pd
+
     df = pd.DataFrame(
         {"x": [1.0, 2.0, 3.0], "label": ["a", "b", "c"]},
         index=pd.Index([10, 20, 30], name="row_id"),
@@ -471,10 +498,15 @@ def test_builtin_dataframe_round_trip(storage_backend: _StorageBackend, tmp_path
     pd.testing.assert_frame_equal(recovered, df)
 
 
-def test_builtin_series_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_builtin_series_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """pd.Series round-trips through storage with extension name ``pandas.series``."""
     import pandas as pd
-    s = pd.Series([10.0, 20.0, 30.0], name="metric", index=pd.Index([1, 2, 3], name="id"))
+
+    s = pd.Series(
+        [10.0, 20.0, 30.0], name="metric", index=pd.Index([1, 2, 3], name="id")
+    )
     result, read_converter = _write_and_read(
         {"series": pd.Series},
         [{"series": s}],
@@ -498,7 +530,9 @@ def test_builtin_series_round_trip(storage_backend: _StorageBackend, tmp_path: P
 # ── list[T] / set[T] round-trip tests (ITL-173) ──────────────────────────────
 
 
-def test_list_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_list_of_uuid_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """list[uuid.UUID] round-trips with extension name list[orcapod.uuid]."""
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
@@ -522,7 +556,9 @@ def test_list_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Pat
     assert all(isinstance(v, uuid_module.UUID) for v in rows[0]["ids"])
 
 
-def test_set_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_set_of_uuid_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """set[uuid.UUID] round-trips with extension name set[orcapod.uuid]; read back as set."""
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
@@ -544,7 +580,9 @@ def test_set_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path
     assert rows[0]["ids"] == {u1, u2}
 
 
-def test_list_of_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_list_of_dataclass_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """list[_SimplePoint] round-trips — ListLogicalType wrapping DataclassLogicalType."""
     p1 = _SimplePoint(label="alpha", value=1)
     p2 = _SimplePoint(label="beta", value=2)
@@ -568,7 +606,9 @@ def test_list_of_dataclass_round_trip(storage_backend: _StorageBackend, tmp_path
     assert reconstructed[1] == p2
 
 
-def test_list_of_list_of_uuid_round_trip(storage_backend: _StorageBackend, tmp_path: Path) -> None:
+def test_list_of_list_of_uuid_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
     """list[list[uuid.UUID]] round-trips — two-level nesting."""
     u1 = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     u2 = uuid_module.UUID("87654321-4321-8765-4321-876543218765")
@@ -634,7 +674,6 @@ def test_list_of_int_produces_no_extension_type(tmp_path: Path) -> None:
 def test_schema_round_trip_list_of_uuid(tmp_path: Path) -> None:
     """arrow_schema_to_python_schema then python_schema_to_arrow_schema is identity for list[UUID]."""
     import uuid
-    import pyarrow as pa
     from orcapod.contexts import create_registry
 
     converter = create_registry().get_context().type_converter
@@ -653,7 +692,9 @@ def test_schema_round_trip_list_of_uuid(tmp_path: Path) -> None:
 
     arrow_schema2 = converter.python_schema_to_arrow_schema(recovered_python)
     assert arrow_schema2.field("ids").type.extension_name == "list[orcapod.uuid]"
-    assert arrow_schema2.field("groups").type.extension_name == "list[list[orcapod.uuid]]"
+    assert (
+        arrow_schema2.field("groups").type.extension_name == "list[list[orcapod.uuid]]"
+    )
     assert arrow_schema2.field("tag_set").type.extension_name == "set[orcapod.uuid]"
 
 
@@ -679,8 +720,12 @@ def test_fresh_converter_reads_list_of_uuid(
     # Write with converter A
     write_converter = _fresh_converter()
     write_converter.register_python_class(list[uuid_module.UUID])
-    arrow_schema = write_converter.python_schema_to_arrow_schema({"ids": list[uuid_module.UUID]})
-    table = write_converter.python_dicts_to_arrow_table([{"ids": [u1]}], arrow_schema=arrow_schema)
+    arrow_schema = write_converter.python_schema_to_arrow_schema(
+        {"ids": list[uuid_module.UUID]}
+    )
+    table = write_converter.python_dicts_to_arrow_table(
+        [{"ids": [u1]}], arrow_schema=arrow_schema
+    )
     storage_backend.write(table, tmp_path)
 
     # Read with converter B — no prior registration; load_logical_types triggers factory

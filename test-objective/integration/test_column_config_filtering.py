@@ -7,12 +7,10 @@ Datagram, Tag, Data, Stream, and Source components.
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
 from orcapod.core.datagrams.tag_data import Data, Tag
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.streams import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 

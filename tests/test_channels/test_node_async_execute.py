@@ -20,10 +20,6 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Data
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import (
-    FunctionNode,
-    OperatorNode,
-)
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import SelectDataColumns
@@ -32,7 +28,8 @@ from orcapod.core.operators.semijoin import SemiJoin
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.types import CacheMode, NodeConfig, PodConfig
+from orcapod.errors import InputValidationError
+from orcapod.types import CacheMode, PodConfig
 
 
 # ---------------------------------------------------------------------------
@@ -42,10 +39,16 @@ from orcapod.types import CacheMode, NodeConfig, PodConfig
 
 def make_stream(n: int = 5) -> ArrowTableStream:
     schema = pa.schema(
-        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
     )
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "x": pa.array(list(range(n)), type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -472,6 +475,15 @@ class TestOperatorNodeAsyncExecute:
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
 
+    @pytest.mark.xfail(
+        strict=True,
+        raises=InputValidationError,
+        reason=(
+            'SemiJoin rejects a non-nullable vs nullable key: "Type conflict for '
+            "key 'id': <class 'int'> vs int | None\" (ITL-829). This test was "
+            "shadowed by a duplicate class name and never ran until ITL-826."
+        ),
+    )
     @pytest.mark.asyncio
     async def test_binary_op_delegation(self):
         left = make_stream(5)
@@ -565,7 +577,7 @@ class TestOperatorNodeAsyncExecute:
 # ---------------------------------------------------------------------------
 
 
-class TestOperatorNodeAsyncExecute:
+class TestOperatorNodeAsyncExecuteCacheModes:
     @pytest.mark.asyncio
     async def test_off_mode_no_db_write(self):
         stream = make_two_col_stream(3)

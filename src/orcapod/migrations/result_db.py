@@ -1,4 +1,5 @@
 """v0 → v1 migration for the Orcapod result DB (rdb)."""
+
 from __future__ import annotations
 
 import logging
@@ -82,7 +83,9 @@ def migrate_result_v0_to_v1(
     # Collect IDs already at v1 for idempotency check (skipped when track_skipped=False).
     existing_ids: set[bytes] = set()
     if track_skipped:
-        v1_existing = result_db.get_all_records(v1_path, record_id_column=_RECORD_ID_COL)
+        v1_existing = result_db.get_all_records(
+            v1_path, record_id_column=_RECORD_ID_COL
+        )
         if v1_existing is not None and _RECORD_ID_COL in v1_existing.schema.names:
             existing_ids = {
                 bytes(r)
@@ -92,7 +95,9 @@ def migrate_result_v0_to_v1(
 
     if progress:
         logger.info(
-            "migrate_result_v0_to_v1: found %d rows at v0 path %r", rows_total, result_path
+            "migrate_result_v0_to_v1: found %d rows at v0 path %r",
+            rows_total,
+            result_path,
         )
 
     rows_migrated = 0
@@ -167,7 +172,9 @@ def _convert_hash_cols(table: pa.Table) -> pa.Table:
         string_vals = table.column(col_name).to_pylist()
         binary_vals = pa.array(
             [
-                ContentHash.from_string(s).to_prefixed_digest() if s is not None else None
+                ContentHash.from_string(s).to_prefixed_digest()
+                if s is not None
+                else None
                 for s in string_vals
             ],
             type=pa.large_binary(),

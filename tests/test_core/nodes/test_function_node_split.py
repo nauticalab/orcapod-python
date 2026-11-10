@@ -1,4 +1,5 @@
 """Tests for the FunctionNode / FunctionJobNode split."""
+
 from __future__ import annotations
 
 import pytest
@@ -142,7 +143,11 @@ class TestSiblingHierarchy:
         )
 
     def test_both_inherit_from_base(self):
-        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNode, FunctionNodeBase
+        from orcapod.core.nodes.function_node import (
+            FunctionJobNode,
+            FunctionNode,
+            FunctionNodeBase,
+        )
 
         assert issubclass(FunctionNode, FunctionNodeBase)
         assert issubclass(FunctionJobNode, FunctionNodeBase)

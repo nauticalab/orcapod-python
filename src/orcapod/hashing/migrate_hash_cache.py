@@ -61,14 +61,10 @@ def migrate_sqlite_hash_cache(db_path: "Path | str") -> None:
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version >= 1:
-            print(
-                f"{db_path}: already at schema V{version} — nothing to migrate."
-            )
+            print(f"{db_path}: already at schema V{version} — nothing to migrate.")
             return
 
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(file_hash_cache)")
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(file_hash_cache)")}
         if "cached_at" in columns:
             # Table already has cached_at (was created with current code before
             # version stamping was introduced).  Just stamp the version.

@@ -104,7 +104,10 @@ class TestAppendToSystemTags:
 
     def test_empty_table_returns_empty(self):
         table = pa.table(
-            {"id": pa.array([], type=pa.int64()), "value": pa.array([], type=pa.int64())}
+            {
+                "id": pa.array([], type=pa.int64()),
+                "value": pa.array([], type=pa.int64()),
+            }
         )
         result = append_to_system_tags(table, value="::extra:0")
         assert result.num_rows == 0

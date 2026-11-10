@@ -17,7 +17,10 @@ from typing import Any
 import pytest
 
 from orcapod.core.datagrams import Data
-from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
+from orcapod.core.executors import (
+    LocalPythonFunctionExecutor,
+    PythonFunctionExecutorBase,
+)
 from orcapod.core.data_function import (
     DataFunctionWrapper,
     PythonDataFunction,
@@ -182,7 +185,9 @@ class TestLocalExecutor:
         data = local_executor.get_executor_data()
         assert data["executor_type"] == "local"
 
-    def test_with_options_returns_new_instance(self, local_executor: LocalPythonFunctionExecutor):
+    def test_with_options_returns_new_instance(
+        self, local_executor: LocalPythonFunctionExecutor
+    ):
         new_executor = local_executor.with_options()
         assert new_executor is not local_executor
         assert isinstance(new_executor, LocalPythonFunctionExecutor)
@@ -197,9 +202,7 @@ class TestExecutorProperty:
     def test_default_executor_is_local(self, add_pf: PythonDataFunction):
         assert isinstance(add_pf.executor, LocalPythonFunctionExecutor)
 
-    def test_set_executor(
-        self, add_pf: PythonDataFunction, spy_executor: SpyExecutor
-    ):
+    def test_set_executor(self, add_pf: PythonDataFunction, spy_executor: SpyExecutor):
         add_pf.executor = spy_executor
         assert add_pf.executor is spy_executor
 
@@ -841,7 +844,6 @@ class TestGenericExecutorDispatch:
 class TestLocalExecutorCallable:
     def test_execute_callable_with_async_fn(self):
         """LocalExecutor.execute_callable handles async functions via asyncio.run."""
-        import asyncio
 
         async def async_add(x: int, y: int) -> int:
             return x + y

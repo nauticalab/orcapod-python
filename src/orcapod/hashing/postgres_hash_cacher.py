@@ -41,9 +41,7 @@ def _redact_conninfo(conninfo: str) -> str:
     # Capture group 1: "://user:", group 2: "@" — replace the password between them.
     redacted = re.sub(r"(://[^:@]*:)[^@]+(@)", r"\1***\2", conninfo)
     # Keyword form: password=value or password='value with spaces'
-    redacted = re.sub(
-        r"(?i)\bpassword\s*=\s*(?:'[^']*'|\S+)", "password=***", redacted
-    )
+    redacted = re.sub(r"(?i)\bpassword\s*=\s*(?:'[^']*'|\S+)", "password=***", redacted)
     return redacted
 
 

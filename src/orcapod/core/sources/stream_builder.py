@@ -40,7 +40,9 @@ _SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
 )
 
 
-def _make_provenance_token(record_id_column: str | None, row_index: int, row: dict) -> str:
+def _make_provenance_token(
+    record_id_column: str | None, row_index: int, row: dict
+) -> str:
     """Build the human-readable provenance token for a single row.
 
     When *record_id_column* is given the token is ``"{column}={value}"``,

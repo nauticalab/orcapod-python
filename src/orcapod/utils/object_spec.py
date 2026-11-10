@@ -37,7 +37,11 @@ def parse_objectspec(
             # like LogicalSIRecording (backed by an optional extras group) to be
             # listed in a context JSON without breaking startup when the extras are
             # absent — they are simply absent from the resulting list.
-            if result is None and isinstance(item, dict) and item.get("_optional", False):
+            if (
+                result is None
+                and isinstance(item, dict)
+                and item.get("_optional", False)
+            ):
                 continue
             processed.append(result)
         return tuple(processed) if isinstance(obj_spec, tuple) else processed

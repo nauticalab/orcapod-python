@@ -5,7 +5,11 @@ from .execution_context import ExecutionContext
 from .graph import Pipeline
 from .job import PipelineJob
 from .logging_observer import LoggingObserver, DataLogger
-from .serialization import LoadStatus, PIPELINE_FORMAT_VERSION, PIPELINE_JOB_FORMAT_VERSION
+from .serialization import (
+    LoadStatus,
+    PIPELINE_FORMAT_VERSION,
+    PIPELINE_JOB_FORMAT_VERSION,
+)
 from .status_observer import StatusObserver
 from .sync_orchestrator import SyncPipelineOrchestrator
 

@@ -1,5 +1,6 @@
 # tests/test_databases/test_postgresql_connector.py
 """Unit tests for PostgreSQLConnector — no live database required."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -67,10 +68,14 @@ class TestPgTypeToArrow:
         assert _pg_type_to_arrow("date", "date") == pa.date32()
 
     def test_timestamp(self):
-        assert _pg_type_to_arrow("timestamp without time zone", "timestamp") == pa.timestamp("us")
+        assert _pg_type_to_arrow(
+            "timestamp without time zone", "timestamp"
+        ) == pa.timestamp("us")
 
     def test_timestamptz(self):
-        assert _pg_type_to_arrow("timestamp with time zone", "timestamptz") == pa.timestamp("us", tz="UTC")
+        assert _pg_type_to_arrow(
+            "timestamp with time zone", "timestamptz"
+        ) == pa.timestamp("us", tz="UTC")
 
     def test_time_is_string(self):
         result = _pg_type_to_arrow("time without time zone", "time")
@@ -148,6 +153,7 @@ class TestCoercePgValue:
 
     def test_uuid_coerced_to_bytes_for_binary16(self):
         import uuid as _uuid
+
         u = _uuid.UUID("12345678-1234-5678-1234-567812345678")
         result = _coerce_pg_value(u, pa.binary(16))
         assert result == u.bytes
@@ -156,6 +162,7 @@ class TestCoercePgValue:
 
     def test_uuid_not_coerced_for_other_types(self):
         import uuid as _uuid
+
         u = _uuid.UUID("12345678-1234-5678-1234-567812345678")
         # Non-binary(16) target — UUID object passed through unchanged
         result = _coerce_pg_value(u, pa.large_string())
@@ -184,7 +191,9 @@ class TestConfig:
     def test_to_config(self) -> None:
         with patch("psycopg.connect") as mock_connect:
             mock_connect.return_value = MagicMock()
-            connector = PostgreSQLConnector("postgresql://user:pass@localhost:5432/mydb")
+            connector = PostgreSQLConnector(
+                "postgresql://user:pass@localhost:5432/mydb"
+            )
             config = connector.to_config()
             assert config["connector_type"] == "postgresql"
             assert config["dsn"] == "postgresql://user:pass@localhost:5432/mydb"
@@ -193,7 +202,10 @@ class TestConfig:
     def test_from_config_roundtrip(self) -> None:
         with patch("psycopg.connect") as mock_connect:
             mock_connect.return_value = MagicMock()
-            config = {"connector_type": "postgresql", "dsn": "postgresql://localhost/test"}
+            config = {
+                "connector_type": "postgresql",
+                "dsn": "postgresql://localhost/test",
+            }
             connector = PostgreSQLConnector.from_config(config)
             assert isinstance(connector, PostgreSQLConnector)
             connector._conn = None

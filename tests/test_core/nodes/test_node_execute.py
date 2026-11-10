@@ -10,11 +10,13 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
+from orcapod.core.operators import SelectDataColumns
+from orcapod.types import CacheMode
 
 
 def double_value(value: int) -> int:
@@ -117,10 +119,6 @@ class TestFunctionNodeExecute:
 # ------------------------------------------------------------------
 # OperatorNode.execute() tests
 # ------------------------------------------------------------------
-
-from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
-from orcapod.core.operators import SelectDataColumns
-from orcapod.types import CacheMode
 
 
 @pytest.fixture

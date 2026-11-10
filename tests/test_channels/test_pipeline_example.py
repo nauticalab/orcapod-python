@@ -66,8 +66,12 @@ def make_students() -> ArrowTableStream:
     )
     table = pa.table(
         {
-            "student_id": pa.array(["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()),
-            "name": pa.array(["Alice", "Bob", "Carol", "Dave", "Eve"], type=pa.large_string()),
+            "student_id": pa.array(
+                ["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()
+            ),
+            "name": pa.array(
+                ["Alice", "Bob", "Carol", "Dave", "Eve"], type=pa.large_string()
+            ),
         },
         schema=schema,
     )
@@ -83,7 +87,9 @@ def make_grades() -> ArrowTableStream:
     )
     table = pa.table(
         {
-            "student_id": pa.array(["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()),
+            "student_id": pa.array(
+                ["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()
+            ),
             "score": pa.array([95, 82, 67, 73, 55], type=pa.int64()),
         },
         schema=schema,
@@ -120,9 +126,7 @@ class TestSynchronousPipeline:
         passing = PolarsFilter(predicates=(pl.col("score") >= 70,))(joined)
 
         # Step 3: Compute letter grade
-        grade_pf = PythonDataFunction(
-            compute_letter_grade, output_keys="letter_grade"
-        )
+        grade_pf = PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
         grade_pod = FunctionPod(grade_pf)
         with_grades = grade_pod.process(passing)
 
@@ -142,9 +146,7 @@ class TestSynchronousPipeline:
         joined = Join()(students, grades)
         passing = PolarsFilter(predicates=(pl.col("score") >= 70,))(joined)
 
-        grade_pf = PythonDataFunction(
-            compute_letter_grade, output_keys="letter_grade"
-        )
+        grade_pf = PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
         with_grades = FunctionPod(grade_pf).process(passing)
 
         table = with_grades.as_table()

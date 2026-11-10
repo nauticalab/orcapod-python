@@ -63,12 +63,15 @@ def get_versioned_semantic_hasher(
         Optional ``HandlerRegistryProtocol`` to inject. When None the
         global default registry is used.
     """
-    from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
+    from orcapod.hashing.semantic_hashing.semantic_hasher import (
+        SemanticAwarePythonHasher,
+    )
 
     if type_handler_registry is None:
         from orcapod.hashing.semantic_hashing.type_handler_registry import (
             get_default_python_type_handler_registry,
         )
+
         type_handler_registry = get_default_python_type_handler_registry()
 
     logger.debug(

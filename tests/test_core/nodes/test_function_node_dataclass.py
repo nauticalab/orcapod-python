@@ -4,6 +4,7 @@ Fixtures are defined at module level so that get_type_hints() can resolve
 annotations (local-scope classes are not reachable via __globals__) and so
 DataclassLogicalTypeFactory can build a stable FQCN for registration.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -74,9 +75,9 @@ def test_as_df_dataclass_column_empty_node():
     # Deliberately do NOT call job.run() — node has no computed results yet.
     df = job.nodes["take_sum"].as_df()
 
-    assert df.shape[0] == 0          # zero rows
-    assert "id" in df.columns        # tag column present
-    assert "result" in df.columns    # data column present even with no data
+    assert df.shape[0] == 0  # zero rows
+    assert "id" in df.columns  # tag column present
+    assert "result" in df.columns  # data column present even with no data
     assert df["result"].dtype != pl.Null
 
 

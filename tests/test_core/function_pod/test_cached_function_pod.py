@@ -67,11 +67,13 @@ class TestConstruction:
     def test_record_path_ends_with_schema_version(self, cached_pod):
         """record_path ends with the schema version suffix (v1 schema)."""
         from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+
         assert cached_pod.record_path[-1] == RESULT_DB_SCHEMA_VERSION
 
     def test_record_path_contains_inner_uri(self, cached_pod, double_pod):
         """record_path is inner_pod.uri + (RESULT_DB_SCHEMA_VERSION,)."""
         from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+
         assert cached_pod.record_path == double_pod.uri + (RESULT_DB_SCHEMA_VERSION,)
 
     def test_record_path_prefix_param_removed(self, double_pod, cache_db):
@@ -261,7 +263,9 @@ class TestAsyncInvokeWithHooks:
     """
 
     @pytest.mark.asyncio
-    async def test_hook_fires_on_cache_miss_with_computed_status(self, double_pod, cache_db):
+    async def test_hook_fires_on_cache_miss_with_computed_status(
+        self, double_pod, cache_db
+    ):
         """Hook receives COMPUTED status on a cache miss."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 

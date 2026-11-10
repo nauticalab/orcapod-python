@@ -48,10 +48,9 @@ def _clean_type(arrow_type: pa.DataType) -> pa.DataType:
     rebuilds the type using cleaned versions of all child fields.
     """
     if pa.types.is_struct(arrow_type):
-        return pa.struct([
-            _clean_field(arrow_type.field(i))
-            for i in range(arrow_type.num_fields)
-        ])
+        return pa.struct(
+            [_clean_field(arrow_type.field(i)) for i in range(arrow_type.num_fields)]
+        )
     if pa.types.is_list(arrow_type):
         return pa.list_(_clean_field(arrow_type.value_field))
     if pa.types.is_large_list(arrow_type):
@@ -77,8 +76,7 @@ def _clean_type(arrow_type: pa.DataType) -> pa.DataType:
         # pa.types.is_sparse_union / is_dense_union do not exist in this
         # PyArrow version; use .mode to distinguish the two union modes.
         cleaned_fields = [
-            _clean_field(arrow_type.field(i))
-            for i in range(arrow_type.num_fields)
+            _clean_field(arrow_type.field(i)) for i in range(arrow_type.num_fields)
         ]
         type_codes = list(arrow_type.type_codes)
         if arrow_type.mode == "sparse":
@@ -115,9 +113,8 @@ def _has_extension_in_type(arrow_type: pa.DataType) -> bool:
     ):
         return _has_extension_in_field(arrow_type.value_field)
     if pa.types.is_map(arrow_type):
-        return (
-            _has_extension_in_field(arrow_type.key_field)
-            or _has_extension_in_field(arrow_type.item_field)
+        return _has_extension_in_field(arrow_type.key_field) or _has_extension_in_field(
+            arrow_type.item_field
         )
     if pa.types.is_dictionary(arrow_type):
         return _has_extension_in_type(arrow_type.value_type)
@@ -186,6 +183,4 @@ def has_extension_metadata(schema: pa.Schema) -> bool:
     """
     if schema.metadata and _EXTENSION_NAME_KEY in schema.metadata:
         return True
-    return any(
-        _has_extension_in_field(schema.field(i)) for i in range(len(schema))
-    )
+    return any(_has_extension_in_field(schema.field(i)) for i in range(len(schema)))

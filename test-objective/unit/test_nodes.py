@@ -11,12 +11,10 @@ Tests based on design specification:
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
-    OperatorNode,
 )
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode

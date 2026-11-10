@@ -10,10 +10,8 @@ Covers:
 
 from __future__ import annotations
 
-from typing import Any
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.datagrams import Datagram, Data
 from orcapod.core.datagrams.tag_data import EmptyData
@@ -46,9 +44,7 @@ def _make_cache(
     return cache, db
 
 
-def _compute_and_store(
-    cache: ResultCache, pf: PythonDataFunction, input_data: Data
-):
+def _compute_and_store(cache: ResultCache, pf: PythonDataFunction, input_data: Data):
     """Helper: compute output and store in cache."""
     output = pf.direct_call(input_data)
     assert output is not None
@@ -350,7 +346,9 @@ class TestStoreDictColumns:
         assert exec_info_col in records.column_names
         # dict[str, str] should be stored as an Arrow map (list of key-value structs)
         field_type = records.schema.field(exec_info_col).type
-        assert pa.types.is_large_list(field_type), f"Expected large_list (map), got {field_type}"
+        assert pa.types.is_large_list(field_type), (
+            f"Expected large_list (map), got {field_type}"
+        )
 
     def test_extra_info_column_stored_as_map(self):
         cache, db = _make_cache()
@@ -363,7 +361,9 @@ class TestStoreDictColumns:
         assert extra_info_col in records.column_names
         # dict[str, str] should be stored as an Arrow map (list of key-value structs)
         field_type = records.schema.field(extra_info_col).type
-        assert pa.types.is_large_list(field_type), f"Expected large_list (map), got {field_type}"
+        assert pa.types.is_large_list(field_type), (
+            f"Expected large_list (map), got {field_type}"
+        )
 
 
 # ---------------------------------------------------------------------------

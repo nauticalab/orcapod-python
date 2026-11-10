@@ -1,4 +1,5 @@
 """Tests for UniversalTypeConverter list[T] / set[T] extension type support."""
+
 from __future__ import annotations
 
 
@@ -88,7 +89,6 @@ def test_python_type_to_arrow_type_list_of_uuid_without_prior_registration():
 def test_arrow_schema_to_python_schema_round_trip_list_of_uuid():
     """Schema round-trip: list[UUID] → Arrow ext → python schema → Arrow ext (same type)."""
     import uuid
-    import pyarrow as pa
     from orcapod.contexts import create_registry
 
     converter = create_registry().get_context().type_converter

@@ -13,8 +13,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-_JSONSCHEMA_AVAILABLE = importlib.util.find_spec("jsonschema") is not None
-
 from orcapod.contexts.core import (
     ContextResolutionError,
     ContextValidationError,
@@ -159,6 +157,7 @@ class JSONDataContextRegistry:
         # Validate against JSON schema if available
         if self._schema and _JSONSCHEMA_AVAILABLE:
             import jsonschema  # noqa: PLC0415 – deferred to keep startup fast
+
             try:
                 jsonschema.validate(spec, self._schema)
             except jsonschema.ValidationError as e:

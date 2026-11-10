@@ -53,7 +53,7 @@ class TestDatagramDictBacked:
             lambda d: d.as_dict(),
             lambda d: d["a"],
             lambda d: d.get("a"),
-            lambda d: ("a" in d),
+            lambda d: "a" in d,
             lambda d: list(d),
             lambda d: d.keys(),
             lambda d: d.schema(),
@@ -141,7 +141,7 @@ class TestDatagramArrowBacked:
     @pytest.mark.parametrize(
         "op",
         [
-            lambda d: ("a" in d),
+            lambda d: "a" in d,
             lambda d: list(d),
             lambda d: d.keys(),
             lambda d: d.schema(),

@@ -24,7 +24,7 @@ from orcapod.core.nodes import (
     SourceNode,
 )
 from orcapod.core.nodes.function_node import FunctionJobNode
-from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNodeBase
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, CachedSource
@@ -98,9 +98,7 @@ class TestPipelineSourceSpecEnforcement:
             Join()(node_a, node_b)
 
         assert pipeline._compiled
-        source_nodes = [
-            n for n in pipeline.dag.nodes() if isinstance(n, SourceNode)
-        ]
+        source_nodes = [n for n in pipeline.dag.nodes() if isinstance(n, SourceNode)]
         assert len(source_nodes) == 2
 
     def test_pipeline_with_concrete_leaf_auto_wraps_as_source_node(self):
@@ -128,7 +126,9 @@ class TestPipelineSourceSpecEnforcement:
             Join()(node_a, node_b)
 
         db = InMemoryArrowDatabase()
-        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=db)
+        job = PipelineJob.from_pipeline(
+            pipeline, sources={"a": src_a, "b": src_b}, store=db
+        )
 
         assert isinstance(job, PipelineJob)
         # compiled_pipeline is computed lazily (schema-normalised) — not the
@@ -631,10 +631,12 @@ class TestSourceNodesInPipeline:
     def test_source_node_accessible_by_source_id(self, pipeline_db):
         """SourceNode is accessible in nodes via its source_id (the identity key)."""
         src = ArrowTableSource(
-            table=pa.table({
-                "key": pa.array(["a"], type=pa.large_string()),
-                "value": pa.array([10], type=pa.int64()),
-            }),
+            table=pa.table(
+                {
+                    "key": pa.array(["a"], type=pa.large_string()),
+                    "value": pa.array([10], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="my_source",
             infer_nullable=True,

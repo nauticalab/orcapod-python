@@ -30,7 +30,10 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
     from orcapod.logical_types.registry import LogicalTypeRegistry
-    from orcapod.logical_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
+    from orcapod.logical_types.protocols import (
+        LogicalTypeFactoryProtocol,
+        LogicalTypeProtocol,
+    )
 else:
     pa = LazyModule("pyarrow")
 
@@ -47,8 +50,8 @@ _PYTHON_TO_ARROW_MAP: "dict | None" = None
 # Using a ContextVar (rather than an instance attribute) keeps it thread-safe,
 # coroutine-safe, and explicitly scoped to the active call chain without
 # polluting the converter instance with temporary state.
-_register_in_progress: contextvars.ContextVar[set[type] | None] = contextvars.ContextVar(
-    "_register_in_progress", default=None
+_register_in_progress: contextvars.ContextVar[set[type] | None] = (
+    contextvars.ContextVar("_register_in_progress", default=None)
 )
 
 
@@ -190,7 +193,6 @@ class UniversalTypeConverter:
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
 
-
     @classmethod
     def get_native_python_types(cls) -> frozenset[type]:
         """Return the set of Python types that this converter handles natively.
@@ -285,7 +287,9 @@ class UniversalTypeConverter:
         # Nested call (direct recursion or factory call-back): reuse the existing set.
         return self._register_python_class_impl(annotation, in_progress)
 
-    def _register_python_class_impl(self, annotation: Any, in_progress: set[type]) -> "pa.DataType":
+    def _register_python_class_impl(
+        self, annotation: Any, in_progress: set[type]
+    ) -> "pa.DataType":
         """Internal recursive implementation of ``register_python_class``.
 
         Args:
@@ -351,8 +355,12 @@ class UniversalTypeConverter:
                     "element type (e.g. list[int], list[str])."
                 )
             inner = self.register_python_class(args[0])
-            if self._logical_type_registry is not None and hasattr(inner, "extension_name"):
-                element_lt = self._logical_type_registry.get_by_arrow_extension_name(inner.extension_name)
+            if self._logical_type_registry is not None and hasattr(
+                inner, "extension_name"
+            ):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(
+                    inner.extension_name
+                )
                 if element_lt is not None:
                     return self._make_or_get_list_logical_type(element_lt, is_set=False)
             return pa.large_list(inner)
@@ -365,8 +373,12 @@ class UniversalTypeConverter:
                     "element type (e.g. set[int], set[str])."
                 )
             inner = self.register_python_class(args[0])
-            if self._logical_type_registry is not None and hasattr(inner, "extension_name"):
-                element_lt = self._logical_type_registry.get_by_arrow_extension_name(inner.extension_name)
+            if self._logical_type_registry is not None and hasattr(
+                inner, "extension_name"
+            ):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(
+                    inner.extension_name
+                )
                 if element_lt is not None:
                     return self._make_or_get_list_logical_type(element_lt, is_set=True)
             return pa.large_list(inner)
@@ -493,7 +505,9 @@ class UniversalTypeConverter:
         for base in python_type.__mro__:
             factory = factories.get(base)
             if factory is not None:
-                if hasattr(factory, "supports_class") and factory.supports_class(python_type):
+                if hasattr(factory, "supports_class") and factory.supports_class(
+                    python_type
+                ):
                     return factory
                 elif not hasattr(factory, "supports_class"):
                     # Factories without supports_class are treated as unconditional matches
@@ -542,7 +556,9 @@ class UniversalTypeConverter:
             raw_meta = arrow_type.__arrow_ext_serialize__()
             ext_meta = raw_meta if raw_meta else None
             resolved_storage = self.register_storage_type(arrow_type.storage_type)
-            return self.register_logical_type_from_arrow_metadata(ext_name, ext_meta, resolved_storage)
+            return self.register_logical_type_from_arrow_metadata(
+                ext_name, ext_meta, resolved_storage
+            )
 
         # Struct type — recurse into each field, preserving field-level metadata.
         # Strip any extension type from field types before embedding (ET1: Arrow/Polars
@@ -555,7 +571,12 @@ class UniversalTypeConverter:
                 if isinstance(resolved_type, pa.ExtensionType):
                     resolved_type = resolved_type.storage_type  # strip: ET1
                 resolved_fields.append(
-                    pa.field(field.name, resolved_type, nullable=field.nullable, metadata=field.metadata)
+                    pa.field(
+                        field.name,
+                        resolved_type,
+                        nullable=field.nullable,
+                        metadata=field.metadata,
+                    )
                 )
             return pa.struct(resolved_fields)
 
@@ -567,7 +588,9 @@ class UniversalTypeConverter:
             if isinstance(resolved_value, pa.ExtensionType):
                 resolved_value = resolved_value.storage_type  # strip: ET1
             return pa.large_list(
-                pa.field(vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata)
+                pa.field(
+                    vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata
+                )
             )
 
         # List type — strip any extension type from the value type (ET1).
@@ -577,7 +600,9 @@ class UniversalTypeConverter:
             if isinstance(resolved_value, pa.ExtensionType):
                 resolved_value = resolved_value.storage_type  # strip: ET1
             return pa.list_(
-                pa.field(vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata)
+                pa.field(
+                    vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata
+                )
             )
 
         # All other types (primitives, timestamps, binary, etc.) — return as-is
@@ -609,6 +634,7 @@ class UniversalTypeConverter:
         from orcapod.logical_types.database_hooks import (
             apply_logical_types as _apply_ext,
         )
+
         return _apply_ext(table, self._logical_type_registry)
 
     def register_discovered_logical_types(self, schema: "pa.Schema") -> None:
@@ -631,6 +657,7 @@ class UniversalTypeConverter:
         from orcapod.logical_types.database_hooks import (
             register_discovered_logical_types as _reg_disc,
         )
+
         _reg_disc(self, schema)
 
     def load_logical_types(self, table: "pa.Table") -> "pa.Table":
@@ -688,7 +715,9 @@ class UniversalTypeConverter:
             )
 
         # Registry hit — already registered
-        lt = self._logical_type_registry.get_by_arrow_extension_name(arrow_extension_name)
+        lt = self._logical_type_registry.get_by_arrow_extension_name(
+            arrow_extension_name
+        )
         if lt is not None:
             return lt.get_arrow_extension_type()
 
@@ -717,14 +746,14 @@ class UniversalTypeConverter:
 
         if "category" not in metadata_dict:
             raise ValueError(
-                f"Extension type {arrow_extension_name!r} metadata has no \"category\" key: "
+                f'Extension type {arrow_extension_name!r} metadata has no "category" key: '
                 f"{metadata_dict}."
             )
 
         category = metadata_dict["category"]
         if not isinstance(category, str):
             raise ValueError(
-                f"Extension type {arrow_extension_name!r} metadata \"category\" is not a "
+                f'Extension type {arrow_extension_name!r} metadata "category" is not a '
                 f"string: {category!r}."
             )
 
@@ -892,7 +921,9 @@ class UniversalTypeConverter:
         """
         if self._logical_type_registry is None:
             return None
-        return self._logical_type_registry.get_by_arrow_extension_name(arrow_extension_name)
+        return self._logical_type_registry.get_by_arrow_extension_name(
+            arrow_extension_name
+        )
 
     def get_logical_type_for_python_type(
         self, annotation: Any
@@ -1179,8 +1210,12 @@ class UniversalTypeConverter:
                     f"list type must have exactly one type argument, got: {args}"
                 )
             element_type = self.python_type_to_arrow_type(args[0])
-            if self._logical_type_registry is not None and hasattr(element_type, "extension_name"):
-                element_lt = self._logical_type_registry.get_by_arrow_extension_name(element_type.extension_name)
+            if self._logical_type_registry is not None and hasattr(
+                element_type, "extension_name"
+            ):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(
+                    element_type.extension_name
+                )
                 if element_lt is not None:
                     return self._make_or_get_list_logical_type(element_lt, is_set=False)
             return pa.large_list(element_type)
@@ -1266,8 +1301,12 @@ class UniversalTypeConverter:
                     f"set type must have exactly one type argument, got: {args}"
                 )
             element_type = self.python_type_to_arrow_type(args[0])
-            if self._logical_type_registry is not None and hasattr(element_type, "extension_name"):
-                element_lt = self._logical_type_registry.get_by_arrow_extension_name(element_type.extension_name)
+            if self._logical_type_registry is not None and hasattr(
+                element_type, "extension_name"
+            ):
+                element_lt = self._logical_type_registry.get_by_arrow_extension_name(
+                    element_type.extension_name
+                )
                 if element_lt is not None:
                     return self._make_or_get_list_logical_type(element_lt, is_set=True)
             return pa.large_list(element_type)
@@ -1283,7 +1322,10 @@ class UniversalTypeConverter:
             return Any
 
         # Check LogicalTypeRegistry for extension types
-        if isinstance(arrow_type, pa.ExtensionType) and self._logical_type_registry is not None:
+        if (
+            isinstance(arrow_type, pa.ExtensionType)
+            and self._logical_type_registry is not None
+        ):
             lt = self._logical_type_registry.get_by_arrow_extension_name(
                 arrow_type.extension_name
             )
@@ -1533,17 +1575,15 @@ class UniversalTypeConverter:
 
         elif origin is list:
             element_converter = self.get_python_to_arrow_converter(args[0])
-            return (
-                lambda value: [element_converter(item) for item in value]
-                if value is not None
-                else []
+            return lambda value: (
+                [element_converter(item) for item in value] if value is not None else []
             )
 
         elif origin is dict:
             key_converter = self.get_python_to_arrow_converter(args[0])
             value_converter = self.get_python_to_arrow_converter(args[1])
-            return (
-                lambda value: [
+            return lambda value: (
+                [
                     {"key": key_converter(k), "value": value_converter(v)}
                     for k, v in value.items()
                 ]
@@ -1569,7 +1609,9 @@ class UniversalTypeConverter:
             if len(non_none_types) == 1:
                 # Optional[T] - use converter for T, pass through None
                 inner_converter = self.get_python_to_arrow_converter(non_none_types[0])
-                return lambda value: inner_converter(value) if value is not None else None
+                return lambda value: (
+                    inner_converter(value) if value is not None else None
+                )
             else:
                 raise ValueError(
                     f"Complex unions with multiple non-None types are not supported: {python_type}. "
@@ -1586,7 +1628,10 @@ class UniversalTypeConverter:
         """Create a cached conversion function for Arrow → Python values."""
 
         # Check LogicalTypeRegistry for extension types
-        if isinstance(arrow_type, pa.ExtensionType) and self._logical_type_registry is not None:
+        if (
+            isinstance(arrow_type, pa.ExtensionType)
+            and self._logical_type_registry is not None
+        ):
             lt = self._logical_type_registry.get_by_arrow_extension_name(
                 arrow_type.extension_name
             )
@@ -1632,8 +1677,8 @@ class UniversalTypeConverter:
                         value_field.type
                     )
 
-                    return (
-                        lambda value: {
+                    return lambda value: (
+                        {
                             key_converter(item["key"]): value_converter(item["value"])
                             for item in value
                             if item is not None
@@ -1647,17 +1692,13 @@ class UniversalTypeConverter:
 
             if pa.types.is_fixed_size_list(arrow_type):
                 # Fixed-size list → tuple
-                return (
-                    lambda value: tuple(element_converter(item) for item in value)
-                    if value
-                    else ()
+                return lambda value: (
+                    tuple(element_converter(item) for item in value) if value else ()
                 )
             else:
                 # Variable-size list → list
-                return (
-                    lambda value: [element_converter(item) for item in value]
-                    if value
-                    else []
+                return lambda value: (
+                    [element_converter(item) for item in value] if value else []
                 )
 
         # Handle struct types - heterogeneous tuple or dynamic TypedDict
@@ -1682,8 +1723,8 @@ class UniversalTypeConverter:
                     field.type
                 )
 
-            return (
-                lambda value: {
+            return lambda value: (
+                {
                     field_name: field_converters[field_name](value.get(field_name))
                     for field_name in field_converters
                 }

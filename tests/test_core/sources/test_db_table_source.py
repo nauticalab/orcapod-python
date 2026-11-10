@@ -11,6 +11,7 @@ Test sections:
  7. Deterministic hashing (pipeline_hash, content_hash)
  8. Config — to_config shape, from_config raises NotImplementedError
 """
+
 from __future__ import annotations
 
 import re
@@ -132,11 +133,13 @@ def source(connector) -> DBTableSource:
 
 def test_import_db_table_source_from_core_sources():
     from orcapod.core.sources import DBTableSource as _DBTableSource
+
     assert _DBTableSource is not None
 
 
 def test_db_table_source_is_in_all():
     import orcapod.core.sources as sources_module
+
     assert "DBTableSource" in sources_module.__all__
 
 
@@ -293,7 +296,9 @@ class TestConstructionErrors:
 
     def test_empty_table_error_distinguishable_from_missing_table(self, connector):
         """The two error messages must be distinct."""
-        connector._tables["empty"] = pa.table({"id": pa.array([], type=pa.large_string())})
+        connector._tables["empty"] = pa.table(
+            {"id": pa.array([], type=pa.large_string())}
+        )
         connector._pk_columns["empty"] = ["id"]
         empty_err: ValueError | None = None
         missing_err: ValueError | None = None
@@ -456,8 +461,11 @@ class TestQueryOverride:
                 match = re.search(r"trial > 1", query)
                 if match:
                     import pyarrow.compute as pc
+
                     filtered = measurements_table.filter(
-                        pc.greater(measurements_table.column("trial"), pa.scalar(1, pa.int64()))
+                        pc.greater(
+                            measurements_table.column("trial"), pa.scalar(1, pa.int64())
+                        )
                     )
                     for batch in filtered.to_batches():
                         yield batch

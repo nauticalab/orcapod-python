@@ -168,16 +168,16 @@ def main() -> None:
         f"    sync+async  {t2:.2f}s  — still sequential (sync orchestrator runs nodes one by one)"
     )
     print(f"    async+sync  {t3:.2f}s  — branches overlap, but GIL-holding busy-wait")
-    print(f"                          serializes data even across threads")
+    print("                          serializes data even across threads")
     print(f"    async+async {t4:.2f}s  — branches overlap AND data overlap")
     print(
-        f"                          (native coroutines yield at await points, enabling I/O overlap)"
+        "                          (native coroutines yield at await points, enabling I/O overlap)"
     )
     print()
-    print(f"  Key insight: async+sync is much slower than async+async because")
-    print(f"  the sync function holds the GIL, so run_in_executor threads")
-    print(f"  cannot actually run in parallel. Native async coroutines yield")
-    print(f"  control at each 'await', enabling cooperative I/O overlap.")
+    print("  Key insight: async+sync is much slower than async+async because")
+    print("  the sync function holds the GIL, so run_in_executor threads")
+    print("  cannot actually run in parallel. Native async coroutines yield")
+    print("  control at each 'await', enabling cooperative I/O overlap.")
     print()
     print(f"  Speedup (sync+sync  vs async+async): {t1 / t4:.1f}x")
     print(f"  Speedup (async+sync vs async+async): {t3 / t4:.1f}x")

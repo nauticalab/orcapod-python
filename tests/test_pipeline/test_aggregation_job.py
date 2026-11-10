@@ -82,12 +82,14 @@ def session_source_factory():
     """Build a 2-group source; `paths` lets a test mutate one group's data."""
 
     def _make(paths: list[str] | None = None) -> ArrowTableSource:
-        table = pa.table({
-            "subject": ["G", "G", "G", "G"],
-            "date": ["d1", "d1", "d2", "d2"],
-            "probe": [0, 1, 0, 1],
-            "path": paths or ["a", "b", "c", "d"],
-        })
+        table = pa.table(
+            {
+                "subject": ["G", "G", "G", "G"],
+                "date": ["d1", "d1", "d2", "d2"],
+                "probe": [0, 1, 0, 1],
+                "path": paths or ["a", "b", "c", "d"],
+            }
+        )
         return ArrowTableSource(
             table,
             tag_columns=["subject", "date", "probe"],
@@ -262,9 +264,7 @@ class TestFileContentHashingThroughReduction:
         job = PipelineJob(name="filehash", store=store)
         with job:
             if grouped:
-                pod = FunctionPod(
-                    PythonDataFunction(reduce_configs, output_keys="n")
-                )
+                pod = FunctionPod(PythonDataFunction(reduce_configs, output_keys="n"))
                 pod(GroupBy(by=["date"])(source, label="agg"), label="cc")
             else:
                 pod = FunctionPod(PythonDataFunction(read_config, output_keys="n"))

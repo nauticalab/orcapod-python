@@ -197,7 +197,9 @@ class LogicalTypeProtocol(Protocol):
         """Return an instance of the Polars extension type for this logical type."""
         ...
 
-    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None") -> Any:
+    def python_to_storage(
+        self, value: Any, converter: "TypeConverterProtocol | None"
+    ) -> Any:
         """Convert a Python value to its Arrow storage representation.
 
         Args:
@@ -209,7 +211,9 @@ class LogicalTypeProtocol(Protocol):
         """
         ...
 
-    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None") -> Any:
+    def storage_to_python(
+        self, storage_value: Any, converter: "TypeConverterProtocol | None"
+    ) -> Any:
         """Convert an Arrow storage value back to a Python object.
 
         Args:

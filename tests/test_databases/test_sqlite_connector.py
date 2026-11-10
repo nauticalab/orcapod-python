@@ -1,4 +1,5 @@
 """Tests for SQLiteConnector — DBConnectorProtocol backed by sqlite3."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -65,8 +66,16 @@ class TestSqliteTypeToArrow:
 
 class TestArrowTypeToSqliteSql:
     def test_integers(self):
-        for t in (pa.int8(), pa.int16(), pa.int32(), pa.int64(),
-                  pa.uint8(), pa.uint16(), pa.uint32(), pa.uint64()):
+        for t in (
+            pa.int8(),
+            pa.int16(),
+            pa.int32(),
+            pa.int64(),
+            pa.uint8(),
+            pa.uint16(),
+            pa.uint32(),
+            pa.uint64(),
+        ):
             assert _arrow_type_to_sqlite_sql(t) == "INTEGER", t
 
     def test_floats(self):
@@ -86,6 +95,7 @@ class TestArrowTypeToSqliteSql:
 
     def test_unsupported_type_logs_warning_and_returns_text(self, caplog):
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = _arrow_type_to_sqlite_sql(pa.list_(pa.int64()))
         assert result == "TEXT"
@@ -188,9 +198,7 @@ class TestGetTableNames:
 
 class TestGetPkColumns:
     def test_single_pk(self, connector: SQLiteConnector) -> None:
-        connector._conn.execute(
-            'CREATE TABLE "t" (id TEXT PRIMARY KEY, val REAL)'
-        )
+        connector._conn.execute('CREATE TABLE "t" (id TEXT PRIMARY KEY, val REAL)')
         assert connector.get_pk_columns("t") == ["id"]
 
     def test_composite_pk_order_preserved(self, connector: SQLiteConnector) -> None:
@@ -232,17 +240,15 @@ class TestGetColumnInfo:
         assert infos["f"].arrow_type == pa.bool_()
 
     def test_nullable_from_notnull(self, connector: SQLiteConnector) -> None:
-        connector._conn.execute(
-            'CREATE TABLE "t" (a TEXT NOT NULL, b TEXT)'
-        )
+        connector._conn.execute('CREATE TABLE "t" (a TEXT NOT NULL, b TEXT)')
         infos = {ci.name: ci for ci in connector.get_column_info("t")}
         assert infos["a"].nullable is False
         assert infos["b"].nullable is True
 
-    def test_table_with_zero_rows_returns_column_metadata(self, connector: SQLiteConnector) -> None:
-        connector._conn.execute(
-            'CREATE TABLE "t" (id INTEGER PRIMARY KEY, val TEXT)'
-        )
+    def test_table_with_zero_rows_returns_column_metadata(
+        self, connector: SQLiteConnector
+    ) -> None:
+        connector._conn.execute('CREATE TABLE "t" (id INTEGER PRIMARY KEY, val TEXT)')
         infos = connector.get_column_info("t")
         assert len(infos) == 2
         assert infos[0].name == "id"
@@ -268,13 +274,17 @@ class TestCreateTableIfNotExists:
         ]
 
     def test_creates_table(self, connector: SQLiteConnector) -> None:
-        connector.create_table_if_not_exists("my_table", self._make_columns(), "__record_id")
+        connector.create_table_if_not_exists(
+            "my_table", self._make_columns(), "__record_id"
+        )
         assert "my_table" in connector.get_table_names()
 
     def test_idempotent(self, connector: SQLiteConnector) -> None:
         cols = self._make_columns()
         connector.create_table_if_not_exists("my_table", cols, "__record_id")
-        connector.create_table_if_not_exists("my_table", cols, "__record_id")  # must not raise
+        connector.create_table_if_not_exists(
+            "my_table", cols, "__record_id"
+        )  # must not raise
 
     def test_pk_column_set(self, connector: SQLiteConnector) -> None:
         connector.create_table_if_not_exists("t", self._make_columns(), "__record_id")
@@ -294,11 +304,17 @@ class TestCreateTableIfNotExists:
 
     def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
         with pytest.raises(ValueError, match="double-quote"):
-            connector.create_table_if_not_exists('table"name', self._make_columns(), "__record_id")
+            connector.create_table_if_not_exists(
+                'table"name', self._make_columns(), "__record_id"
+            )
 
-    def test_raises_when_pk_column_not_in_columns(self, connector: SQLiteConnector) -> None:
+    def test_raises_when_pk_column_not_in_columns(
+        self, connector: SQLiteConnector
+    ) -> None:
         with pytest.raises(ValueError, match="not found in columns"):
-            connector.create_table_if_not_exists("t", self._make_columns(), "nonexistent_pk")
+            connector.create_table_if_not_exists(
+                "t", self._make_columns(), "nonexistent_pk"
+            )
 
 
 class TestUpsertRecords:
@@ -311,10 +327,13 @@ class TestUpsertRecords:
 
     def _make_table(self, ids: list[str], values: list[float | None]) -> pa.Table:
         import pyarrow as pa
-        return pa.table({
-            "__record_id": pa.array(ids, type=pa.large_string()),
-            "value": pa.array(values, type=pa.float64()),
-        })
+
+        return pa.table(
+            {
+                "__record_id": pa.array(ids, type=pa.large_string()),
+                "value": pa.array(values, type=pa.float64()),
+            }
+        )
 
     def test_insert_new_records(self, connector: SQLiteConnector) -> None:
         self._setup_table(connector)
@@ -329,7 +348,9 @@ class TestUpsertRecords:
         connector.upsert_records("t", records_v1, "__record_id")
         records_v2 = self._make_table(["a"], [99.0])
         connector.upsert_records("t", records_v2, "__record_id", skip_existing=False)
-        cursor = connector._conn.execute("SELECT value FROM \"t\" WHERE \"__record_id\" = 'a'")
+        cursor = connector._conn.execute(
+            'SELECT value FROM "t" WHERE "__record_id" = \'a\''
+        )
         assert cursor.fetchone()[0] == 99.0
 
     def test_skip_existing_keeps_original(self, connector: SQLiteConnector) -> None:
@@ -338,7 +359,9 @@ class TestUpsertRecords:
         connector.upsert_records("t", records_v1, "__record_id")
         records_v2 = self._make_table(["a"], [99.0])
         connector.upsert_records("t", records_v2, "__record_id", skip_existing=True)
-        cursor = connector._conn.execute("SELECT value FROM \"t\" WHERE \"__record_id\" = 'a'")
+        cursor = connector._conn.execute(
+            'SELECT value FROM "t" WHERE "__record_id" = \'a\''
+        )
         assert cursor.fetchone()[0] == 1.0
 
     def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
@@ -362,13 +385,15 @@ class TestIterBatches:
             ColumnInfo("active", pa.bool_(), nullable=True),
         ]
         connector.create_table_if_not_exists("data", cols, "id")
-        records = pa.table({
-            "id": pa.array(["a", "b", "c"], type=pa.large_string()),
-            "name": pa.array(["Alice", "Bob", "Carol"], type=pa.large_string()),
-            "score": pa.array([1.5, 2.5, 3.5], type=pa.float64()),
-            "count": pa.array([10, 20, 30], type=pa.int64()),
-            "active": pa.array([True, False, True], type=pa.bool_()),
-        })
+        records = pa.table(
+            {
+                "id": pa.array(["a", "b", "c"], type=pa.large_string()),
+                "name": pa.array(["Alice", "Bob", "Carol"], type=pa.large_string()),
+                "score": pa.array([1.5, 2.5, 3.5], type=pa.float64()),
+                "count": pa.array([10, 20, 30], type=pa.int64()),
+                "active": pa.array([True, False, True], type=pa.bool_()),
+            }
+        )
         connector.upsert_records("data", records, "id")
 
     def test_returns_all_rows(self, connector: SQLiteConnector) -> None:
@@ -389,7 +414,7 @@ class TestIterBatches:
 
     def test_bool_roundtrip(self, connector: SQLiteConnector) -> None:
         self._setup_data(connector)
-        batches = list(connector.iter_batches('SELECT * FROM "data" WHERE id = \'a\''))
+        batches = list(connector.iter_batches("SELECT * FROM \"data\" WHERE id = 'a'"))
         table = pa.Table.from_batches(batches)
         active_col = table.column("active")
         assert active_col[0].as_py() is True
@@ -408,7 +433,9 @@ class TestIterBatches:
 
     def test_non_select_query_yields_nothing(self, connector: SQLiteConnector) -> None:
         """cursor.description is None for DDL/DML queries; iter_batches should yield nothing."""
-        batches = list(connector.iter_batches("CREATE TABLE IF NOT EXISTS tmp (x INTEGER)"))
+        batches = list(
+            connector.iter_batches("CREATE TABLE IF NOT EXISTS tmp (x INTEGER)")
+        )
         assert batches == []
 
     def test_unquoted_table_name_in_query(self, connector: SQLiteConnector) -> None:
@@ -462,10 +489,12 @@ class TestValidateRecords:
         conn.close()
 
     def test_accepts_plain_table(self, c):
-        table = pa.table({
-            "id": pa.array([b"a"], type=pa.large_binary()),
-            "v": pa.array([1]),
-        })
+        table = pa.table(
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "v": pa.array([1]),
+            }
+        )
         c.validate_records(table)  # must not raise
 
     def test_rejects_field_with_metadata(self, c):

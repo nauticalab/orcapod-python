@@ -18,7 +18,10 @@ from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import PipelineJob
 from orcapod.pipeline.composite_observer import CompositeObserver
 from orcapod.pipeline.logging_observer import LoggingObserver
-from orcapod.pipeline.serialization import DatabaseRegistry, resolve_observer_from_config
+from orcapod.pipeline.serialization import (
+    DatabaseRegistry,
+    resolve_observer_from_config,
+)
 from orcapod.pipeline.status_observer import StatusObserver
 
 
@@ -28,10 +31,12 @@ from orcapod.pipeline.status_observer import StatusObserver
 
 
 def _make_source(n: int = 3) -> ArrowTableSource:
-    table = pa.table({
-        "id": pa.array([str(i) for i in range(n)], type=pa.large_string()),
-        "x": pa.array([10 * (i + 1) for i in range(n)], type=pa.int64()),
-    })
+    table = pa.table(
+        {
+            "id": pa.array([str(i) for i in range(n)], type=pa.large_string()),
+            "x": pa.array([10 * (i + 1) for i in range(n)], type=pa.int64()),
+        }
+    )
     return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
 
 
@@ -49,7 +54,9 @@ class TestLoggingAndStatusTogether:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            double, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_composite", store=pipeline_db)
@@ -57,7 +64,9 @@ class TestLoggingAndStatusTogether:
             pod(source, label="doubler")
 
         log_obs = LoggingObserver(log_database=obs_db.at("test_composite", "_log"))
-        status_obs = StatusObserver(status_database=obs_db.at("test_composite", "_status"))
+        status_obs = StatusObserver(
+            status_database=obs_db.at("test_composite", "_status")
+        )
         observer = CompositeObserver(log_obs, status_obs)
 
         job.run(observer=observer)
@@ -88,15 +97,21 @@ class TestCreateDataLoggerDelegation:
             print("hello")
             return x
 
-        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            identity, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_logger_delegation", store=pipeline_db)
         with job:
             pod(source, label="ident")
 
-        log_obs = LoggingObserver(log_database=obs_db.at("test_logger_delegation", "_log"))
-        status_obs = StatusObserver(status_database=obs_db.at("test_logger_delegation", "_status"))
+        log_obs = LoggingObserver(
+            log_database=obs_db.at("test_logger_delegation", "_log")
+        )
+        status_obs = StatusObserver(
+            status_database=obs_db.at("test_logger_delegation", "_status")
+        )
         observer = CompositeObserver(log_obs, status_obs)
 
         job.run(observer=observer)
@@ -126,9 +141,13 @@ class TestCompositeObserverMultiNodeIntegration:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(
+            double, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod1 = FunctionPod(pf1)
-        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(
+            triple, output_keys="final", executor=LocalPythonFunctionExecutor()
+        )
         pod2 = FunctionPod(pf2)
 
         job = PipelineJob(name="test_ctx_composite", store=pipeline_db)
@@ -137,7 +156,9 @@ class TestCompositeObserverMultiNodeIntegration:
             pod2(s1, label="tripler")
 
         log_obs = LoggingObserver(log_database=obs_db.at("test_ctx_composite", "_log"))
-        status_obs = StatusObserver(status_database=obs_db.at("test_ctx_composite", "_status"))
+        status_obs = StatusObserver(
+            status_database=obs_db.at("test_ctx_composite", "_status")
+        )
         observer = CompositeObserver(log_obs, status_obs)
 
         job.run(observer=observer)
@@ -149,7 +170,7 @@ class TestCompositeObserverMultiNodeIntegration:
         status = status_obs.get_status()
         assert logs is not None
         assert status is not None
-        assert logs.num_rows == 4   # 2 nodes × 2 data
+        assert logs.num_rows == 4  # 2 nodes × 2 data
         assert status.num_rows == 8  # 2 nodes × 2 × (RUNNING + SUCCESS)
 
 
@@ -167,7 +188,9 @@ class TestCompositeWithFailures:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(
+            failing, output_keys="result", executor=LocalPythonFunctionExecutor()
+        )
         pod = FunctionPod(pf)
 
         job = PipelineJob(name="test_composite_fail", store=pipeline_db)
@@ -175,7 +198,9 @@ class TestCompositeWithFailures:
             pod(source, label="failing")
 
         log_obs = LoggingObserver(log_database=obs_db.at("test_composite_fail", "_log"))
-        status_obs = StatusObserver(status_database=obs_db.at("test_composite_fail", "_status"))
+        status_obs = StatusObserver(
+            status_database=obs_db.at("test_composite_fail", "_status")
+        )
         observer = CompositeObserver(log_obs, status_obs)
 
         job.run(observer=observer)
@@ -230,6 +255,7 @@ def test_resolve_observer_from_config_unknown_type_raises():
 def test_composite_contextualize_with_empty_path_raises():
     from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
     from orcapod.pipeline.status_observer import StatusObserver
+
     db = InMemoryArrowDatabase()
     obs = CompositeObserver(StatusObserver(db))
     with pytest.raises(ValueError, match="non-empty identity_path"):

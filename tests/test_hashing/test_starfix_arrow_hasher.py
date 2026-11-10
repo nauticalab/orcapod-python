@@ -24,7 +24,6 @@ Coverage
 
 from __future__ import annotations
 
-import pytest
 import pyarrow as pa
 
 from orcapod.hashing.arrow_hashers import StarfixArrowHasher
@@ -46,6 +45,7 @@ _DIGEST_LEN = 35  # 3 version bytes + 32 SHA-256 bytes
 
 def _make_hasher() -> StarfixArrowHasher:
     from orcapod.contexts import get_default_context
+
     ctx = get_default_context()
     return StarfixArrowHasher(
         type_converter=ctx.type_converter,
@@ -105,22 +105,25 @@ class TestHashSchema:
             ]
         )
         h = _make_hasher().hash_schema(schema)
-        assert h.digest.hex() == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c", (
+        assert (
+            h.digest.hex()
+            == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c"
+        ), (
             f"Schema golden digest changed — was the starfix algorithm updated? "
             f"Got: {h.digest.hex()}"
         )
 
     def test_nullability_affects_schema_hash(self):
         """nullable=True and nullable=False must produce different schema hashes."""
-        s_nullable     = pa.schema([pa.field("x", pa.int32(), nullable=True)])
+        s_nullable = pa.schema([pa.field("x", pa.int32(), nullable=True)])
         s_non_nullable = pa.schema([pa.field("x", pa.int32(), nullable=False)])
-        h_nullable     = _make_hasher().hash_schema(s_nullable)
+        h_nullable = _make_hasher().hash_schema(s_nullable)
         h_non_nullable = _make_hasher().hash_schema(s_non_nullable)
         assert h_nullable.digest != h_non_nullable.digest
 
     def test_nullability_golden_values(self):
         """Pin nullable and non-nullable schema digests independently."""
-        s_nullable     = pa.schema([pa.field("x", pa.int32(), nullable=True)])
+        s_nullable = pa.schema([pa.field("x", pa.int32(), nullable=True)])
         s_non_nullable = pa.schema([pa.field("x", pa.int32(), nullable=False)])
         assert _make_hasher().hash_schema(s_nullable).digest.hex() == (
             "000001b8005339e69df64cda60f9ff9c98caa264092a7b666c3f7f85a2bfed20bae3db"
@@ -168,7 +171,9 @@ class TestHashTable:
     def test_different_data_differs(self):
         t1 = pa.table({"x": [1, 2, 3]})
         t2 = pa.table({"x": [1, 2, 4]})
-        assert _make_hasher().hash_table(t1).digest != _make_hasher().hash_table(t2).digest
+        assert (
+            _make_hasher().hash_table(t1).digest != _make_hasher().hash_table(t2).digest
+        )
 
     def test_empty_table(self):
         """Zero-row tables should be hashable without error."""
@@ -187,52 +192,70 @@ class TestHashTable:
     def test_utf8_largeutf8_normalised(self):
         """Utf8 and LargeUtf8 columns should hash identically (starfix normalises)."""
         t_utf8 = pa.table({"s": pa.array(["hello", "world"], type=pa.utf8())})
-        t_large = pa.table(
-            {"s": pa.array(["hello", "world"], type=pa.large_utf8())}
-        )
+        t_large = pa.table({"s": pa.array(["hello", "world"], type=pa.large_utf8())})
         h1 = _make_hasher().hash_table(t_utf8)
         h2 = _make_hasher().hash_table(t_large)
         assert h1.digest == h2.digest
 
     def test_binary_largebinary_normalised(self):
         """Binary and LargeBinary columns should hash identically (starfix normalises)."""
-        t_bin  = pa.table({"b": pa.array([b"hello", b"world"], type=pa.binary())})
+        t_bin = pa.table({"b": pa.array([b"hello", b"world"], type=pa.binary())})
         t_lbin = pa.table({"b": pa.array([b"hello", b"world"], type=pa.large_binary())})
-        assert _make_hasher().hash_table(t_bin).digest == _make_hasher().hash_table(t_lbin).digest
+        assert (
+            _make_hasher().hash_table(t_bin).digest
+            == _make_hasher().hash_table(t_lbin).digest
+        )
 
     def test_row_order_matters(self):
         """Reordering rows must produce a different hash (rows carry positional semantics)."""
-        t_orig     = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
+        t_orig = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         t_reversed = pa.table({"x": pa.array([3, 2, 1], type=pa.int64())})
-        assert _make_hasher().hash_table(t_orig).digest != _make_hasher().hash_table(t_reversed).digest
+        assert (
+            _make_hasher().hash_table(t_orig).digest
+            != _make_hasher().hash_table(t_reversed).digest
+        )
 
     def test_null_position_matters(self):
         """A null in a different row position must produce a different hash."""
-        t_null_first  = pa.table({"x": pa.array([None, 2, 3], type=pa.int32())})
+        t_null_first = pa.table({"x": pa.array([None, 2, 3], type=pa.int32())})
         t_null_second = pa.table({"x": pa.array([1, None, 3], type=pa.int32())})
-        assert _make_hasher().hash_table(t_null_first).digest != _make_hasher().hash_table(t_null_second).digest
+        assert (
+            _make_hasher().hash_table(t_null_first).digest
+            != _make_hasher().hash_table(t_null_second).digest
+        )
 
     def test_null_differs_from_no_null(self):
         """A table with a null value must hash differently from one without."""
         t_with_null = pa.table({"x": pa.array([1, None, 3], type=pa.int32())})
-        t_no_null   = pa.table({"x": pa.array([1, 2, 3],    type=pa.int32())})
-        assert _make_hasher().hash_table(t_with_null).digest != _make_hasher().hash_table(t_no_null).digest
+        t_no_null = pa.table({"x": pa.array([1, 2, 3], type=pa.int32())})
+        assert (
+            _make_hasher().hash_table(t_with_null).digest
+            != _make_hasher().hash_table(t_no_null).digest
+        )
 
     def test_int32_differs_from_int64(self):
         """Same values stored as int32 and int64 must hash differently."""
         t_i32 = pa.table({"x": pa.array([1, 2, 3], type=pa.int32())})
         t_i64 = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        assert _make_hasher().hash_table(t_i32).digest != _make_hasher().hash_table(t_i64).digest
+        assert (
+            _make_hasher().hash_table(t_i32).digest
+            != _make_hasher().hash_table(t_i64).digest
+        )
 
     def test_golden_value_table(self):
         """Pin the full 35-byte table digest so any algorithm change is caught."""
-        table = pa.table({
-            "id":    pa.array([1, 2, 3], type=pa.int32()),
-            "score": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
-            "label": pa.array(["a", "b", "c"], type=pa.utf8()),
-        })
+        table = pa.table(
+            {
+                "id": pa.array([1, 2, 3], type=pa.int32()),
+                "score": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
+                "label": pa.array(["a", "b", "c"], type=pa.utf8()),
+            }
+        )
         h = _make_hasher().hash_table(table)
-        assert h.digest.hex() == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791", (
+        assert (
+            h.digest.hex()
+            == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791"
+        ), (
             f"Table golden digest changed — was the starfix algorithm updated? "
             f"Got: {h.digest.hex()}"
         )
@@ -262,9 +285,9 @@ class TestHashRecordBatch:
         an equivalent single-batch Table (chunked arrays are transparent)."""
         b1 = pa.record_batch({"x": pa.array([1, 2], type=pa.int64())})
         b2 = pa.record_batch({"x": pa.array([3, 4], type=pa.int64())})
-        t_multi  = pa.Table.from_batches([b1, b2])
+        t_multi = pa.Table.from_batches([b1, b2])
         t_single = pa.table({"x": pa.array([1, 2, 3, 4], type=pa.int64())})
-        h_multi  = _make_hasher().hash_table(t_multi)
+        h_multi = _make_hasher().hash_table(t_multi)
         h_single = _make_hasher().hash_table(t_single)
         assert h_multi.digest == h_single.digest
 
@@ -335,85 +358,142 @@ class TestHashSchemaExtensionAware:
             ]
         )
         h = _make_hasher().hash_schema(schema)
-        assert h.digest.hex() == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c", (
+        assert (
+            h.digest.hex()
+            == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c"
+        ), (
             f"Stability invariant broken — extension-free golden digest changed. Got: {h.digest.hex()}"
         )
 
     def test_mixed_metadata_hash_equals_extension_only_hash(self):
         """Key property: a schema with ARROW:extension:name plus unrelated metadata
         hashes identically to the same schema with only the extension key."""
-        ext_only_schema = pa.schema([
-            pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"my.Type"}),
-        ])
-        mixed_schema = pa.schema([
-            pa.field("t", pa.binary(), metadata={
-                _EXT_NAME_KEY: b"my.Type",
-                _COMMENT_KEY:  b"ignored",
-            }),
-        ])
-        h_ext   = _make_hasher().hash_schema(ext_only_schema)
+        ext_only_schema = pa.schema(
+            [
+                pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"my.Type"}),
+            ]
+        )
+        mixed_schema = pa.schema(
+            [
+                pa.field(
+                    "t",
+                    pa.binary(),
+                    metadata={
+                        _EXT_NAME_KEY: b"my.Type",
+                        _COMMENT_KEY: b"ignored",
+                    },
+                ),
+            ]
+        )
+        h_ext = _make_hasher().hash_schema(ext_only_schema)
         h_mixed = _make_hasher().hash_schema(mixed_schema)
         assert h_ext.digest == h_mixed.digest
 
     def test_metadata_key_ordering_does_not_affect_hash(self):
         """Reordering metadata keys in the input does not change the hash."""
-        s1 = pa.schema([pa.field("t", pa.binary(), metadata={
-            _EXT_NAME_KEY: b"my.Type",
-            b"ARROW:extension:metadata": b"{}",
-        })])
-        s2 = pa.schema([pa.field("t", pa.binary(), metadata={
-            b"ARROW:extension:metadata": b"{}",
-            _EXT_NAME_KEY: b"my.Type",
-        })])
-        assert _make_hasher().hash_schema(s1).digest == _make_hasher().hash_schema(s2).digest
+        s1 = pa.schema(
+            [
+                pa.field(
+                    "t",
+                    pa.binary(),
+                    metadata={
+                        _EXT_NAME_KEY: b"my.Type",
+                        b"ARROW:extension:metadata": b"{}",
+                    },
+                )
+            ]
+        )
+        s2 = pa.schema(
+            [
+                pa.field(
+                    "t",
+                    pa.binary(),
+                    metadata={
+                        b"ARROW:extension:metadata": b"{}",
+                        _EXT_NAME_KEY: b"my.Type",
+                    },
+                )
+            ]
+        )
+        assert (
+            _make_hasher().hash_schema(s1).digest
+            == _make_hasher().hash_schema(s2).digest
+        )
 
     def test_extension_metadata_affects_hash(self):
         """Changing an ARROW:extension:name value changes the hash."""
         s1 = pa.schema([pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"TypeA"})])
         s2 = pa.schema([pa.field("t", pa.binary(), metadata={_EXT_NAME_KEY: b"TypeB"})])
-        assert _make_hasher().hash_schema(s1).digest != _make_hasher().hash_schema(s2).digest
+        assert (
+            _make_hasher().hash_schema(s1).digest
+            != _make_hasher().hash_schema(s2).digest
+        )
 
     def test_unrelated_metadata_does_not_affect_hash(self):
         """Adding only unrelated metadata keys does not change the hash."""
         s_clean = pa.schema([pa.field("x", pa.int32())])
         s_noise = pa.schema([pa.field("x", pa.int32(), metadata={_COMMENT_KEY: b"hi"})])
-        assert _make_hasher().hash_schema(s_clean).digest == _make_hasher().hash_schema(s_noise).digest
+        assert (
+            _make_hasher().hash_schema(s_clean).digest
+            == _make_hasher().hash_schema(s_noise).digest
+        )
 
 
 class TestHashTableExtensionAware:
     def test_extension_free_table_golden_value_unchanged(self):
         """Stability invariant: extension-free table hash is byte-identical to
         the pre-v0.3.0 golden value."""
-        table = pa.table({
-            "id":    pa.array([1, 2, 3], type=pa.int32()),
-            "score": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
-            "label": pa.array(["a", "b", "c"], type=pa.utf8()),
-        })
+        table = pa.table(
+            {
+                "id": pa.array([1, 2, 3], type=pa.int32()),
+                "score": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
+                "label": pa.array(["a", "b", "c"], type=pa.utf8()),
+            }
+        )
         h = _make_hasher().hash_table(table)
-        assert h.digest.hex() == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791", (
+        assert (
+            h.digest.hex()
+            == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791"
+        ), (
             f"Stability invariant broken — extension-free table golden digest changed. Got: {h.digest.hex()}"
         )
 
     def test_table_mixed_schema_metadata_equals_extension_only(self):
         """Table schema with mixed metadata hashes identically to same table
         schema with only the extension key (unrelated keys are stripped)."""
-        schema_ext_only = pa.schema([
-            pa.field("x", pa.int32(), metadata={_EXT_NAME_KEY: b"my.Type"}),
-        ])
-        schema_mixed = pa.schema([
-            pa.field("x", pa.int32(), metadata={
-                _EXT_NAME_KEY: b"my.Type",
-                _COMMENT_KEY:  b"ignored",
-            }),
-        ])
+        schema_ext_only = pa.schema(
+            [
+                pa.field("x", pa.int32(), metadata={_EXT_NAME_KEY: b"my.Type"}),
+            ]
+        )
+        schema_mixed = pa.schema(
+            [
+                pa.field(
+                    "x",
+                    pa.int32(),
+                    metadata={
+                        _EXT_NAME_KEY: b"my.Type",
+                        _COMMENT_KEY: b"ignored",
+                    },
+                ),
+            ]
+        )
         data = [pa.array([1, 2, 3], type=pa.int32())]
-        t_ext   = pa.table(data, schema=schema_ext_only)
+        t_ext = pa.table(data, schema=schema_ext_only)
         t_mixed = pa.table(data, schema=schema_mixed)
-        assert _make_hasher().hash_table(t_ext).digest == _make_hasher().hash_table(t_mixed).digest
+        assert (
+            _make_hasher().hash_table(t_ext).digest
+            == _make_hasher().hash_table(t_mixed).digest
+        )
 
     def test_table_unrelated_schema_metadata_does_not_affect_hash(self):
         """Adding only unrelated schema metadata does not change the table hash."""
         t_clean = pa.table({"x": pa.array([1, 2], type=pa.int32())})
-        schema_noise = pa.schema([pa.field("x", pa.int32(), metadata={_COMMENT_KEY: b"hi"})])
+        schema_noise = pa.schema(
+            [pa.field("x", pa.int32(), metadata={_COMMENT_KEY: b"hi"})]
+        )
         t_noise = pa.table([pa.array([1, 2], type=pa.int32())], schema=schema_noise)
-        assert _make_hasher().hash_table(t_clean).digest == _make_hasher().hash_table(t_noise).digest
+        assert (
+            _make_hasher().hash_table(t_clean).digest
+            == _make_hasher().hash_table(t_noise).digest
+        )

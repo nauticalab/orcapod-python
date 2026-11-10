@@ -88,7 +88,9 @@ class SyncPipelineOrchestrator:
                 elif is_function_node(node) or is_side_effect_function_node(node):
                     upstream_buf = self._gather_upstream(node, graph, buffers)
                     upstream_node = list(graph.predecessors(node))[0]
-                    input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
+                    input_stream = self._materialize_as_stream(
+                        upstream_buf, upstream_node
+                    )
                     buffers[node] = node.execute(
                         input_stream,
                         observer=effective_observer,
@@ -101,11 +103,15 @@ class SyncPipelineOrchestrator:
                         self._materialize_as_stream(buf, upstream_node)
                         for buf, upstream_node in upstream_buffers
                     ]
-                    buffers[node] = node.execute(*input_streams, observer=effective_observer)
+                    buffers[node] = node.execute(
+                        *input_streams, observer=effective_observer
+                    )
                 elif is_side_effect_node(node):
                     upstream_buf = self._gather_upstream(node, graph, buffers)
                     upstream_node = list(graph.predecessors(node))[0]
-                    input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
+                    input_stream = self._materialize_as_stream(
+                        upstream_buf, upstream_node
+                    )
                     buffers[node] = node.execute(
                         input_stream,
                         observer=effective_observer,
@@ -130,7 +136,9 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _gather_upstream(
-        node: Any, graph: "GraphProtocol[Any]", buffers: dict[Any, list[tuple[Any, Any]]]
+        node: Any,
+        graph: "GraphProtocol[Any]",
+        buffers: dict[Any, list[tuple[Any, Any]]],
     ) -> list[tuple[Any, Any]]:
         """Gather a single upstream buffer (for function nodes)."""
         predecessors = list(graph.predecessors(node))
@@ -142,7 +150,9 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _gather_upstream_multi(
-        node: Any, graph: "GraphProtocol[Any]", buffers: dict[Any, list[tuple[Any, Any]]]
+        node: Any,
+        graph: "GraphProtocol[Any]",
+        buffers: dict[Any, list[tuple[Any, Any]]],
     ) -> list[tuple[list[tuple[Any, Any]], Any]]:
         """Gather multiple upstream buffers with their nodes (for operators).
 

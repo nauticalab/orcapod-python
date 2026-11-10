@@ -78,19 +78,23 @@ class TestPipelineJobRecording:
     def test_concrete_source_stored_in_sources(self, store):
         """Concrete sources from with-block are stored by source_id in job.sources."""
         src_a = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a", "b"], type=pa.large_string()),
-                "value": pa.array([10, 20], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a", "b"], type=pa.large_string()),
+                    "value": pa.array([10, 20], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="source_a",
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a", "b"], type=pa.large_string()),
-                "score": pa.array([100, 200], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a", "b"], type=pa.large_string()),
+                    "score": pa.array([100, 200], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="source_b",
             infer_nullable=True,
@@ -108,7 +112,9 @@ class TestPipelineJobRecording:
     def test_spec_leaf_not_added_to_sources(self, store):
         """SourceNode leaves are NOT added to job.sources (they're unbound)."""
         src_a, _ = _make_two_sources()
-        tag_b, data_b = _make_source("key", "score", {"key": ["a"], "score": [1]}).output_schema()
+        tag_b, data_b = _make_source(
+            "key", "score", {"key": ["a"], "score": [1]}
+        ).output_schema()
         node_b = SourceNode(name="spec_b", tag_schema=tag_b, data_schema=data_b)
 
         job = PipelineJob(store=store)
@@ -187,7 +193,9 @@ class TestPipelineJobBind:
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         # Create a node that requires an extra column the source doesn't have
-        wrong_node = SourceNode(name="a", tag_schema=tag_a, data_schema=Schema({"value": int, "extra": str}))
+        wrong_node = SourceNode(
+            name="a", tag_schema=tag_a, data_schema=Schema({"value": int, "extra": str})
+        )
 
         job = PipelineJob(store=store)
         with job:
@@ -210,7 +218,9 @@ class TestPipelineJobBind:
         with pipeline:
             Join()(node_a, node_b)
 
-        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(
+            pipeline, sources={"a": src_a, "b": src_b}, store=store
+        )
         assert isinstance(job, PipelineJob)
         # compiled_pipeline is computed lazily (schema-normalised) — not the
         # original object, but it must be a fully compiled Pipeline.
@@ -231,7 +241,9 @@ class TestPipelineJobBind:
         with pipeline:
             Join()(node_a, node_b)
 
-        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(
+            pipeline, sources={"a": src_a, "b": src_b}, store=store
+        )
         assert job._name == ("my_pipeline",), (
             "PipelineJob._name should match Pipeline.name after from_pipeline()"
         )
@@ -778,7 +790,9 @@ class TestPipelineJobSerialization:
         loaded = PipelineJob.load(str(path))
 
         # bind() must not raise "no matching source slot".
-        loaded.bind(sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store)
+        loaded.bind(
+            sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store
+        )
 
         assert loaded._sources[src_a.source_id] is src_a
         assert loaded._sources[src_b.source_id] is src_b
@@ -801,7 +815,9 @@ class TestPipelineJobSerialization:
         # Before binding, is_runnable() should return False.
         assert loaded.is_runnable("adder") is False
 
-        loaded.bind(sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store)
+        loaded.bind(
+            sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store
+        )
 
         # After binding all sources, is_runnable() should return True.
         assert loaded.is_runnable("adder") is True
@@ -809,6 +825,7 @@ class TestPipelineJobSerialization:
     def test_load_nodes_are_job_nodes(self, store, tmp_path):
         """job.nodes on a loaded job returns FunctionJobNode, not blueprint FunctionNode."""
         from orcapod.core.nodes.function_node import FunctionJobNode
+
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
@@ -949,7 +966,8 @@ class TestPipelineJobUsesJobNodes:
 
         assert pipeline_job_with_sources._persistent_node_map is not None
         fn_nodes = [
-            n for n in pipeline_job_with_sources._persistent_node_map.values()
+            n
+            for n in pipeline_job_with_sources._persistent_node_map.values()
             if isinstance(n, FunctionNodeBase)
         ]
         assert len(fn_nodes) >= 1, "Expected at least one FunctionJobNode"
@@ -964,7 +982,8 @@ class TestPipelineJobUsesJobNodes:
 
         assert pipeline_job_with_sources._persistent_node_map is not None
         op_nodes = [
-            n for n in pipeline_job_with_sources._persistent_node_map.values()
+            n
+            for n in pipeline_job_with_sources._persistent_node_map.values()
             if isinstance(n, OperatorNodeBase)
         ]
         assert len(op_nodes) >= 1, "Expected at least one OperatorJobNode"
@@ -973,7 +992,9 @@ class TestPipelineJobUsesJobNodes:
                 f"Expected OperatorJobNode but got {type(node).__name__}"
             )
 
-    def test_blueprint_pipeline_still_has_lightweight_nodes(self, pipeline_job_with_sources):
+    def test_blueprint_pipeline_still_has_lightweight_nodes(
+        self, pipeline_job_with_sources
+    ):
         """The compiled pipeline's _persistent_node_map still has lightweight nodes."""
         from orcapod.core.nodes.function_node import FunctionJobNode
         from orcapod.core.nodes.operator_node import OperatorJobNode
@@ -1017,7 +1038,9 @@ class TestFromPipeline:
         with pytest.raises(RuntimeError, match="function_pod is None"):
             PipelineJob.from_pipeline(loaded_pipeline, store=db)
 
-    def test_from_pipeline_with_sources_binds_them(self, compiled_pipeline, db, source_a):
+    def test_from_pipeline_with_sources_binds_them(
+        self, compiled_pipeline, db, source_a
+    ):
         """Sources passed to from_pipeline are immediately bound."""
         job = PipelineJob.from_pipeline(
             compiled_pipeline, store=db, sources={"slot_a": source_a}

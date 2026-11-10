@@ -210,7 +210,11 @@ class ResultCache:
 
         record_id_bytes = result_table.to_pylist()[0][RECORD_ID_COL]
         # Convert bytes back to uuid.UUID (stored as binary(16) in the DB)
-        record_uuid = uuid.UUID(bytes=bytes(record_id_bytes)) if record_id_bytes is not None else None
+        record_uuid = (
+            uuid.UUID(bytes=bytes(record_id_bytes))
+            if record_id_bytes is not None
+            else None
+        )
         # Drop lookup columns from the returned data
         drop_cols = [RECORD_ID_COL] + [
             c for c in constraints if c in result_table.column_names
@@ -307,9 +311,7 @@ class ResultCache:
         """
         self._ensure_rdb_schema()
 
-        record_id_column = (
-            constants.DATA_RECORD_ID if include_system_columns else None
-        )
+        record_id_column = constants.DATA_RECORD_ID if include_system_columns else None
         result_table = self._result_database.get_all_records(
             self._versioned_record_path, record_id_column=record_id_column
         )

@@ -408,9 +408,9 @@ def compute_schema_hash(
         Hex string — full digest length when ``char_count`` is ``None``,
         otherwise truncated to ``char_count`` characters.
     """
-    return semantic_hasher.hash_object(
-        (tag_schema, data_schema)
-    ).to_hex(char_count=char_count)
+    return semantic_hasher.hash_object((tag_schema, data_schema)).to_hex(
+        char_count=char_count
+    )
 
 
 def compute_source_schema_hash(

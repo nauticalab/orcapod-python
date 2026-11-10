@@ -14,6 +14,16 @@ from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
 )
+import pyarrow as pa
+from orcapod.core.sources import ArrowTableSource
+from orcapod.core.nodes.source_node import SourceJobNode
+from orcapod.channels import Channel
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.data_function import PythonDataFunction
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
+from orcapod.core.operators.join import Join
+from orcapod.core.operators import SelectDataColumns
 
 
 class TestSourceNodeProtocol:
@@ -158,11 +168,6 @@ class TestTypeGuardDispatch:
         assert is_operator_node(node)
 
 
-import pyarrow as pa
-from orcapod.core.sources import ArrowTableSource
-from orcapod.core.nodes.source_node import SourceJobNode
-
-
 def _make_source_job_node(table, tag_col="key"):
     """Helper: create a SourceJobNode wrapping a concrete source.
 
@@ -183,10 +188,12 @@ def _make_source_job_node(table, tag_col="key"):
 
 class TestSourceNodeExecute:
     def _make_source_node(self):
-        table = pa.table({
-            "key": pa.array(["a", "b", "c"], type=pa.large_string()),
-            "value": pa.array([1, 2, 3], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "key": pa.array(["a", "b", "c"], type=pa.large_string()),
+                "value": pa.array([1, 2, 3], type=pa.int64()),
+            }
+        )
         return _make_source_job_node(table)
 
     def test_execute_returns_list(self):
@@ -208,10 +215,13 @@ class TestSourceNodeExecute:
         class Obs:
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("end", node_label))
+
             def on_data_start(self, node_label, t, p):
                 pass
+
             def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
@@ -226,17 +236,16 @@ class TestSourceNodeExecute:
         assert len(result) == 3
 
 
-from orcapod.channels import Channel
-
-
 class TestSourceNodeAsyncExecuteProtocol:
     @pytest.mark.asyncio
     async def test_tightened_signature(self):
         """async_execute takes output only, no inputs."""
-        table = pa.table({
-            "key": pa.array(["a", "b"], type=pa.large_string()),
-            "value": pa.array([1, 2], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([1, 2], type=pa.int64()),
+            }
+        )
         node = _make_source_job_node(table)
 
         output_ch = Channel(buffer_size=16)
@@ -246,20 +255,25 @@ class TestSourceNodeAsyncExecuteProtocol:
 
     @pytest.mark.asyncio
     async def test_async_execute_with_observer(self):
-        table = pa.table({
-            "key": pa.array(["a"], type=pa.large_string()),
-            "value": pa.array([1], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "key": pa.array(["a"], type=pa.large_string()),
+                "value": pa.array([1], type=pa.int64()),
+            }
+        )
         node = _make_source_job_node(table)
         events = []
 
         class Obs:
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("start")
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("end")
+
             def on_data_start(self, node_label, t, p):
                 pass
+
             def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
@@ -272,11 +286,6 @@ class TestSourceNodeAsyncExecuteProtocol:
 # FunctionNode.execute() with observer
 # ===========================================================================
 
-from orcapod.core.function_pod import FunctionPod
-from orcapod.core.data_function import PythonDataFunction
-from orcapod.core.nodes import FunctionNode
-from orcapod.core.nodes.function_node import FunctionJobNode
-
 
 def double_value(value: int) -> int:
     return value * 2
@@ -284,10 +293,12 @@ def double_value(value: int) -> int:
 
 class TestFunctionNodeExecute:
     def _make_function_node(self):
-        table = pa.table({
-            "key": pa.array(["a", "b"], type=pa.large_string()),
-            "value": pa.array([1, 2], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([1, 2], type=pa.int64()),
+            }
+        )
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
@@ -300,18 +311,25 @@ class TestFunctionNodeExecute:
         class Obs:
             def contextualize(self, *identity_path):
                 return self
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, t, p):
                 events.append(("data_start",))
+
             def on_data_end(self, node_label, t, ip, op, cached):
                 events.append(("data_end", cached))
+
             def on_data_crash(self, node_label, t, p, exc):
                 pass
+
             def create_data_logger(self, t, p, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
 
         input_stream = node._input_stream
@@ -341,10 +359,12 @@ class TestFunctionNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_tightened_signature(self):
         """async_execute takes single input_channel, not Sequence."""
-        table = pa.table({
-            "key": pa.array(["a", "b"], type=pa.large_string()),
-            "value": pa.array([1, 2], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([1, 2], type=pa.int64()),
+            }
+        )
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
@@ -365,10 +385,12 @@ class TestFunctionNodeAsyncExecute:
 
     @pytest.mark.asyncio
     async def test_async_execute_with_observer(self):
-        table = pa.table({
-            "key": pa.array(["a"], type=pa.large_string()),
-            "value": pa.array([1], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "key": pa.array(["a"], type=pa.large_string()),
+                "value": pa.array([1], type=pa.int64()),
+            }
+        )
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
@@ -379,18 +401,25 @@ class TestFunctionNodeAsyncExecute:
         class Obs:
             def contextualize(self, *identity_path):
                 return self
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("node_start")
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("node_end")
+
             def on_data_start(self, node_label, t, p):
                 events.append("pkt_start")
+
             def on_data_end(self, node_label, t, ip, op, cached):
                 events.append("pkt_end")
+
             def on_data_crash(self, node_label, t, p, exc):
                 pass
+
             def create_data_logger(self, t, p, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
 
         input_ch = Channel(buffer_size=16)
@@ -408,20 +437,21 @@ class TestFunctionNodeAsyncExecute:
 # OperatorNode.execute() with observer + cache check
 # ===========================================================================
 
-from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
-from orcapod.core.operators.join import Join
-
 
 class TestOperatorNodeExecute:
     def _make_join_node(self):
-        table_a = pa.table({
-            "key": pa.array(["a", "b"], type=pa.large_string()),
-            "value": pa.array([10, 20], type=pa.int64()),
-        })
-        table_b = pa.table({
-            "key": pa.array(["a", "b"], type=pa.large_string()),
-            "score": pa.array([100, 200], type=pa.int64()),
-        })
+        table_a = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        table_b = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "score": pa.array([100, 200], type=pa.int64()),
+            }
+        )
         src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
         src_b = ArrowTableSource(table_b, tag_columns=["key"], infer_nullable=True)
         return OperatorNode(Join(), input_streams=[src_a, src_b])
@@ -433,12 +463,16 @@ class TestOperatorNodeExecute:
         class Obs:
             def contextualize(self, *identity_path):
                 return self
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, t, p):
                 pass
+
             def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
@@ -457,16 +491,16 @@ class TestOperatorNodeExecute:
 # OperatorNode.async_execute() with observer
 # ===========================================================================
 
-from orcapod.core.operators import SelectDataColumns
-
 
 class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_async_execute_with_observer(self):
-        table_a = pa.table({
-            "key": pa.array(["a", "b"], type=pa.large_string()),
-            "value": pa.array([10, 20], type=pa.int64()),
-        })
+        table_a = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([10, 20], type=pa.int64()),
+            }
+        )
         src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
         op = SelectDataColumns(columns=["value"])
         op_node = OperatorNode(op, input_streams=[src_a])
@@ -476,12 +510,16 @@ class TestOperatorNodeAsyncExecute:
         class Obs:
             def contextualize(self, *identity_path):
                 return self
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("start")
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("end")
+
             def on_data_start(self, node_label, t, p):
                 pass
+
             def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
@@ -491,8 +529,6 @@ class TestOperatorNodeAsyncExecute:
             await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
-        await op_node.async_execute(
-            [input_ch.reader], output_ch.writer, observer=Obs()
-        )
+        await op_node.async_execute([input_ch.reader], output_ch.writer, observer=Obs())
         assert "start" in events
         assert "end" in events

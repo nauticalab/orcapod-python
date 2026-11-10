@@ -271,7 +271,9 @@ class TestFunctionNodeExecuteData:
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_execute_data_second_call_same_input_appends_recomputation_record(self, node):
+    def test_execute_data_second_call_same_input_appends_recomputation_record(
+        self, node
+    ):
         """Under the ITL-508 recomputation-index design, each call for the same
         logical input creates a new versioned pipeline record rather than
         deduplicating. Two calls produce two records with sequential indices.
@@ -362,7 +364,10 @@ class TestFunctionNodePipelineIdentity:
                     "x": [100, 200, 300],
                 },
                 schema=pa.schema(
-                    [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("x", pa.int64(), nullable=False),
+                    ]
                 ),
             ),
             tag_columns=["id"],
@@ -659,6 +664,7 @@ class TestGetAllRecordsAllInfo:
     def test_all_info_excludes_node_content_hash(self, filled_node):
         """NODE_CONTENT_HASH_COL must not appear in get_all_records output even with all_info."""
         from orcapod.system_constants import constants
+
         result = filled_node.get_all_records(all_info=True)
         assert result is not None
         assert constants.NODE_CONTENT_HASH_COL not in result.column_names
@@ -707,5 +713,6 @@ class TestFunctionNodeResultPath:
 
         # record_path now includes the schema version suffix (v1 schema)
         from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+
         result_path = node._cached_function_pod.record_path
         assert result_path == pod.uri + (RESULT_DB_SCHEMA_VERSION,)

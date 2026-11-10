@@ -159,9 +159,7 @@ class TestCacheModeNonActive:
         result = list(node.iter_data())
         assert result == []
 
-    def test_iter_data_replay_mode_returns_db_contents(
-        self, simple_source, map_op
-    ):
+    def test_iter_data_replay_mode_returns_db_contents(self, simple_source, map_op):
         """REPLAY + prior LOG run → iter_data returns DB records without run()."""
         db = InMemoryArrowDatabase()
         # Populate DB via LOG run
@@ -177,9 +175,7 @@ class TestCacheModeNonActive:
         for _, data in result:
             assert "renamed_x" in data.keys()
 
-    def test_iter_data_log_mode_no_run_returns_empty(
-        self, simple_source, map_op
-    ):
+    def test_iter_data_log_mode_no_run_returns_empty(self, simple_source, map_op):
         """LOG mode: DB has prior records but iter_data() without run() returns empty.
 
         This verifies the CacheMode guard in _load_cached_stream_from_db.
@@ -192,8 +188,6 @@ class TestCacheModeNonActive:
         assert db.get_all_records(node_log.node_identity_path) is not None
 
         # Fresh LOG node (same DB, no in-memory cache)
-        node_fresh = _node(
-            map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG
-        )
+        node_fresh = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)
         result = list(node_fresh.iter_data())
         assert result == []

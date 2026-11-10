@@ -32,6 +32,7 @@ class DataContext:
     arrow_hasher: ArrowHasherProtocol
     semantic_hasher: SemanticHasherProtocol
 
+
 class ContextValidationError(Exception):
     """Raised when context validation fails."""
 

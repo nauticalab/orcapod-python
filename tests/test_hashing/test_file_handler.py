@@ -6,9 +6,14 @@ import pytest
 
 from orcapod.logical_types.file_type import File
 from orcapod.hashing.file_hashers import FileHasher
-from orcapod.hashing.semantic_hashing.builtin_handlers import FileHandler, register_builtin_python_type_handlers
+from orcapod.hashing.semantic_hashing.builtin_handlers import (
+    FileHandler,
+    register_builtin_python_type_handlers,
+)
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import (
+    PythonTypeHandlerRegistry,
+)
 from orcapod.types import ContentHash
 
 

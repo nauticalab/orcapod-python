@@ -83,8 +83,12 @@ def _build_job() -> PipelineJob:
     job = PipelineJob(name="grades_pipeline", store=db)
 
     with job:
-        students = ArrowTableSource(STUDENTS, tag_columns=["student_id"], infer_nullable=True)
-        grades = ArrowTableSource(GRADES, tag_columns=["student_id"], infer_nullable=True)
+        students = ArrowTableSource(
+            STUDENTS, tag_columns=["student_id"], infer_nullable=True
+        )
+        grades = ArrowTableSource(
+            GRADES, tag_columns=["student_id"], infer_nullable=True
+        )
 
         joined = Join()(students, grades, label="join")
         compute_letter_grade.pod(joined, label="letter_grade")

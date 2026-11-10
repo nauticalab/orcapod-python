@@ -27,10 +27,12 @@ from orcapod import InvocationHashConfig
 
 
 def _make_stream(n: int = 2) -> ArrowTableStream:
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("x", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -238,7 +240,9 @@ class TestErrorStatus:
 class TestFilteredOutput:
     def test_filtered_row_fires_hook_with_none_output(self):
         pf = PythonDataFunction(double, output_keys="result")
-        pf.set_active(False)  # set_active(False) causes process_data to return None output
+        pf.set_active(
+            False
+        )  # set_active(False) causes process_data to return None output
         pod = FunctionPod(pf)
 
         payloads: list[PostRunPayload] = []
@@ -313,9 +317,7 @@ class TestParallelExecution:
 
         assert len(results) == 4
         assert len(payloads) == 4
-        assert all(
-            p.stats.status == InvocationStatus.COMPUTED for p in payloads
-        )
+        assert all(p.stats.status == InvocationStatus.COMPUTED for p in payloads)
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +344,7 @@ class TestAsyncExecuteHooks:
             await input_ch.writer.close()
 
         import asyncio
+
         await asyncio.gather(
             feed(),
             pod.async_execute([input_ch.reader], output_ch.writer),
@@ -431,6 +434,7 @@ class TestDecoratorConvenience:
 
     def test_public_api_imports(self):
         import orcapod
+
         assert hasattr(orcapod, "PostRunPayload")
         assert hasattr(orcapod, "HookConfig")
         assert hasattr(orcapod, "InvocationStatus")

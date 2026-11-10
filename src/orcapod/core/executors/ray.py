@@ -123,15 +123,17 @@ class RayExecutor(PythonFunctionExecutorBase):
             try:
                 import cloudpickle
 
-                def _pickle_logger(l: logging.Logger) -> tuple:
+                def _pickle_logger(lgr: logging.Logger) -> tuple:
                     # Root logger has name "root" but must be fetched as ""
-                    name = "" if isinstance(l, logging.RootLogger) else l.name
+                    name = "" if isinstance(lgr, logging.RootLogger) else lgr.name
                     return logging.getLogger, (name,)
 
                 if logging.Logger not in cloudpickle.CloudPickler.dispatch:
                     cloudpickle.CloudPickler.dispatch[logging.Logger] = _pickle_logger
                 if logging.RootLogger not in cloudpickle.CloudPickler.dispatch:
-                    cloudpickle.CloudPickler.dispatch[logging.RootLogger] = _pickle_logger
+                    cloudpickle.CloudPickler.dispatch[logging.RootLogger] = (
+                        _pickle_logger
+                    )
                 _cloudpickle_dispatch_registered = True
             except (ImportError, AttributeError, KeyError):
                 pass  # cloudpickle not available or API changed — best effort
@@ -260,13 +262,14 @@ class RayExecutor(PythonFunctionExecutorBase):
         """
         if isinstance(value, dict):
             return tuple(
-                (k, RayExecutor._normalize_opts(v))
-                for k, v in sorted(value.items())
+                (k, RayExecutor._normalize_opts(v)) for k, v in sorted(value.items())
             )
         if isinstance(value, (list, tuple)):
             return tuple(RayExecutor._normalize_opts(v) for v in value)
         if isinstance(value, set):
-            return tuple(sorted((RayExecutor._normalize_opts(v) for v in value), key=repr))
+            return tuple(
+                sorted((RayExecutor._normalize_opts(v) for v in value), key=repr)
+            )
         return value
 
     @staticmethod
@@ -280,8 +283,11 @@ class RayExecutor(PythonFunctionExecutorBase):
         if logger is None:
             return
         logger.record(
-            stdout_log=stdout_log, stderr_log=stderr_log, python_logs=python_logs,
-            traceback=None, success=True,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+            python_logs=python_logs,
+            traceback=None,
+            success=True,
         )
 
     @staticmethod
@@ -338,11 +344,13 @@ class RayExecutor(PythonFunctionExecutorBase):
 
     def get_executor_data(self) -> dict[str, Any]:
         executor_data = super().get_executor_data()
-        executor_data.update({
-            "ray_address": self._ray_address or "auto",
-            "remote_opts": self._remote_opts,
-            "runtime_env": self._runtime_env is not None,
-        })
+        executor_data.update(
+            {
+                "ray_address": self._ray_address or "auto",
+                "remote_opts": self._remote_opts,
+                "runtime_env": self._runtime_env is not None,
+            }
+        )
         return executor_data
 
     def get_executor_data_schema(self) -> Schema:
@@ -353,9 +361,11 @@ class RayExecutor(PythonFunctionExecutorBase):
         before storage. The schema here describes the pre-stringification
         executor output.
         """
-        return Schema({
-            "executor_type": str,
-            "ray_address": str,
-            "remote_opts": dict[str, Any],
-            "runtime_env": bool,
-        })
+        return Schema(
+            {
+                "executor_type": str,
+                "ray_address": str,
+                "remote_opts": dict[str, Any],
+                "runtime_env": bool,
+            }
+        )

@@ -1,7 +1,11 @@
 """Tests for scoped database serialization round-trips."""
+
 import pytest
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
-from orcapod.pipeline.serialization import DatabaseRegistry, resolve_database_from_config
+from orcapod.pipeline.serialization import (
+    DatabaseRegistry,
+    resolve_database_from_config,
+)
 
 
 class TestScopedDatabaseToConfig:
@@ -56,7 +60,9 @@ class TestResolveFromScopedConfig:
         scoped_config = scoped_original.to_config(db_registry=registry)
         registry_dict = registry.to_dict()
 
-        resolved = resolve_database_from_config(scoped_config, db_registry=registry_dict)
+        resolved = resolve_database_from_config(
+            scoped_config, db_registry=registry_dict
+        )
         assert resolved._scoped_path == ("pipeline", "node")
 
     def test_resolve_scoped_config_has_correct_path_prefix(self):
@@ -67,7 +73,9 @@ class TestResolveFromScopedConfig:
         scoped_config = scoped_original.to_config(db_registry=registry)
         registry_dict = registry.to_dict()
 
-        resolved = resolve_database_from_config(scoped_config, db_registry=registry_dict)
+        resolved = resolve_database_from_config(
+            scoped_config, db_registry=registry_dict
+        )
         assert resolved._path_prefix == ("pipeline", "node")
 
     def test_resolve_non_scoped_config_ignores_registry(self):

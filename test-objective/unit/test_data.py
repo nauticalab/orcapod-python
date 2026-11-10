@@ -1,8 +1,5 @@
 """Specification-derived tests for Data."""
 
-import pyarrow as pa
-import pytest
-
 from orcapod.core.datagrams.datagram import Datagram
 from orcapod.core.datagrams.tag_data import Data
 from orcapod.types import ColumnConfig
@@ -11,12 +8,14 @@ from orcapod.types import ColumnConfig
 def _make_context():
     """Create a DataContext for tests."""
     from orcapod.contexts import resolve_context
+
     return resolve_context(None)
 
 
 # ---------------------------------------------------------------------------
 # Source info stored per data column
 # ---------------------------------------------------------------------------
+
 
 class TestDataSourceInfo:
     """source_info is stored per data column."""
@@ -66,6 +65,7 @@ class TestDataSourceInfo:
 # Source info included with ColumnConfig
 # ---------------------------------------------------------------------------
 
+
 class TestDataSourceInfoWithConfig:
     """With ColumnConfig source=True or all_info=True, source columns included."""
 
@@ -114,6 +114,7 @@ class TestDataSourceInfoWithConfig:
 # with_source_info() returns new instance (immutable)
 # ---------------------------------------------------------------------------
 
+
 class TestDataWithSourceInfo:
     """with_source_info() returns new instance (immutable)."""
 
@@ -136,6 +137,7 @@ class TestDataWithSourceInfo:
 # ---------------------------------------------------------------------------
 # rename() also renames source_info keys
 # ---------------------------------------------------------------------------
+
 
 class TestDataRename:
     """rename() also renames source_info keys."""
@@ -160,6 +162,7 @@ class TestDataRename:
 # with_columns() adds source_info=None for new columns
 # ---------------------------------------------------------------------------
 
+
 class TestDataWithColumns:
     """with_columns() adds source_info=None for new columns."""
 
@@ -179,6 +182,7 @@ class TestDataWithColumns:
 # as_datagram() returns Datagram, not Data
 # ---------------------------------------------------------------------------
 
+
 class TestDataAsDatagram:
     """as_datagram() returns a Datagram (not Data)."""
 
@@ -191,7 +195,9 @@ class TestDataAsDatagram:
 
     def test_as_datagram_preserves_data(self):
         ctx = _make_context()
-        pkt = Data({"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"})
+        pkt = Data(
+            {"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"}
+        )
         dg = pkt.as_datagram()
         assert dg["x"] == 1
         assert dg["y"] == "hello"
@@ -200,6 +206,7 @@ class TestDataAsDatagram:
 # ---------------------------------------------------------------------------
 # copy() preserves source_info
 # ---------------------------------------------------------------------------
+
 
 class TestDataCopy:
     """copy() preserves source_info."""
@@ -218,7 +225,9 @@ class TestDataCopy:
 
     def test_copy_preserves_data(self):
         ctx = _make_context()
-        pkt = Data({"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"})
+        pkt = Data(
+            {"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"}
+        )
         copied = pkt.copy()
         assert copied["x"] == 1
         assert copied["y"] == "hello"

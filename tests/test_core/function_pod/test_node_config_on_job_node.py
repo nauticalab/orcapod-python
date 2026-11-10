@@ -1,5 +1,4 @@
 import pyarrow as pa
-import pytest
 
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod

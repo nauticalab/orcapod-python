@@ -18,8 +18,8 @@ from orcapod.protocols import core_protocols as cp
 from orcapod.types import CacheMode, NodeConfig
 
 if TYPE_CHECKING:
-    from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode
-    from orcapod.core.nodes.source_node import SourceNode
+    from pathlib import Path
+
     from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
     from orcapod.pipeline.execution_context import ExecutionContext
     from orcapod.pipeline.graph import Pipeline
@@ -99,7 +99,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None) -> None:
         """Exit the recording context, compiling if no exception occurred."""
-        AutoRegisteringContextBasedTracker.__exit__(self, exc_type, exc_value, traceback)
+        AutoRegisteringContextBasedTracker.__exit__(
+            self, exc_type, exc_value, traceback
+        )
         if exc_type is None and self._auto_compile:
             self.compile()
 
@@ -483,8 +485,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # Required to wire blueprint upstreams to the correct hash key even when
         # job node identity (content_hash) differs from the map key.
         job_id_to_bp_hash: dict[int, str] = {
-            id(job_node): bp_hash
-            for bp_hash, job_node in persistent.items()
+            id(job_node): bp_hash for bp_hash, job_node in persistent.items()
         }
 
         node_map: dict[str, object] = {}
@@ -509,8 +510,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
             elif isinstance(job_node, OperatorJobNode):
                 blueprint_upstreams = tuple(
-                    node_map[job_id_to_bp_hash[id(s)]]
-                    for s in job_node._input_streams
+                    node_map[job_id_to_bp_hash[id(s)]] for s in job_node._input_streams
                 )
                 node_map[node_hash] = OperatorNode(
                     operator=job_node._operator,
@@ -535,13 +535,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # Blueprint nodes use schema-based content_hash() (SourceNode is schema-only,
         # so FunctionNode/OperatorNode upstreaming SourceNodes are also schema-based).
         old_to_new: dict[str, str] = {
-            h: bp_node.content_hash().to_string()
-            for h, bp_node in node_map.items()
+            h: bp_node.content_hash().to_string() for h, bp_node in node_map.items()
         }
         # Re-key node_map with schema-based hashes.
         new_node_map: dict[str, object] = {
-            new_h: node_map[h]
-            for h, new_h in old_to_new.items()
+            new_h: node_map[h] for h, new_h in old_to_new.items()
         }
 
         # Rebuild hash graph with schema-based keys.
@@ -550,7 +548,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # valid for the blueprint nodes.
         bp_hash_graph = _nx.DiGraph()
         for old_h, new_h in old_to_new.items():
-            old_attrs = dict(self._hash_graph.nodes[old_h]) if old_h in self._hash_graph else {}
+            old_attrs = (
+                dict(self._hash_graph.nodes[old_h]) if old_h in self._hash_graph else {}
+            )
             bp_hash_graph.add_node(new_h, **old_attrs)
         for up_h, down_h in self._hash_graph.edges():
             new_up = old_to_new.get(up_h)
@@ -569,14 +569,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         pipeline._graph_edges = new_graph_edges
         pipeline._persistent_node_map = new_node_map
         pipeline._upstreams = {
-            old_to_new[h]: node_map[h]
-            for h in self._upstreams
-            if h in old_to_new
+            old_to_new[h]: node_map[h] for h in self._upstreams if h in old_to_new
         }
         pipeline._node_lut = {
-            old_to_new[h]: node_map[h]
-            for h in self._node_lut
-            if h in old_to_new
+            old_to_new[h]: node_map[h] for h in self._node_lut if h in old_to_new
         }
         pipeline._nodes = {
             label: node_map[job_id_to_bp_hash[id(job_node)]]
@@ -1012,7 +1008,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         # Reconstruct sources (best-effort)
         sources: dict[str, cp.StreamProtocol] = {}
-        for spec_name, src_config in data.get("bindings", {}).get("sources", {}).items():
+        for spec_name, src_config in (
+            data.get("bindings", {}).get("sources", {}).items()
+        ):
             try:
                 source = resolve_source_from_config(src_config)
                 if source is not None:
@@ -1028,10 +1026,15 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             store_config = data.get("bindings", {}).get("store")
             if store_config:
                 try:
-                    from orcapod.pipeline.serialization import resolve_database_from_config
+                    from orcapod.pipeline.serialization import (
+                        resolve_database_from_config,
+                    )
+
                     effective_store = resolve_database_from_config(store_config)
                 except Exception:
-                    logger.warning("Could not reconstruct store from config — skipping.")
+                    logger.warning(
+                        "Could not reconstruct store from config — skipping."
+                    )
 
         # Reconstruct the job directly without going through to_invocations().
         # The loaded pipeline may have stub nodes (function_pod=None, operator=None)
@@ -1093,16 +1096,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             elif isinstance(bp_node, _FunctionNode):
                 descriptor = getattr(bp_node, "_descriptor", None) or {}
                 preds = list(job._hash_graph.predecessors(node_hash))
-                input_stream = (
-                    job._persistent_node_map.get(preds[0]) if preds else None
-                )
+                input_stream = job._persistent_node_map.get(preds[0]) if preds else None
                 # Pass the live content hash (from the run) so the stub's
                 # content_hash() matches the _node_content_hash column in
                 # the DB — required for _filter_by_content_hash() to work
                 # in get_all_records() on a loaded job.
-                live_content_hash = node_job_content_hashes.get(
-                    bp_node.label
-                )
+                live_content_hash = node_job_content_hashes.get(bp_node.label)
                 fjn = FunctionJobNode.from_descriptor(
                     descriptor,
                     input_stream=input_stream,

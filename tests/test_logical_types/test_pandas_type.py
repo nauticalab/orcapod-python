@@ -1,4 +1,5 @@
 """Tests for LogicalPandasDataFrame and LogicalPandasSeries."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -12,31 +13,44 @@ from orcapod.logical_types.protocols import LogicalTypeProtocol
 class TestLogicalPandasDataFrameProtocol:
     def test_isinstance_logical_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         assert isinstance(LogicalPandasDataFrame(), LogicalTypeProtocol)
 
     def test_logical_type_name(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         assert LogicalPandasDataFrame().logical_type_name == "pandas.dataframe"
 
     def test_python_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         assert LogicalPandasDataFrame().python_type is pd.DataFrame
 
     def test_arrow_ext_name(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
-        assert LogicalPandasDataFrame().get_arrow_extension_type().extension_name == "pandas.dataframe"
+
+        assert (
+            LogicalPandasDataFrame().get_arrow_extension_type().extension_name
+            == "pandas.dataframe"
+        )
 
     def test_arrow_ext_storage_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
-        assert LogicalPandasDataFrame().get_arrow_extension_type().storage_type == pa.large_binary()
+
+        assert (
+            LogicalPandasDataFrame().get_arrow_extension_type().storage_type
+            == pa.large_binary()
+        )
 
     def test_arrow_ext_is_cached(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         lt = LogicalPandasDataFrame()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
     def test_polars_ext_is_cached(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         lt = LogicalPandasDataFrame()
         assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
 
@@ -44,6 +58,7 @@ class TestLogicalPandasDataFrameProtocol:
 class TestLogicalPandasDataFrameStorage:
     def test_python_to_storage_returns_bytes(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         df = pd.DataFrame({"a": [1.0, 2.0], "b": [3, 4]})
         result = LogicalPandasDataFrame().python_to_storage(df)
         assert isinstance(result, bytes)
@@ -62,6 +77,7 @@ class TestLogicalPandasDataFrameStorage:
 class TestLogicalPandasDataFrameRoundTrip:
     def _rt(self, df: pd.DataFrame) -> pd.DataFrame:
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
         lt = LogicalPandasDataFrame()
         return lt.storage_to_python(lt.python_to_storage(df))
 
@@ -118,31 +134,44 @@ class TestLogicalPandasDataFrameRoundTrip:
 class TestLogicalPandasSeriesProtocol:
     def test_isinstance_logical_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         assert isinstance(LogicalPandasSeries(), LogicalTypeProtocol)
 
     def test_logical_type_name(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         assert LogicalPandasSeries().logical_type_name == "pandas.series"
 
     def test_python_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         assert LogicalPandasSeries().python_type is pd.Series
 
     def test_arrow_ext_name(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
-        assert LogicalPandasSeries().get_arrow_extension_type().extension_name == "pandas.series"
+
+        assert (
+            LogicalPandasSeries().get_arrow_extension_type().extension_name
+            == "pandas.series"
+        )
 
     def test_arrow_ext_storage_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
-        assert LogicalPandasSeries().get_arrow_extension_type().storage_type == pa.large_binary()
+
+        assert (
+            LogicalPandasSeries().get_arrow_extension_type().storage_type
+            == pa.large_binary()
+        )
 
     def test_arrow_ext_is_cached(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         lt = LogicalPandasSeries()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
     def test_polars_ext_is_cached(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         lt = LogicalPandasSeries()
         assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
 
@@ -150,6 +179,7 @@ class TestLogicalPandasSeriesProtocol:
 class TestLogicalPandasSeriesRoundTrip:
     def _rt(self, s: pd.Series) -> pd.Series:
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         lt = LogicalPandasSeries()
         return lt.storage_to_python(lt.python_to_storage(s))
 
@@ -195,6 +225,7 @@ class TestLogicalPandasSeriesRoundTrip:
 
     def test_reserved_name_raises_value_error(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
         s = pd.Series([1.0, 2.0], name="__pandas_series_unnamed__")
         with pytest.raises(ValueError, match="reserved"):
             LogicalPandasSeries().python_to_storage(s)

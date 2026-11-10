@@ -6,6 +6,7 @@ Provides two public functions:
   and a merged dict of deltalake-compatible storage_options.
 - is_cloud_uri: Returns True for cloud storage schemes (s3://, gs://, etc.).
 """
+
 from __future__ import annotations
 
 import logging
@@ -47,7 +48,10 @@ def _extract_upath_options(upath: UPath) -> dict[str, str]:
     try:
         fsspec_opts: dict = dict(getattr(upath, "storage_options", {}))
     except TypeError:
-        logger.warning("Could not extract storage_options from UPath %r; using empty options", upath)
+        logger.warning(
+            "Could not extract storage_options from UPath %r; using empty options",
+            upath,
+        )
         return {}
 
     result: dict[str, str] = {}
@@ -85,6 +89,7 @@ def parse_base_path(
     """
     try:
         from upath import UPath as _UPath
+
         is_upath = isinstance(base_path, _UPath)
     except ImportError:
         is_upath = False

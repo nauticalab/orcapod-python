@@ -85,19 +85,24 @@ class TestConstruction:
 
     def test_record_path_ends_with_schema_version(self, cached_pf):
         from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+
         assert cached_pf.record_path[-1] == RESULT_DB_SCHEMA_VERSION
 
     def test_record_path_contains_inner_uri(self, cached_pf, inner_pf):
         """record_path is inner_pf.uri + (RESULT_DB_SCHEMA_VERSION,)."""
         from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+
         assert cached_pf.record_path == inner_pf.uri + (RESULT_DB_SCHEMA_VERSION,)
 
     def test_record_path_prefix_prepended(self, inner_pf, db):
         from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
+
         cpf = CachedDataFunction(
             inner_pf, result_database=db, record_path_prefix=("org", "project")
         )
-        assert cpf.record_path == ("org", "project") + inner_pf.uri + (RESULT_DB_SCHEMA_VERSION,)
+        assert cpf.record_path == ("org", "project") + inner_pf.uri + (
+            RESULT_DB_SCHEMA_VERSION,
+        )
 
     def test_auto_flush_true_by_default(self, cached_pf):
         assert cached_pf._cache._auto_flush is True
@@ -470,17 +475,13 @@ class TestRecordDataColumns:
 
 
 class TestGetAllCachedOutputsSystemColumns:
-    def test_include_system_columns_true_exposes_record_id(
-        self, cached_pf, input_data
-    ):
+    def test_include_system_columns_true_exposes_record_id(self, cached_pf, input_data):
         cached_pf.call(input_data)
         table = cached_pf.get_all_cached_outputs(include_system_columns=True)
         assert table is not None
         assert constants.DATA_RECORD_ID in table.column_names
 
-    def test_include_system_columns_false_hides_record_id(
-        self, cached_pf, input_data
-    ):
+    def test_include_system_columns_false_hides_record_id(self, cached_pf, input_data):
         cached_pf.call(input_data)
         table = cached_pf.get_all_cached_outputs(include_system_columns=False)
         assert table is not None

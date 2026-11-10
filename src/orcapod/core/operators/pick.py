@@ -1,4 +1,5 @@
 """Pick operator — keyed projection into dict/struct-typed columns."""
+
 from __future__ import annotations
 
 import logging
@@ -133,7 +134,9 @@ class Pick(UnaryOperator):
         Returns:
             A ``(tag_schema, data_schema)`` tuple.
         """
-        tag_schema, data_schema = stream.output_schema(columns=columns, all_info=all_info)
+        tag_schema, data_schema = stream.output_schema(
+            columns=columns, all_info=all_info
+        )
         data_dict = dict(data_schema)
 
         if self.out is None:
@@ -203,20 +206,18 @@ class Pick(UnaryOperator):
             # then re-add under the same name with the resolved output type.
             new_data = (
                 data.drop(self.column)
-                    .with_columns(
-                        column_types={self.column: self._output_type},
-                        **{self.column: extracted},
-                    )
-                    .with_source_info(**{self.column: new_src})
+                .with_columns(
+                    column_types={self.column: self._output_type},
+                    **{self.column: extracted},
+                )
+                .with_source_info(**{self.column: new_src})
             )
         else:
             # Add new column; original stays unchanged.
-            new_data = (
-                data.with_columns(
-                    column_types={self.out: self._output_type},
-                    **{self.out: extracted},
-                ).with_source_info(**{self.out: new_src})
-            )
+            new_data = data.with_columns(
+                column_types={self.out: self._output_type},
+                **{self.out: extracted},
+            ).with_source_info(**{self.out: new_src})
 
         return tag, new_data
 
@@ -254,8 +255,10 @@ class Pick(UnaryOperator):
             tag_columns, _ = stream.keys()
             tag_schema, data_schema = self.unary_output_schema(stream)
             combined_schema = {**dict(tag_schema), **dict(data_schema)}
-            empty_table = stream.data_context.type_converter.python_dicts_to_arrow_table(
-                [], python_schema=combined_schema
+            empty_table = (
+                stream.data_context.type_converter.python_dicts_to_arrow_table(
+                    [], python_schema=combined_schema
+                )
             )
             return ArrowTableStream(
                 empty_table,

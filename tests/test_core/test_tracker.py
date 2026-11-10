@@ -90,10 +90,16 @@ def _make_y_spec(name: str = "test_y_spec") -> SourceNode:
 def _make_stream(n: int = 3) -> ArrowTableStream:
     """Simple stream with tag=id, data=x. Uses nullable=False schema."""
     schema = pa.schema(
-        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
     )
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "x": pa.array(list(range(n)), type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -122,10 +128,16 @@ def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
 def _make_y_stream(n: int = 3) -> ArrowTableStream:
     """Stream with tag=id, data=y (non-overlapping with _make_stream). Uses nullable=False schema."""
     schema = pa.schema(
-        [pa.field("id", pa.int64(), nullable=False), pa.field("y", pa.int64(), nullable=False)]
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("y", pa.int64(), nullable=False),
+        ]
     )
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()), "y": pa.array([i * 10 for i in range(n)], type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
@@ -443,6 +455,7 @@ class TestPipelineRecording:
         # After compile(), _upstreams holds a SourceNode wrapper (schema-only)
         tracker.compile()
         from orcapod.core.nodes.source_node import SourceNode
+
         assert stream_hash in tracker._upstreams
         assert isinstance(tracker._upstreams[stream_hash], SourceNode)
 

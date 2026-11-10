@@ -8,6 +8,9 @@ import pytest
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.core.sources.data_frame_source import DataFrameSource
+from orcapod.core.sources.csv_source import CSVSource
+from orcapod.core.sources.delta_table_source import DeltaTableSource
+from orcapod.core.sources.list_source import ListSource
 
 
 class TestDictSourceBuilder:
@@ -65,10 +68,6 @@ class TestDataFrameSourceBuilder:
         src = DataFrameSource(data={"id": [1], "x": [10]}, tag_columns=["id"])
         identity = src.identity_structure()
         assert identity[0] == "DataFrameSource"
-
-
-from orcapod.core.sources.csv_source import CSVSource
-from orcapod.core.sources.delta_table_source import DeltaTableSource
 
 
 class TestCSVSourceBuilder:
@@ -137,9 +136,6 @@ class TestDeltaTableSourceBuilder:
     def test_identity_uses_class_name(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
         assert src.identity_structure()[0] == "DeltaTableSource"
-
-
-from orcapod.core.sources.list_source import ListSource
 
 
 class TestListSourceBuilder:

@@ -165,9 +165,7 @@ class SelectDataColumns(UnaryOperator):
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, data_columns = stream.keys()
         data_columns_to_drop = [c for c in data_columns if c not in self.columns]
-        new_data_columns = [
-            c for c in data_columns if c not in data_columns_to_drop
-        ]
+        new_data_columns = [c for c in data_columns if c not in data_columns_to_drop]
 
         if len(new_data_columns) == len(data_columns):
             logger.info("All data columns are selected. Returning stream unaltered.")

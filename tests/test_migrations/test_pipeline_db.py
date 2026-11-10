@@ -1,12 +1,11 @@
 """Tests for migrate_pipeline_v0_to_v1()."""
+
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.migrations.pipeline_db import migrate_pipeline_v0_to_v1
-from orcapod.migrations.types import MigrationResult
 from orcapod.system_constants import PIPELINE_DB_SCHEMA_VERSION, constants
 from orcapod.types import ContentHash
 
@@ -31,17 +30,25 @@ def _write_v0_rdb_row(
     In real operation the rdb's internal record ID equals the output
     datagram UUID, which is the same value stored as ``__data_id`` in the pdb.
     """
-    row = pa.table({
-        "__input_data_hash": pa.array([input_hash.to_string()], type=pa.large_string()),
-        "__pf_var_function_name": pa.array(["fn"], type=pa.large_string()),
-        "__pf_var_function_signature_hash": pa.array(["sha256:aabb"], type=pa.large_string()),
-        "__pf_var_function_content_hash": pa.array(["sha256:ccdd"], type=pa.large_string()),
-        "__pf_var_git_hash": pa.array(["abc"], type=pa.large_string()),
-        "__pf_exec_executor_type": pa.array(["local"], type=pa.large_string()),
-        "__pf_exec_python_version": pa.array(["3.11"], type=pa.large_string()),
-        "__pod_ts": pa.array([0], type=pa.timestamp("us", tz="UTC")),
-        "result": pa.array([99], type=pa.int64()),
-    })
+    row = pa.table(
+        {
+            "__input_data_hash": pa.array(
+                [input_hash.to_string()], type=pa.large_string()
+            ),
+            "__pf_var_function_name": pa.array(["fn"], type=pa.large_string()),
+            "__pf_var_function_signature_hash": pa.array(
+                ["sha256:aabb"], type=pa.large_string()
+            ),
+            "__pf_var_function_content_hash": pa.array(
+                ["sha256:ccdd"], type=pa.large_string()
+            ),
+            "__pf_var_git_hash": pa.array(["abc"], type=pa.large_string()),
+            "__pf_exec_executor_type": pa.array(["local"], type=pa.large_string()),
+            "__pf_exec_python_version": pa.array(["3.11"], type=pa.large_string()),
+            "__pod_ts": pa.array([0], type=pa.timestamp("us", tz="UTC")),
+            "result": pa.array([99], type=pa.int64()),
+        }
+    )
     db.add_record(rdb_path, data_id, row)
     db.flush()
 
@@ -62,17 +69,27 @@ def _write_v0_pdb_row(
     Uses the v0 column name ``_node_content_hash`` (with ``DATAGRAM_PREFIX``)
     to simulate a true pre-migration pdb row.
     """
-    row = pa.table({
-        constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
-        _V0_NODE_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
-        constants.INPUT_DATA_HASH_COL: pa.array([_INPUT_HASH.to_string()], type=pa.large_string()),
-        constants.OUTPUT_DATA_HASH_COL: pa.array([_OUTPUT_HASH.to_string()], type=pa.large_string()),
-        f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(["ctx"], type=pa.large_string()),
-        f"{constants.META_PREFIX}computed": pa.array([True], type=pa.bool_()),
-        constants.IS_EPHEMERAL_COL: pa.array([False], type=pa.bool_()),
-        "__pipeline_base_entry_id": pa.array([data_id], type=pa.large_binary()),
-        "__pipeline_recomputation_index": pa.array([0], type=pa.int32()),
-    })
+    row = pa.table(
+        {
+            constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
+            _V0_NODE_HASH_COL: pa.array(
+                [_NODE_HASH.to_string()], type=pa.large_string()
+            ),
+            constants.INPUT_DATA_HASH_COL: pa.array(
+                [_INPUT_HASH.to_string()], type=pa.large_string()
+            ),
+            constants.OUTPUT_DATA_HASH_COL: pa.array(
+                [_OUTPUT_HASH.to_string()], type=pa.large_string()
+            ),
+            f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
+                ["ctx"], type=pa.large_string()
+            ),
+            f"{constants.META_PREFIX}computed": pa.array([True], type=pa.bool_()),
+            constants.IS_EPHEMERAL_COL: pa.array([False], type=pa.bool_()),
+            "__pipeline_base_entry_id": pa.array([data_id], type=pa.large_binary()),
+            "__pipeline_recomputation_index": pa.array([0], type=pa.int32()),
+        }
+    )
     db.add_record(pdb_path, pdb_record_id, row)
     db.flush()
 
@@ -94,18 +111,28 @@ def _write_v0_pdb_row_with_system_tags(
     Uses the v0 column name ``_node_content_hash`` (with ``DATAGRAM_PREFIX``)
     to simulate a true pre-migration pdb row.
     """
-    row = pa.table({
-        _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
-        constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
-        _V0_NODE_HASH_COL: pa.array([_NODE_HASH.to_string()], type=pa.large_string()),
-        constants.INPUT_DATA_HASH_COL: pa.array([_INPUT_HASH.to_string()], type=pa.large_string()),
-        constants.OUTPUT_DATA_HASH_COL: pa.array([_OUTPUT_HASH.to_string()], type=pa.large_string()),
-        f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(["ctx"], type=pa.large_string()),
-        f"{constants.META_PREFIX}computed": pa.array([True], type=pa.bool_()),
-        constants.IS_EPHEMERAL_COL: pa.array([False], type=pa.bool_()),
-        "__pipeline_base_entry_id": pa.array([b"old_base"], type=pa.large_binary()),
-        "__pipeline_recomputation_index": pa.array([0], type=pa.int32()),
-    })
+    row = pa.table(
+        {
+            _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
+            constants.DATA_RECORD_ID: pa.array([data_id], type=pa.large_binary()),
+            _V0_NODE_HASH_COL: pa.array(
+                [_NODE_HASH.to_string()], type=pa.large_string()
+            ),
+            constants.INPUT_DATA_HASH_COL: pa.array(
+                [_INPUT_HASH.to_string()], type=pa.large_string()
+            ),
+            constants.OUTPUT_DATA_HASH_COL: pa.array(
+                [_OUTPUT_HASH.to_string()], type=pa.large_string()
+            ),
+            f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
+                ["ctx"], type=pa.large_string()
+            ),
+            f"{constants.META_PREFIX}computed": pa.array([True], type=pa.bool_()),
+            constants.IS_EPHEMERAL_COL: pa.array([False], type=pa.bool_()),
+            "__pipeline_base_entry_id": pa.array([b"old_base"], type=pa.large_binary()),
+            "__pipeline_recomputation_index": pa.array([0], type=pa.int32()),
+        }
+    )
     db.add_record(pdb_path, pdb_record_id, row)
     db.flush()
 
@@ -119,9 +146,7 @@ class TestMigratePipelineV0ToV1:
         _write_v0_rdb_row(db, rdb_path, _DATA_ID, _INPUT_HASH)
         _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
 
-        result = migrate_pipeline_v0_to_v1(
-            db, pdb_path, db, rdb_path, progress=False
-        )
+        result = migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
 
         assert result.rows_total == 1
         assert result.rows_migrated == 1
@@ -142,9 +167,18 @@ class TestMigratePipelineV0ToV1:
         v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
         v1_table = db.get_all_records(v1_path)
         assert v1_table is not None
-        assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary()
-        assert v1_table.schema.field(constants.INPUT_DATA_HASH_COL).type == pa.large_binary()
-        assert v1_table.schema.field(constants.OUTPUT_DATA_HASH_COL).type == pa.large_binary()
+        assert (
+            v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type
+            == pa.large_binary()
+        )
+        assert (
+            v1_table.schema.field(constants.INPUT_DATA_HASH_COL).type
+            == pa.large_binary()
+        )
+        assert (
+            v1_table.schema.field(constants.OUTPUT_DATA_HASH_COL).type
+            == pa.large_binary()
+        )
 
     def test_v1_binary_values_decode_correctly(self):
         db = InMemoryArrowDatabase()
@@ -159,9 +193,24 @@ class TestMigratePipelineV0ToV1:
         v1_path = pdb_path + (PIPELINE_DB_SCHEMA_VERSION,)
         v1_table = db.get_all_records(v1_path)
         row_dict = v1_table.to_pylist()[0]
-        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.NODE_CONTENT_HASH_COL])) == _NODE_HASH
-        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.INPUT_DATA_HASH_COL])) == _INPUT_HASH
-        assert ContentHash.from_prefixed_digest(bytes(row_dict[constants.OUTPUT_DATA_HASH_COL])) == _OUTPUT_HASH
+        assert (
+            ContentHash.from_prefixed_digest(
+                bytes(row_dict[constants.NODE_CONTENT_HASH_COL])
+            )
+            == _NODE_HASH
+        )
+        assert (
+            ContentHash.from_prefixed_digest(
+                bytes(row_dict[constants.INPUT_DATA_HASH_COL])
+            )
+            == _INPUT_HASH
+        )
+        assert (
+            ContentHash.from_prefixed_digest(
+                bytes(row_dict[constants.OUTPUT_DATA_HASH_COL])
+            )
+            == _OUTPUT_HASH
+        )
 
     def test_unresolvable_row_written_with_null_output_and_input_hash(self):
         """A pdb row whose data_id does NOT exist in rdb has null output hash."""
@@ -172,9 +221,7 @@ class TestMigratePipelineV0ToV1:
         # Write pdb but NOT rdb — simulates ephemeral result expired
         _write_v0_pdb_row(db, pdb_path, _DATA_ID, _PDB_RECORD_ID)
 
-        result = migrate_pipeline_v0_to_v1(
-            db, pdb_path, db, rdb_path, progress=False
-        )
+        result = migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
 
         # The pdb row already has INPUT_HASH_COL as a string → converts to binary
         # (no rdb lookup needed for it). Unresolvable only when the column is missing.
@@ -225,9 +272,7 @@ class TestMigratePipelineV0ToV1:
         pdb_path = ("empty_pipeline",)
         rdb_path = ("empty_results",)
 
-        result = migrate_pipeline_v0_to_v1(
-            db, pdb_path, db, rdb_path, progress=False
-        )
+        result = migrate_pipeline_v0_to_v1(db, pdb_path, db, rdb_path, progress=False)
 
         assert result.rows_total == 0
         assert result.rows_migrated == 0
@@ -252,7 +297,10 @@ class TestMigratePipelineV0ToV1Extended:
         assert constants.NODE_CONTENT_HASH_COL in v1_table.schema.names, (
             f"``{constants.NODE_CONTENT_HASH_COL}`` must be preserved in pdb_v1 rows for per-node isolation."
         )
-        assert v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type == pa.large_binary(), (
+        assert (
+            v1_table.schema.field(constants.NODE_CONTENT_HASH_COL).type
+            == pa.large_binary()
+        ), (
             f"``{constants.NODE_CONTENT_HASH_COL}`` must be converted to large_binary in pdb_v1."
         )
 
@@ -276,12 +324,14 @@ class TestMigratePipelineV0ToV1Extended:
 
         # Independently compute the expected base_entry_id.
         arrow_hasher = get_default_arrow_hasher()
-        preimage = pa.table({
-            _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
-            constants.INPUT_DATA_HASH_COL: pa.array(
-                [_INPUT_HASH.to_prefixed_digest()], type=pa.large_binary()
-            ),
-        })
+        preimage = pa.table(
+            {
+                _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
+                constants.INPUT_DATA_HASH_COL: pa.array(
+                    [_INPUT_HASH.to_prefixed_digest()], type=pa.large_binary()
+                ),
+            }
+        )
         expected = arrow_hasher.hash_table(preimage).to_prefixed_digest()
 
         actual = bytes(row["__pipeline_base_entry_id"])
@@ -310,12 +360,14 @@ class TestMigratePipelineV0ToV1Extended:
         row = v1_table.to_pylist()[0]
 
         arrow_hasher = get_default_arrow_hasher()
-        preimage = pa.table({
-            _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
-            constants.INPUT_DATA_HASH_COL: pa.array(
-                [_INPUT_HASH.to_prefixed_digest()], type=pa.large_binary()
-            ),
-        })
+        preimage = pa.table(
+            {
+                _SYS_TAG_COL: pa.array([_SYS_TAG_VAL], type=pa.large_string()),
+                constants.INPUT_DATA_HASH_COL: pa.array(
+                    [_INPUT_HASH.to_prefixed_digest()], type=pa.large_binary()
+                ),
+            }
+        )
         preimage_with_idx = preimage.append_column(
             "__pipeline_recomputation_index",
             pa.array([0], type=pa.int32()),

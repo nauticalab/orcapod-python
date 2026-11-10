@@ -135,9 +135,7 @@ class TestFunctionPodDecoratorEndToEnd:
         via_process = [
             (t["id"], p["result"]) for t, p in triple.pod.process(stream).iter_data()
         ]
-        via_call = [
-            (t["id"], p["result"]) for t, p in triple.pod(stream).iter_data()
-        ]
+        via_call = [(t["id"], p["result"]) for t, p in triple.pod(stream).iter_data()]
         assert via_process == via_call
 
     def test_multiple_output_keys_end_to_end(self):

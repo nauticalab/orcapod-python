@@ -3,6 +3,7 @@
 Covers InMemoryHashCacher and SqliteHashCacher for the match_mtime flag,
 plus CachedFileHasher integration with real files.
 """
+
 from __future__ import annotations
 
 import os
@@ -190,7 +191,9 @@ class TestCachedFileHasherMatchMtime:
             # cached hash without calling the inner hasher again.
             second_hash = cached.hash_file(f)
             assert second_hash == first_hash
-            assert spy.call_count == 1  # inner hasher NOT called again — confirms the cache hit
+            assert (
+                spy.call_count == 1
+            )  # inner hasher NOT called again — confirms the cache hit
 
     def test_t3_match_mtime_false_size_change_is_miss(self, tmp_path):
         """T3: match_mtime=False, content and size changed → cache miss."""

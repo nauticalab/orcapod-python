@@ -18,6 +18,7 @@ Note:
     each new ``SQLiteConnector(":memory:")`` opens a fresh empty database.
     File-backed sources (including ROWID-only tables) round-trip correctly.
 """
+
 from __future__ import annotations
 
 import os
@@ -130,7 +131,9 @@ class SQLiteTableSource(DBTableSource):
         return {**base, "source_type": "sqlite_table", "db_path": str(self._db_path)}
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "SQLiteTableSource":
+    def from_config(
+        cls, config: dict[str, Any], db_registry=None
+    ) -> "SQLiteTableSource":
         """Reconstruct a SQLiteTableSource from a config dict.
 
         Args:

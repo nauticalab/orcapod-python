@@ -133,5 +133,3 @@ class LocalPythonFunctionExecutor(PythonFunctionExecutorBase):
         ``LocalPythonFunctionExecutor`` carries no state, so options are ignored.
         """
         return LocalPythonFunctionExecutor()
-
-

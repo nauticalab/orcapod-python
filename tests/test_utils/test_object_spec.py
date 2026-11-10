@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import sys
-import importlib
 from typing import Any
 
 import pytest
 
-from orcapod.utils.object_spec import parse_objectspec, _create_instance_from_spec, _resolve_type_from_spec
+from orcapod.utils.object_spec import (
+    parse_objectspec,
+    _create_instance_from_spec,
+    _resolve_type_from_spec,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _Sentinel:
     """Trivial class used as a resolvable target in tests."""
+
     def __init__(self, value: Any = None) -> None:
         self.value = value
 
@@ -24,6 +29,7 @@ class _Sentinel:
 # ---------------------------------------------------------------------------
 # _resolve_type_from_spec — _optional flag
 # ---------------------------------------------------------------------------
+
 
 class TestResolveTypeFromSpecOptional:
     def test_resolves_present_type(self):
@@ -51,6 +57,7 @@ class TestResolveTypeFromSpecOptional:
 # ---------------------------------------------------------------------------
 # _create_instance_from_spec — _optional flag
 # ---------------------------------------------------------------------------
+
 
 class TestCreateInstanceFromSpecOptional:
     def test_creates_instance_normally(self):
@@ -92,6 +99,7 @@ class TestCreateInstanceFromSpecOptional:
 # parse_objectspec — _optional integration
 # ---------------------------------------------------------------------------
 
+
 class TestParseObjectspecOptional:
     def test_list_with_optional_missing_drops_entry(self, monkeypatch):
         """Optional dict items that fail to resolve are dropped from the list entirely."""
@@ -125,13 +133,18 @@ class TestParseObjectspecOptional:
 # LogicalTypeRegistry — None filtering
 # ---------------------------------------------------------------------------
 
+
 class TestParseObjectspecOptionalListFiltering:
     def test_optional_class_spec_filtered_from_list(self, monkeypatch):
         """_optional _class items that fail to resolve are dropped from the list."""
         monkeypatch.setitem(sys.modules, "nonexistent_pkg_xyz", None)
         specs = [
             {"_type": "builtins.int"},
-            {"_class": "nonexistent_pkg_xyz.SomeClass", "_config": {}, "_optional": True},
+            {
+                "_class": "nonexistent_pkg_xyz.SomeClass",
+                "_config": {},
+                "_optional": True,
+            },
             {"_type": "builtins.str"},
         ]
         result = parse_objectspec(specs)
@@ -154,15 +167,18 @@ class TestParseObjectspecOptionalListFiltering:
 # PythonTypeHandlerRegistry — None filtering
 # ---------------------------------------------------------------------------
 
+
 class TestPythonTypeHandlerRegistryNoneFiltering:
     def test_none_pair_in_handlers_is_skipped(self):
-        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+        from orcapod.hashing.semantic_hashing.type_handler_registry import (
+            PythonTypeHandlerRegistry,
+        )
         from orcapod.hashing.semantic_hashing.builtin_handlers import BytesHandler
 
         # A pair containing None (simulating optional missing dep) should be skipped.
         handlers = [
             (bytes, BytesHandler()),
-            [None, None],           # optional pair where both resolved to None
+            [None, None],  # optional pair where both resolved to None
             [None, BytesHandler()],  # partial None also skipped
         ]
         registry = PythonTypeHandlerRegistry(handlers=handlers)
@@ -171,7 +187,9 @@ class TestPythonTypeHandlerRegistryNoneFiltering:
 
     def test_empty_pair_in_handlers_is_skipped(self):
         """Empty list entries (optional pair where all elements were filtered) are skipped."""
-        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+        from orcapod.hashing.semantic_hashing.type_handler_registry import (
+            PythonTypeHandlerRegistry,
+        )
         from orcapod.hashing.semantic_hashing.builtin_handlers import BytesHandler
 
         # parse_objectspec filters _optional elements from the inner list, leaving [].
@@ -183,7 +201,9 @@ class TestPythonTypeHandlerRegistryNoneFiltering:
         assert registry.get_handler(b"x") is not None
 
     def test_none_entry_itself_skipped(self):
-        from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+        from orcapod.hashing.semantic_hashing.type_handler_registry import (
+            PythonTypeHandlerRegistry,
+        )
         from orcapod.hashing.semantic_hashing.builtin_handlers import BytesHandler
 
         handlers = [None, (bytes, BytesHandler())]

@@ -742,28 +742,35 @@ class TestSignatureHashUnionOrderIndependence:
 
     def test_two_member_union_param_order_independent(self):
         """str | Path and Path | str produce the same signature hash."""
+
         def foo(x: str | Path) -> str:
             return str(x)
+
         h1 = self._sig_hash(foo)
 
         def foo(x: Path | str) -> str:
             return str(x)
+
         h2 = self._sig_hash(foo)
 
         assert h1 == h2
 
     def test_three_member_union_all_permutations(self):
         """All permutations of str | Path | bytes produce the same signature hash."""
+
         def foo(x: str | Path | bytes) -> str:
             return str(x)
+
         h1 = self._sig_hash(foo)
 
         def foo(x: bytes | str | Path) -> str:
             return str(x)
+
         h2 = self._sig_hash(foo)
 
         def foo(x: Path | bytes | str) -> str:
             return str(x)
+
         h3 = self._sig_hash(foo)
 
         assert h2 == h1
@@ -771,18 +778,22 @@ class TestSignatureHashUnionOrderIndependence:
 
     def test_return_type_union_order_independent(self):
         """Return-type unions are also order-independent."""
+
         def foo(x: int) -> str | Path:
             return str(x)
+
         h1 = self._sig_hash(foo)
 
         def foo(x: int) -> Path | str:
             return str(x)
+
         h2 = self._sig_hash(foo)
 
         assert h1 == h2
 
     def test_non_union_param_hash_unchanged(self):
         """A non-union function's signature hash is stable and unaffected by the union fix."""
+
         def foo(x: int) -> str:
             return str(x)
 
@@ -794,24 +805,30 @@ class TestSignatureHashUnionOrderIndependence:
 
     def test_different_union_types_still_differ(self):
         """str | Path and str | bytes are different and must not hash the same."""
+
         def foo(x: str | Path) -> str:
             return str(x)
+
         h1 = self._sig_hash(foo)
 
         def foo(x: str | bytes) -> str:
             return str(x)
+
         h2 = self._sig_hash(foo)
 
         assert h1 != h2
 
     def test_union_vs_non_union_differ(self):
         """A union-typed param and a plain-typed param produce different hashes."""
+
         def foo(x: str | Path) -> str:
             return str(x)
+
         h1 = self._sig_hash(foo)
 
         def foo(x: str) -> str:
             return str(x)
+
         h2 = self._sig_hash(foo)
 
         assert h1 != h2
@@ -836,7 +853,11 @@ class TestVariationHashSchema:
     def test_variation_hash_decodes_to_content_hash(self, add_pf):
         """Both variation hash bytes round-trip through ContentHash.from_prefixed_digest."""
         variation = add_pf.get_function_variation_data()
-        sig_hash = ContentHash.from_prefixed_digest(variation["function_signature_hash"])
-        content_hash = ContentHash.from_prefixed_digest(variation["function_content_hash"])
+        sig_hash = ContentHash.from_prefixed_digest(
+            variation["function_signature_hash"]
+        )
+        content_hash = ContentHash.from_prefixed_digest(
+            variation["function_content_hash"]
+        )
         assert isinstance(sig_hash, ContentHash)
         assert isinstance(content_hash, ContentHash)

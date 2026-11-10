@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import WrappedFunctionPod
@@ -134,7 +134,9 @@ class CachedFunctionPod(WrappedFunctionPod):
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
             return tag, cached
 
-        tag, output = self._function_pod.process_data(tag, data, logger=logger, run_id=run_id)
+        tag, output = self._function_pod.process_data(
+            tag, data, logger=logger, run_id=run_id
+        )
         if output is not None:
             pf = self._function_pod.data_function
             var_dg = Datagram(
@@ -237,7 +239,9 @@ class CachedFunctionPod(WrappedFunctionPod):
         output_data: DataProtocol | None = None
 
         try:
-            out_tag, output_data = self.process_data(tag, data, logger=logger, run_id=run_id)
+            out_tag, output_data = self.process_data(
+                tag, data, logger=logger, run_id=run_id
+            )
             if output_data is not None:
                 status = (
                     InvocationStatus.HIT
@@ -250,8 +254,14 @@ class CachedFunctionPod(WrappedFunctionPod):
             finished_at = datetime.now(timezone.utc)
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
-                    tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc, run_id=run_id,
+                    tag,
+                    data,
+                    None,
+                    started_at,
+                    finished_at,
+                    InvocationStatus.ERROR,
+                    exc,
+                    run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -259,7 +269,13 @@ class CachedFunctionPod(WrappedFunctionPod):
         finished_at = datetime.now(timezone.utc)
         self._fire_post_run_hooks(
             self._build_post_run_payload(
-                tag, data, output_data, started_at, finished_at, status, None,
+                tag,
+                data,
+                output_data,
+                started_at,
+                finished_at,
+                status,
+                None,
                 run_id=run_id,
             )
         )
@@ -289,7 +305,9 @@ class CachedFunctionPod(WrappedFunctionPod):
             A ``(tag, output_data)`` tuple.
         """
         if not self._post_run_hooks:
-            return await self.async_process_data(tag, data, logger=logger, run_id=run_id)
+            return await self.async_process_data(
+                tag, data, logger=logger, run_id=run_id
+            )
 
         started_at = datetime.now(timezone.utc)
         out_tag = tag
@@ -311,8 +329,14 @@ class CachedFunctionPod(WrappedFunctionPod):
             finished_at = datetime.now(timezone.utc)
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
-                    tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc, run_id=run_id,
+                    tag,
+                    data,
+                    None,
+                    started_at,
+                    finished_at,
+                    InvocationStatus.ERROR,
+                    exc,
+                    run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -320,7 +344,13 @@ class CachedFunctionPod(WrappedFunctionPod):
         finished_at = datetime.now(timezone.utc)
         self._fire_post_run_hooks(
             self._build_post_run_payload(
-                tag, data, output_data, started_at, finished_at, status, None,
+                tag,
+                data,
+                output_data,
+                started_at,
+                finished_at,
+                status,
+                None,
                 run_id=run_id,
             )
         )

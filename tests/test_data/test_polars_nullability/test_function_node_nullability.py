@@ -214,10 +214,12 @@ class TestJoinOperatorNullability:
         nulls in the data. restore_schema_nullability preserves schema intent.
         """
         # Explicitly declare "x" as nullable=True (Optional[int]) via pa.Schema
-        schema1 = pa.schema([
-            pa.field("id", pa.int64(), nullable=False),
-            pa.field("x", pa.int64(), nullable=True),  # Optional — no actual nulls
-        ])
+        schema1 = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("x", pa.int64(), nullable=True),  # Optional — no actual nulls
+            ]
+        )
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
@@ -258,18 +260,24 @@ class TestJoinTagColumnNullability:
         - "id"    int64  nullable=False  (mandatory join key)
         - "group" utf8   nullable=True   (Optional grouping key, no actual nulls)
         """
-        tag_schema = pa.schema([
-            pa.field("id",    pa.int64(), nullable=False),
-            pa.field("group", pa.utf8(),  nullable=True),
-        ])
-        schema1 = pa.schema([
-            *tag_schema,
-            pa.field("x", pa.int64(), nullable=False),
-        ])
-        schema2 = pa.schema([
-            *tag_schema,
-            pa.field("y", pa.int64(), nullable=False),
-        ])
+        tag_schema = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("group", pa.utf8(), nullable=True),
+            ]
+        )
+        schema1 = pa.schema(
+            [
+                *tag_schema,
+                pa.field("x", pa.int64(), nullable=False),
+            ]
+        )
+        schema2 = pa.schema(
+            [
+                *tag_schema,
+                pa.field("y", pa.int64(), nullable=False),
+            ]
+        )
 
         source1 = op.sources.DictSource(
             [{"id": 1, "group": "a", "x": 10}, {"id": 2, "group": "b", "x": 20}],
@@ -284,7 +292,7 @@ class TestJoinTagColumnNullability:
 
         table = source1.join(source2).as_table()
 
-        id_field    = table.schema.field("id")
+        id_field = table.schema.field("id")
         group_field = table.schema.field("group")
 
         assert id_field.nullable is False, (
@@ -305,14 +313,18 @@ class TestJoinTagColumnNullability:
         Neither tag is shared, so the join is a full cartesian product.
         Both tag columns appear in the result and must keep their original nullable flags.
         """
-        schema1 = pa.schema([
-            pa.field("id", pa.int64(), nullable=False),
-            pa.field("x",  pa.int64(), nullable=False),
-        ])
-        schema2 = pa.schema([
-            pa.field("category", pa.utf8(), nullable=True),   # Optional tag
-            pa.field("y",        pa.int64(), nullable=False),
-        ])
+        schema1 = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("x", pa.int64(), nullable=False),
+            ]
+        )
+        schema2 = pa.schema(
+            [
+                pa.field("category", pa.utf8(), nullable=True),  # Optional tag
+                pa.field("y", pa.int64(), nullable=False),
+            ]
+        )
 
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}],
@@ -327,7 +339,7 @@ class TestJoinTagColumnNullability:
 
         table = source1.join(source2).as_table()
 
-        id_field       = table.schema.field("id")
+        id_field = table.schema.field("id")
         category_field = table.schema.field("category")
 
         assert id_field.nullable is False, (
@@ -347,12 +359,16 @@ class TestJoinTagColumnNullability:
         shared tag "id"    int64  nullable=False
         shared tag "group" utf8   nullable=True  (Optional, no actual nulls)
         """
-        tag_schema = pa.schema([
-            pa.field("id",    pa.int64(), nullable=False),
-            pa.field("group", pa.utf8(),  nullable=True),
-        ])
+        tag_schema = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("group", pa.utf8(), nullable=True),
+            ]
+        )
         schema1 = pa.schema([*tag_schema, pa.field("a", pa.int64(), nullable=False)])
-        schema2 = pa.schema([*tag_schema, pa.field("b", pa.int64(), nullable=True)])   # b is Optional
+        schema2 = pa.schema(
+            [*tag_schema, pa.field("b", pa.int64(), nullable=True)]
+        )  # b is Optional
         schema3 = pa.schema([*tag_schema, pa.field("c", pa.int64(), nullable=False)])
 
         source1 = op.sources.DictSource(
@@ -373,9 +389,9 @@ class TestJoinTagColumnNullability:
 
         table = source1.join(source2).join(source3).as_table()
 
-        id_field    = table.schema.field("id")
+        id_field = table.schema.field("id")
         group_field = table.schema.field("group")
-        b_field     = table.schema.field("b")
+        b_field = table.schema.field("b")
 
         assert id_field.nullable is False, (
             f"'id' (non-nullable tag) must remain nullable=False after 3-way join, "

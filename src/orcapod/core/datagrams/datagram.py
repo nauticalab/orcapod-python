@@ -574,9 +574,9 @@ class Datagram(ContentIdentifiableBase):
         new_d._meta = {k: v for k, v in self._meta.items() if k not in prefixed}
         # Preserve existing schema types for remaining fields (see
         # with_meta_columns for rationale).
-        new_d._meta_python_schema = Schema({
-            k: v for k, v in self._meta_python_schema.items() if k not in prefixed
-        })
+        new_d._meta_python_schema = Schema(
+            {k: v for k, v in self._meta_python_schema.items() if k not in prefixed}
+        )
         return new_d
 
     # ------------------------------------------------------------------

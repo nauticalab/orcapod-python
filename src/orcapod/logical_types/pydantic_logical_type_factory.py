@@ -25,7 +25,10 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.registry import (
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -130,7 +133,9 @@ class PydanticLogicalType(BaseLogicalType):
             self._polars_ext = self._polars_ext_class()
         return self._polars_ext
 
-    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None) -> dict[str, Any]:
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None
+    ) -> dict[str, Any]:
         """Convert a pydantic model instance to an Arrow-compatible struct dict.
 
         Iterates ``_field_annotations`` and delegates each field's conversion to
@@ -156,7 +161,9 @@ class PydanticLogicalType(BaseLogicalType):
             for name, annotation in self._field_annotations
         }
 
-    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None) -> Any:
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None
+    ) -> Any:
         """Reconstruct a pydantic model instance from an Arrow struct dict.
 
         Args:
@@ -223,6 +230,7 @@ class PydanticLogicalTypeFactory:
             True if ``python_type`` is a ``BaseModel`` subclass.
         """
         from pydantic import BaseModel
+
         return isinstance(python_type, type) and issubclass(python_type, BaseModel)
 
     def create_for_python_type(
@@ -279,7 +287,9 @@ class PydanticLogicalTypeFactory:
             field_annotations.append((field_name, annotation))
 
         storage_type = pa.struct(arrow_fields)
-        logger.debug("PydanticLogicalTypeFactory: synthesised %r for %r", fqcn, python_type)
+        logger.debug(
+            "PydanticLogicalTypeFactory: synthesised %r for %r", fqcn, python_type
+        )
         return PydanticLogicalType(fqcn, python_type, storage_type, field_annotations)
 
     def reconstruct_from_arrow(
@@ -322,9 +332,7 @@ class PydanticLogicalTypeFactory:
         try:
             hints = typing.get_type_hints(cls)
         except Exception as exc:
-            raise ValueError(
-                f"Cannot get type hints for {cls!r}: {exc}"
-            ) from exc
+            raise ValueError(f"Cannot get type hints for {cls!r}: {exc}") from exc
 
         field_annotations = []
         for field_name in cls.model_fields:
@@ -336,7 +344,8 @@ class PydanticLogicalTypeFactory:
             field_annotations.append((field_name, annotation))
 
         logger.debug(
-            "PydanticLogicalTypeFactory: reconstructed %r from Arrow", arrow_extension_name
+            "PydanticLogicalTypeFactory: reconstructed %r from Arrow",
+            arrow_extension_name,
         )
         return PydanticLogicalType(
             arrow_extension_name, cls, storage_type, field_annotations

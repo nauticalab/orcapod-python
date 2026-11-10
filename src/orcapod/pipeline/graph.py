@@ -22,7 +22,6 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import networkx as nx
     from orcapod.pipeline.dag import GraphProtocol
-    from orcapod.pipeline.execution_context import ExecutionContext
 else:
     nx = LazyModule("networkx")
 
@@ -93,7 +92,9 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
         # Call AutoRegisteringContextBasedTracker.__exit__ directly (deactivates the tracker)
         # but NOT AbstractPipelineBase.__exit__ (which calls compile() unconditionally).
-        AutoRegisteringContextBasedTracker.__exit__(self, exc_type, exc_value, traceback)
+        AutoRegisteringContextBasedTracker.__exit__(
+            self, exc_type, exc_value, traceback
+        )
         if exc_type is None and self._auto_compile:
             self.compile()
 
@@ -151,6 +152,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                 type_converter = node.data_context.type_converter
             except (AttributeError, TypeError):
                 from orcapod.contexts import resolve_context
+
                 type_converter = resolve_context(None).type_converter
 
             try:
@@ -170,11 +172,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
             # See ENG-544 for the tradeoff discussion (reproducibility vs.
             # forward-compatibility).
             _cfg = node.orcapod_config
-            config_val = (
-                None
-                if _cfg == _DEFAULT_CONFIG
-                else dataclasses.asdict(_cfg)
-            )
+            config_val = None if _cfg == _DEFAULT_CONFIG else dataclasses.asdict(_cfg)
 
             descriptor: dict[str, Any] = {
                 "node_type": node.node_type,
@@ -196,7 +194,9 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                         "source_type": "node",
                         "name": node.name,
                         "tag_schema": serialize_schema(node.tag_schema, type_converter),
-                        "data_schema": serialize_schema(node.data_schema, type_converter),
+                        "data_schema": serialize_schema(
+                            node.data_schema, type_converter
+                        ),
                     }
                     descriptor["reconstructable"] = True
 
@@ -292,15 +292,25 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
             if node_type == "source":
                 source_type = source_config.get("source_type")
                 if source_type == "node":
-                    node_name = source_config.get("name") or source_config.get("node_name")
+                    node_name = source_config.get("name") or source_config.get(
+                        "node_name"
+                    )
                     if not node_name:
                         node_name = descriptor.get("label") or "unknown"
                     if "tag_schema" in source_config and "data_schema" in source_config:
-                        tag_schema = Schema(deserialize_schema(source_config["tag_schema"]))
-                        data_schema = Schema(deserialize_schema(source_config["data_schema"]))
+                        tag_schema = Schema(
+                            deserialize_schema(source_config["tag_schema"])
+                        )
+                        data_schema = Schema(
+                            deserialize_schema(source_config["data_schema"])
+                        )
                     else:
-                        tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
-                        data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
+                        tag_schema = Schema(
+                            deserialize_schema(descriptor["output_schema"]["tag"])
+                        )
+                        data_schema = Schema(
+                            deserialize_schema(descriptor["output_schema"]["data"])
+                        )
                     node = SourceNodeClass(
                         name=node_name,
                         tag_schema=tag_schema,
@@ -321,7 +331,10 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                 up_hashes = upstream_map.get(node_hash, [])
                 upstream_node = reconstructed.get(up_hashes[0]) if up_hashes else None
                 node = FunctionNode.from_descriptor(
-                    descriptor, function_pod=None, input_stream=upstream_node, databases={}
+                    descriptor,
+                    function_pod=None,
+                    input_stream=upstream_node,
+                    databases={},
                 )
                 reconstructed[node_hash] = node
 
@@ -337,7 +350,10 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                 op_config = descriptor.get("operator_config")
                 if op_config:
                     try:
-                        from orcapod.pipeline.serialization import resolve_operator_from_config
+                        from orcapod.pipeline.serialization import (
+                            resolve_operator_from_config,
+                        )
+
                         operator = resolve_operator_from_config(op_config)
                     except Exception as exc:
                         logger.warning(
@@ -347,7 +363,10 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                             exc,
                         )
                 node = OperatorNode.from_descriptor(
-                    descriptor, operator=operator, input_streams=upstream_nodes, databases={}
+                    descriptor,
+                    operator=operator,
+                    input_streams=upstream_nodes,
+                    databases={},
                 )
                 reconstructed[node_hash] = node
 
@@ -394,16 +413,12 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
         # Restore _node_lut and _upstreams so PipelineJob can substitute bound
         # sources and build a correct execution graph at run time.
         pipeline._node_lut = {
-            h: n
-            for h, n in reconstructed.items()
-            if n.node_type != "source"
+            h: n for h, n in reconstructed.items() if n.node_type != "source"
         }
         # SourceNode IS the upstream — store it directly so run() can find it
         # by hash and substitute a concrete source at run time.
         pipeline._upstreams = {
-            h: n
-            for h, n in reconstructed.items()
-            if n.node_type == "source"
+            h: n for h, n in reconstructed.items() if n.node_type == "source"
         }
 
         pipeline._compiled = True

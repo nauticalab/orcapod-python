@@ -4,6 +4,7 @@ Verifies that the async polling loop runs (not just a static snapshot) when
 a PollingSource is bound as the data source for a PipelineJob and executed
 via the async orchestrator.
 """
+
 from __future__ import annotations
 
 import pytest

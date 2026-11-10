@@ -83,7 +83,9 @@ def _walk_fqcn(fqcn: str) -> Any:
     """
     parts = fqcn.split(".")
     if len(parts) < 2:
-        raise ImportError(f"Cannot import from FQCN {fqcn!r}: no module separator found.")
+        raise ImportError(
+            f"Cannot import from FQCN {fqcn!r}: no module separator found."
+        )
 
     for i in range(len(parts) - 1, 0, -1):
         module_path = ".".join(parts[:i])

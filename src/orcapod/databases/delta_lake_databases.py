@@ -58,7 +58,9 @@ class DeltaTableDatabase:
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "defaultdict[str, set[bytes]] | None" = None,
     ):
-        self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
+        self._root_uri, self._storage_options = parse_base_path(
+            base_path, storage_options
+        )
         self._is_cloud: bool = is_cloud_uri(self._root_uri)
         self._path_prefix = _path_prefix
         self._root = _root
@@ -122,7 +124,9 @@ class DeltaTableDatabase:
             return component.replace(":", "!")
         return component
 
-    def _get_table_uri(self, record_path: tuple[str, ...], create_dir: bool = False) -> str:
+    def _get_table_uri(
+        self, record_path: tuple[str, ...], create_dir: bool = False
+    ) -> str:
         """Get the URI for a given record path, incorporating base_path prefix.
 
         Args:
@@ -178,7 +182,9 @@ class DeltaTableDatabase:
                     f"Source path {record_path} component {component} contains invalid characters: {repr(component)}"
                 )
 
-    def _get_delta_table(self, record_path: tuple[str, ...]) -> deltalake.DeltaTable | None:
+    def _get_delta_table(
+        self, record_path: tuple[str, ...]
+    ) -> deltalake.DeltaTable | None:
         """
         Get an existing Delta table, either from cache or by loading it.
 
@@ -197,7 +203,9 @@ class DeltaTableDatabase:
 
         try:
             # Try to load existing table
-            delta_table = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
+            delta_table = deltalake.DeltaTable(
+                table_uri, storage_options=self._storage_options or None
+            )
             self._delta_table_cache[record_key] = delta_table
             logger.debug(f"Loaded existing Delta table for {record_key}")
             return delta_table
@@ -882,7 +890,7 @@ class DeltaTableDatabase:
         """Serialize database configuration to a JSON-compatible dict."""
         config: dict[str, Any] = {
             "type": "delta_table",
-            "root_uri": self._root_uri,           # renamed from "base_path"
+            "root_uri": self._root_uri,  # renamed from "base_path"
             "base_path": list(self._path_prefix),  # new: relative prefix tuple
             "batch_size": self.batch_size,
             "max_hierarchy_depth": self.max_hierarchy_depth,
@@ -904,7 +912,9 @@ class DeltaTableDatabase:
             # Current format (post-ENG-341)
             root_uri = config["root_uri"]
             base_path_value = config.get("base_path", [])
-            _path_prefix = tuple(base_path_value) if isinstance(base_path_value, list) else ()
+            _path_prefix = (
+                tuple(base_path_value) if isinstance(base_path_value, list) else ()
+            )
         else:
             # Legacy format (pre-ENG-341): "base_path" was the root URI string
             root_uri = config["base_path"]
@@ -983,13 +993,20 @@ class DeltaTableDatabase:
             # Ensure parent directory exists (local only)
             if not self._is_cloud:
                 import os
+
                 os.makedirs(table_uri, exist_ok=True)
 
             # Check if Delta table exists at this URI
             try:
                 import deltalake as _dl
-                delta_table = _dl.DeltaTable(table_uri, storage_options=self._storage_options or None)
-            except (_dl.exceptions.TableNotFoundError, _dl.exceptions.DeltaProtocolError):
+
+                delta_table = _dl.DeltaTable(
+                    table_uri, storage_options=self._storage_options or None
+                )
+            except (
+                _dl.exceptions.TableNotFoundError,
+                _dl.exceptions.DeltaProtocolError,
+            ):
                 delta_table = None
 
             if delta_table is None:
@@ -1018,7 +1035,9 @@ class DeltaTableDatabase:
                 )
 
             # Update cache
-            self._delta_table_cache[record_key] = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
+            self._delta_table_cache[record_key] = deltalake.DeltaTable(
+                table_uri, storage_options=self._storage_options or None
+            )
 
             # Invalidate the existing-IDs cache directly by record_key to avoid
             # double-prefixing that would occur if _invalidate_cache() were used
@@ -1109,14 +1128,20 @@ class DeltaTableDatabase:
             try:
                 items = list(current_path.iterdir())
             except OSError as e:
-                logger.warning("Could not list directory %s during list_sources scan: %s", current_path, e)
+                logger.warning(
+                    "Could not list directory %s during list_sources scan: %s",
+                    current_path,
+                    e,
+                )
                 return
             for item in items:
                 if not item.is_dir():
                     continue
                 components = path_components + (item.name,)
                 try:
-                    deltalake.DeltaTable(str(item), storage_options=self._storage_options or None)
+                    deltalake.DeltaTable(
+                        str(item), storage_options=self._storage_options or None
+                    )
                     sources.append(components)
                 except deltalake.exceptions.TableNotFoundError:
                     _scan(item, components)

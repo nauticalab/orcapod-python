@@ -48,7 +48,9 @@ class CompositeObserver:
             raise ValueError(
                 "CompositeObserver.contextualize() requires a non-empty identity_path."
             )
-        return CompositeObserver(*[o.contextualize(*identity_path) for o in self._observers])
+        return CompositeObserver(
+            *[o.contextualize(*identity_path) for o in self._observers]
+        )
 
     def on_run_start(self, run_id: str, **kwargs: Any) -> None:
         for o in self._observers:
@@ -121,7 +123,9 @@ class CompositeObserver:
         """
         return {
             "type": "composite",
-            "observers": [o.to_config(db_registry=db_registry) for o in self._observers],
+            "observers": [
+                o.to_config(db_registry=db_registry) for o in self._observers
+            ],
         }
 
     @classmethod
@@ -141,5 +145,7 @@ class CompositeObserver:
         """
         from orcapod.pipeline.serialization import resolve_observer_from_config
 
-        children = [resolve_observer_from_config(c, db_registry) for c in config["observers"]]
+        children = [
+            resolve_observer_from_config(c, db_registry) for c in config["observers"]
+        ]
         return cls(*children)

@@ -1,5 +1,5 @@
 """Unit tests for orcapod.databases.storage_utils."""
-import pytest
+
 from upath import UPath
 
 from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
@@ -8,6 +8,7 @@ from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 # ---------------------------------------------------------------------------
 # is_cloud_uri
 # ---------------------------------------------------------------------------
+
 
 def test_is_cloud_uri_local_string():
     assert is_cloud_uri("/tmp/foo") is False
@@ -35,6 +36,7 @@ def test_is_cloud_uri_other_schemes():
 # parse_base_path — local paths
 # ---------------------------------------------------------------------------
 
+
 def test_parse_base_path_local_path_object(tmp_path):
     uri, opts = parse_base_path(tmp_path)
     assert uri == str(tmp_path)
@@ -50,6 +52,7 @@ def test_parse_base_path_local_string(tmp_path):
 def test_parse_base_path_upath_local(tmp_path):
     """A local UPath should yield empty opts (no cloud credentials to translate)."""
     from upath import UPath
+
     up = UPath(tmp_path)
     uri, opts = parse_base_path(up)
     assert uri == str(tmp_path)
@@ -59,6 +62,7 @@ def test_parse_base_path_upath_local(tmp_path):
 # ---------------------------------------------------------------------------
 # parse_base_path — S3 string
 # ---------------------------------------------------------------------------
+
 
 def test_parse_base_path_s3_string():
     uri, opts = parse_base_path("s3://bucket/prefix")
@@ -77,6 +81,7 @@ def test_parse_base_path_s3_string_with_explicit_options():
 # parse_base_path — UPath
 # ---------------------------------------------------------------------------
 
+
 def test_parse_base_path_upath_s3_basic():
     up = UPath("s3://my-bucket/tables", key="mykey", secret="mysecret")
     uri, opts = parse_base_path(up)
@@ -86,14 +91,18 @@ def test_parse_base_path_upath_s3_basic():
 
 
 def test_parse_base_path_upath_with_endpoint():
-    up = UPath("s3://my-bucket/tables", key="k", secret="s", endpoint_url="http://minio:9000")
+    up = UPath(
+        "s3://my-bucket/tables", key="k", secret="s", endpoint_url="http://minio:9000"
+    )
     uri, opts = parse_base_path(up)
     assert opts["AWS_ENDPOINT_URL"] == "http://minio:9000"
 
 
 def test_parse_base_path_upath_client_kwargs_endpoint():
     """Nested client_kwargs.endpoint_url is translated as fallback."""
-    up = UPath("s3://my-bucket/tables", client_kwargs={"endpoint_url": "http://minio:9000"})
+    up = UPath(
+        "s3://my-bucket/tables", client_kwargs={"endpoint_url": "http://minio:9000"}
+    )
     uri, opts = parse_base_path(up)
     assert opts.get("AWS_ENDPOINT_URL") == "http://minio:9000"
 

@@ -13,6 +13,7 @@ from orcapod.protocols.node_protocols import (
     is_source_node,
 )
 
+
 @pytest.fixture
 def _sample_source():
     from orcapod.core.sources import ArrowTableSource

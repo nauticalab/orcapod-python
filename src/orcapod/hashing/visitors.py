@@ -91,7 +91,9 @@ class ArrowTypeDataVisitor(ABC):
         """
         if isinstance(arrow_type, pa.ExtensionType):
             new_type, new_data = self.visit_extension(arrow_type, data)
-            if new_type is not arrow_type and not isinstance(new_type, pa.ExtensionType):
+            if new_type is not arrow_type and not isinstance(
+                new_type, pa.ExtensionType
+            ):
                 return self.visit(new_type, new_data)
             return new_type, new_data
 
@@ -154,6 +156,7 @@ class ArrowTypeDataVisitor(ABC):
 
 class SemanticHashingError(Exception):
     """Exception raised when semantic hashing fails."""
+
     pass
 
 
@@ -232,9 +235,8 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         # (not isinstance(..., type)), so the guard below would incorrectly skip it.
         # We intercept here and hash each element, folding the outer extension name
         # into the result (mirrors the scalar path) to prevent list[T]/set[T] collisions.
-        if (
-            typing.get_origin(python_type) in (list, set)
-            and pa.types.is_large_list(extension_type.storage_type)
+        if typing.get_origin(python_type) in (list, set) and pa.types.is_large_list(
+            extension_type.storage_type
         ):
             args = typing.get_args(python_type)
             # Defensive guard: a well-formed list[T]/set[T] always has args, but if
@@ -252,10 +254,9 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
                     if not inner_args:
                         break
                     inner = inner_args[0]
-                hashable = (
-                    isinstance(inner, type)
-                    and self._python_hasher.type_handler_registry.has_handler(inner)
-                )
+                hashable = isinstance(
+                    inner, type
+                ) and self._python_hasher.type_handler_registry.has_handler(inner)
                 if not hashable:
                     # Innermost element type has no semantic handler — whole-column
                     # passthrough, identical to main-branch behaviour.
@@ -271,7 +272,9 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
                     elem_python_type
                 )
                 virtual_list_type = pa.large_list(elem_arrow_type)
-                _, list_data = self._visit_list_elements(virtual_list_type, storage_value)
+                _, list_data = self._visit_list_elements(
+                    virtual_list_type, storage_value
+                )
 
                 # Fold the outer extension name into the result, the same way the
                 # scalar path does.  This ensures list[T] and set[T] with identical
@@ -304,9 +307,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         # The "::" separator is unambiguous because to_prefixed_digest() uses only ":".
         type_name = extension_type.extension_name.replace(".", ":")
         hash_bytes = (
-            type_name.encode("utf-8")
-            + b"::"
-            + content_hash.to_prefixed_digest()
+            type_name.encode("utf-8") + b"::" + content_hash.to_prefixed_digest()
         )
         return pa.large_binary(), hash_bytes
 

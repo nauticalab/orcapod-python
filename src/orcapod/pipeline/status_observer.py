@@ -203,7 +203,7 @@ class StatusObserver:
 
         parts = []
         for src in sources:
-            if src[-len(DEFAULT_STATUS_PATH):] == DEFAULT_STATUS_PATH:
+            if src[-len(DEFAULT_STATUS_PATH) :] == DEFAULT_STATUS_PATH:
                 tbl = self._db.get_all_records(src)
                 if tbl is not None and tbl.num_rows > 0:
                     if "__record_id" in tbl.schema.names:
@@ -251,9 +251,7 @@ class StatusObserver:
         """
         from orcapod.pipeline.serialization import resolve_database_from_config
 
-        db = resolve_database_from_config(
-            config["database"], db_registry=db_registry
-        )
+        db = resolve_database_from_config(config["database"], db_registry=db_registry)
         return cls(db)
 
     # -- internal --
@@ -274,11 +272,13 @@ class StatusObserver:
         timestamp = datetime.now(timezone.utc).isoformat()
 
         columns: dict[str, pa.Array] = {
-            "_status_id":            pa.array([status_id],       type=pa.binary(16)),
-            "_status_run_id":        pa.array([self._current_run_id], type=pa.large_utf8()),
-            "_status_pipeline_uri":  pa.array([self._current_pipeline_uri], type=pa.large_utf8()),
-            "_status_state":         pa.array([state],           type=pa.large_utf8()),
-            "_status_timestamp":     pa.array([timestamp],       type=pa.large_utf8()),
+            "_status_id": pa.array([status_id], type=pa.binary(16)),
+            "_status_run_id": pa.array([self._current_run_id], type=pa.large_utf8()),
+            "_status_pipeline_uri": pa.array(
+                [self._current_pipeline_uri], type=pa.large_utf8()
+            ),
+            "_status_state": pa.array([state], type=pa.large_utf8()),
+            "_status_timestamp": pa.array([timestamp], type=pa.large_utf8()),
             "_status_error_summary": pa.array(
                 [str(error) if error is not None else None],
                 type=pa.large_utf8(),
@@ -401,11 +401,13 @@ class _ContextualizedStatusObserver:
         timestamp = datetime.now(timezone.utc).isoformat()
 
         columns: dict[str, pa.Array] = {
-            "_status_id":            pa.array([status_id],               type=pa.binary(16)),
-            "_status_run_id":        pa.array([self._current_run_id],     type=pa.large_utf8()),
-            "_status_pipeline_uri":  pa.array([self._current_pipeline_uri], type=pa.large_utf8()),
-            "_status_state":         pa.array([state],                    type=pa.large_utf8()),
-            "_status_timestamp":     pa.array([timestamp],                type=pa.large_utf8()),
+            "_status_id": pa.array([status_id], type=pa.binary(16)),
+            "_status_run_id": pa.array([self._current_run_id], type=pa.large_utf8()),
+            "_status_pipeline_uri": pa.array(
+                [self._current_pipeline_uri], type=pa.large_utf8()
+            ),
+            "_status_state": pa.array([state], type=pa.large_utf8()),
+            "_status_timestamp": pa.array([timestamp], type=pa.large_utf8()),
             "_status_error_summary": pa.array(
                 [str(error) if error is not None else None],
                 type=pa.large_utf8(),

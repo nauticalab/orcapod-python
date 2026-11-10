@@ -1,5 +1,7 @@
 """Tests for DataFunctionProxy invocation, bind, and unbind behavior."""
 
+from typing import cast
+
 import pytest
 
 from orcapod.core.datagrams.tag_data import Data, Tag
@@ -37,8 +39,11 @@ def _make_sample_function() -> PythonDataFunction:
     return PythonDataFunction(double_age, output_keys="doubled_age", version="v1.0")
 
 
-def _make_proxy_from_function(pf: PythonDataFunction) -> DataFunctionProxy:
-    config = pf.to_config()
+def _make_proxy_from_function(
+    pf: PythonDataFunction, config: dict[str, object] | None = None
+) -> DataFunctionProxy:
+    if config is None:
+        config = pf.to_config()
     return DataFunctionProxy(
         config=config,
         content_hash_str=pf.content_hash().to_string(),
@@ -56,9 +61,7 @@ class TestDataFunctionProxyInvocation:
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
         data = Data({"age": 25})
-        with pytest.raises(
-            DataFunctionUnavailableError, match="double_age"
-        ):
+        with pytest.raises(DataFunctionUnavailableError, match="double_age"):
             proxy.call(data)
 
     @pytest.mark.asyncio
@@ -66,18 +69,14 @@ class TestDataFunctionProxyInvocation:
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
         data = Data({"age": 25})
-        with pytest.raises(
-            DataFunctionUnavailableError, match="double_age"
-        ):
+        with pytest.raises(DataFunctionUnavailableError, match="double_age"):
             await proxy.async_call(data)
 
     def test_direct_call_raises_when_unbound(self):
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
         data = Data({"age": 25})
-        with pytest.raises(
-            DataFunctionUnavailableError, match="double_age"
-        ):
+        with pytest.raises(DataFunctionUnavailableError, match="double_age"):
             proxy.direct_call(data)
 
     @pytest.mark.asyncio
@@ -85,9 +84,7 @@ class TestDataFunctionProxyInvocation:
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
         data = Data({"age": 25})
-        with pytest.raises(
-            DataFunctionUnavailableError, match="double_age"
-        ):
+        with pytest.raises(DataFunctionUnavailableError, match="double_age"):
             await proxy.direct_async_call(data)
 
     def test_variation_data_empty_when_unbound(self):
@@ -234,3 +231,48 @@ class TestFunctionPodWithProxy:
         data = Data({"age": 25})
         with pytest.raises(DataFunctionUnavailableError):
             pod.process_data(tag, data)
+
+
+# ==================== ITL-825: config is Python-version independent ====================
+
+
+class TestConfigPythonVersionIndependence:
+    """A config saved on one Python version must bind on another (ITL-825).
+
+    ``pathlib.Path`` is defined in ``pathlib._local`` on Python 3.13, so
+    ``str(Path)`` differs from 3.11/3.12. The expected strings below are what
+    3.12 writes.
+    """
+
+    @staticmethod
+    def _make_path_function() -> PythonDataFunction:
+        from pathlib import Path
+
+        def stem(p: Path, alt: Path | None, many: list[Path]) -> Path:  # pyright: ignore[reportUnusedParameter]  # params exist only for the schema derived from their annotations
+            return p
+
+        return PythonDataFunction(stem, output_keys="out", version="v1.0")
+
+    def test_to_config_schema_strings(self):
+        config = cast(
+            "dict[str, object]", self._make_path_function().to_config()["config"]
+        )
+        assert config["input_data_schema"] == {
+            "p": "<class 'pathlib.Path'>",
+            "alt": "pathlib.Path | None",
+            "many": "list[pathlib.Path]",
+        }
+        assert config["output_data_schema"] == {"out": "<class 'pathlib.Path'>"}
+
+    def test_bind_accepts_config_saved_on_python_312(self):
+        pf = self._make_path_function()
+        config = pf.to_config()
+        config["config"]["input_data_schema"] = {
+            "p": "<class 'pathlib.Path'>",
+            "alt": "pathlib.Path | None",
+            "many": "list[pathlib.Path]",
+        }
+        config["config"]["output_data_schema"] = {"out": "<class 'pathlib.Path'>"}
+        proxy = _make_proxy_from_function(pf, config)
+        proxy.bind(pf)  # pyright: ignore[reportArgumentType]
+        assert proxy.is_bound

@@ -6,7 +6,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.mappers import MapData
 from orcapod.core.data_function import PythonDataFunction
@@ -119,20 +118,32 @@ class TestSyncOrchestratorObserver:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, tag, data):
                 events.append(("data_start",))
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("data_end", cached))
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
+
             def contextualize(self, *identity_path):
                 return self
 
@@ -199,20 +210,32 @@ class TestPipelineRunIntegration:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, tag, data):
                 events.append(("data_start",))
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("data_end",))
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
+
             def contextualize(self, *identity_path):
                 return self
 
@@ -411,20 +434,32 @@ class TestSyncObserverInjection:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, tag, data):
                 events.append(("data_start", node_label))
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("data_end", node_label, cached))
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
+
             def contextualize(self, *identity_path):
                 return self
 
@@ -438,7 +473,9 @@ class TestSyncObserverInjection:
         # Function fires node_start, per-data hooks, node_end
         assert ("node_start", "doubler") in events
         assert ("node_end", "doubler") in events
-        fn_data_events = [e for e in events if e[0] == "data_start" and e[1] == "doubler"]
+        fn_data_events = [
+            e for e in events if e[0] == "data_start" and e[1] == "doubler"
+        ]
         assert len(fn_data_events) == 2  # 2 data
 
     def test_function_node_cached_flag(self):
@@ -456,18 +493,33 @@ class TestSyncObserverInjection:
         events1 = []
 
         class Obs1:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash, **kwargs): pass
-            def on_node_end(self, node_label, node_hash, **kwargs): pass
-            def on_data_start(self, node_label, tag, data): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
+            def on_node_start(self, node_label, node_hash, **kwargs):
+                pass
+
+            def on_node_end(self, node_label, node_hash, **kwargs):
+                pass
+
+            def on_data_start(self, node_label, tag, data):
+                pass
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 if node_label == "doubler":
                     events1.append(cached)
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
+
             def contextualize(self, *identity_path):
                 return self
 
@@ -478,18 +530,33 @@ class TestSyncObserverInjection:
         events2 = []
 
         class Obs2:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash, **kwargs): pass
-            def on_node_end(self, node_label, node_hash, **kwargs): pass
-            def on_data_start(self, node_label, tag, data): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
+            def on_node_start(self, node_label, node_hash, **kwargs):
+                pass
+
+            def on_node_end(self, node_label, node_hash, **kwargs):
+                pass
+
+            def on_data_start(self, node_label, tag, data):
+                pass
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 if node_label == "doubler":
                     events2.append(cached)
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
+
             def contextualize(self, *identity_path):
                 return self
 
@@ -511,18 +578,32 @@ class TestSyncObserverInjection:
         node_order = []
 
         class OrderObserver:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 node_order.append(("start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 node_order.append(("end", node_label))
-            def on_data_start(self, node_label, tag, data): pass
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached): pass
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_start(self, node_label, tag, data):
+                pass
+
+            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
+
                 return _NOOP_LOGGER
+
             def contextualize(self, *identity_path):
                 return self
 

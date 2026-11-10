@@ -4,6 +4,7 @@ After ENG-379:
 - iter_data() is strictly read-only — never triggers computation
 - Computation only via run() / execute() / async_execute()
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -12,7 +13,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
@@ -90,7 +90,9 @@ class TestIterDatasReadOnly:
         node1.run()
 
         node2 = _make_node(n=3, db=db)
-        with patch.object(node2, "_load_cached_entries", wraps=node2._load_cached_entries) as mock_load:
+        with patch.object(
+            node2, "_load_cached_entries", wraps=node2._load_cached_entries
+        ) as mock_load:
             first = [(t["id"], p["result"]) for t, p in node2.iter_data()]
             second = [(t["id"], p["result"]) for t, p in node2.iter_data()]
             assert mock_load.call_count <= 1  # at most one DB query
@@ -102,7 +104,9 @@ class TestIterDatasReadOnly:
         node.run()
         assert len(node._cached_output_datas) == 3
         for key in node._cached_output_datas:
-            assert isinstance(key, bytes), f"Expected bytes key, got {type(key)}: {key!r}"
+            assert isinstance(key, bytes), (
+                f"Expected bytes key, got {type(key)}: {key!r}"
+            )
             assert b":" in key, f"Entry ID bytes should be method-prefixed, got {key!r}"
 
     def test_as_table_fresh_node_returns_empty_no_compute(self):
@@ -150,7 +154,9 @@ class TestIterDatasReadOnly:
             return x * 2
 
         pf = PythonDataFunction(sometimes_fail, output_keys="result")
-        pf.executor = LocalPythonFunctionExecutor()  # supports_concurrent_execution is False
+        pf.executor = (
+            LocalPythonFunctionExecutor()
+        )  # supports_concurrent_execution is False
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
         node = FunctionJobNode(pod, _make_source(n=3), pipeline_database=db)
@@ -161,7 +167,9 @@ class TestIterDatasReadOnly:
             def on_data_crash(self, node_label, tag, data, exc):
                 errors.append(exc)
 
-        results = node.execute(node._input_stream, observer=CapturingObserver(), error_policy="continue")
+        results = node.execute(
+            node._input_stream, observer=CapturingObserver(), error_policy="continue"
+        )
         assert len(errors) == 1
         assert isinstance(errors[0], ValueError)
         # Two non-failing data should succeed
@@ -186,5 +194,3 @@ def test_as_table_empty_schema_matches_non_empty_schema():
         empty_table.schema.field(n).nullable == full_table.schema.field(n).nullable
         for n in empty_table.column_names
     )
-
-

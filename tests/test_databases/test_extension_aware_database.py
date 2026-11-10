@@ -5,17 +5,20 @@ from __future__ import annotations
 import uuid
 
 import pyarrow as pa
-import pytest
 
 from orcapod.databases.extension_aware_database import ExtensionAwareDatabase
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
-from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.logical_types.registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+)
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _unique_name() -> str:
     return f"test.eadb.{uuid.uuid4().hex[:8]}"
@@ -35,6 +38,7 @@ def _make_converter_with_type(
     class _PolarsExt(pl.BaseExtension):
         def __init__(self):
             super().__init__(arrow_name, pl_storage, None)
+
         @classmethod
         def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
             return cls()
@@ -43,15 +47,20 @@ def _make_converter_with_type(
         @property
         def logical_type_name(self):
             return arrow_name
+
         @property
         def python_type(self):
             return str
+
         def get_arrow_extension_type(self):
             return ext_type
+
         def get_polars_extension_type(self):
             return _PolarsExt()
+
         def python_to_storage(self, v, converter=None):
             return str(v)
+
         def storage_to_python(self, v, converter=None):
             return v
 
@@ -70,16 +79,19 @@ def _make_converter():
 def _degraded_table(arrow_name: str, storage: pa.DataType, values: list) -> pa.Table:
     """Arrow table with extension field metadata but storage type (simulates unregistered read)."""
     col = pa.array(values, type=storage)
-    field = pa.field("col", storage).with_metadata({
-        b"ARROW:extension:name": arrow_name.encode(),
-        b"ARROW:extension:metadata": b"",
-    })
+    field = pa.field("col", storage).with_metadata(
+        {
+            b"ARROW:extension:name": arrow_name.encode(),
+            b"ARROW:extension:metadata": b"",
+        }
+    )
     return pa.table({"col": col}, schema=pa.schema([field]))
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_get_all_records_applies_extension_types():
     """get_all_records returns table with extension types applied."""

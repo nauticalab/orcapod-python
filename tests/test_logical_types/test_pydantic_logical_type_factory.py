@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 import uuid as _uuid_module
 
@@ -12,6 +12,7 @@ from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 class _StubConverter:
     """Minimal converter stub for PydanticLogicalType tests."""
@@ -40,8 +41,10 @@ class _StubConverter:
 
 # ── PydanticLogicalType tests ────────────────────────────────────────────────
 
+
 def test_pydantic_logical_type_is_importable():
     from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalType
+
     assert PydanticLogicalType is not None
 
 
@@ -53,7 +56,9 @@ def test_pydantic_logical_type_protocol_conformance():
         name: str
         count: int
 
-    storage = pa.struct([pa.field("name", pa.large_string()), pa.field("count", pa.int64())])
+    storage = pa.struct(
+        [pa.field("name", pa.large_string()), pa.field("count", pa.int64())]
+    )
     lt = PydanticLogicalType(
         logical_name="tests._MyModel",
         python_type=_MyModel,
@@ -144,6 +149,7 @@ def test_storage_to_python_raises_when_converter_none():
 # ── Module-level models for factory tests ────────────────────────────────────
 # Must be at module scope (not inside functions) so FQCN reconstruction works.
 
+
 class _FlatModel(BaseModel):
     name: str
     count: int
@@ -223,6 +229,7 @@ class _ModelWithValidator(BaseModel):
 
 # ── Module-level models for read-path and round-trip tests ───────────────────
 
+
 class _RoundTripPoint(BaseModel):
     x: int
     y: int
@@ -235,31 +242,48 @@ class _RoundTripRecord(BaseModel):
 
 # ── Factory helper ────────────────────────────────────────────────────────────
 
+
 def _make_full_converter():
     """Make a UniversalTypeConverter with builtin types + PydanticLogicalTypeFactory."""
     from pydantic import BaseModel as _BaseModel
-    from orcapod.logical_types.builtin_logical_types import LogicalPath, LogicalUUID, LogicalUPath
+    from orcapod.logical_types.builtin_logical_types import (
+        LogicalPath,
+        LogicalUUID,
+        LogicalUPath,
+    )
     from orcapod.logical_types.registry import LogicalTypeRegistry
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory, PYDANTIC_CATEGORY
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+        PYDANTIC_CATEGORY,
+    )
     from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
-    registry = LogicalTypeRegistry(logical_types=[LogicalPath(), LogicalUUID(), LogicalUPath()])
+    registry = LogicalTypeRegistry(
+        logical_types=[LogicalPath(), LogicalUUID(), LogicalUPath()]
+    )
     factory = PydanticLogicalTypeFactory()
-    registry.register_logical_type_factory(factory, category=PYDANTIC_CATEGORY, python_bases=[_BaseModel])
+    registry.register_logical_type_factory(
+        factory, category=PYDANTIC_CATEGORY, python_bases=[_BaseModel]
+    )
     return UniversalTypeConverter(logical_type_registry=registry)
 
 
 # ── PydanticLogicalTypeFactory write-path tests ───────────────────────────────
 
+
 def test_factory_supports_class_pydantic_model():
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     assert factory.supports_class(_FlatModel) is True
 
 
 def test_factory_supports_class_non_pydantic():
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     import dataclasses
 
@@ -274,7 +298,10 @@ def test_factory_supports_class_non_pydantic():
 
 
 def test_factory_create_flat_model():
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory, PydanticLogicalType
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+        PydanticLogicalType,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -289,7 +316,9 @@ def test_factory_create_flat_model():
 
 def test_factory_create_model_with_uuid_field():
     """UUID field → plain storage type (large_binary) in the struct, not extension type (ET1)."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -302,7 +331,9 @@ def test_factory_create_model_with_uuid_field():
 
 
 def test_factory_create_model_with_list_field():
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -314,7 +345,9 @@ def test_factory_create_model_with_list_field():
 
 
 def test_factory_create_model_with_dict_field():
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -324,16 +357,22 @@ def test_factory_create_model_with_dict_field():
     meta_type = storage.field("meta").type
     assert pa.types.is_large_list(meta_type)
     assert pa.types.is_struct(meta_type.value_type)
-    field_names = {meta_type.value_type.field(i).name for i in range(meta_type.value_type.num_fields)}
+    field_names = {
+        meta_type.value_type.field(i).name
+        for i in range(meta_type.value_type.num_fields)
+    }
     assert field_names == {"key", "value"}
 
 
 def test_factory_rejects_local_class():
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     def _make_local():
         class _Local(BaseModel):
             x: int
+
         return _Local
 
     LocalModel = _make_local()
@@ -345,7 +384,9 @@ def test_factory_rejects_local_class():
 
 def test_private_fields_not_stored():
     """Private attributes (PrivateAttr) must not appear in the Arrow struct."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -360,9 +401,13 @@ def test_private_fields_not_stored():
 
 # ── PydanticLogicalTypeFactory read-path tests ────────────────────────────────
 
+
 def test_factory_reconstruct_from_arrow():
     """reconstruct_from_arrow rebuilds the logical type from the Arrow struct."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory, PydanticLogicalType
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+        PydanticLogicalType,
+    )
 
     storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.int64())])
     metadata = {"category": "orcapod.pydantic"}
@@ -379,7 +424,9 @@ def test_factory_reconstruct_from_arrow():
 
 def test_factory_reconstruct_from_arrow_invalid_fqcn():
     """ImportError if the FQCN cannot be resolved."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     storage = pa.struct([pa.field("x", pa.int64())])
     factory = PydanticLogicalTypeFactory()
@@ -387,19 +434,26 @@ def test_factory_reconstruct_from_arrow_invalid_fqcn():
 
     with pytest.raises(ImportError):
         factory.reconstruct_from_arrow(
-            "nonexistent.module.NoSuchModel", storage, {"category": "orcapod.pydantic"}, converter
+            "nonexistent.module.NoSuchModel",
+            storage,
+            {"category": "orcapod.pydantic"},
+            converter,
         )
 
 
 def test_reconstruct_from_arrow_registers_nested_types():
     """reconstruct_from_arrow for Outer must register Inner as a side effect."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     inner_storage = pa.struct([pa.field("value", pa.int64())])
-    outer_storage = pa.struct([
-        pa.field("inner", inner_storage),
-        pa.field("label", pa.large_string()),
-    ])
+    outer_storage = pa.struct(
+        [
+            pa.field("inner", inner_storage),
+            pa.field("label", pa.large_string()),
+        ]
+    )
     outer_fqcn = f"{_OuterModel.__module__}.{_OuterModel.__qualname__}"
 
     factory = PydanticLogicalTypeFactory()
@@ -408,7 +462,9 @@ def test_reconstruct_from_arrow_registers_nested_types():
     # Inner is NOT pre-registered
     assert converter._logical_type_registry.get_by_python_type(_InnerModel) is None
 
-    factory.reconstruct_from_arrow(outer_fqcn, outer_storage, {"category": "orcapod.pydantic"}, converter)
+    factory.reconstruct_from_arrow(
+        outer_fqcn, outer_storage, {"category": "orcapod.pydantic"}, converter
+    )
 
     # Inner must now be registered as a side effect
     assert converter._logical_type_registry.get_by_python_type(_InnerModel) is not None
@@ -416,9 +472,12 @@ def test_reconstruct_from_arrow_registers_nested_types():
 
 # ── Value round-trip tests ────────────────────────────────────────────────────
 
+
 def test_pydantic_python_to_storage_round_trip():
     """python_to_storage → storage_to_python returns an equivalent model."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     converter = _make_full_converter()
     factory = PydanticLogicalTypeFactory()
@@ -437,7 +496,9 @@ def test_pydantic_python_to_storage_round_trip():
 
 def test_pydantic_with_uuid_round_trip():
     """Round-trip a pydantic model with a UUID field."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     converter = _make_full_converter()
     factory = PydanticLogicalTypeFactory()
@@ -459,6 +520,7 @@ def test_pydantic_with_uuid_round_trip():
 
 # ── Parquet integration test ──────────────────────────────────────────────────
 
+
 def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
     """Fresh-process Parquet round-trip for a two-level nested pydantic model.
 
@@ -468,7 +530,10 @@ def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
     so that storage_to_python can reconstruct the full nested object.
     """
     import pyarrow.parquet as pq
-    from orcapod.logical_types.database_hooks import register_discovered_logical_types, apply_logical_types
+    from orcapod.logical_types.database_hooks import (
+        register_discovered_logical_types,
+        apply_logical_types,
+    )
 
     # ── Write path ───────────────────────────────────────────────────────────
     write_converter = _make_full_converter()
@@ -492,8 +557,14 @@ def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
     register_discovered_logical_types(read_converter, read_table.schema)
     read_table = apply_logical_types(read_table, read_converter._logical_type_registry)
 
-    assert read_converter._logical_type_registry.get_by_python_type(_OuterModel) is not None
-    assert read_converter._logical_type_registry.get_by_python_type(_InnerModel) is not None
+    assert (
+        read_converter._logical_type_registry.get_by_python_type(_OuterModel)
+        is not None
+    )
+    assert (
+        read_converter._logical_type_registry.get_by_python_type(_InnerModel)
+        is not None
+    )
 
     rows_out = read_converter.arrow_table_to_python_dicts(read_table)
     assert len(rows_out) == 1
@@ -509,7 +580,9 @@ def test_nested_pydantic_model_parquet_roundtrip(tmp_path):
 
 def test_factory_create_model_with_literal_str_field():
     """Literal["a", "b"] field → large_string in the Arrow struct."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -521,7 +594,9 @@ def test_factory_create_model_with_literal_str_field():
 
 def test_factory_create_model_with_literal_int_field():
     """Literal[1, 2, 3] field → int64 in the Arrow struct."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -533,7 +608,9 @@ def test_factory_create_model_with_literal_int_field():
 
 def test_factory_create_model_with_literal_none_field():
     """Literal["active", None] strips None → resolves to large_string."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -545,7 +622,9 @@ def test_factory_create_model_with_literal_none_field():
 
 def test_factory_rejects_literal_none_only():
     """Literal[None] has no concrete value type — raises ValueError."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -555,7 +634,9 @@ def test_factory_rejects_literal_none_only():
 
 def test_factory_rejects_mixed_literal():
     """Literal["a", 1] mixes str and int — raises ValueError."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -565,7 +646,9 @@ def test_factory_rejects_mixed_literal():
 
 def test_literal_model_round_trip():
     """python_to_storage → storage_to_python round-trip for a model with Literal fields."""
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     converter = _make_full_converter()
     factory = PydanticLogicalTypeFactory()
@@ -619,7 +702,9 @@ def test_literal_none_schema_field_is_nullable():
     would yield nullable=False and crash on serialisation of None values.
     """
     converter = _make_full_converter()
-    schema = converter.python_schema_to_arrow_schema({"status": Literal["active", None]})
+    schema = converter.python_schema_to_arrow_schema(
+        {"status": Literal["active", None]}
+    )
     field = schema.field("status")
     assert field.type == pa.large_string()
     assert field.nullable is True
@@ -643,7 +728,9 @@ def test_literal_model_polars_dataframe_round_trip():
 
     # Build Arrow table
     rows = [{"config": _LiteralRoundTripModel(method="a", count=42)}]
-    arrow_schema = converter.python_schema_to_arrow_schema({"config": _LiteralRoundTripModel})
+    arrow_schema = converter.python_schema_to_arrow_schema(
+        {"config": _LiteralRoundTripModel}
+    )
     table = converter.python_dicts_to_arrow_table(rows, arrow_schema=arrow_schema)
 
     # Convert Arrow table → Polars DataFrame
@@ -671,7 +758,9 @@ def test_computed_field_not_stored():
     so @computed_field properties are naturally excluded. This test pins that
     behaviour so a future refactor cannot accidentally include them.
     """
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -698,7 +787,9 @@ def test_validator_runs_on_decode():
     the decoded instance may differ from a round-trip re-encoding of the original
     value — this is a Pydantic property, not an Orcapod bug.
     """
-    from orcapod.logical_types.pydantic_logical_type_factory import PydanticLogicalTypeFactory
+    from orcapod.logical_types.pydantic_logical_type_factory import (
+        PydanticLogicalTypeFactory,
+    )
 
     converter = _make_full_converter()
     factory = PydanticLogicalTypeFactory()

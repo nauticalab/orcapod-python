@@ -9,6 +9,7 @@ Also provides a dual-mode MinIO fixture for S3 integration tests:
   - CI: reads MINIO_ENDPOINT / MINIO_ACCESS_KEY / MINIO_SECRET_KEY env vars
   - Local: uses testcontainers to spin up a MinIO Docker container
 """
+
 from __future__ import annotations
 
 import os
@@ -39,7 +40,7 @@ def _minio_client(endpoint: str, access_key: str, secret_key: str) -> Minio:
     """Construct a Minio admin client from a full URL endpoint."""
     parsed = urlparse(endpoint)
     return Minio(
-        parsed.netloc,          # "host:port" — no scheme
+        parsed.netloc,  # "host:port" — no scheme
         access_key=access_key,
         secret_key=secret_key,
         secure=parsed.scheme == "https",
@@ -71,9 +72,12 @@ def minio_server():
             "bucket": bucket,
         }
     else:
-        pytest.importorskip("testcontainers.minio", reason="testcontainers[minio] not installed")
+        pytest.importorskip(
+            "testcontainers.minio", reason="testcontainers[minio] not installed"
+        )
         try:
             from testcontainers.minio import MinioContainer  # type: ignore[import]
+
             with MinioContainer() as minio:
                 client = minio.get_client()
                 bucket = "test-bucket"

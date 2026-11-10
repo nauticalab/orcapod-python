@@ -3,6 +3,7 @@
 Provides ``orcapod migrate pipeline-db`` and ``orcapod migrate result-db``
 for upgrading v0 pipeline/result DB tables to the v1 schema.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,20 +33,36 @@ def _result_path_from_node_path(node_path_str: str) -> tuple[str, ...]:
         components stripped.
     """
     return tuple(
-        p for p in node_path_str.split("/")
+        p
+        for p in node_path_str.split("/")
         if not p.startswith("schema:") and not p.startswith("instance:")
     )
 
 
 @migrate_app.command("pipeline-db")
 def migrate_pipeline_db(
-    pipeline_db_path: str = typer.Argument(..., help="Path to the pipeline DB (Delta Lake root)."),
-    result_db_path: str = typer.Argument(..., help="Path to the result DB (Delta Lake root)."),
-    node_paths: list[str] = typer.Argument(..., help="One or more bare v0 node paths (slash-separated, e.g. 'my_node/schema:abc123')."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Count rows to migrate without writing."),
-    batch_size: int = typer.Option(500, "--batch-size", help="Rows processed per batch."),
-    progress: bool = typer.Option(True, "--progress/--no-progress", help="Log progress messages."),
-    json_summary: bool = typer.Option(False, "--json-summary", help="Print JSON summary to stdout on completion."),
+    pipeline_db_path: str = typer.Argument(
+        ..., help="Path to the pipeline DB (Delta Lake root)."
+    ),
+    result_db_path: str = typer.Argument(
+        ..., help="Path to the result DB (Delta Lake root)."
+    ),
+    node_paths: list[str] = typer.Argument(
+        ...,
+        help="One or more bare v0 node paths (slash-separated, e.g. 'my_node/schema:abc123').",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Count rows to migrate without writing."
+    ),
+    batch_size: int = typer.Option(
+        500, "--batch-size", help="Rows processed per batch."
+    ),
+    progress: bool = typer.Option(
+        True, "--progress/--no-progress", help="Log progress messages."
+    ),
+    json_summary: bool = typer.Option(
+        False, "--json-summary", help="Print JSON summary to stdout on completion."
+    ),
 ) -> None:
     """Migrate one or more pipeline DB node paths from v0 to v1 schema."""
     from orcapod.databases.delta_lake_databases import DeltaTableDatabase
@@ -96,12 +113,24 @@ def migrate_pipeline_db(
 
 @migrate_app.command("result-db")
 def migrate_result_db(
-    result_db_path: str = typer.Argument(..., help="Path to the result DB (Delta Lake root)."),
-    record_paths: list[str] = typer.Argument(..., help="One or more bare v0 record paths (slash-separated)."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Count rows to migrate without writing."),
-    batch_size: int = typer.Option(500, "--batch-size", help="Rows processed per batch."),
-    progress: bool = typer.Option(True, "--progress/--no-progress", help="Log progress messages."),
-    json_summary: bool = typer.Option(False, "--json-summary", help="Print JSON summary to stdout on completion."),
+    result_db_path: str = typer.Argument(
+        ..., help="Path to the result DB (Delta Lake root)."
+    ),
+    record_paths: list[str] = typer.Argument(
+        ..., help="One or more bare v0 record paths (slash-separated)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Count rows to migrate without writing."
+    ),
+    batch_size: int = typer.Option(
+        500, "--batch-size", help="Rows processed per batch."
+    ),
+    progress: bool = typer.Option(
+        True, "--progress/--no-progress", help="Log progress messages."
+    ),
+    json_summary: bool = typer.Option(
+        False, "--json-summary", help="Print JSON summary to stdout on completion."
+    ),
 ) -> None:
     """Migrate one or more result DB record paths from v0 to v1 schema."""
     from orcapod.databases.delta_lake_databases import DeltaTableDatabase

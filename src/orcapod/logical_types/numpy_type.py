@@ -20,7 +20,10 @@ import polars as pl
 import pyarrow as pa
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.registry import (
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 
 if TYPE_CHECKING:
     from orcapod.logical_types.protocols import TypeConverterProtocol
@@ -83,7 +86,9 @@ class LogicalNumpyArray(BaseLogicalType):
             LogicalNumpyArray._polars_ext = LogicalNumpyArray._polars_ext_class()
         return LogicalNumpyArray._polars_ext
 
-    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> bytes:
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> bytes:
         """Serialise a ``numpy.ndarray`` to its ``.npy`` byte representation.
 
         Args:
@@ -111,7 +116,9 @@ class LogicalNumpyArray(BaseLogicalType):
         np.save(buf, value, allow_pickle=False)
         return buf.getvalue()
 
-    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> np.ndarray:
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> np.ndarray:
         """Reconstruct a ``numpy.ndarray`` from its ``.npy`` byte representation.
 
         Args:

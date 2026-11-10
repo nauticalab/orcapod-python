@@ -100,6 +100,7 @@ class TestInMemoryDatabaseConfig:
 def test_connector_to_config_includes_base_path():
     from unittest.mock import MagicMock
     from orcapod.databases import ConnectorArrowDatabase
+
     mock_connector = MagicMock()
     mock_connector.to_config.return_value = {"type": "mock"}
     db = ConnectorArrowDatabase(connector=mock_connector)

@@ -580,9 +580,9 @@ class TestStringViewColumns:
         assert files
         for f in files:
             schema = pq.read_schema(f)
-            assert not any(
-                pa.types.is_string_view(field.type) for field in schema
-            ), f"string_view persisted in {f}"
+            assert not any(pa.types.is_string_view(field.type) for field in schema), (
+                f"string_view persisted in {f}"
+            )
 
 
 # ---------------------------------------------------------------------------

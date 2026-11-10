@@ -1,12 +1,11 @@
 """Tests for to_invocations / from_invocations and cross-class transitions."""
+
 from __future__ import annotations
 
-import pytest
 import pyarrow as pa
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
-from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.nodes.source_node import SourceNode, SourceJobNode
 from orcapod.pipeline import Pipeline
@@ -14,22 +13,26 @@ from orcapod.pipeline.job import PipelineJob
 
 
 def _src(tag_col: str, data_col: str) -> ArrowTableSource:
-    table = pa.table({
-        tag_col: pa.array(["a", "b"], type=pa.large_string()),
-        data_col: pa.array([1, 2], type=pa.int64()),
-    })
+    table = pa.table(
+        {
+            tag_col: pa.array(["a", "b"], type=pa.large_string()),
+            data_col: pa.array([1, 2], type=pa.int64()),
+        }
+    )
     return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
 
 
 def _fn() -> FunctionPod:
     def double(value: int) -> int:
         return value * 2
+
     return FunctionPod(PythonDataFunction(double, output_keys="result"))
 
 
 class TestToInvocations:
     def test_returns_invocation_graph(self):
         from orcapod.pipeline.base import InvocationGraph
+
         pod = _fn()
         stream = _src("key", "value")
         pipeline = Pipeline(name="test")
@@ -40,6 +43,7 @@ class TestToInvocations:
 
     def test_invocation_graph_contains_one_invocation(self):
         from orcapod.pipeline.pod_invocation import FunctionInvocation
+
         pod = _fn()
         stream = _src("key", "value")
         pipeline = Pipeline(name="test")
@@ -85,8 +89,7 @@ class TestFromInvocations:
         assert "out" in job._nodes
         # Source nodes should be unbound SourceJobNodes
         source_nodes = [
-            n for n in job._persistent_node_map.values()
-            if isinstance(n, SourceJobNode)
+            n for n in job._persistent_node_map.values() if isinstance(n, SourceJobNode)
         ]
         assert len(source_nodes) == 1
         assert source_nodes[0].bound_source is None
@@ -128,11 +131,12 @@ class TestSourceJobNodeFromStream:
         sjn2 = SourceJobNode.from_stream(sjn)
         assert isinstance(sjn2, SourceJobNode)
         assert sjn2.bound_source is concrete  # bound_source copied, not sjn itself
-        assert sjn2.bound_source is not sjn   # sjn itself is NOT the bound_source
+        assert sjn2.bound_source is not sjn  # sjn itself is NOT the bound_source
 
     def test_sjn_from_source_node_creates_unbound(self):
         """SourceNode → SJN: creates unbound SourceJobNode with matching schema."""
         from orcapod.types import Schema
+
         sn = SourceNode(
             name="data",
             tag_schema=Schema({"key": str}),
@@ -154,6 +158,7 @@ class TestSourceJobNodeFromStream:
     def test_unbound_sjn_hash_equals_source_node_hash(self):
         """Unbound SJN must have same content_hash as the corresponding SourceNode."""
         from orcapod.types import Schema
+
         sn = SourceNode(
             name="data",
             tag_schema=Schema({"key": str}),
@@ -179,14 +184,16 @@ class TestCrossWithBlockReconnection:
             pod1(concrete, label="step1")
         # After first with-block, _persistent_node_map is populated via compile().
         source_hash_first = list(
-            h for h, n in job._persistent_node_map.items()
+            h
+            for h, n in job._persistent_node_map.items()
             if isinstance(n, SourceJobNode)
         )[0]
         with job:
             pod2(concrete, label="step2")
         # After second with-block, compile() re-runs; same concrete → same source hash.
         source_hash_second = list(
-            h for h, n in job._persistent_node_map.items()
+            h
+            for h, n in job._persistent_node_map.items()
             if isinstance(n, SourceJobNode)
         )[0]
         assert source_hash_first == source_hash_second
@@ -194,6 +201,7 @@ class TestCrossWithBlockReconnection:
     def test_pipeline_source_hash_after_compile_differs_from_concrete_stream_hash(self):
         """Pipeline: SourceNode's own content_hash() is schema-based, not data-inclusive."""
         from orcapod.core.nodes.source_node import SourceNode
+
         pod = _fn()
         stream = _src("key", "value")
         pipeline = Pipeline(name="test")
@@ -204,7 +212,8 @@ class TestCrossWithBlockReconnection:
         # Its own content_hash() is schema-based and must differ from the
         # data-inclusive hash of the original concrete ArrowTableSource.
         source_nodes = {
-            h: n for h, n in pipeline._persistent_node_map.items()
+            h: n
+            for h, n in pipeline._persistent_node_map.items()
             if isinstance(n, SourceNode)
         }
         assert len(source_nodes) == 1

@@ -92,9 +92,7 @@ class MapData(UnaryOperator):
                 relevant_source.append(source)
                 relevant_target.append(target)
         remaining_data_columns = set(data_columns) - set(relevant_source)
-        overlapping_data_columns = remaining_data_columns.intersection(
-            relevant_target
-        )
+        overlapping_data_columns = remaining_data_columns.intersection(relevant_target)
         overlapping_tag_columns = set(tag_columns).intersection(relevant_target)
 
         if overlapping_data_columns or overlapping_tag_columns:

@@ -31,6 +31,7 @@ signed``. Upgrading to pyspiral 0.14.x (which rewrote the HTTP stack in Python
 using ``httpx``) resolved the issue. If these tests start failing with a similar
 ``AccessDenied`` / unsigned-headers error, upgrade pyspiral first.
 """
+
 from __future__ import annotations
 
 import os
@@ -45,7 +46,9 @@ from orcapod.types import ColumnInfo
 
 INTEGRATION = os.environ.get("SPIRAL_INTEGRATION_TESTS") == "1"
 DEV_PROJECT = os.environ.get("SPIRAL_PROJECT_ID", "test-orcapod-362211")
-DEV_OVERRIDES = {"server.url": os.environ.get("SPIRAL_SERVER_URL", "http://api.spiraldb.dev")}
+DEV_OVERRIDES = {
+    "server.url": os.environ.get("SPIRAL_SERVER_URL", "http://api.spiraldb.dev")
+}
 
 pytestmark = pytest.mark.skipif(
     not INTEGRATION,
@@ -82,10 +85,12 @@ class TestSpiralDBConnectorIntegration:
                 ],
                 pk_column="__record_id",
             )
-            records = pa.table({
-                "__record_id": pa.array(["r1", "r2"], type=pa.string()),
-                "value": pa.array([10.0, 20.0], type=pa.float64()),
-            })
+            records = pa.table(
+                {
+                    "__record_id": pa.array(["r1", "r2"], type=pa.string()),
+                    "value": pa.array([10.0, 20.0], type=pa.float64()),
+                }
+            )
             connector.upsert_records(table_name, records, id_column="__record_id")
 
             result = pa.Table.from_batches(
@@ -108,10 +113,14 @@ class TestSpiralDBConnectorIntegration:
                 ],
                 pk_column="id",
             )
-            first_write = pa.table({"id": ["a", "b"], "val": pa.array([1, 2], type=pa.int64())})
+            first_write = pa.table(
+                {"id": ["a", "b"], "val": pa.array([1, 2], type=pa.int64())}
+            )
             connector.upsert_records(table_name, first_write, id_column="id")
 
-            second_write = pa.table({"id": ["a", "c"], "val": pa.array([99, 3], type=pa.int64())})
+            second_write = pa.table(
+                {"id": ["a", "c"], "val": pa.array([99, 3], type=pa.int64())}
+            )
             connector.upsert_records(
                 table_name, second_write, id_column="id", skip_existing=True
             )
@@ -196,10 +205,16 @@ class TestArrowMetadataRoundTrip:
     def test_field_metadata_round_trip(self, connector):
         """Per-column field metadata survives a full write→read cycle."""
         table_name = _unique_table("field_meta")
-        schema = pa.schema([
-            pa.field("__record_id", pa.string(), nullable=False),
-            pa.field("value", pa.float64(), metadata={b"unit": b"meters", b"sensor": b"lidar"}),
-        ])
+        schema = pa.schema(
+            [
+                pa.field("__record_id", pa.string(), nullable=False),
+                pa.field(
+                    "value",
+                    pa.float64(),
+                    metadata={b"unit": b"meters", b"sensor": b"lidar"},
+                ),
+            ]
+        )
         records = pa.table(
             {"__record_id": pa.array(["r1"]), "value": pa.array([42.0])},
             schema=schema,
@@ -235,10 +250,12 @@ class TestArrowMetadataRoundTrip:
                 b"ARROW:extension:metadata": b"",
             },
         )
-        schema = pa.schema([
-            pa.field("__record_id", pa.string(), nullable=False),
-            ext_field,
-        ])
+        schema = pa.schema(
+            [
+                pa.field("__record_id", pa.string(), nullable=False),
+                ext_field,
+            ]
+        )
         records = pa.table(
             {
                 "__record_id": pa.array(["r1"]),
@@ -277,10 +294,12 @@ class TestArrowMetadataRoundTrip:
                 ],
                 pk_column="__record_id",
             )
-            records = pa.table({
-                "__record_id": pa.array(["r1"]),
-                "value": pa.array([99], type=pa.int64()),
-            })
+            records = pa.table(
+                {
+                    "__record_id": pa.array(["r1"]),
+                    "value": pa.array([99], type=pa.int64()),
+                }
+            )
             connector.upsert_records(table_name, records, id_column="__record_id")
 
             batches = list(connector.iter_batches(f'SELECT * FROM "{table_name}"'))
@@ -330,10 +349,12 @@ class TestArrowMetadataRoundTrip:
         table_name = _unique_table("struct_meta")
         inner_field = pa.field("val", pa.float64(), metadata={b"unit": b"volts"})
         struct_col = pa.field("measurement", pa.struct([inner_field]))
-        schema = pa.schema([
-            pa.field("__record_id", pa.string(), nullable=False),
-            struct_col,
-        ])
+        schema = pa.schema(
+            [
+                pa.field("__record_id", pa.string(), nullable=False),
+                struct_col,
+            ]
+        )
         records = pa.table(
             {
                 "__record_id": pa.array(["r1"]),
@@ -349,7 +370,9 @@ class TestArrowMetadataRoundTrip:
                 table_name,
                 columns=[
                     ColumnInfo("__record_id", pa.string(), nullable=False),
-                    ColumnInfo("measurement", pa.struct([pa.field("val", pa.float64())])),
+                    ColumnInfo(
+                        "measurement", pa.struct([pa.field("val", pa.float64())])
+                    ),
                 ],
                 pk_column="__record_id",
             )

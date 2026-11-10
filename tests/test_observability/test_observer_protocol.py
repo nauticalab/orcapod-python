@@ -1,6 +1,6 @@
 """Tests for ExecutionObserverProtocol and NoOpObserver."""
+
 import inspect
-import pytest
 from orcapod.pipeline.observer import NoOpObserver
 from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 
@@ -37,25 +37,30 @@ class TestNoOpObserver:
         for method_name in ["on_node_start", "on_node_end", "create_data_logger"]:
             if hasattr(observer, method_name):
                 sig = inspect.signature(getattr(observer, method_name))
-                assert "pipeline_path" not in sig.parameters, \
+                assert "pipeline_path" not in sig.parameters, (
                     f"{method_name} still has pipeline_path parameter"
+                )
 
     def test_protocol_hooks_accept_no_pipeline_path(self):
         """Protocol hook signatures no longer include pipeline_path."""
         for method_name in ["on_node_start", "on_node_end", "create_data_logger"]:
             if hasattr(ExecutionObserverProtocol, method_name):
                 sig = inspect.signature(getattr(ExecutionObserverProtocol, method_name))
-                assert "pipeline_path" not in sig.parameters, \
+                assert "pipeline_path" not in sig.parameters, (
                     f"Protocol {method_name} still has pipeline_path parameter"
+                )
 
     def test_protocol_contextualize_uses_variadic_identity_path(self):
         """Protocol contextualize() uses *identity_path: str, not fixed params."""
         sig = inspect.signature(ExecutionObserverProtocol.contextualize)
         params = list(sig.parameters.values())
         # Find a VAR_POSITIONAL param named identity_path
-        var_positional = [p for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL]
-        assert len(var_positional) == 1, \
+        var_positional = [
+            p for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL
+        ]
+        assert len(var_positional) == 1, (
             "contextualize() should have exactly one *args (VAR_POSITIONAL) parameter"
+        )
         assert var_positional[0].name == "identity_path"
 
     def test_noop_on_node_start_callable_without_pipeline_path(self):

@@ -156,7 +156,9 @@ class FunctionSignatureExtractor:
                 if annotation is not inspect.Parameter.empty
                 else None
             )
-            param_strs.append(_format_param(param, canonical_ann, self.include_defaults))
+            param_strs.append(
+                _format_param(param, canonical_ann, self.include_defaults)
+            )
 
         parts["params"] = ", ".join(param_strs)
 

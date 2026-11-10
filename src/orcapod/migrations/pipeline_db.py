@@ -1,4 +1,5 @@
 """v0 → v1 migration for the Orcapod pipeline DB (pdb)."""
+
 from __future__ import annotations
 
 import logging
@@ -29,11 +30,13 @@ _V0_NODE_HASH_COL = "_node_content_hash"
 
 # pdb columns whose values are ContentHash strings in v0 and must become binary in v1.
 # NODE_CONTENT_HASH_COL here refers to the v1 name ("__node_content_hash").
-_PDB_HASH_COLS = frozenset({
-    constants.NODE_CONTENT_HASH_COL,
-    constants.INPUT_DATA_HASH_COL,
-    constants.OUTPUT_DATA_HASH_COL,
-})
+_PDB_HASH_COLS = frozenset(
+    {
+        constants.NODE_CONTENT_HASH_COL,
+        constants.INPUT_DATA_HASH_COL,
+        constants.OUTPUT_DATA_HASH_COL,
+    }
+)
 
 
 def migrate_pipeline_v0_to_v1(
@@ -89,7 +92,9 @@ def migrate_pipeline_v0_to_v1(
     start = time.monotonic()
 
     # Read v0 records with their internal UUIDs exposed as _RECORD_ID_COL.
-    v0_table = pipeline_db.get_all_records(pipeline_path, record_id_column=_RECORD_ID_COL)
+    v0_table = pipeline_db.get_all_records(
+        pipeline_path, record_id_column=_RECORD_ID_COL
+    )
     if v0_table is None or v0_table.num_rows == 0:
         logger.info("No v0 records found at %r — nothing to migrate.", pipeline_path)
         return MigrationResult(
@@ -106,7 +111,9 @@ def migrate_pipeline_v0_to_v1(
     # Collect IDs already at v1 for idempotency (skipped when track_skipped=False).
     existing_ids: set[bytes] = set()
     if track_skipped:
-        v1_existing = pipeline_db.get_all_records(v1_path, record_id_column=_RECORD_ID_COL)
+        v1_existing = pipeline_db.get_all_records(
+            v1_path, record_id_column=_RECORD_ID_COL
+        )
         if v1_existing is not None and _RECORD_ID_COL in v1_existing.schema.names:
             existing_ids = {
                 bytes(r)
@@ -151,7 +158,9 @@ def migrate_pipeline_v0_to_v1(
                     if rid is not None:
                         rdb_index[bytes(rid)] = row
 
-        transformed, batch_unresolvable = _transform_pdb_batch(batch, rdb_index, arrow_hasher)
+        transformed, batch_unresolvable = _transform_pdb_batch(
+            batch, rdb_index, arrow_hasher
+        )
         rows_unresolvable += batch_unresolvable
 
         # Skip rows whose recomputed record ID is already at v1 (idempotent re-runs).
@@ -271,7 +280,9 @@ def _transform_pdb_batch(
                 if rdb_row is not None:
                     raw = rdb_row.get(input_hash_col)
                     if raw is not None and isinstance(raw, str):
-                        new_row[input_hash_col] = ContentHash.from_string(raw).to_prefixed_digest()
+                        new_row[input_hash_col] = ContentHash.from_string(
+                            raw
+                        ).to_prefixed_digest()
                 else:
                     unresolvable += 1
 
@@ -300,7 +311,9 @@ def _transform_pdb_batch(
                 "__pipeline_recomputation_index",
                 pa.array([recomp_idx], type=pa.int32()),
             )
-            new_row[_RECORD_ID_COL] = arrow_hasher.hash_table(preimage_with_idx).to_prefixed_digest()
+            new_row[_RECORD_ID_COL] = arrow_hasher.hash_table(
+                preimage_with_idx
+            ).to_prefixed_digest()
 
         out_rows.append(new_row)
 

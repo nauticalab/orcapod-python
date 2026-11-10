@@ -5,15 +5,16 @@ import pytest
 import pyarrow as pa
 
 from orcapod.core.streams import ArrowTableStream
-from orcapod.core.datagrams import Data, Tag
 
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
     """Simple stream: tag=id (int), data=value (int)."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("value", pa.int64(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("value", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {"id": list(range(n)), "value": list(range(n))},
         schema=schema,
@@ -25,21 +26,25 @@ def _make_stream(n: int = 3) -> ArrowTableStream:
 # Task 1 tests
 # ---------------------------------------------------------------------------
 
+
 class TestInvocationHashConfig:
     def test_defaults(self):
         from orcapod.side_effects import InvocationHashConfig
+
         cfg = InvocationHashConfig()
         assert cfg.encoding == "hex"
         assert cfg.component_length is None
 
     def test_custom(self):
         from orcapod.side_effects import InvocationHashConfig
+
         cfg = InvocationHashConfig(encoding="base64", component_length=8)
         assert cfg.encoding == "base64"
         assert cfg.component_length == 8
 
     def test_frozen(self):
         from orcapod.side_effects import InvocationHashConfig
+
         cfg = InvocationHashConfig()
         with pytest.raises((AttributeError, TypeError)):
             cfg.encoding = "base64"  # type: ignore[misc]
@@ -48,6 +53,7 @@ class TestInvocationHashConfig:
 class TestSideEffectPodConfig:
     def test_defaults(self):
         from orcapod.side_effects import SideEffectPodConfig
+
         cfg = SideEffectPodConfig()
         assert cfg.track_completion is True
         assert cfg.drop_on_failure is True
@@ -55,6 +61,7 @@ class TestSideEffectPodConfig:
 
     def test_custom(self):
         from orcapod.side_effects import SideEffectPodConfig
+
         cfg = SideEffectPodConfig(track_completion=False, drop_on_failure=False)
         assert cfg.track_completion is False
         assert cfg.drop_on_failure is False
@@ -64,12 +71,14 @@ class TestSideEffectPodConfig:
 # Task 3 tests
 # ---------------------------------------------------------------------------
 
+
 class TestSideEffectInvocation:
     def test_construction(self):
         from orcapod.pipeline.pod_invocation import SideEffectInvocation
-        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+        from orcapod.side_effects import SideEffectPod
 
         calls = []
+
         def fn(value, ctx):
             calls.append(value)
 
@@ -83,7 +92,9 @@ class TestSideEffectInvocation:
         from orcapod.pipeline.pod_invocation import SideEffectInvocation
         from orcapod.side_effects import SideEffectPod
 
-        def fn(value, ctx): pass
+        def fn(value, ctx):
+            pass
+
         pod = SideEffectPod(fn)
         stream = _make_stream()
 
@@ -107,6 +118,7 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 
         calls = []
+
         def fn(value, ctx):
             calls.append({"value": value})
 
@@ -119,9 +131,10 @@ class TestSideEffectPodStandalone:
 
     def test_t2_passthrough_drop_on_failure_true_no_errors(self):
         """T2: All rows emitted when drop_on_failure=True and no errors."""
-        from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+        from orcapod.side_effects import SideEffectPod
 
         calls = []
+
         def fn(value, ctx):
             calls.append({"value": value})
 
@@ -137,6 +150,7 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod, InvocationContext
 
         received = []
+
         def fn(value, ctx):
             received.append(ctx)
 
@@ -156,6 +170,7 @@ class TestSideEffectPodStandalone:
         from orcapod.side_effects import SideEffectPod
 
         calls = []
+
         def fn(value, ctx):
             calls.append(True)
 
@@ -277,6 +292,7 @@ class TestDecorators:
 def _make_in_memory_db():
     """Return a fresh in-memory ArrowDatabase."""
     from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+
     return InMemoryArrowDatabase()
 
 
@@ -297,9 +313,9 @@ class TestSideEffectJobNodeSync:
     def test_t5_invocation_log_written_on_success(self):
         """T5: DB row written for each successful delivery."""
         import polars as pl
-        from orcapod.side_effects import SideEffectPod, SideEffectJobNode
 
         calls = []
+
         def fn(value, ctx):
             calls.append(True)
 
@@ -322,9 +338,14 @@ class TestSideEffectJobNodeSync:
     def test_t6_track_completion_skips_on_rerun(self):
         """T6: Second run skips re-delivery; skipped row still emitted."""
         import polars as pl
-        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+        from orcapod.side_effects import (
+            SideEffectPod,
+            SideEffectJobNode,
+            SideEffectPodConfig,
+        )
 
         calls = []
+
         def fn(value, ctx):
             calls.append(True)
 
@@ -355,9 +376,14 @@ class TestSideEffectJobNodeSync:
     def test_t7_no_track_completion_reruns_delivery(self):
         """T7: track_completion=False always re-delivers."""
         import polars as pl
-        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+        from orcapod.side_effects import (
+            SideEffectPod,
+            SideEffectJobNode,
+            SideEffectPodConfig,
+        )
 
         calls = []
+
         def fn(value, ctx):
             calls.append(True)
 
@@ -392,7 +418,11 @@ class TestSideEffectJobNodeSync:
         A failed delivery never writes a success record, so the record_id is absent
         from the DB and the next run sees no prior completion — it calls fn again.
         """
-        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+        from orcapod.side_effects import (
+            SideEffectPod,
+            SideEffectJobNode,
+            SideEffectPodConfig,
+        )
 
         call_count = 0
 
@@ -413,7 +443,7 @@ class TestSideEffectJobNodeSync:
         node1.attach_databases(pipeline_database=db)
         results1 = node1.execute(stream)
         assert len(results1) == 1  # row still emitted (drop_on_failure=False)
-        assert call_count == 1     # fn was invoked
+        assert call_count == 1  # fn was invoked
 
         table_path = node1._table_path
         assert db.get_all_records(table_path) is None  # no success record in DB
@@ -435,7 +465,11 @@ class TestSideEffectJobNodeSync:
         Run 3: record found → fn NOT called → row re-emitted from cache.
         """
         import polars as pl
-        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, SideEffectPodConfig
+        from orcapod.side_effects import (
+            SideEffectPod,
+            SideEffectJobNode,
+            SideEffectPodConfig,
+        )
 
         call_count = 0
 
@@ -487,9 +521,14 @@ class TestSideEffectJobNodeSync:
 
     def test_t11_invocation_hash_determinism(self):
         """T11: Identical inputs produce identical invocation_hash."""
-        from orcapod.side_effects import SideEffectPod, SideEffectJobNode, InvocationContext
+        from orcapod.side_effects import (
+            SideEffectPod,
+            SideEffectJobNode,
+            InvocationContext,
+        )
 
         ctx_list: list[InvocationContext] = []
+
         def fn(value, ctx):
             ctx_list.append(ctx)
 
@@ -512,10 +551,14 @@ class TestSideEffectJobNodeSync:
     def test_t12_format_id_base64_override(self):
         """T12: format_id with base64 encoding returns valid compound."""
         from orcapod.side_effects import (
-            SideEffectPod, SideEffectJobNode, InvocationHashConfig, InvocationContext
+            SideEffectPod,
+            SideEffectJobNode,
+            InvocationHashConfig,
+            InvocationContext,
         )
 
         ctx_list: list[InvocationContext] = []
+
         def fn(value, ctx):
             ctx_list.append(ctx)
 
@@ -533,6 +576,7 @@ class TestSideEffectJobNodeSync:
         parts = fid.split("::")
         assert len(parts) == 2
         import base64
+
         for part in parts:
             # Each component is "{method}:{encoded_digest}"; split on the first ":"
             assert ":" in part
@@ -557,6 +601,7 @@ class TestSideEffectJobNodeAsync:
         from orcapod.channels import Channel
 
         calls = []
+
         def fn(value, ctx):
             calls.append(True)
 
@@ -577,9 +622,7 @@ class TestSideEffectJobNodeAsync:
 
             await asyncio.gather(
                 feed(),
-                node.async_execute(
-                    [ch_in.reader], ch_out.writer, run_id="test-run-1"
-                ),
+                node.async_execute([ch_in.reader], ch_out.writer, run_id="test-run-1"),
             )
             return await ch_out.reader.collect()
 
@@ -601,6 +644,7 @@ class TestSideEffectJobNodeAsync:
         from orcapod.channels import Channel
 
         results_store = []
+
         def fn(value, ctx):
             results_store.append(True)
 
@@ -668,8 +712,7 @@ class TestSideEffectPodPipelineIntegration:
 
         # Find the side_effect node in the compiled graph
         side_effect_nodes = [
-            n for n in job.dag.nodes()
-            if getattr(n, "node_type", None) == "side_effect"
+            n for n in job.dag.nodes() if getattr(n, "node_type", None) == "side_effect"
         ]
         assert len(side_effect_nodes) == 1
         node = side_effect_nodes[0]
@@ -770,7 +813,6 @@ class TestSideEffectInvocationLogHashType:
 
     def test_record_id_hash_bytes_stored_correctly(self):
         """The actual bytes are stored and retrievable unchanged."""
-        import pyarrow as pa
         from orcapod.databases import InMemoryArrowDatabase
         from orcapod.side_effects import _write_invocation_row
         from orcapod.types import ContentHash

@@ -101,12 +101,17 @@ class TestFetchJoinedRecords:
         """Passing a single base_entry_id returns only that row."""
         node = executed_node
         input_pairs = list(node._input_stream.iter_data())
-        base_entry_id_0 = node.compute_base_entry_id(input_pairs[0][0], input_pairs[0][1])
+        base_entry_id_0 = node.compute_base_entry_id(
+            input_pairs[0][0], input_pairs[0][1]
+        )
 
         result = node._fetch_joined_records(base_entry_ids=[base_entry_id_0])
         assert result is not None
         assert result.table.num_rows == 1
-        assert result.table.column(_PIPELINE_BASE_ENTRY_ID_COL)[0].as_py() == base_entry_id_0
+        assert (
+            result.table.column(_PIPELINE_BASE_ENTRY_ID_COL)[0].as_py()
+            == base_entry_id_0
+        )
 
     def test_empty_base_entry_ids_returns_zero_rows(self, executed_node):
         """Passing base_entry_ids=[] returns a 0-row table, not None."""

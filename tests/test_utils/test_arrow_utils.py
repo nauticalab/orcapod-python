@@ -1,7 +1,6 @@
 """Tests for arrow_utils utility functions."""
 
 import pyarrow as pa
-import pytest
 
 from orcapod.types import ColumnConfig
 from orcapod.utils.arrow_utils import (
@@ -141,7 +140,12 @@ class TestMakeSchemaNotNullable:
     def _schema_with_metadata(self) -> "pa.Schema":
         return pa.schema(
             [
-                pa.field("id", pa.int64(), nullable=True, metadata={b"field_key": b"field_val"}),
+                pa.field(
+                    "id",
+                    pa.int64(),
+                    nullable=True,
+                    metadata={b"field_key": b"field_val"},
+                ),
                 pa.field("name", pa.large_string(), nullable=True),
             ],
             metadata={b"schema_key": b"schema_val"},
@@ -185,7 +189,9 @@ class TestInferSchemaNullable:
     def _table_with_metadata(self) -> "pa.Table":
         schema = pa.schema(
             [
-                pa.field("id", pa.int64(), nullable=True, metadata={b"field_key": b"fv"}),
+                pa.field(
+                    "id", pa.int64(), nullable=True, metadata={b"field_key": b"fv"}
+                ),
                 pa.field("val", pa.int64(), nullable=True),
                 pa.field("opt", pa.int64(), nullable=True),
             ],
@@ -193,9 +199,11 @@ class TestInferSchemaNullable:
         )
         return pa.table(
             {
-                "id": pa.array([1, 2], type=pa.int64()),      # no nulls → nullable=False
-                "val": pa.array([10, 20], type=pa.int64()),   # no nulls → nullable=False
-                "opt": pa.array([None, 1], type=pa.int64()),  # has nulls → nullable=True
+                "id": pa.array([1, 2], type=pa.int64()),  # no nulls → nullable=False
+                "val": pa.array([10, 20], type=pa.int64()),  # no nulls → nullable=False
+                "opt": pa.array(
+                    [None, 1], type=pa.int64()
+                ),  # has nulls → nullable=True
             },
             schema=schema,
         )
@@ -248,11 +256,13 @@ class TestAddSourceInfo:
 
     def test_multi_column_each_source_column_uses_its_own_name(self):
         """Each _source_<col> value is '<src>::<col>' — columns are independent."""
-        table = pa.table({
-            "x": pa.array([1, 2], type=pa.int64()),
-            "y": pa.array([3, 4], type=pa.int64()),
-            "z": pa.array([5, 6], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "x": pa.array([1, 2], type=pa.int64()),
+                "y": pa.array([3, 4], type=pa.int64()),
+                "z": pa.array([5, 6], type=pa.int64()),
+            }
+        )
         result = add_source_info(table, "base")
 
         assert result.column("_source_x").to_pylist() == ["base::x", "base::x"]
@@ -261,10 +271,12 @@ class TestAddSourceInfo:
 
     def test_per_row_source_tokens_combined_with_column_name(self):
         """With a per-row source list, each row's token is '<row_src>::<col>'."""
-        table = pa.table({
-            "a": pa.array([10, 20], type=pa.int64()),
-            "b": pa.array([30, 40], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "a": pa.array([10, 20], type=pa.int64()),
+                "b": pa.array([30, 40], type=pa.int64()),
+            }
+        )
         result = add_source_info(table, ["src0", "src1"])
 
         assert result.column("_source_a").to_pylist() == ["src0::a", "src1::a"]
@@ -272,11 +284,13 @@ class TestAddSourceInfo:
 
     def test_correct_number_of_source_columns_added(self):
         """Exactly one _source_<col> column is added per non-excluded data column."""
-        table = pa.table({
-            "p": pa.array([1], type=pa.int64()),
-            "q": pa.array([2], type=pa.int64()),
-            "r": pa.array([3], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "p": pa.array([1], type=pa.int64()),
+                "q": pa.array([2], type=pa.int64()),
+                "r": pa.array([3], type=pa.int64()),
+            }
+        )
         result = add_source_info(table, "s")
 
         assert result.num_columns == 6  # 3 data + 3 source
@@ -329,7 +343,10 @@ class TestSystemTagColumnNames:
         import uuid
 
         import pyarrow as pa
-        from orcapod.utils.arrow_utils import add_system_tag_columns, system_tag_column_names
+        from orcapod.utils.arrow_utils import (
+            add_system_tag_columns,
+            system_tag_column_names,
+        )
 
         schema_hash = "testhash"
         table = pa.table({"id": pa.array([1]), "v": pa.array([1.0])})
@@ -428,9 +445,9 @@ class TestNormalizeViewTypes:
         )
 
     def test_fixed_size_list_of_string_view(self):
-        assert normalize_view_types(
-            pa.list_(pa.string_view(), 3)
-        ) == pa.list_(pa.large_string(), 3)
+        assert normalize_view_types(pa.list_(pa.string_view(), 3)) == pa.list_(
+            pa.large_string(), 3
+        )
 
     def test_struct_with_string_view_field(self):
         src = pa.struct([pa.field("a", pa.string_view()), pa.field("b", pa.int64())])
@@ -487,7 +504,9 @@ class TestNormalizeTableViewTypes:
         assert result.column("s").to_pylist() == ["x", "y"]
 
     def test_no_view_types_returns_same_table(self):
-        tbl = pa.table({"s": ["x"], "n": [1]})  # string -> large_string by default? plain string
+        tbl = pa.table(
+            {"s": ["x"], "n": [1]}
+        )  # string -> large_string by default? plain string
         result = normalize_table_view_types(tbl)
         # No view types present -> object returned unchanged (identity).
         assert result is tbl
@@ -743,6 +762,7 @@ class TestMakeEmptyTable:
 
     def _converter(self):
         from orcapod.contexts import get_default_type_converter
+
         return get_default_type_converter()
 
     def test_required_fields_are_non_nullable(self):
@@ -792,6 +812,8 @@ class TestMakeEmptyTable:
         _, data_schema = stream.output_schema()
 
         assert data_schema["score"] == (int | None)
+
+
 # fold_system_tag_values
 # ---------------------------------------------------------------------------
 
@@ -812,9 +834,7 @@ class TestFoldSystemTagValues:
         bytes.fromhex("1112131415161718191a1b1c1d1e1f20"),
     ]
     EXPECTED_RID = bytes.fromhex("853be16a3f38565f8ced039f84fdbea6")
-    EXPECTED_SID = (
-        "7916442d59841140bedf6c1f5dcc1304ae9fce0ba885765c06e511086b85da2e"
-    )
+    EXPECTED_SID = "7916442d59841140bedf6c1f5dcc1304ae9fce0ba885765c06e511086b85da2e"
 
     def test_record_id_folds_to_16_bytes(self):
         from orcapod.utils.arrow_utils import fold_system_tag_values
@@ -856,9 +876,7 @@ class TestFoldSystemTagValues:
         assert isinstance(
             fold_system_tag_values(self.RECORD_COL, [None, self.RIDS[0]]), bytes
         )
-        assert isinstance(
-            fold_system_tag_values(self.SOURCE_COL, [None, "src_a"]), str
-        )
+        assert isinstance(fold_system_tag_values(self.SOURCE_COL, [None, "src_a"]), str)
 
     def test_digest_is_stable_across_processes(self):
         """Fresh interpreter, therefore fresh PYTHONHASHSEED.
@@ -885,7 +903,9 @@ class TestFoldSystemTagValues:
         src_dir = Path(__file__).resolve().parents[2] / "src"
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join(
-            [str(src_dir), env["PYTHONPATH"]] if env.get("PYTHONPATH") else [str(src_dir)]
+            [str(src_dir), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH")
+            else [str(src_dir)]
         )
         out = subprocess.run(
             [sys.executable, "-c", script],

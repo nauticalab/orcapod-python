@@ -41,9 +41,7 @@ class SemiJoin(BinaryOperator):
         right_tag_schema, right_data_schema = right_stream.output_schema()
 
         # Find overlapping columns across all columns (tags + data)
-        left_all_schema = schema_utils.union_schemas(
-            left_tag_schema, left_data_schema
-        )
+        left_all_schema = schema_utils.union_schemas(left_tag_schema, left_data_schema)
         right_all_schema = schema_utils.union_schemas(
             right_tag_schema, right_data_schema
         )

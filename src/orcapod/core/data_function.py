@@ -29,6 +29,7 @@ from orcapod.protocols.core_protocols.executor import (
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import schema_utils
+from orcapod.utils.canonical_type_names import stabilize_type_names
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
 
@@ -350,9 +351,7 @@ class DataFunctionBase(TraceableBase, Generic[E]):
         return await self.direct_async_call(data, **kwargs)
 
     @abstractmethod
-    def direct_call(
-        self, data: DataProtocol, **kwargs: Any
-    ) -> DataProtocol | None:
+    def direct_call(self, data: DataProtocol, **kwargs: Any) -> DataProtocol | None:
         """Execute the function's native computation on *data*.
 
         This is the method executors invoke.  It bypasses executor routing
@@ -395,8 +394,9 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         # default to the basic PythonFunctionExecutor
         if executor is None:
             from orcapod.core.executors.local import LocalPythonFunctionExecutor
+
             executor = LocalPythonFunctionExecutor()
-        
+
         self._function = function
         self._is_async = inspect.iscoroutinefunction(function)
 
@@ -435,7 +435,13 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         assert function_name is not None
         self._function_name = function_name
 
-        super().__init__(label=label, version=version, data_context=data_context, config=config, executor=executor)
+        super().__init__(
+            label=label,
+            version=version,
+            data_context=data_context,
+            config=config,
+            executor=executor,
+        )
 
         # extract input and output schema from the function signature
         self._input_schema, self._output_schema = schema_utils.extract_function_schemas(
@@ -456,7 +462,9 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
                 git_hash += "-dirty"
             if env_info.get("has_untracked_files") == "true":
                 git_hash += "-untracked"
-            if (git_source := env_info.get("git_source")) is not None and git_source != "function":
+            if (
+                git_source := env_info.get("git_source")
+            ) is not None and git_source != "function":
                 git_hash += f"-{git_source}"
         self._git_hash = git_hash
 
@@ -484,12 +492,14 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
 
     def get_function_variation_data_schema(self) -> Schema:
         """Schema for the data returned by ``get_function_variation_data``."""
-        return Schema({
-            "function_name": str,
-            "function_signature_hash": bytes,
-            "function_content_hash": bytes,
-            "git_hash": str,
-        })
+        return Schema(
+            {
+                "function_name": str,
+                "function_signature_hash": bytes,
+                "function_content_hash": bytes,
+                "git_hash": str,
+            }
+        )
 
     def get_execution_data(self) -> dict[str, Any]:
         """Raw data defining execution context."""
@@ -498,9 +508,15 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         executor = self._executor
         if executor is not None:
             executor_data = executor.get_executor_data()
-            executor_type = str(executor_data.pop("executor_type", executor.executor_type_id))
+            executor_type = str(
+                executor_data.pop("executor_type", executor.executor_type_id)
+            )
             executor_info = {
-                k: v if isinstance(v, str) else json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                k: v
+                if isinstance(v, str)
+                else json.dumps(v)
+                if isinstance(v, (dict, list))
+                else str(v)
                 for k, v in executor_data.items()
             }
         else:
@@ -518,12 +534,14 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
 
     def get_execution_data_schema(self) -> Schema:
         """Schema for the data returned by ``get_execution_data``."""
-        return Schema({
-            "executor_type": str,
-            "executor_info": dict[str, str],
-            "python_version": str,
-            "extra_info": dict[str, str],
-        })
+        return Schema(
+            {
+                "executor_type": str,
+                "executor_info": dict[str, str],
+                "python_version": str,
+                "extra_info": dict[str, str],
+            }
+        )
 
     @property
     def input_data_schema(self) -> Schema:
@@ -564,7 +582,9 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             return "::".join(inner_parsed)
 
         new_record_uuid = uuid.UUID(bytes=uuid7().bytes)
-        source_info = {k: combine(self.uri, (new_record_uuid.hex,), (k,)) for k in output_data}
+        source_info = {
+            k: combine(self.uri, (new_record_uuid.hex,), (k,)) for k in output_data
+        }
 
         return Data(
             output_data,
@@ -607,7 +627,9 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             # The lambda ensures the coroutine is created inside the executor
             # thread, avoiding unawaited-coroutine warnings on submission failure.
             return (
-                _get_sync_executor().submit(lambda: asyncio.run(fn(**call_dict))).result()
+                _get_sync_executor()
+                .submit(lambda: asyncio.run(fn(**call_dict)))
+                .result()
             )
 
     def call(
@@ -673,9 +695,7 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             )
         return await self.direct_async_call(data, **kwargs)
 
-    def direct_call(
-        self, data: DataProtocol, **kwargs: Any
-    ) -> DataProtocol | None:
+    def direct_call(self, data: DataProtocol, **kwargs: Any) -> DataProtocol | None:
         """Execute the function on *data* synchronously (no executor path).
 
         On user-function failure the exception is re-raised.
@@ -750,10 +770,12 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
                 "callable_name": self._function_name,
                 "version": self._version,
                 "input_data_schema": {
-                    k: str(v) for k, v in self.input_data_schema.items()
+                    k: stabilize_type_names(str(v), v)
+                    for k, v in self.input_data_schema.items()
                 },
                 "output_data_schema": {
-                    k: str(v) for k, v in self.output_data_schema.items()
+                    k: stabilize_type_names(str(v), v)
+                    for k, v in self.output_data_schema.items()
                 },
                 "output_keys": list(self._output_keys) if self._output_keys else None,
             },
@@ -906,9 +928,7 @@ class DataFunctionWrapper(DataFunctionBase[E]):
     ) -> DataProtocol | None:
         return await self._data_function.async_call(data, logger=logger, **kwargs)
 
-    def direct_call(
-        self, data: DataProtocol, **kwargs: Any
-    ) -> DataProtocol | None:
+    def direct_call(self, data: DataProtocol, **kwargs: Any) -> DataProtocol | None:
         return self._data_function.direct_call(data, **kwargs)
 
     async def direct_async_call(
@@ -1017,7 +1037,9 @@ class CachedDataFunction(DataFunctionWrapper):
             if output_data is not None:
                 module_logger.info(f"Cache hit for {data}!")
                 return output_data
-        output_data = await self._data_function.async_call(data, logger=logger, **kwargs)
+        output_data = await self._data_function.async_call(
+            data, logger=logger, **kwargs
+        )
         if output_data is not None:
             if not skip_cache_insert:
                 var_dg, exec_dg = self._build_metadata_datagrams()

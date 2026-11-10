@@ -584,7 +584,9 @@ def test_cached_source_to_config_no_identity_fields():
     src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
     config = src.to_config()
     for field in ("content_hash", "pipeline_hash", "tag_schema", "data_schema"):
-        assert field not in config, f"Identity field {field!r} must not be in source_config"
+        assert field not in config, (
+            f"Identity field {field!r} must not be in source_config"
+        )
 
 
 def test_cached_source_from_config_with_registry_resolves_key():
@@ -637,7 +639,9 @@ def test_cached_source_to_config_forwards_db_registry_to_inner_source():
     registry = DatabaseRegistry()
     config = outer_cached.to_config(db_registry=registry)
 
-    assert isinstance(config["cache_database"], str), "outer cache_database should be a key"
+    assert isinstance(config["cache_database"], str), (
+        "outer cache_database should be a key"
+    )
     # Inner source's cache_database must also use the registry key, not inline dict
     assert isinstance(config["inner_source"]["cache_database"], str), (
         "inner cache_database should be a registry key when db_registry is forwarded"
@@ -733,7 +737,9 @@ def test_function_node_has_node_uri():
     def add_one(x: int) -> int:
         return x + 1
 
-    source = SourceNode("source", tag_schema=Schema({"id": str}), data_schema=Schema({"x": int}))
+    source = SourceNode(
+        "source", tag_schema=Schema({"id": str}), data_schema=Schema({"x": int})
+    )
     pf = PythonDataFunction(add_one, output_keys="result")
     pod = FunctionPod(data_function=pf)
 
@@ -763,7 +769,9 @@ def test_function_node_stored_node_uri_from_descriptor():
         "output_schema": {"tag": {"x": "int64"}, "data": {"result": "int64"}},
         "data_context_key": "std:v0.1:default",
     }
-    node = FunctionNode.from_descriptor(descriptor, function_pod=None, input_stream=None, databases={})
+    node = FunctionNode.from_descriptor(
+        descriptor, function_pod=None, input_stream=None, databases={}
+    )
     assert node.node_uri == ("add_one", "v0", "python.function.v0", "schema_repr")
 
 
@@ -773,8 +781,12 @@ def test_operator_node_has_node_uri():
     from orcapod.pipeline import Pipeline
     from orcapod.types import Schema
 
-    src_a = SourceNode("src_a", tag_schema=Schema({"key": str}), data_schema=Schema({"val_a": int}))
-    src_b = SourceNode("src_b", tag_schema=Schema({"key": str}), data_schema=Schema({"val_b": int}))
+    src_a = SourceNode(
+        "src_a", tag_schema=Schema({"key": str}), data_schema=Schema({"val_a": int})
+    )
+    src_b = SourceNode(
+        "src_b", tag_schema=Schema({"key": str}), data_schema=Schema({"val_b": int})
+    )
 
     pipeline = Pipeline(name="test")
     with pipeline:

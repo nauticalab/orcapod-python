@@ -1,11 +1,16 @@
 repos:
+  # Keeps the ruff rev below equal to the ruff version in uv.lock, which is the
+  # version CI runs (`uv run --with ruff` resolves to the locked dev dependency).
   - repo: https://github.com/tsvikas/sync-with-uv
-    rev: v0.4.0  # replace with the latest version
+    rev: v0.4.0
     hooks:
       - id: sync-with-uv
+  # Same checks as the org required CI: `ruff check .` and `ruff format --check .`.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.4
+    rev: v0.15.8
     hooks:
+      - id: ruff-check
+        types_or: [ python, pyi ]
       - id: ruff-format
         types_or: [ python, pyi ]
 
@@ -18,4 +23,6 @@ repos:
         types_or: [ python, pyi ]
       - id: check-yaml
       - id: check-added-large-files
+        # The basedpyright baseline is generated and large by design.
+        exclude: ^\.basedpyright/baseline\.json$
       - id: check-merge-conflict

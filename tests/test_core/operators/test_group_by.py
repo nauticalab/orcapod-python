@@ -20,12 +20,14 @@ from orcapod.system_constants import constants
 @pytest.fixture
 def session_table() -> pa.Table:
     """Two sessions x two probes: the common-clock shape from NPIPE-204."""
-    return pa.table({
-        "subject": ["G", "G", "G", "G"],
-        "date": ["d1", "d1", "d2", "d2"],
-        "probe": [1, 0, 1, 0],
-        "path": ["b", "a", "d", "c"],
-    })
+    return pa.table(
+        {
+            "subject": ["G", "G", "G", "G"],
+            "date": ["d1", "d1", "d2", "d2"],
+            "probe": [1, 0, 1, 0],
+            "path": ["b", "a", "d", "c"],
+        }
+    )
 
 
 @pytest.fixture
@@ -217,10 +219,12 @@ class TestGroupByEmptyInput:
     # review on PR #250, same follow-up as ordering.
 
     def test_empty_input_yields_zero_groups(self):
-        table = pa.table({
-            "subject": pa.array([], pa.large_string()),
-            "path": pa.array([], pa.large_string()),
-        })
+        table = pa.table(
+            {
+                "subject": pa.array([], pa.large_string()),
+                "path": pa.array([], pa.large_string()),
+            }
+        )
         stream = ArrowTableStream(table, tag_columns=["subject"])
         out = GroupBy(by=["subject"]).process(stream)
         assert len(out.as_table()) == 0
@@ -321,6 +325,7 @@ class TestGroupByAsyncIsBarrier:
 # Logical (extension) element types — NPIPE-204 / ET2
 # ---------------------------------------------------------------------------
 
+
 # Defined at module level on purpose.  This file uses `from __future__ import
 # annotations`, so a pod function nested inside a test method would have its
 # annotations stringified with no resolvable scope, and `Path` would fail to
@@ -333,17 +338,19 @@ def _make_path(seed: str) -> Path:
 def _path_stream() -> StreamProtocol:
     """A stream whose data column is ``extension<orcapod.path>``."""
     source = ArrowTableSource(
-        pa.table({
-            "date": ["d1", "d1", "d2"],
-            "probe": [0, 1, 0],
-            "seed": ["a", "b", "c"],
-        }),
+        pa.table(
+            {
+                "date": ["d1", "d1", "d2"],
+                "probe": [0, 1, 0],
+                "seed": ["a", "b", "c"],
+            }
+        ),
         tag_columns=["date", "probe"],
         infer_nullable=True,
     )
-    return FunctionPod(
-        PythonDataFunction(_make_path, output_keys="result_path")
-    )(source)
+    return FunctionPod(PythonDataFunction(_make_path, output_keys="result_path"))(
+        source
+    )
 
 
 class TestAggregationLogicalTypes:

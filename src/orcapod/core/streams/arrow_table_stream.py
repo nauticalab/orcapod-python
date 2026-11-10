@@ -221,9 +221,7 @@ class ArrowTableStream(StreamBase):
                 if columns_config.content_hash is True
                 else columns_config.content_hash
             )
-            content_hashes = [
-                str(data.content_hash()) for _, data in self.iter_data()
-            ]
+            content_hashes = [str(data.content_hash()) for _, data in self.iter_data()]
             output_table = output_table.append_column(
                 pa.field(hash_column_name, pa.large_string(), nullable=False),
                 pa.array(content_hashes, type=pa.large_string()),

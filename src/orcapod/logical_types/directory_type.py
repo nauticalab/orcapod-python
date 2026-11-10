@@ -24,7 +24,10 @@ from upath import UPath
 from upath.extensions import ProxyUPath
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.registry import (
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 
 if TYPE_CHECKING:
     from orcapod.logical_types.protocols import TypeConverterProtocol
@@ -203,7 +206,9 @@ class LogicalDirectory(BaseLogicalType):
 
     _arrow_ext_class = make_arrow_extension_type("orcapod.directory", pa.large_string())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("orcapod.directory", pa.large_string())
+    _polars_ext_class = make_polars_extension_type(
+        "orcapod.directory", pa.large_string()
+    )
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "orcapod.directory"
@@ -259,7 +264,12 @@ class LogicalDirectory(BaseLogicalType):
             # Any non-callable iterable (list, tuple, set, …) — pattern spec.
             # Sort by base name (strip leading glob chars) for deterministic storage order;
             # secondary sort by the full pattern ensures canonical output when base names collide.
-            return json.dumps({"path": path_str, "ignore": sorted(ignore, key=lambda x: (x.lstrip("*."), x))})
+            return json.dumps(
+                {
+                    "path": path_str,
+                    "ignore": sorted(ignore, key=lambda x: (x.lstrip("*."), x)),
+                }
+            )
 
         # Callable — attempt best-effort serialisation via module:qualname.
         qualname = getattr(ignore, "__qualname__", "")

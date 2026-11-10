@@ -14,6 +14,7 @@ Two tests:
    is called exactly once (first read) and zero additional times on the second
    read of the same file.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -22,10 +23,13 @@ from unittest.mock import patch
 import pyarrow.parquet as pq
 
 from orcapod.contexts import create_registry
-from orcapod.logical_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+from orcapod.logical_types.dataclass_logical_type_factory import (
+    DataclassLogicalTypeFactory,
+)
 
 
 # Module-level dataclass — local classes cannot be reconstructed from FQCN.
+
 
 @dataclasses.dataclass
 class _CachePoint:
@@ -73,12 +77,17 @@ def test_cache_populated_after_first_read(tmp_path):
     fqcn = f"{_CachePoint.__module__}.{_CachePoint.__qualname__}"
 
     # Before read: not registered
-    assert read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn) is None
+    assert (
+        read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn) is None
+    )
 
     read_converter.load_logical_types(pq.read_table(parquet_path))
 
     # After read: registered (cache populated)
-    assert read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn) is not None
+    assert (
+        read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn)
+        is not None
+    )
 
 
 def test_factory_not_called_on_second_read(tmp_path):

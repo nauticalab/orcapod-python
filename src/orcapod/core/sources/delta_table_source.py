@@ -49,7 +49,9 @@ class DeltaTableSource(RootSource):
         except deltalake.exceptions.TableNotFoundError:
             raise ValueError(f"Delta table not found at {self._delta_table_path}")
 
-        table: pa.Table = self._delta_table.to_pyarrow_dataset(as_large_types=True).to_table()
+        table: pa.Table = self._delta_table.to_pyarrow_dataset(
+            as_large_types=True
+        ).to_table()
         # The Delta log stores field-level nullable flags; to_pyarrow_dataset()
         # preserves them exactly — no inference needed.
 
@@ -82,7 +84,9 @@ class DeltaTableSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "DeltaTableSource":
+    def from_config(
+        cls, config: dict[str, Any], db_registry=None
+    ) -> "DeltaTableSource":
         """Reconstruct a DeltaTableSource from a config dict."""
         return cls(
             delta_table_path=config["delta_table_path"],

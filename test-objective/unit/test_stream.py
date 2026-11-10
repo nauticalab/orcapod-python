@@ -20,10 +20,12 @@ from orcapod.types import ColumnConfig, Schema
 
 def _simple_table(n_rows: int = 3) -> pa.Table:
     """A table with one tag-eligible column and one data column."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("value", pa.large_string(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("value", pa.large_string(), nullable=False),
+        ]
+    )
     return pa.table(
         {
             "id": pa.array(list(range(n_rows)), type=pa.int64()),
@@ -35,11 +37,13 @@ def _simple_table(n_rows: int = 3) -> pa.Table:
 
 def _multi_data_table(n_rows: int = 3) -> pa.Table:
     """A table with one tag column and two data columns."""
-    schema = pa.schema([
-        pa.field("id", pa.int64(), nullable=False),
-        pa.field("x", pa.int64(), nullable=False),
-        pa.field("y", pa.large_string(), nullable=False),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+            pa.field("y", pa.large_string(), nullable=False),
+        ]
+    )
     return pa.table(
         {
             "id": pa.array(list(range(n_rows)), type=pa.int64()),
@@ -81,9 +85,7 @@ class TestConstruction:
                 "sys": pa.array(["s1", "s2"], type=pa.large_string()),
             }
         )
-        stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["sys"]
-        )
+        stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["sys"])
         assert stream is not None
 
     def test_construction_with_source_info(self):
@@ -135,9 +137,7 @@ class TestConstruction:
 
     def test_multiple_data_columns(self):
         """Stream supports multiple data columns."""
-        stream = ArrowTableStream(
-            _multi_data_table(), tag_columns=["id"]
-        )
+        stream = ArrowTableStream(_multi_data_table(), tag_columns=["id"])
         _, data_keys = stream.keys()
         assert set(data_keys) == {"x", "y"}
 
@@ -242,12 +242,14 @@ class TestOutputSchema:
 
     def test_schema_with_multiple_types(self):
         """Schema correctly reflects different column types."""
-        schema = pa.schema([
-            pa.field("tag", pa.int64(), nullable=False),
-            pa.field("col_int", pa.int64(), nullable=False),
-            pa.field("col_str", pa.large_string(), nullable=False),
-            pa.field("col_float", pa.float64(), nullable=False),
-        ])
+        schema = pa.schema(
+            [
+                pa.field("tag", pa.int64(), nullable=False),
+                pa.field("col_int", pa.int64(), nullable=False),
+                pa.field("col_str", pa.large_string(), nullable=False),
+                pa.field("col_float", pa.float64(), nullable=False),
+            ]
+        )
         table = pa.table(
             {
                 "tag": pa.array([1], type=pa.int64()),
@@ -273,9 +275,7 @@ class TestOutputSchema:
                 "sys": pa.array(["s"], type=pa.large_string()),
             }
         )
-        stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["sys"]
-        )
+        stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["sys"])
         tag_schema_default, _ = stream.output_schema()
         tag_schema_with_sys, _ = stream.output_schema(
             columns=ColumnConfig(system_tags=True)
@@ -406,9 +406,7 @@ class TestColumnConfigFiltering:
         """source=True includes source info columns in as_table."""
         stream = _make_stream()
         table_no_source = stream.as_table()
-        table_with_source = stream.as_table(
-            columns=ColumnConfig(source=True)
-        )
+        table_with_source = stream.as_table(columns=ColumnConfig(source=True))
         assert table_with_source.num_columns >= table_no_source.num_columns
 
     def test_context_column_config(self):
@@ -509,7 +507,6 @@ class TestFormatConversions:
 
     def test_format_conversions_with_column_config(self):
         """Format conversions respect ColumnConfig."""
-        import polars as pl
 
         stream = _make_stream()
         df_default = stream.as_polars_df()

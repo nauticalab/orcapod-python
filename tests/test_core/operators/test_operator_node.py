@@ -17,7 +17,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import (
     DropDataColumns,
     Join,
@@ -326,7 +326,7 @@ class TestOperatorNodeRunAndStorage:
     def test_iter_data(self, simple_stream, db):
         op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db)
-        node.run()                          # <-- add this line
+        node.run()  # <-- add this line
         data = list(node.iter_data())
         assert len(data) == 3
         for tag, data in data:
@@ -335,7 +335,7 @@ class TestOperatorNodeRunAndStorage:
     def test_as_table(self, simple_stream, db):
         op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db)
-        node.run()                          # <-- add this line
+        node.run()  # <-- add this line
         table = node.as_table()
         assert table.num_rows == 3
         assert "renamed_x" in table.column_names

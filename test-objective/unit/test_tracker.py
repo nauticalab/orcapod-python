@@ -7,10 +7,8 @@ Pipeline documented behavior.
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.nodes.source_node import SourceNode

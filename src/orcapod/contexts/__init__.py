@@ -26,15 +26,18 @@ Example usage:
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols import semantic_types_protocols as sp
 
-logger = logging.getLogger(__name__)
-
 from .core import ContextResolutionError, ContextValidationError, DataContext
 from .registry import JSONDataContextRegistry
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Global registry instance (lazily initialized)
 _registry: JSONDataContextRegistry | None = None

@@ -55,7 +55,9 @@ class TestApplyNodeConfig:
         # Pre-set one node to ephemeral=True
         nodes[0].node_config = NodeConfig(is_result_ephemeral=True)
         # Apply a new config wholesale — replaces whatever each node had
-        job.apply_node_config(NodeConfig(is_result_ephemeral=False), replace_existing=False)
+        job.apply_node_config(
+            NodeConfig(is_result_ephemeral=False), replace_existing=False
+        )
         for node in job._iter_function_job_nodes():
             assert node.node_config.is_result_ephemeral is False
 
@@ -73,12 +75,15 @@ class TestApplyNodeConfig:
         job = _make_job()
         nodes = list(job._iter_function_job_nodes())
         nodes[0].node_config = NodeConfig(is_result_ephemeral=True)
-        job.apply_node_config(NodeConfig(is_result_ephemeral=False), replace_existing=True)
+        job.apply_node_config(
+            NodeConfig(is_result_ephemeral=False), replace_existing=True
+        )
         assert nodes[0].node_config.is_result_ephemeral is False
 
     def test_iter_function_job_nodes_yields_only_function_nodes(self):
         """_iter_function_job_nodes does not yield source or operator nodes."""
         from orcapod.core.nodes.function_node import FunctionJobNode
+
         job = _make_job()
         nodes = list(job._iter_function_job_nodes())
         assert all(isinstance(n, FunctionJobNode) for n in nodes)

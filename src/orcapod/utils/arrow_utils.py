@@ -17,7 +17,9 @@ else:
     pa = LazyModule("pyarrow")
 
 
-def make_empty_table(python_schema: "Mapping[str, Any]", type_converter: "TypeConverterProtocol") -> "pa.Table":
+def make_empty_table(
+    python_schema: "Mapping[str, Any]", type_converter: "TypeConverterProtocol"
+) -> "pa.Table":
     """Return a zero-row PyArrow table whose field nullability matches ``python_schema``.
 
     Uses ``python_schema_to_arrow_schema`` so that plain types (``str``, ``int``, …)
@@ -362,16 +364,18 @@ def normalize_extension_columns(table: "pa.Table") -> "pa.Table":
             # Merge extension identity into existing field metadata (if any)
             # so that non-extension keys already on the field are preserved.
             existing_meta = dict(field.metadata) if field.metadata else {}
-            existing_meta[b"ARROW:extension:name"] = (
-                ext_type.extension_name.encode("utf-8")
+            existing_meta[b"ARROW:extension:name"] = ext_type.extension_name.encode(
+                "utf-8"
             )
             existing_meta[b"ARROW:extension:metadata"] = serialized
-            new_fields.append(pa.field(
-                field.name,
-                ext_type.storage_type,
-                nullable=field.nullable,
-                metadata=existing_meta,
-            ))
+            new_fields.append(
+                pa.field(
+                    field.name,
+                    ext_type.storage_type,
+                    nullable=field.nullable,
+                    metadata=existing_meta,
+                )
+            )
             new_columns.append(storage_arr)
         else:
             new_columns.append(table.column(i))
@@ -835,14 +839,16 @@ def prepare_prefixed_columns(
     data_table: pa.Table = pa.Table.from_arrays(data_columns, schema=data_schema)
     result_tables = {}
     for prefix in all_prefix_info:
-        schema = pa.schema([
-            pa.field(name, col.type, nullable=nullable)
-            for name, col, nullable in zip(
-                prefixed_column_names[prefix],
-                prefixed_columns[prefix],
-                prefixed_column_nullables[prefix],
-            )
-        ])
+        schema = pa.schema(
+            [
+                pa.field(name, col.type, nullable=nullable)
+                for name, col, nullable in zip(
+                    prefixed_column_names[prefix],
+                    prefixed_columns[prefix],
+                    prefixed_column_nullables[prefix],
+                )
+            ]
+        )
         prefix_table = pa.Table.from_arrays(prefixed_columns[prefix], schema=schema)
         result_tables[prefix] = normalize_table_to_large_types(prefix_table)
 
@@ -1056,7 +1062,9 @@ def restore_schema_nullability(
         ref = field_lookup.get(field.name)
         if ref is not None:
             restored_fields.append(
-                pa.field(field.name, ref.type, nullable=ref.nullable, metadata=ref.metadata)
+                pa.field(
+                    field.name, ref.type, nullable=ref.nullable, metadata=ref.metadata
+                )
             )
         else:
             restored_fields.append(field)
@@ -1116,12 +1124,8 @@ def system_tag_column_names(schema_hash: str) -> tuple[str, str]:
         has ``large_string`` type; the record_id column has ``binary(16)``
         (fixed-size 16-byte binary) type in the Arrow table.
     """
-    source_id_col = (
-        f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
-    )
-    record_id_col = (
-        f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
-    )
+    source_id_col = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    record_id_col = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
     return source_id_col, record_id_col
 
 
@@ -1219,9 +1223,7 @@ def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | byt
             "" if v is None else v.hex() for v in values
         )
         return uuid.uuid5(_AGGREGATED_RECORD_ID_NAMESPACE, name).bytes
-    return combine_hashes(
-        *["" if v is None else str(v) for v in values], order=False
-    )
+    return combine_hashes(*["" if v is None else str(v) for v in values], order=False)
 
 
 def build_aggregated_table(
@@ -1272,9 +1274,7 @@ def build_aggregated_table(
                 list[element_python_type]
             )
             extension_overrides[field.name] = list_type
-            fields.append(
-                pa.field(field.name, list_type.storage_type, nullable=False)
-            )
+            fields.append(pa.field(field.name, list_type.storage_type, nullable=False))
         else:
             fields.append(pa.field(field.name, pa.list_(field.type), nullable=False))
 
@@ -1284,7 +1284,10 @@ def build_aggregated_table(
         index = table.schema.get_field_index(name)
         storage = table.column(name)
         wrapped = pa.chunked_array(
-            [pa.ExtensionArray.from_storage(list_type, chunk) for chunk in storage.chunks],
+            [
+                pa.ExtensionArray.from_storage(list_type, chunk)
+                for chunk in storage.chunks
+            ],
             type=list_type,
         )
         table = table.set_column(
@@ -1481,7 +1484,9 @@ def add_source_info(
         )
         # Source info columns are always computed strings, never null.
         table = table.append_column(
-            pa.field(f"{constants.SOURCE_PREFIX}{col}", pa.large_string(), nullable=False),
+            pa.field(
+                f"{constants.SOURCE_PREFIX}{col}", pa.large_string(), nullable=False
+            ),
             col_source,
         )
 
@@ -1525,13 +1530,10 @@ def apply_column_config(
     drop_columns = []
     if not column_config.system_tags:
         drop_columns.extend(
-            c for c in table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
         )
     if not column_config.source:
-        drop_columns.extend(
-            f"{constants.SOURCE_PREFIX}{c}" for c in data_keys
-        )
+        drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in data_keys)
     if not column_config.context:
         drop_columns.append(constants.CONTEXT_KEY)
     if not column_config.meta:
@@ -1547,15 +1549,15 @@ def apply_column_config(
             for p in column_config.meta
         ]
         drop_columns.extend(
-            c for c in table.column_names
+            c
+            for c in table.column_names
             if c.startswith(constants.META_PREFIX)
             and not any(c.startswith(p) for p in normalized_meta_prefixes)
         )
-    output_table = table.drop(
-        [c for c in drop_columns if c in table.column_names]
-    )
+    output_table = table.drop([c for c in drop_columns if c in table.column_names])
     if column_config.sort_by_tags:
         import polars as pl
+
         output_table_schema = output_table.schema
         output_table = (
             pl.DataFrame(output_table)

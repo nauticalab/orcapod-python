@@ -1,4 +1,5 @@
 """Tests for SpiralDBConnector — DBConnectorProtocol backed by SpiralDB."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -105,7 +106,9 @@ class TestLifecycle:
         with pytest.raises(RuntimeError, match="closed"):
             connector.create_table_if_not_exists("t", [], "id")
         with pytest.raises(RuntimeError, match="closed"):
-            connector.upsert_records("t", pa.table({"id": pa.array([], type=pa.string())}), "id")
+            connector.upsert_records(
+                "t", pa.table({"id": pa.array([], type=pa.string())}), "id"
+            )
         with pytest.raises(RuntimeError, match="closed"):
             connector.to_config()
 
@@ -146,7 +149,9 @@ class TestGetPkColumns:
         mock_table.key_schema.names = ["session_id", "timestamp", "probe_id"]
         mock_project.table.return_value = mock_table
         assert connector.get_pk_columns("spike_data") == [
-            "session_id", "timestamp", "probe_id"
+            "session_id",
+            "timestamp",
+            "probe_id",
         ]
 
     def test_empty_key_schema_returns_empty_list(self, connector, mock_project):
@@ -157,29 +162,35 @@ class TestGetPkColumns:
 
 
 class TestGetColumnInfo:
-    def test_arrow_types_returned_with_string_normalization(self, connector, mock_project):
+    def test_arrow_types_returned_with_string_normalization(
+        self, connector, mock_project
+    ):
         # SpiralDB normalizes large_string → string at storage time.
         # get_column_info maps string → large_string (and binary → large_binary)
         # to stay consistent with SQLiteConnector and PostgreSQLConnector.
-        arrow_schema = pa.schema([
-            pa.field("id", pa.string(), nullable=False),       # SpiralDB returns string
-            pa.field("data", pa.binary(), nullable=True),      # SpiralDB returns binary
-            pa.field("value", pa.float64(), nullable=True),
-            pa.field("count", pa.int64(), nullable=True),
-        ])
+        arrow_schema = pa.schema(
+            [
+                pa.field("id", pa.string(), nullable=False),  # SpiralDB returns string
+                pa.field("data", pa.binary(), nullable=True),  # SpiralDB returns binary
+                pa.field("value", pa.float64(), nullable=True),
+                pa.field("count", pa.int64(), nullable=True),
+            ]
+        )
         mock_table = MagicMock()
         mock_table.schema.return_value.to_arrow.return_value = arrow_schema
         mock_project.table.return_value = mock_table
         result = connector.get_column_info("my_table")
         assert result == [
-            ColumnInfo("id", pa.large_string(), nullable=False),   # normalized
+            ColumnInfo("id", pa.large_string(), nullable=False),  # normalized
             ColumnInfo("data", pa.large_binary(), nullable=True),  # normalized
             ColumnInfo("value", pa.float64(), nullable=True),
             ColumnInfo("count", pa.int64(), nullable=True),
         ]
         mock_project.table.assert_called_once_with("default.my_table")
 
-    def test_nonexistent_table_propagates_pyspiral_exception(self, connector, mock_project):
+    def test_nonexistent_table_propagates_pyspiral_exception(
+        self, connector, mock_project
+    ):
         mock_project.table.side_effect = RuntimeError("table not found")
         with pytest.raises(RuntimeError, match="table not found"):
             connector.get_column_info("nonexistent")
@@ -194,8 +205,8 @@ class TestIterBatches:
     def _wire_scan(self, mock_sp, mock_project, batches: list) -> None:
         """Wire mock_sp so that scan().to_record_batches() returns ``batches``."""
         mock_project.table.return_value.select.return_value = MagicMock()
-        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = iter(
-            batches
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = (
+            iter(batches)
         )
 
     def test_full_scan_yields_batches(self, connector, mock_sp, mock_project):
@@ -214,16 +225,20 @@ class TestIterBatches:
         assert result[0].column("v").to_pylist() == [1, 2]
         mock_project.table.assert_called_once_with("default.my_table")
 
-    def test_string_and_binary_normalized_to_large(self, connector, mock_sp, mock_project):
+    def test_string_and_binary_normalized_to_large(
+        self, connector, mock_sp, mock_project
+    ):
         # SpiralDB (Vortex) stores utf8 → pa.string() and binary → pa.binary().
         # iter_batches must cast those to large_string / large_binary so they
         # match the types used by ConnectorArrowDatabase for pending records,
         # preventing pa.concat_tables schema mismatches.
-        raw_batch = pa.record_batch({
-            "label": pa.array(["x"], type=pa.string()),
-            "payload": pa.array([b"\x00"], type=pa.binary()),
-            "score": pa.array([1.0], type=pa.float64()),
-        })
+        raw_batch = pa.record_batch(
+            {
+                "label": pa.array(["x"], type=pa.string()),
+                "payload": pa.array([b"\x00"], type=pa.binary()),
+                "score": pa.array([1.0], type=pa.float64()),
+            }
+        )
         self._wire_scan(mock_sp, mock_project, [raw_batch])
         result = list(connector.iter_batches('SELECT * FROM "t"'))
         assert len(result) == 1
@@ -246,26 +261,34 @@ class TestIterBatches:
         result = list(connector.iter_batches('SELECT * FROM "t"'))
         assert len(result) == 2
 
-    def test_params_not_none_emits_warning(self, connector, mock_sp, mock_project, caplog):
+    def test_params_not_none_emits_warning(
+        self, connector, mock_sp, mock_project, caplog
+    ):
         import logging
+
         self._wire_scan(mock_sp, mock_project, [])
         with caplog.at_level(logging.WARNING):
             list(connector.iter_batches('SELECT * FROM "t"', params={"x": 1}))
         assert any("params" in msg.lower() for msg in caplog.messages)
 
-    def test_batch_size_logs_warning_and_is_ignored(self, connector, mock_sp, mock_project, caplog):
+    def test_batch_size_logs_warning_and_is_ignored(
+        self, connector, mock_sp, mock_project, caplog
+    ):
         # SpiralDB does not support caller-controlled batch sizing; the SDK
         # controls batch sizes internally.  A warning should be logged when a
         # non-default value is passed, and to_record_batches() must be called
         # with no arguments.
         import logging  # noqa: PLC0415
+
         self._wire_scan(mock_sp, mock_project, [])
         with caplog.at_level(logging.WARNING):
             list(connector.iter_batches('SELECT * FROM "t"', batch_size=500))
         assert any("batch_size" in msg.lower() for msg in caplog.messages)
         mock_sp.Spiral.return_value.scan.return_value.to_record_batches.assert_called_with()
 
-    def test_nonexistent_table_propagates_exception(self, connector, mock_sp, mock_project):
+    def test_nonexistent_table_propagates_exception(
+        self, connector, mock_sp, mock_project
+    ):
         mock_project.table.side_effect = RuntimeError("table not found")
         with pytest.raises(RuntimeError, match="table not found"):
             list(connector.iter_batches('SELECT * FROM "missing"'))
@@ -363,53 +386,75 @@ class TestUpsertRecords:
 
     # --- skip_existing=True (scan + filter + write novel rows only) ----------
 
-    def test_skip_existing_writes_only_novel_rows(self, connector, mock_sp, mock_project):
+    def test_skip_existing_writes_only_novel_rows(
+        self, connector, mock_sp, mock_project
+    ):
         mock_table = self._make_mock_table(mock_project, ["id"])
         existing = pa.table({"id": ["a"], "value": [1.0]})
         new_records = pa.table({"id": ["a", "b"], "value": [1.0, 2.0]})
         mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
 
-        connector.upsert_records("my_table", new_records, id_column="id", skip_existing=True)
+        connector.upsert_records(
+            "my_table", new_records, id_column="id", skip_existing=True
+        )
 
         written = mock_table.write.call_args[0][0]
         assert written.column("id").to_pylist() == ["b"]
 
-    def test_skip_existing_noop_when_all_rows_exist(self, connector, mock_sp, mock_project):
+    def test_skip_existing_noop_when_all_rows_exist(
+        self, connector, mock_sp, mock_project
+    ):
         mock_table = self._make_mock_table(mock_project, ["id"])
         existing = pa.table({"id": ["a", "b"], "value": [1.0, 2.0]})
         new_records = pa.table({"id": ["a", "b"], "value": [10.0, 20.0]})
         mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
 
-        connector.upsert_records("my_table", new_records, id_column="id", skip_existing=True)
+        connector.upsert_records(
+            "my_table", new_records, id_column="id", skip_existing=True
+        )
 
         mock_table.write.assert_not_called()
 
     def test_skip_existing_composite_pk(self, connector, mock_sp, mock_project):
         mock_table = self._make_mock_table(mock_project, ["session_id", "ts"])
-        existing = pa.table({
-            "session_id": pa.array(["s1"]),
-            "ts": pa.array([1], type=pa.int64()),
-            "v": pa.array([10.0]),
-        })
-        new_records = pa.table({
-            "session_id": pa.array(["s1", "s1"]),
-            "ts": pa.array([1, 2], type=pa.int64()),  # (s1,1) exists; (s1,2) is novel
-            "v": pa.array([99.0, 5.0]),
-        })
+        existing = pa.table(
+            {
+                "session_id": pa.array(["s1"]),
+                "ts": pa.array([1], type=pa.int64()),
+                "v": pa.array([10.0]),
+            }
+        )
+        new_records = pa.table(
+            {
+                "session_id": pa.array(["s1", "s1"]),
+                "ts": pa.array(
+                    [1, 2], type=pa.int64()
+                ),  # (s1,1) exists; (s1,2) is novel
+                "v": pa.array([99.0, 5.0]),
+            }
+        )
         mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
 
-        connector.upsert_records("my_table", new_records, id_column="session_id", skip_existing=True)
+        connector.upsert_records(
+            "my_table", new_records, id_column="session_id", skip_existing=True
+        )
 
         written = mock_table.write.call_args[0][0]
         assert written.column("ts").to_pylist() == [2]
 
-    def test_skip_existing_raises_if_id_column_not_in_key_schema(self, connector, mock_project):
+    def test_skip_existing_raises_if_id_column_not_in_key_schema(
+        self, connector, mock_project
+    ):
         self._make_mock_table(mock_project, ["id"])
         records = pa.table({"id": ["a"]})
         with pytest.raises(ValueError, match="id_column"):
-            connector.upsert_records("t", records, id_column="wrong", skip_existing=True)
+            connector.upsert_records(
+                "t", records, id_column="wrong", skip_existing=True
+            )
 
-    def test_skip_existing_raises_if_pk_missing_from_records(self, connector, mock_project):
+    def test_skip_existing_raises_if_pk_missing_from_records(
+        self, connector, mock_project
+    ):
         self._make_mock_table(mock_project, ["id", "ts"])
         records = pa.table({"id": ["a"]})  # missing ts
         with pytest.raises(ValueError, match="missing key column"):
@@ -477,10 +522,12 @@ class TestConfigSerialization:
 class TestValidateRecords:
     def test_no_op_for_plain_columns(self, connector):
         """validate_records is a no-op on SpiralDBConnector for plain columns."""
-        table = pa.table({
-            "id": pa.array([b"a"], type=pa.large_binary()),
-            "value": pa.array([1], type=pa.int64()),
-        })
+        table = pa.table(
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "value": pa.array([1], type=pa.int64()),
+            }
+        )
         connector.validate_records(table)  # must not raise
 
     def test_no_op_for_extension_typed_columns(self, connector):
@@ -495,11 +542,15 @@ class TestValidateRecords:
         )
         schema = pa.schema([pa.field("id", pa.large_binary()), ext_field])
         table = pa.table(
-            {"id": pa.array([b"a"], type=pa.large_binary()),
-             "payload": pa.array(["/tmp/x"], type=pa.large_string())},
+            {
+                "id": pa.array([b"a"], type=pa.large_binary()),
+                "payload": pa.array(["/tmp/x"], type=pa.large_string()),
+            },
             schema=schema,
         )
-        connector.validate_records(table)  # must not raise — SpiralDB supports extension types
+        connector.validate_records(
+            table
+        )  # must not raise — SpiralDB supports extension types
 
 
 # ---------------------------------------------------------------------------
@@ -536,10 +587,12 @@ class TestUpsertRecordsMetadata:
         self, connector, mock_project
     ):
         mock_tbl = self._make_mock_table(mock_project, ["id"])
-        schema = pa.schema([
-            pa.field("id", pa.string()),
-            pa.field("val", pa.int64(), metadata={b"unit": b"m"}),
-        ])
+        schema = pa.schema(
+            [
+                pa.field("id", pa.string()),
+                pa.field("val", pa.int64(), metadata={b"unit": b"m"}),
+            ]
+        )
         records = pa.table(
             {"id": pa.array(["a"]), "val": pa.array([1], type=pa.int64())},
             schema=schema,
@@ -547,9 +600,7 @@ class TestUpsertRecordsMetadata:
         connector.upsert_records("t", records, id_column="id")
         mock_tbl.set_metadata.assert_called_once()
 
-    def test_set_metadata_not_called_when_no_metadata(
-        self, connector, mock_project
-    ):
+    def test_set_metadata_not_called_when_no_metadata(self, connector, mock_project):
         mock_tbl = self._make_mock_table(mock_project, ["id"])
         records = pa.table({"id": pa.array(["a"]), "val": pa.array([1])})
         connector.upsert_records("t", records, id_column="id")
@@ -576,9 +627,13 @@ class TestUpsertRecordsMetadata:
         mock_tbl.set_metadata.assert_called_once()
         import json  # noqa: PLC0415
         import base64 as b64mod  # noqa: PLC0415
+
         kv = mock_tbl.set_metadata.call_args[0][0]
         blob = json.loads(kv["__arrow_metadata__"].decode())
-        assert blob["schema"][b64mod.b64encode(b"version").decode()] == b64mod.b64encode(b"1").decode()
+        assert (
+            blob["schema"][b64mod.b64encode(b"version").decode()]
+            == b64mod.b64encode(b"1").decode()
+        )
 
     def test_set_metadata_not_called_when_skip_existing_all_exist(
         self, connector, mock_sp, mock_project
@@ -598,22 +653,32 @@ class TestUpsertRecordsMetadata:
 
 
 class TestIterBatchesMetadata:
-    def _wire_scan(self, mock_sp, mock_project, batches: list, kv: dict | None = None) -> None:
+    def _wire_scan(
+        self, mock_sp, mock_project, batches: list, kv: dict | None = None
+    ) -> None:
         mock_project.table.return_value.select.return_value = MagicMock()
         mock_project.table.return_value.get_metadata.return_value = kv or {}
-        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = iter(batches)
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = (
+            iter(batches)
+        )
 
     def test_schema_metadata_reattached(self, connector, mock_sp, mock_project):
         import json  # noqa: PLC0415
         import base64 as b64mod  # noqa: PLC0415
 
-        stored_blob = json.dumps({
-            "schema": {
-                b64mod.b64encode(b"origin").decode(): b64mod.b64encode(b"test").decode()
+        stored_blob = json.dumps(
+            {
+                "schema": {
+                    b64mod.b64encode(b"origin").decode(): b64mod.b64encode(
+                        b"test"
+                    ).decode()
+                }
             }
-        }).encode()
+        ).encode()
         raw_batch = pa.record_batch({"id": pa.array(["a"], type=pa.string())})
-        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+        self._wire_scan(
+            mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob}
+        )
 
         result = list(connector.iter_batches('SELECT * FROM "t"'))
         assert len(result) == 1
@@ -623,55 +688,83 @@ class TestIterBatchesMetadata:
         import json  # noqa: PLC0415
         import base64 as b64mod  # noqa: PLC0415
 
-        stored_blob = json.dumps({
-            "fields": {
-                "val": {"meta": {
-                    b64mod.b64encode(b"unit").decode(): b64mod.b64encode(b"meters").decode()
-                }}
+        stored_blob = json.dumps(
+            {
+                "fields": {
+                    "val": {
+                        "meta": {
+                            b64mod.b64encode(b"unit").decode(): b64mod.b64encode(
+                                b"meters"
+                            ).decode()
+                        }
+                    }
+                }
             }
-        }).encode()
-        raw_batch = pa.record_batch({
-            "id": pa.array(["a"], type=pa.string()),
-            "val": pa.array([1.0], type=pa.float64()),
-        })
-        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+        ).encode()
+        raw_batch = pa.record_batch(
+            {
+                "id": pa.array(["a"], type=pa.string()),
+                "val": pa.array([1.0], type=pa.float64()),
+            }
+        )
+        self._wire_scan(
+            mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob}
+        )
 
         result = list(connector.iter_batches('SELECT * FROM "t"'))
         assert result[0].schema.field("val").metadata == {b"unit": b"meters"}
 
-    def test_string_normalization_preserved_with_metadata(self, connector, mock_sp, mock_project):
+    def test_string_normalization_preserved_with_metadata(
+        self, connector, mock_sp, mock_project
+    ):
         """string → large_string normalization still applies when field metadata present."""
         import json  # noqa: PLC0415
         import base64 as b64mod  # noqa: PLC0415
 
-        stored_blob = json.dumps({
-            "fields": {
-                "label": {"meta": {
-                    b64mod.b64encode(b"ARROW:extension:name").decode(): b64mod.b64encode(b"orcapod.path").decode()
-                }}
+        stored_blob = json.dumps(
+            {
+                "fields": {
+                    "label": {
+                        "meta": {
+                            b64mod.b64encode(
+                                b"ARROW:extension:name"
+                            ).decode(): b64mod.b64encode(b"orcapod.path").decode()
+                        }
+                    }
+                }
             }
-        }).encode()
+        ).encode()
         # SpiralDB returns pa.string() at the wire
         raw_batch = pa.record_batch({"label": pa.array(["x"], type=pa.string())})
-        self._wire_scan(mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob})
+        self._wire_scan(
+            mock_sp, mock_project, [raw_batch], {"__arrow_metadata__": stored_blob}
+        )
 
         result = list(connector.iter_batches('SELECT * FROM "t"'))
         batch = result[0]
         # type must be large_string (normalized)
         assert batch.schema.field("label").type == pa.large_string()
         # metadata must be restored
-        assert batch.schema.field("label").metadata == {b"ARROW:extension:name": b"orcapod.path"}
+        assert batch.schema.field("label").metadata == {
+            b"ARROW:extension:name": b"orcapod.path"
+        }
 
-    def test_no_stored_metadata_behaves_as_before(self, connector, mock_sp, mock_project):
+    def test_no_stored_metadata_behaves_as_before(
+        self, connector, mock_sp, mock_project
+    ):
         """Tables with no stored metadata are returned unchanged (backward compat)."""
-        raw_batch = pa.record_batch({"id": pa.array(["a"], type=pa.string()), "v": pa.array([1])})
+        raw_batch = pa.record_batch(
+            {"id": pa.array(["a"], type=pa.string()), "v": pa.array([1])}
+        )
         self._wire_scan(mock_sp, mock_project, [raw_batch], {})
 
         result = list(connector.iter_batches('SELECT * FROM "t"'))
         assert result[0].schema.field("id").type == pa.large_string()
         assert result[0].schema.metadata is None
 
-    def test_get_metadata_called_once_per_scan_not_per_batch(self, connector, mock_sp, mock_project):
+    def test_get_metadata_called_once_per_scan_not_per_batch(
+        self, connector, mock_sp, mock_project
+    ):
         b1 = pa.record_batch({"id": pa.array(["a"])})
         b2 = pa.record_batch({"id": pa.array(["b"])})
         self._wire_scan(mock_sp, mock_project, [b1, b2], {})

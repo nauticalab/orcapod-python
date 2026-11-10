@@ -5,6 +5,7 @@ Provides ``SideEffectPod``, ``SideEffectPodStream``, ``SideEffectJobNode``,
 ``SideEffectPodConfig``, and the ``side_effect_pod``, ``sink_pod``, ``tap_pod``
 decorators.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -164,13 +165,9 @@ class SideEffectPodStream(StreamBase):
             data_tables.append(data.as_table(columns=column_config))
         if not tag_tables:
             # Return an empty table preserving declared field nullability.
-            tag_schema, data_schema = self.output_schema(
-                columns=column_config
-            )
+            tag_schema, data_schema = self.output_schema(columns=column_config)
             tc = self._pod.data_context.type_converter
-            return arrow_utils.make_empty_table(
-                {**tag_schema, **data_schema}, tc
-            )
+            return arrow_utils.make_empty_table({**tag_schema, **data_schema}, tc)
         combined_tags = pa.concat_tables(tag_tables)
         combined_data = pa.concat_tables(data_tables)
         return arrow_utils.hstack_tables(combined_tags, combined_data)
@@ -235,7 +232,11 @@ def _execute_side_effect_row(
     record_id: bytes = record_id_hash.to_prefixed_digest()
 
     # 2. Completion check — look up by deterministic record_id.
-    if pod_config.track_completion and pipeline_database is not None and table_path is not None:
+    if (
+        pod_config.track_completion
+        and pipeline_database is not None
+        and table_path is not None
+    ):
         prior = pipeline_database.get_record_by_id(table_path, record_id)
         if prior is not None:
             return (tag, data)  # already completed — re-emit without re-delivery
@@ -305,12 +306,8 @@ def _write_invocation_row(
     executed_at = datetime.datetime.now(datetime.timezone.utc)
     record = pa.table(
         {
-            "record_id_hash": pa.array(
-                [record_id_hash_bytes], type=pa.large_binary()
-            ),
-            "pipeline_run_id": pa.array(
-                [run_id], type=pa.large_string()
-            ),
+            "record_id_hash": pa.array([record_id_hash_bytes], type=pa.large_binary()),
+            "pipeline_run_id": pa.array([run_id], type=pa.large_string()),
             "executed_at": pa.array(
                 [executed_at],
                 type=pa.timestamp("us", tz="UTC"),
@@ -369,7 +366,9 @@ class SideEffectPod(TraceableBase):
     ) -> None:
         super().__init__(label=label, data_context=data_context)
         self._fn = fn
-        self._name: str = name if name is not None else getattr(fn, "__name__", "unknown")
+        self._name: str = (
+            name if name is not None else getattr(fn, "__name__", "unknown")
+        )
         self._pod_config = config or SideEffectPodConfig()
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._ctx_arg_name: str = ctx_arg_name
@@ -499,6 +498,7 @@ def side_effect_pod(
     Returns:
         A ``SideEffectPod`` (bare usage) or a decorator (parameterised usage).
     """
+
     def _wrap(f: Callable) -> SideEffectPod:
         return SideEffectPod(f, config=config, name=name, ctx_arg_name=ctx_arg_name)
 
@@ -533,7 +533,9 @@ def sink_pod(
     effective_config = _merge_config(preset, config)
 
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=effective_config, name=name, ctx_arg_name=ctx_arg_name)
+        return SideEffectPod(
+            f, config=effective_config, name=name, ctx_arg_name=ctx_arg_name
+        )
 
     if fn is not None:
         return _wrap(fn)
@@ -566,7 +568,9 @@ def tap_pod(
     effective_config = _merge_config(preset, config)
 
     def _wrap(f: Callable) -> SideEffectPod:
-        return SideEffectPod(f, config=effective_config, name=name, ctx_arg_name=ctx_arg_name)
+        return SideEffectPod(
+            f, config=effective_config, name=name, ctx_arg_name=ctx_arg_name
+        )
 
     if fn is not None:
         return _wrap(fn)
@@ -725,9 +729,7 @@ class SideEffectNode(StreamBase):
             # Return an empty table preserving declared field nullability.
             tag_schema, data_schema = self.output_schema(columns=column_config)
             tc = self._pod.data_context.type_converter
-            return arrow_utils.make_empty_table(
-                {**tag_schema, **data_schema}, tc
-            )
+            return arrow_utils.make_empty_table({**tag_schema, **data_schema}, tc)
         return arrow_utils.hstack_tables(
             pa.concat_tables(tag_tables),
             pa.concat_tables(data_tables),
@@ -770,7 +772,9 @@ class SideEffectJobNode(SideEffectNode):
         input_stream: StreamProtocol,
         label: str | None = None,
     ) -> None:
-        super().__init__(side_effect_pod=side_effect_pod, input_stream=input_stream, label=label)
+        super().__init__(
+            side_effect_pod=side_effect_pod, input_stream=input_stream, label=label
+        )
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._table_path: tuple[str, ...] | None = None
 
@@ -878,9 +882,12 @@ class SideEffectJobNode(SideEffectNode):
                 f"got {len(inputs)}."
             )
         max_concurrency = self._pod.pod_config.max_concurrency
-        sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+        sem = (
+            asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+        )
 
         try:
+
             async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
                 try:
                     result = _execute_side_effect_row(

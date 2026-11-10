@@ -3,6 +3,7 @@
 These tests verify the new _record_invocation / _invocation_lut / _source_streams
 mechanics by exercising them through Pipeline (concrete subclass).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -16,16 +17,19 @@ from orcapod.pipeline import Pipeline
 
 
 def _src(tag_col: str, data_col: str) -> ArrowTableSource:
-    table = pa.table({
-        tag_col: pa.array(["a", "b"], type=pa.large_string()),
-        data_col: pa.array([1, 2], type=pa.int64()),
-    })
+    table = pa.table(
+        {
+            tag_col: pa.array(["a", "b"], type=pa.large_string()),
+            data_col: pa.array([1, 2], type=pa.int64()),
+        }
+    )
     return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
 
 
 def _fn(name: str = "double") -> FunctionPod:
     def fn(value: int) -> int:
         return value * 2
+
     fn.__name__ = name
     return FunctionPod(PythonDataFunction(fn, output_keys="result"))
 
@@ -53,14 +57,17 @@ class TestRecordFunctionPodInvocation:
 
     def test_invocation_lut_additive_across_with_blocks(self):
         """Opening a second with-block appends to _invocation_lut, not replaces."""
+
         # pod1 consumes 'value' and produces 'result'; pod2 consumes 'result'
         def fn1(value: int) -> int:
             return value * 2
+
         fn1.__name__ = "fn1"
         pod1 = FunctionPod(PythonDataFunction(fn1, output_keys="result"))
 
         def fn2(result: int) -> int:
             return result * 3
+
         fn2.__name__ = "fn2"
         pod2 = FunctionPod(PythonDataFunction(fn2, output_keys="result2"))
 
@@ -85,6 +92,7 @@ class TestRecordFunctionPodInvocation:
     def test_compile_creates_source_node_for_unregistered_upstream(self):
         """Streams with no recorded invocation must become SourceNode at compile time."""
         from orcapod.core.nodes.source_node import SourceNode
+
         pod = _fn()
         stream = _src("key", "value")
         pipeline = Pipeline(name="test")
@@ -111,10 +119,12 @@ class TestSourceNodeNaming:
         from orcapod.core.nodes.source_node import SourceNode
 
         source = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a", "b"], type=pa.large_string()),
-                "value": pa.array([1, 2], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a", "b"], type=pa.large_string()),
+                    "value": pa.array([1, 2], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="my_dataset",
             infer_nullable=True,
@@ -125,7 +135,8 @@ class TestSourceNodeNaming:
             pod(source, label="out")
 
         source_nodes = [
-            n for n in pipeline._persistent_node_map.values()
+            n
+            for n in pipeline._persistent_node_map.values()
             if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 1
@@ -135,7 +146,7 @@ class TestSourceNodeNaming:
         """Two ArrowTableSources with different data get distinct hash-based names."""
         from orcapod.core.nodes.source_node import SourceNode
 
-        s1 = _src("key", "value")   # different data column → different source_id
+        s1 = _src("key", "value")  # different data column → different source_id
         s2 = _src("key", "score")
         join = Join()
         pipeline = Pipeline(name="test")
@@ -143,7 +154,8 @@ class TestSourceNodeNaming:
             join(s1, s2, label="joined")
 
         source_nodes = [
-            n for n in pipeline._persistent_node_map.values()
+            n
+            for n in pipeline._persistent_node_map.values()
             if isinstance(n, SourceNode)
         ]
         names = [n.name for n in source_nodes]
@@ -158,19 +170,23 @@ class TestSourceNodeNaming:
         from orcapod.core.nodes.source_node import SourceNode
 
         s1 = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a"], type=pa.large_string()),
-                "v1": pa.array([1], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a"], type=pa.large_string()),
+                    "v1": pa.array([1], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="left_input",
             infer_nullable=True,
         )
         s2 = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a"], type=pa.large_string()),
-                "v2": pa.array([2], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a"], type=pa.large_string()),
+                    "v2": pa.array([2], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="right_input",
             infer_nullable=True,
@@ -192,19 +208,25 @@ class TestSourceNodeNaming:
         from orcapod.errors import InconsistentSourceError
 
         s1 = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a"], type=pa.large_string()),
-                "value": pa.array([1], type=pa.int64()),
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a"], type=pa.large_string()),
+                    "value": pa.array([1], type=pa.int64()),
+                }
+            ),
             tag_columns=["key"],
             source_id="shared_id",
             infer_nullable=True,
         )
         s2 = ArrowTableSource(
-            pa.table({
-                "key": pa.array(["a"], type=pa.large_string()),
-                "score": pa.array([1.0], type=pa.float64()),  # different data column
-            }),
+            pa.table(
+                {
+                    "key": pa.array(["a"], type=pa.large_string()),
+                    "score": pa.array(
+                        [1.0], type=pa.float64()
+                    ),  # different data column
+                }
+            ),
             tag_columns=["key"],
             source_id="shared_id",
             infer_nullable=True,

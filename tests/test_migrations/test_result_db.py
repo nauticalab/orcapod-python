@@ -1,12 +1,11 @@
 """Tests for migrate_result_v0_to_v1()."""
+
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.migrations.result_db import migrate_result_v0_to_v1
-from orcapod.migrations.types import MigrationResult
 from orcapod.system_constants import RESULT_DB_SCHEMA_VERSION
 from orcapod.types import ContentHash
 
@@ -26,17 +25,25 @@ def _make_v0_rdb_row(
     Note: does NOT include the internal record ID column — that is passed
     separately to ``db.add_record(path, record_id, row)``.
     """
-    return pa.table({
-        "__input_data_hash": pa.array([input_hash.to_string()], type=pa.large_string()),
-        "__pf_var_function_name": pa.array(["my_func"], type=pa.large_string()),
-        "__pf_var_function_signature_hash": pa.array([sig_hash.to_string()], type=pa.large_string()),
-        "__pf_var_function_content_hash": pa.array([content_hash.to_string()], type=pa.large_string()),
-        "__pf_var_git_hash": pa.array(["abc123"], type=pa.large_string()),
-        "__pf_exec_executor_type": pa.array(["local"], type=pa.large_string()),
-        "__pf_exec_python_version": pa.array(["3.11"], type=pa.large_string()),
-        "__pod_ts": pa.array([0], type=pa.timestamp("us", tz="UTC")),
-        "result": pa.array([42], type=pa.int64()),
-    })
+    return pa.table(
+        {
+            "__input_data_hash": pa.array(
+                [input_hash.to_string()], type=pa.large_string()
+            ),
+            "__pf_var_function_name": pa.array(["my_func"], type=pa.large_string()),
+            "__pf_var_function_signature_hash": pa.array(
+                [sig_hash.to_string()], type=pa.large_string()
+            ),
+            "__pf_var_function_content_hash": pa.array(
+                [content_hash.to_string()], type=pa.large_string()
+            ),
+            "__pf_var_git_hash": pa.array(["abc123"], type=pa.large_string()),
+            "__pf_exec_executor_type": pa.array(["local"], type=pa.large_string()),
+            "__pf_exec_python_version": pa.array(["3.11"], type=pa.large_string()),
+            "__pod_ts": pa.array([0], type=pa.timestamp("us", tz="UTC")),
+            "result": pa.array([42], type=pa.int64()),
+        }
+    )
 
 
 class TestMigrateResultV0ToV1:
@@ -68,8 +75,14 @@ class TestMigrateResultV0ToV1:
         v1_table = db.get_all_records(v1_path)
         assert v1_table is not None
         assert v1_table.schema.field("__input_data_hash").type == pa.large_binary()
-        assert v1_table.schema.field("__pf_var_function_signature_hash").type == pa.large_binary()
-        assert v1_table.schema.field("__pf_var_function_content_hash").type == pa.large_binary()
+        assert (
+            v1_table.schema.field("__pf_var_function_signature_hash").type
+            == pa.large_binary()
+        )
+        assert (
+            v1_table.schema.field("__pf_var_function_content_hash").type
+            == pa.large_binary()
+        )
         # git_hash stays as string
         assert v1_table.schema.field("__pf_var_git_hash").type == pa.large_string()
 
@@ -85,9 +98,22 @@ class TestMigrateResultV0ToV1:
         v1_path = v0_path + (RESULT_DB_SCHEMA_VERSION,)
         v1_table = db.get_all_records(v1_path)
         row_dict = v1_table.to_pylist()[0]
-        assert ContentHash.from_prefixed_digest(bytes(row_dict["__input_data_hash"])) == _INPUT_HASH
-        assert ContentHash.from_prefixed_digest(bytes(row_dict["__pf_var_function_signature_hash"])) == _SIG_HASH
-        assert ContentHash.from_prefixed_digest(bytes(row_dict["__pf_var_function_content_hash"])) == _CONTENT_HASH
+        assert (
+            ContentHash.from_prefixed_digest(bytes(row_dict["__input_data_hash"]))
+            == _INPUT_HASH
+        )
+        assert (
+            ContentHash.from_prefixed_digest(
+                bytes(row_dict["__pf_var_function_signature_hash"])
+            )
+            == _SIG_HASH
+        )
+        assert (
+            ContentHash.from_prefixed_digest(
+                bytes(row_dict["__pf_var_function_content_hash"])
+            )
+            == _CONTENT_HASH
+        )
 
     def test_idempotent_second_run_skips_all(self):
         db = InMemoryArrowDatabase()

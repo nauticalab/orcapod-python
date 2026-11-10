@@ -7,12 +7,10 @@ Source → Stream → [Operator / FunctionPod] → Stream → ...
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import (
     Batch,
-    DropDataColumns,
     Join,
     MapTags,
     MergeJoin,
@@ -21,8 +19,7 @@ from orcapod.core.operators import (
     SemiJoin,
 )
 from orcapod.core.data_function import PythonDataFunction
-from orcapod.core.sources import ArrowTableSource, DictSource
-from orcapod.core.streams import ArrowTableStream
+from orcapod.core.sources import ArrowTableSource
 
 
 # ---------------------------------------------------------------------------

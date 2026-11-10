@@ -19,6 +19,7 @@ Example::
     table = ext_db.get_all_records(("results", "my_fn"))
     # table columns have proper extension types applied
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping

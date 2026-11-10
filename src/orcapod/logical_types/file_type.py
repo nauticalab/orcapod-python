@@ -20,7 +20,10 @@ from upath import UPath
 from upath.extensions import ProxyUPath
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.registry import (
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 
 if TYPE_CHECKING:
     from orcapod.logical_types.protocols import TypeConverterProtocol
@@ -66,17 +69,11 @@ class File(ProxyUPath):
                 f"File: path is a symlink and follow_symlinks=False: {self.__wrapped__!r}"
             )
         if not self.__wrapped__.exists():
-            raise FileNotFoundError(
-                f"File: path does not exist: {self.__wrapped__!r}"
-            )
+            raise FileNotFoundError(f"File: path does not exist: {self.__wrapped__!r}")
         if self.__wrapped__.is_dir():
-            raise IsADirectoryError(
-                f"File: path is a directory: {self.__wrapped__!r}"
-            )
+            raise IsADirectoryError(f"File: path is a directory: {self.__wrapped__!r}")
         if not self.__wrapped__.is_file():
-            raise ValueError(
-                f"File: path is not a regular file: {self.__wrapped__!r}"
-            )
+            raise ValueError(f"File: path is not a regular file: {self.__wrapped__!r}")
 
     def __fspath__(self) -> str:
         """Return the file system path representation of the underlying ``UPath``.
@@ -161,7 +158,9 @@ class LogicalFile(BaseLogicalType):
             LogicalFile._polars_ext = LogicalFile._polars_ext_class()
         return LogicalFile._polars_ext
 
-    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> str:
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> str:
         """Convert a ``File`` to its JSON storage representation.
 
         Args:
@@ -173,7 +172,9 @@ class LogicalFile(BaseLogicalType):
         """
         return json.dumps({"path": str(value)})
 
-    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> File:
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> File:
         """Reconstruct a ``File`` from its stored JSON string.
 
         Re-validates existence on read — raises ``FileNotFoundError`` if the file

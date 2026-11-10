@@ -31,7 +31,9 @@ def _make_source(tag_col: str, data_cols: dict, tag_data: list) -> ArrowTableSou
     columns = {tag_col: pa.array(tag_data, type=pa.large_string())}
     for name, values in data_cols.items():
         columns[name] = pa.array(values, type=pa.int64())
-    return ArrowTableSource(pa.table(columns), tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(
+        pa.table(columns), tag_columns=[tag_col], infer_nullable=True
+    )
 
 
 # ---------------------------------------------------------------------------

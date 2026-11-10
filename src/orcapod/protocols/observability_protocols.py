@@ -64,9 +64,7 @@ class ExecutionObserverProtocol(Protocol):
     observer is used for all hooks and logger creation within that node.
     """
 
-    def contextualize(
-        self, *identity_path: str
-    ) -> ExecutionObserverProtocol:
+    def contextualize(self, *identity_path: str) -> ExecutionObserverProtocol:
         """Return a copy of this observer bound to the given node identity path.
 
         The returned observer is a wrapper that calls through to the same

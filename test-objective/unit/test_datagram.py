@@ -1,25 +1,26 @@
 """Specification-derived tests for Datagram."""
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.types import ColumnConfig
 
 
 # ---------------------------------------------------------------------------
 # Helper to create a DataContext (needed for Arrow conversions)
 # ---------------------------------------------------------------------------
 
+
 def _make_context():
     """Create a DataContext for tests that need Arrow conversion."""
     from orcapod.contexts import resolve_context
+
     return resolve_context(None)
 
 
 # ---------------------------------------------------------------------------
 # Construction
 # ---------------------------------------------------------------------------
+
 
 class TestDatagramConstruction:
     """Datagram can be constructed from dict, pa.Table, pa.RecordBatch."""
@@ -45,6 +46,7 @@ class TestDatagramConstruction:
 # ---------------------------------------------------------------------------
 # Dict-like access
 # ---------------------------------------------------------------------------
+
 
 class TestDatagramDictAccess:
     """Dict-like access: __getitem__, __contains__, __iter__, get()."""
@@ -79,6 +81,7 @@ class TestDatagramDictAccess:
 # Lazy conversion
 # ---------------------------------------------------------------------------
 
+
 class TestDatagramLazyConversion:
     """Dict access uses dict backing; as_table() triggers Arrow conversion."""
 
@@ -103,6 +106,7 @@ class TestDatagramLazyConversion:
 # ---------------------------------------------------------------------------
 # Round-trip
 # ---------------------------------------------------------------------------
+
 
 class TestDatagramRoundTrip:
     """dict->Arrow->dict and Arrow->dict->Arrow preserve data."""
@@ -134,6 +138,7 @@ class TestDatagramRoundTrip:
 # Schema methods
 # ---------------------------------------------------------------------------
 
+
 class TestDatagramSchemaMethods:
     """keys(), schema(), arrow_schema() with ColumnConfig."""
 
@@ -143,6 +148,7 @@ class TestDatagramSchemaMethods:
 
     def test_schema_returns_schema_object(self):
         from orcapod.types import Schema
+
         dg = Datagram({"x": 1, "y": "hello"}, data_context=_make_context())
         s = dg.schema()
         assert isinstance(s, Schema)
@@ -153,6 +159,7 @@ class TestDatagramSchemaMethods:
 # ---------------------------------------------------------------------------
 # Format conversions
 # ---------------------------------------------------------------------------
+
 
 class TestDatagramFormatConversions:
     """as_dict(), as_table(), as_arrow_compatible_dict()."""
@@ -175,6 +182,7 @@ class TestDatagramFormatConversions:
 # ---------------------------------------------------------------------------
 # Immutable operations
 # ---------------------------------------------------------------------------
+
 
 class TestDatagramImmutableOperations:
     """select, drop, rename, update, with_columns return NEW instances."""
@@ -228,6 +236,7 @@ class TestDatagramImmutableOperations:
 # Meta operations
 # ---------------------------------------------------------------------------
 
+
 class TestDatagramMetaOperations:
     """get_meta_value (auto-prefixed), with_meta_columns, drop_meta_columns."""
 
@@ -252,6 +261,7 @@ class TestDatagramMetaOperations:
 # ---------------------------------------------------------------------------
 # Content hashing
 # ---------------------------------------------------------------------------
+
 
 class TestDatagramContentHashing:
     """Content hashing is deterministic, changes with data, equality by content."""

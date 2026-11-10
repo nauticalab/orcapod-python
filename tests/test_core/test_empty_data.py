@@ -1,10 +1,10 @@
 # tests/test_core/test_empty_data.py
 """Tests for EmptyData and its associated exception types."""
+
 from __future__ import annotations
 
 import uuid
 
-import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams import Data
@@ -133,10 +133,9 @@ class TestEmptyDataMetadata:
 class TestCachedFunctionPodLookupCachedData:
     def test_lookup_returns_none_when_cache_empty(self):
         """lookup_cached_data returns None when no result is cached yet."""
-        import pyarrow as pa
         from orcapod.core.cached_function_pod import CachedFunctionPod
         from orcapod.core.data_function import PythonDataFunction
-        from orcapod.core.datagrams import Data, Tag
+        from orcapod.core.datagrams import Data
         from orcapod.core.function_pod import FunctionPod
         from orcapod.databases import InMemoryArrowDatabase
 

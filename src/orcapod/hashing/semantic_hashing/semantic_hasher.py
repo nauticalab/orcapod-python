@@ -69,10 +69,11 @@ import json
 import logging
 import re
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.types import ContentHash
+from orcapod.utils.canonical_type_names import canonical_module_name
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,10 @@ class SemanticAwarePythonHasher:
         self._strict = strict
 
         if type_handler_registry is None:
-            from orcapod.hashing.defaults import get_default_python_type_handler_registry
+            from orcapod.hashing.defaults import (
+                get_default_python_type_handler_registry,
+            )
+
             self._registry = get_default_python_type_handler_registry()
         else:
             self._registry = type_handler_registry
@@ -382,7 +386,7 @@ class SemanticAwarePythonHasher:
         type.  Raises TypeError in strict mode.
         """
         class_name = type(obj).__name__
-        module_name = getattr(type(obj), "__module__", "<unknown>")
+        module_name = canonical_module_name(type(cast(object, obj))) or "<unknown>"
         qualified = f"{module_name}.{class_name}"
 
         if self._strict:

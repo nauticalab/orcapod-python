@@ -6,6 +6,7 @@ cursor tracking, cache management, error handling, and shutdown; the
 implementation only supplies ``identity``, ``to_config``, ``from_config``,
 ``poll``, ``fetch``, and ``close``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,12 +20,19 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
-from orcapod.errors import CursorInvalidatedError, InputValidationError, SchemaInconsistencyError
+from orcapod.errors import (
+    CursorInvalidatedError,
+    InputValidationError,
+    SchemaInconsistencyError,
+)
 from orcapod.types import ColumnConfig, Cursor, PollingConfig, Schema
 from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.arrow_utils import system_tag_column_names
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.utils.schema_utils import _normalize_column_list, compute_source_schema_hash
+from orcapod.utils.schema_utils import (
+    _normalize_column_list,
+    compute_source_schema_hash,
+)
 
 if TYPE_CHECKING:
     import polars as pl
@@ -79,9 +87,11 @@ def _run_sync(async_fn, *args, **kwargs):
     except RuntimeError:
         return asyncio.run(async_fn(*args, **kwargs))
     else:
-        return _get_sync_executor().submit(
-            lambda: asyncio.run(async_fn(*args, **kwargs))
-        ).result()
+        return (
+            _get_sync_executor()
+            .submit(lambda: asyncio.run(async_fn(*args, **kwargs)))
+            .result()
+        )
 
 
 def _assert_schema_match(
@@ -387,7 +397,9 @@ class PollingSource(RootSource, Generic[T]):
         if self._batches:
             return self._batches[0].output_schema(columns=columns, all_info=all_info)
         self._sync_poll_and_commit()
-        return self._get_combined_stream().output_schema(columns=columns, all_info=all_info)
+        return self._get_combined_stream().output_schema(
+            columns=columns, all_info=all_info
+        )
 
     def keys(
         self,
@@ -472,7 +484,9 @@ class PollingSource(RootSource, Generic[T]):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry: Any = None) -> PollingSource:
+    def from_config(
+        cls, config: dict[str, Any], db_registry: Any = None
+    ) -> PollingSource:
         """Reconstruct a ``PollingSource`` by importing the impl class.
 
         When ``config["impl_config"]`` is non-``None``, the impl is
@@ -535,7 +549,9 @@ class PollingSource(RootSource, Generic[T]):
 
         if cursor_snapshot is None:
             # First access — no poll needed, fetch unconditionally.
-            logger.debug("PollingSource %r: first sync access — fetching", self._source_id)
+            logger.debug(
+                "PollingSource %r: first sync access — fetching", self._source_id
+            )
             new_cursor, data = _run_sync(self._impl.fetch, cursor=None)
             new_stream = self._try_build_stream(data)
             if new_stream is not None:
@@ -554,7 +570,8 @@ class PollingSource(RootSource, Generic[T]):
             has_new = _run_sync(self._impl.poll, cursor=cursor_snapshot)
             if has_new:
                 logger.debug(
-                    "PollingSource %r: sync poll found new data — fetching", self._source_id
+                    "PollingSource %r: sync poll found new data — fetching",
+                    self._source_id,
                 )
                 new_cursor, data = _run_sync(self._impl.fetch, cursor=cursor_snapshot)
                 new_stream = self._try_build_stream(data)
@@ -621,7 +638,6 @@ class PollingSource(RootSource, Generic[T]):
         no canonical schema has been established yet — the frame is silently
         skipped so that a spurious all-non-nullable schema is never recorded.
         """
-        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
         # Handle Object-dtype columns (same pattern as DataFrameSource)
         object_columns = [c for c in df.columns if df[c].dtype == pl.Object]
@@ -642,7 +658,9 @@ class PollingSource(RootSource, Generic[T]):
                 # T | None → nullable=True; plain T → nullable=False. No inference.
                 combined = {**dict(self._tag_schema), **dict(self._data_schema)}
                 self._canonical_arrow_schema = (
-                    self.data_context.type_converter.python_schema_to_arrow_schema(combined)
+                    self.data_context.type_converter.python_schema_to_arrow_schema(
+                        combined
+                    )
                 )
             else:
                 # Infer-once path: first non-empty batch establishes canonical nullability.
@@ -655,7 +673,9 @@ class PollingSource(RootSource, Generic[T]):
                         "to avoid schema drift on zero-row polls or null-free batches.",
                         self._source_id,
                     )
-                    self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(arrow_table)
+                    self._canonical_arrow_schema = arrow_utils.infer_schema_nullable(
+                        arrow_table
+                    )
 
         # If _canonical_arrow_schema is still None here, this is a zero-row frame
         # on the infer-once path before any real data has arrived.  Skip it —
@@ -665,10 +685,14 @@ class PollingSource(RootSource, Generic[T]):
 
         # Apply canonical nullability by column name (order-safe).
         canonical_nullable = {f.name: f.nullable for f in self._canonical_arrow_schema}
-        target_schema = pa.schema([
-            pa.field(f.name, f.type, nullable=canonical_nullable.get(f.name, f.nullable))
-            for f in arrow_table.schema
-        ])
+        target_schema = pa.schema(
+            [
+                pa.field(
+                    f.name, f.type, nullable=canonical_nullable.get(f.name, f.nullable)
+                )
+                for f in arrow_table.schema
+            ]
+        )
         arrow_table = arrow_table.cast(target_schema)
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
@@ -695,9 +719,13 @@ class PollingSource(RootSource, Generic[T]):
         """
         actual_tag_schema, actual_data_schema = stream.output_schema()
         if self._tag_schema is not None:
-            _assert_schema_match("tag", self._tag_schema, actual_tag_schema, self._source_id)
+            _assert_schema_match(
+                "tag", self._tag_schema, actual_tag_schema, self._source_id
+            )
         if self._data_schema is not None:
-            _assert_schema_match("data", self._data_schema, actual_data_schema, self._source_id)
+            _assert_schema_match(
+                "data", self._data_schema, actual_data_schema, self._source_id
+            )
 
     def _validate_combining_schemas(
         self, existing: ArrowTableStream, new_stream: ArrowTableStream
@@ -838,11 +866,16 @@ class PollingSource(RootSource, Generic[T]):
                             self._source_id,
                         )
                         # Fetch — no lock held across await.
-                        new_cursor, data = await self._impl.fetch(cursor=cursor_snapshot)
+                        new_cursor, data = await self._impl.fetch(
+                            cursor=cursor_snapshot
+                        )
                         new_stream = self._try_build_stream(data)
 
                         if new_stream is not None:
-                            if self._tag_schema is not None or self._data_schema is not None:
+                            if (
+                                self._tag_schema is not None
+                                or self._data_schema is not None
+                            ):
                                 self._validate_against_declared_schemas(new_stream)
                             if self._batches:
                                 self._validate_combining_schemas(

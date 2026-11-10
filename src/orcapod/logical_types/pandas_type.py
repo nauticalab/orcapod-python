@@ -22,7 +22,10 @@ import pyarrow as pa
 import pyarrow.ipc
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.registry import (
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 
 if TYPE_CHECKING:
     from orcapod.logical_types.protocols import TypeConverterProtocol
@@ -83,7 +86,9 @@ class LogicalPandasDataFrame(BaseLogicalType):
 
     _arrow_ext_class = make_arrow_extension_type("pandas.dataframe", pa.large_binary())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("pandas.dataframe", pa.large_binary())
+    _polars_ext_class = make_polars_extension_type(
+        "pandas.dataframe", pa.large_binary()
+    )
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "pandas.dataframe"
@@ -97,7 +102,9 @@ class LogicalPandasDataFrame(BaseLogicalType):
             ``"pandas.dataframe"`` and storage type ``pa.large_binary()``.
         """
         if LogicalPandasDataFrame._arrow_ext is None:
-            LogicalPandasDataFrame._arrow_ext = LogicalPandasDataFrame._arrow_ext_class()
+            LogicalPandasDataFrame._arrow_ext = (
+                LogicalPandasDataFrame._arrow_ext_class()
+            )
         return LogicalPandasDataFrame._arrow_ext
 
     def get_polars_extension_type(self) -> pl.BaseExtension:
@@ -107,10 +114,14 @@ class LogicalPandasDataFrame(BaseLogicalType):
             A ``pl.BaseExtension`` instance registered under ``"pandas.dataframe"``.
         """
         if LogicalPandasDataFrame._polars_ext is None:
-            LogicalPandasDataFrame._polars_ext = LogicalPandasDataFrame._polars_ext_class()
+            LogicalPandasDataFrame._polars_ext = (
+                LogicalPandasDataFrame._polars_ext_class()
+            )
         return LogicalPandasDataFrame._polars_ext
 
-    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> bytes:
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> bytes:
         """Serialise a ``pd.DataFrame`` to Arrow IPC stream bytes.
 
         Args:
@@ -137,7 +148,9 @@ class LogicalPandasDataFrame(BaseLogicalType):
             ) from exc
         return _table_to_ipc_bytes(table)
 
-    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> pd.DataFrame:
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> pd.DataFrame:
         """Reconstruct a ``pd.DataFrame`` from Arrow IPC stream bytes.
 
         Args:
@@ -200,7 +213,9 @@ class LogicalPandasSeries(BaseLogicalType):
             LogicalPandasSeries._polars_ext = LogicalPandasSeries._polars_ext_class()
         return LogicalPandasSeries._polars_ext
 
-    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> bytes:
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None = None
+    ) -> bytes:
         """Serialise a ``pd.Series`` to Arrow IPC stream bytes.
 
         Args:
@@ -236,7 +251,9 @@ class LogicalPandasSeries(BaseLogicalType):
             ) from exc
         return _table_to_ipc_bytes(table)
 
-    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> pd.Series:
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None = None
+    ) -> pd.Series:
         """Reconstruct a ``pd.Series`` from Arrow IPC stream bytes.
 
         Args:

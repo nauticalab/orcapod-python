@@ -31,8 +31,10 @@ class TestWarmCacheCLI:
             [
                 "warm-cache",
                 str(tmp_path),
-                "--min-size", "0.00002",   # int(0.00002 * 1024 * 1024) = 20 bytes threshold; 20-byte file qualifies
-                "--db-path", str(db),
+                "--min-size",
+                "0.00002",  # int(0.00002 * 1024 * 1024) = 20 bytes threshold; 20-byte file qualifies
+                "--db-path",
+                str(db),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -48,8 +50,10 @@ class TestWarmCacheCLI:
         args = [
             "warm-cache",
             str(tmp_path),
-            "--min-size", "0.00002",
-            "--db-path", str(db),
+            "--min-size",
+            "0.00002",
+            "--db-path",
+            str(db),
         ]
         runner.invoke(app, args)  # first run — populates cache
         result = runner.invoke(app, args)  # second run — all cached
@@ -81,9 +85,12 @@ class TestWarmCacheCLI:
             [
                 "warm-cache",
                 str(tmp_path),
-                "--min-size", "0.00002",
-                "--db-path", str(db),
-                "--workers", "2",
+                "--min-size",
+                "0.00002",
+                "--db-path",
+                str(db),
+                "--workers",
+                "2",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -112,8 +119,10 @@ class TestWarmCacheCLI:
             [
                 "warm-cache",
                 str(tmp_path),
-                "--min-size", "0.00002",
-                "--db-path", str(db),
+                "--min-size",
+                "0.00002",
+                "--db-path",
+                str(db),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -133,8 +142,10 @@ class TestWarmCacheCLI:
             [
                 "warm-cache",
                 str(tmp_path),
-                "--min-size", "100",   # 100 MB threshold — tiny.bin won't qualify
-                "--db-path", str(db),
+                "--min-size",
+                "100",  # 100 MB threshold — tiny.bin won't qualify
+                "--db-path",
+                str(db),
             ],
         )
         assert result.exit_code == 0, result.output
@@ -153,8 +164,10 @@ class TestWarmCacheCLI:
             [
                 "warm-cache",
                 str(tmp_path),
-                "--min-size", "0.00002",
-                "--db-path", str(db),
+                "--min-size",
+                "0.00002",
+                "--db-path",
+                str(db),
             ],
         )
         assert result.exit_code == 0, result.output

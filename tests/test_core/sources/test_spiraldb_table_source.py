@@ -16,6 +16,7 @@ Test sections:
  9. Config round-trip (to_config / from_config)
 10. Integration: SpiralDBTableSource in a simple pipeline
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -747,11 +748,15 @@ class TestPipelineIntegration:
             pod(src, label="doubler")
 
         from orcapod.pipeline.dag import OrcaDAG
+
         exec_dag: OrcaDAG = OrcaDAG()
         for node in job._persistent_node_map.values():
             exec_dag.add_node(node)
         for u_hash, v_hash in job._graph_edges:
-            if u_hash in job._persistent_node_map and v_hash in job._persistent_node_map:
+            if (
+                u_hash in job._persistent_node_map
+                and v_hash in job._persistent_node_map
+            ):
                 exec_dag.add_edge(
                     job._persistent_node_map[u_hash],
                     job._persistent_node_map[v_hash],
@@ -765,9 +770,7 @@ class TestPipelineIntegration:
         assert len(fn_outputs) == 1
         assert len(fn_outputs[0]) == 3
 
-        doubled_values = sorted(
-            [pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]]
-        )
+        doubled_values = sorted([pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]])
         assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
 
         tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])

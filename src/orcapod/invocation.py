@@ -32,7 +32,9 @@ class InvocationHashConfig:
     component_length: int | None = None
 
 
-def _serialize_component(content_hash: ContentHash, config: InvocationHashConfig) -> str:
+def _serialize_component(
+    content_hash: ContentHash, config: InvocationHashConfig
+) -> str:
     """Serialize one ``ContentHash`` component per ``InvocationHashConfig``.
 
     The method name is always included as a prefix (e.g. ``"arrow_v2.1:abcd1234"``).
@@ -48,7 +50,7 @@ def _serialize_component(content_hash: ContentHash, config: InvocationHashConfig
     """
     raw = content_hash.digest
     if config.component_length is not None:
-        raw = raw[:config.component_length]
+        raw = raw[: config.component_length]
     if config.encoding == "base64":
         encoded = base64.b64encode(raw).decode("ascii")
     else:

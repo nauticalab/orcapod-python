@@ -199,20 +199,24 @@ class AsyncPipelineOrchestrator:
                         input_reader = edge_readers[(predecessors[0], node)]
                         tg.create_task(
                             node.async_execute(
-                                input_reader, writer, observer=effective_observer, run_id=run_id
+                                input_reader,
+                                writer,
+                                observer=effective_observer,
+                                run_id=run_id,
                             )
                         )
                     elif is_operator_node(node):
                         predecessors = in_edges.get(node, [])
                         # Sort by node.upstreams order for non-commutative operators
-                        upstream_order = {id(s): i for i, s in enumerate(node.upstreams)}
+                        upstream_order = {
+                            id(s): i for i, s in enumerate(node.upstreams)
+                        }
                         sorted_preds = sorted(
                             predecessors,
                             key=lambda p: upstream_order.get(id(p), 0),
                         )
                         input_readers = [
-                            edge_readers[(upstream, node)]
-                            for upstream in sorted_preds
+                            edge_readers[(upstream, node)] for upstream in sorted_preds
                         ]
                         tg.create_task(
                             node.async_execute(
@@ -223,7 +227,7 @@ class AsyncPipelineOrchestrator:
                         predecessors = in_edges.get(node, [])
                         if not predecessors:
                             raise ValueError(
-                                f"SideEffectNode expects exactly 1 upstream, got 0"
+                                "SideEffectNode expects exactly 1 upstream, got 0"
                             )
                         input_reader = edge_readers[(predecessors[0], node)]
                         tg.create_task(

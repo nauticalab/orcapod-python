@@ -11,29 +11,21 @@ def sample_transform(age: int) -> dict[str, int]:
 
 class TestFunctionPodConfig:
     def test_to_config_includes_uri(self):
-        pf = PythonDataFunction(
-            function=sample_transform, output_keys=["age_plus_one"]
-        )
+        pf = PythonDataFunction(function=sample_transform, output_keys=["age_plus_one"])
         pod = FunctionPod(data_function=pf)
         config = pod.to_config()
         assert "uri" in config
         assert config["uri"] == list(pod.uri)
 
     def test_to_config_includes_data_function(self):
-        pf = PythonDataFunction(
-            function=sample_transform, output_keys=["age_plus_one"]
-        )
+        pf = PythonDataFunction(function=sample_transform, output_keys=["age_plus_one"])
         pod = FunctionPod(data_function=pf)
         config = pod.to_config()
         assert "data_function" in config
-        assert (
-            config["data_function"]["data_function_type_id"] == "python.function.v0"
-        )
+        assert config["data_function"]["data_function_type_id"] == "python.function.v0"
 
     def test_round_trip(self):
-        pf = PythonDataFunction(
-            function=sample_transform, output_keys=["age_plus_one"]
-        )
+        pf = PythonDataFunction(function=sample_transform, output_keys=["age_plus_one"])
         pod = FunctionPod(data_function=pf)
         config = pod.to_config()
         restored = FunctionPod.from_config(config)
@@ -50,9 +42,7 @@ class TestPodConfigSerialization:
         A FunctionPod with a non-default PodConfig should serialize to a dict
         where "pod_config" contains the configuration values.
         """
-        pf = PythonDataFunction(
-            function=sample_transform, output_keys=["age_plus_one"]
-        )
+        pf = PythonDataFunction(function=sample_transform, output_keys=["age_plus_one"])
         pod = FunctionPod(
             data_function=pf,
             pod_config=PodConfig(max_concurrency=4),
@@ -68,9 +58,7 @@ class TestPodConfigSerialization:
         A FunctionPod with a default (unspecified) PodConfig should serialize
         to a dict where "pod_config" is None.
         """
-        pf = PythonDataFunction(
-            function=sample_transform, output_keys=["age_plus_one"]
-        )
+        pf = PythonDataFunction(function=sample_transform, output_keys=["age_plus_one"])
         pod = FunctionPod(data_function=pf)
         config = pod.to_config()
         assert "pod_config" in config
@@ -82,9 +70,7 @@ class TestPodConfigSerialization:
         A FunctionPod with PodConfig(max_concurrency=4) should reconstruct
         from its config with the same max_concurrency value.
         """
-        pf = PythonDataFunction(
-            function=sample_transform, output_keys=["age_plus_one"]
-        )
+        pf = PythonDataFunction(function=sample_transform, output_keys=["age_plus_one"])
         original_pod = FunctionPod(
             data_function=pf,
             pod_config=PodConfig(max_concurrency=4),

@@ -6,6 +6,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.sources.stream_builder import SourceStreamBuilder, SourceStreamResult
+from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
 
 class TestSourceStreamBuilder:
@@ -107,10 +108,12 @@ class TestSourceStreamBuilderRespectsSchema:
         """build() preserves nullable=False from incoming schema."""
         table = pa.table(
             {"id": pa.array([1]), "val": pa.array([10], type=pa.int64())},
-            schema=pa.schema([
-                pa.field("id", pa.int64(), nullable=False),
-                pa.field("val", pa.int64(), nullable=False),
-            ]),
+            schema=pa.schema(
+                [
+                    pa.field("id", pa.int64(), nullable=False),
+                    pa.field("val", pa.int64(), nullable=False),
+                ]
+            ),
         )
         result = builder.build(table, tag_columns=["id"])
         _, data_schema = result.stream.output_schema()
@@ -118,20 +121,21 @@ class TestSourceStreamBuilderRespectsSchema:
 
     def test_nullable_flags_affect_schema_hash(self, builder):
         """nullable=True and nullable=False schemas produce different hashes."""
-        nullable_table = pa.table({"id": pa.array([1]), "val": pa.array([10], type=pa.int64())})
+        nullable_table = pa.table(
+            {"id": pa.array([1]), "val": pa.array([10], type=pa.int64())}
+        )
         non_nullable_table = pa.table(
             {"id": pa.array([1]), "val": pa.array([10], type=pa.int64())},
-            schema=pa.schema([
-                pa.field("id", pa.int64(), nullable=False),
-                pa.field("val", pa.int64(), nullable=False),
-            ]),
+            schema=pa.schema(
+                [
+                    pa.field("id", pa.int64(), nullable=False),
+                    pa.field("val", pa.int64(), nullable=False),
+                ]
+            ),
         )
         result_nullable = builder.build(nullable_table, tag_columns=["id"])
         result_non_nullable = builder.build(non_nullable_table, tag_columns=["id"])
         assert result_nullable.schema_hash != result_non_nullable.schema_hash
-
-
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
 
 class TestArrowTableSourceUsesBuilder:

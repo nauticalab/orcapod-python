@@ -8,6 +8,7 @@ Outputs: tests/test_hashing/hash_samples/type_annotation_golden.json
 Note: ANNOTATION_CASES and FUNCTION_CASES are imported from test_type_annotation_golden
 so that function hashes are produced with the correct module path (the test module).
 """
+
 from __future__ import annotations
 
 import json
@@ -20,23 +21,30 @@ _PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from orcapod.hashing.defaults import get_default_semantic_hasher
-from orcapod.hashing.semantic_hashing.function_info_extractors import (
+# The imports below must follow the sys.path setup above.
+from orcapod.hashing.defaults import get_default_semantic_hasher  # noqa: E402
+from orcapod.hashing.semantic_hashing.function_info_extractors import (  # noqa: E402
     FunctionSignatureExtractor,
 )
-from tests.test_hashing.test_type_annotation_golden import (
+from tests.test_hashing.test_type_annotation_golden import (  # noqa: E402
     ANNOTATION_CASES,
     FUNCTION_CASES,
 )
 
-GOLDEN_PATH = pathlib.Path(__file__).parent / "hash_samples" / "type_annotation_golden.json"
+GOLDEN_PATH = (
+    pathlib.Path(__file__).parent / "hash_samples" / "type_annotation_golden.json"
+)
 
 
 def main() -> None:
     hasher = get_default_semantic_hasher()
     extractor = FunctionSignatureExtractor(include_module=True, include_defaults=True)
 
-    result: dict = {"annotation_hashes": {}, "function_info_hashes": {}, "function_object_hashes": {}}
+    result: dict = {
+        "annotation_hashes": {},
+        "function_info_hashes": {},
+        "function_object_hashes": {},
+    }
 
     # Hash bare annotations through TypeObjectHandler
     for key, ann in ANNOTATION_CASES.items():

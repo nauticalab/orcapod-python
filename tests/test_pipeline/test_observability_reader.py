@@ -17,8 +17,12 @@ def _make_fake_delta_table(path: Path) -> None:
 
 def test_discover_tables_finds_status_and_log_paths(tmp_path):
     # Create fake Delta tables at new-format paths (_status/_log not status/logs)
-    _make_fake_delta_table(tmp_path / "my_pipeline" / "_status" / "my_pod" / "schema:abc" / "instance:xyz")
-    _make_fake_delta_table(tmp_path / "my_pipeline" / "_log" / "my_pod" / "schema:abc" / "instance:xyz")
+    _make_fake_delta_table(
+        tmp_path / "my_pipeline" / "_status" / "my_pod" / "schema:abc" / "instance:xyz"
+    )
+    _make_fake_delta_table(
+        tmp_path / "my_pipeline" / "_log" / "my_pod" / "schema:abc" / "instance:xyz"
+    )
 
     reader = ObservabilityReader(tmp_path)
     assert "my_pod" in reader.nodes
@@ -32,8 +36,14 @@ def _write_status_table(
 ) -> None:
     """Write a status Delta table mimicking StatusObserver output."""
     table_dir = (
-        root / pipeline_name / "_status" / node_name / "hash_a" / "v0"
-        / "python.function.v0" / "node:hash_b"
+        root
+        / pipeline_name
+        / "_status"
+        / node_name
+        / "hash_a"
+        / "v0"
+        / "python.function.v0"
+        / "node:hash_b"
     )
     table_dir.mkdir(parents=True, exist_ok=True)
     df = pl.DataFrame(rows)
@@ -52,8 +62,14 @@ def _write_log_table(
 ) -> None:
     """Write a log Delta table mimicking LoggingObserver output."""
     table_dir = (
-        root / pipeline_name / "_log" / node_name / "hash_a" / "v0"
-        / "python.function.v0" / "node:hash_b"
+        root
+        / pipeline_name
+        / "_log"
+        / node_name
+        / "hash_a"
+        / "v0"
+        / "python.function.v0"
+        / "node:hash_b"
     )
     table_dir.mkdir(parents=True, exist_ok=True)
     df = pl.DataFrame(rows)
@@ -125,41 +141,110 @@ def results_root(tmp_path: Path) -> Path:
     root = tmp_path / "results_out" / "op_pipeline"
 
     # Node A: 2 inputs, both succeed
-    _write_status_table(root, "my_pipeline", "node_a", [
-        _status_row("node_a", "RUNNING", subject="subj_A", timestamp="2026-01-01T00:00:01+00:00"),
-        _status_row("node_a", "SUCCESS", subject="subj_A", timestamp="2026-01-01T00:00:02+00:00"),
-        _status_row("node_a", "RUNNING", subject="subj_B", timestamp="2026-01-01T00:00:03+00:00"),
-        _status_row("node_a", "SUCCESS", subject="subj_B", timestamp="2026-01-01T00:00:04+00:00"),
-    ])
-    _write_log_table(root, "my_pipeline", "node_a", [
-        _log_row("node_a", subject="subj_A"),
-        _log_row("node_a", subject="subj_B"),
-    ])
+    _write_status_table(
+        root,
+        "my_pipeline",
+        "node_a",
+        [
+            _status_row(
+                "node_a",
+                "RUNNING",
+                subject="subj_A",
+                timestamp="2026-01-01T00:00:01+00:00",
+            ),
+            _status_row(
+                "node_a",
+                "SUCCESS",
+                subject="subj_A",
+                timestamp="2026-01-01T00:00:02+00:00",
+            ),
+            _status_row(
+                "node_a",
+                "RUNNING",
+                subject="subj_B",
+                timestamp="2026-01-01T00:00:03+00:00",
+            ),
+            _status_row(
+                "node_a",
+                "SUCCESS",
+                subject="subj_B",
+                timestamp="2026-01-01T00:00:04+00:00",
+            ),
+        ],
+    )
+    _write_log_table(
+        root,
+        "my_pipeline",
+        "node_a",
+        [
+            _log_row("node_a", subject="subj_A"),
+            _log_row("node_a", subject="subj_B"),
+        ],
+    )
 
     # Node B: 2 inputs, one succeeds, one fails
-    _write_status_table(root, "my_pipeline", "node_b", [
-        _status_row("node_b", "RUNNING", subject="subj_A", timestamp="2026-01-01T00:01:01+00:00"),
-        _status_row("node_b", "SUCCESS", subject="subj_A", timestamp="2026-01-01T00:01:02+00:00"),
-        _status_row("node_b", "RUNNING", subject="subj_B", timestamp="2026-01-01T00:01:03+00:00"),
-        _status_row(
-            "node_b", "FAILED", subject="subj_B",
-            timestamp="2026-01-01T00:01:04+00:00",
-            error_summary="ValueError: bad input",
-        ),
-    ])
-    _write_log_table(root, "my_pipeline", "node_b", [
-        _log_row("node_b", subject="subj_A"),
-        _log_row(
-            "node_b", subject="subj_B", success=False,
-            traceback="Traceback (most recent call last):\n  ...\nValueError: bad input",
-            stderr="Error processing subj_B",
-        ),
-    ])
+    _write_status_table(
+        root,
+        "my_pipeline",
+        "node_b",
+        [
+            _status_row(
+                "node_b",
+                "RUNNING",
+                subject="subj_A",
+                timestamp="2026-01-01T00:01:01+00:00",
+            ),
+            _status_row(
+                "node_b",
+                "SUCCESS",
+                subject="subj_A",
+                timestamp="2026-01-01T00:01:02+00:00",
+            ),
+            _status_row(
+                "node_b",
+                "RUNNING",
+                subject="subj_B",
+                timestamp="2026-01-01T00:01:03+00:00",
+            ),
+            _status_row(
+                "node_b",
+                "FAILED",
+                subject="subj_B",
+                timestamp="2026-01-01T00:01:04+00:00",
+                error_summary="ValueError: bad input",
+            ),
+        ],
+    )
+    _write_log_table(
+        root,
+        "my_pipeline",
+        "node_b",
+        [
+            _log_row("node_b", subject="subj_A"),
+            _log_row(
+                "node_b",
+                subject="subj_B",
+                success=False,
+                traceback="Traceback (most recent call last):\n  ...\nValueError: bad input",
+                stderr="Error processing subj_B",
+            ),
+        ],
+    )
 
     # Node C: status only, no logs (e.g. still running or logs not yet written)
-    _write_status_table(root, "my_pipeline", "node_c", [
-        _status_row("node_c", "RUNNING", subject="subj_A", timestamp="2026-01-01T00:02:01+00:00"),
-    ])
+    _write_status_table(
+        root,
+        "my_pipeline",
+        "node_c",
+        [
+            _status_row(
+                "node_c",
+                "RUNNING",
+                subject="subj_A",
+                timestamp="2026-01-01T00:02:01+00:00",
+            ),
+        ],
+    )
 
     return tmp_path / "results_out"
 
@@ -195,10 +280,19 @@ class TestStatus:
 
     def test_maps_cached_to_success(self, tmp_path: Path):
         root = tmp_path / "results_out" / "pipeline"
-        _write_status_table(root, "p", "cached_node", [
-            _status_row("cached_node", "RUNNING", timestamp="2026-01-01T00:00:01+00:00"),
-            _status_row("cached_node", "CACHED", timestamp="2026-01-01T00:00:02+00:00"),
-        ])
+        _write_status_table(
+            root,
+            "p",
+            "cached_node",
+            [
+                _status_row(
+                    "cached_node", "RUNNING", timestamp="2026-01-01T00:00:01+00:00"
+                ),
+                _status_row(
+                    "cached_node", "CACHED", timestamp="2026-01-01T00:00:02+00:00"
+                ),
+            ],
+        )
         reader = ObservabilityReader(tmp_path / "results_out")
         df = reader.status()
         assert len(df) == 1
@@ -227,9 +321,14 @@ class TestStatus:
 
     def test_empty_status_returns_empty_df(self, tmp_path: Path):
         root = tmp_path / "results_out" / "pipeline"
-        _write_log_table(root, "p", "log_only_node", [
-            _log_row("log_only_node"),
-        ])
+        _write_log_table(
+            root,
+            "p",
+            "log_only_node",
+            [
+                _log_row("log_only_node"),
+            ],
+        )
         reader = ObservabilityReader(tmp_path / "results_out")
         df = reader.status()
         assert df.is_empty()
@@ -260,7 +359,7 @@ class TestLogs:
 
     def test_contains_failure_traceback(self, results_root: Path):
         reader = ObservabilityReader(results_root)
-        df = reader.logs("node_b").filter(pl.col("success") == False)
+        df = reader.logs("node_b").filter(~pl.col("success"))
         assert len(df) == 1
         assert "ValueError: bad input" in df["traceback"].item()
         assert df["stderr_log"].item() == "Error processing subj_B"

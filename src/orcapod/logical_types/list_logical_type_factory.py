@@ -20,13 +20,19 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.registry import make_arrow_extension_type, make_polars_extension_type
+from orcapod.logical_types.registry import (
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    from orcapod.logical_types.protocols import LogicalTypeProtocol, TypeConverterProtocol
+    from orcapod.logical_types.protocols import (
+        LogicalTypeProtocol,
+        TypeConverterProtocol,
+    )
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -81,7 +87,9 @@ class ListLogicalType(BaseLogicalType):
         element_ext_type = element_logical_type.get_arrow_extension_type()
         element_ext_name = element_ext_type.extension_name
         raw_meta_bytes: bytes = element_ext_type.__arrow_ext_serialize__()
-        element_ext_metadata: str | None = raw_meta_bytes.decode("utf-8") if raw_meta_bytes else None
+        element_ext_metadata: str | None = (
+            raw_meta_bytes.decode("utf-8") if raw_meta_bytes else None
+        )
 
         category = SET_CATEGORY if is_set else LIST_CATEGORY
         meta_dict = {
@@ -163,7 +171,9 @@ class ListLogicalType(BaseLogicalType):
         """
         return self._element_python_type
 
-    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None) -> list:
+    def python_to_storage(
+        self, value: Any, converter: TypeConverterProtocol | None
+    ) -> list:
         """Convert a Python list or set to its Arrow storage representation.
 
         Delegates per-element conversion to ``converter.python_to_storage`` using
@@ -188,7 +198,10 @@ class ListLogicalType(BaseLogicalType):
         if converter is None:
             elements = list(value)
         else:
-            elements = [converter.python_to_storage(item, self._element_python_type) for item in value]
+            elements = [
+                converter.python_to_storage(item, self._element_python_type)
+                for item in value
+            ]
         if self._is_set:
             try:
                 elements = sorted(elements)
@@ -196,7 +209,9 @@ class ListLogicalType(BaseLogicalType):
                 elements = sorted(elements, key=repr)
         return elements
 
-    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None) -> list | set:
+    def storage_to_python(
+        self, storage_value: Any, converter: TypeConverterProtocol | None
+    ) -> list | set:
         """Reconstruct a Python list or set from its Arrow storage representation.
 
         Delegates per-element conversion to ``converter.storage_to_python`` using
@@ -271,6 +286,7 @@ class ListLogicalTypeFactory:
                 it lacks a type argument, or if ``T`` has no registered ``LogicalType``.
         """
         import typing
+
         origin = typing.get_origin(python_type)
         args = typing.get_args(python_type)
 
@@ -353,7 +369,9 @@ class ListLogicalTypeFactory:
         )
 
         # Retrieve the now-registered element logical type.
-        element_logical_type = converter.get_logical_type_by_arrow_extension_name(element_ext_name)
+        element_logical_type = converter.get_logical_type_by_arrow_extension_name(
+            element_ext_name
+        )
         if element_logical_type is None:
             raise ValueError(
                 f"ListLogicalTypeFactory.reconstruct_from_arrow: element extension "

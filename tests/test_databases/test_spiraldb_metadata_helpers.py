@@ -1,4 +1,5 @@
 """Pure-function tests for SpiralDB Arrow metadata helpers."""
+
 from __future__ import annotations
 
 import base64
@@ -38,9 +39,7 @@ class TestSerializeFieldMetaTree:
         inner = pa.field("val", pa.float64(), metadata={b"key": b"v"})
         field = pa.field("s", pa.struct([inner]))
         result = _serialize_field_meta_tree(field)
-        assert result == {
-            "children": {"val": {"meta": {b64(b"key"): b64(b"v")}}}
-        }
+        assert result == {"children": {"val": {"meta": {b64(b"key"): b64(b"v")}}}}
 
     def test_struct_with_both_own_and_child_metadata(self):
         inner = pa.field("val", pa.float64(), metadata={b"k": b"v"})
@@ -64,25 +63,19 @@ class TestSerializeFieldMetaTree:
         vf = pa.field("item", pa.int32(), metadata={b"k": b"v"})
         field = pa.field("lst", pa.list_(vf))
         result = _serialize_field_meta_tree(field)
-        assert result == {
-            "children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}
-        }
+        assert result == {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}}
 
     def test_large_list_value_field_with_metadata(self):
         vf = pa.field("item", pa.int32(), metadata={b"k": b"v"})
         field = pa.field("lst", pa.large_list(vf))
         result = _serialize_field_meta_tree(field)
-        assert result == {
-            "children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}
-        }
+        assert result == {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}}
 
     def test_fixed_size_list_value_field_with_metadata(self):
         vf = pa.field("item", pa.float32(), metadata={b"k": b"v"})
         field = pa.field("lst", pa.list_(vf, 3))
         result = _serialize_field_meta_tree(field)
-        assert result == {
-            "children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}
-        }
+        assert result == {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}}
 
     def test_nested_struct_in_struct(self):
         leaf = pa.field("z", pa.int8(), metadata={b"deep": b"yes"})
@@ -91,9 +84,7 @@ class TestSerializeFieldMetaTree:
         result = _serialize_field_meta_tree(outer)
         assert result == {
             "children": {
-                "inner": {
-                    "children": {"z": {"meta": {b64(b"deep"): b64(b"yes")}}}
-                }
+                "inner": {"children": {"z": {"meta": {b64(b"deep"): b64(b"yes")}}}}
             }
         }
 
@@ -110,7 +101,9 @@ class TestSerializeFieldMetaTree:
         assert _serialize_field_meta_tree(field) is None
 
         # Even if the outer field has metadata, children are not in the result
-        field_with_meta = pa.field("m", pa.map_(pa.string(), pa.int32()), metadata={b"tag": b"yes"})
+        field_with_meta = pa.field(
+            "m", pa.map_(pa.string(), pa.int32()), metadata={b"tag": b"yes"}
+        )
         result = _serialize_field_meta_tree(field_with_meta)
         assert result == {"meta": {b64(b"tag"): b64(b"yes")}}
         assert "children" not in result
@@ -154,7 +147,11 @@ class TestSerializeArrowMetadata:
         inner = pa.field("val", pa.float64(), metadata={b"k": b"v"})
         schema = pa.schema([pa.field("s", pa.struct([inner]))])
         table = pa.table(
-            {"s": pa.array([{"val": 1.0}], type=pa.struct([pa.field("val", pa.float64())]))},
+            {
+                "s": pa.array(
+                    [{"val": 1.0}], type=pa.struct([pa.field("val", pa.float64())])
+                )
+            },
             schema=schema,
         )
         result = _serialize_arrow_metadata(table)
@@ -165,9 +162,7 @@ class TestSerializeArrowMetadata:
         }
 
     def test_returns_bytes_value(self):
-        schema = pa.schema(
-            [pa.field("x", pa.int64())], metadata={b"k": b"v"}
-        )
+        schema = pa.schema([pa.field("x", pa.int64())], metadata={b"k": b"v"})
         table = pa.table({"x": pa.array([1])}, schema=schema)
         result = _serialize_arrow_metadata(table)
         assert isinstance(result[_ARROW_METADATA_KEY], bytes)
@@ -199,11 +194,7 @@ class TestLoadArrowMetadata:
     def test_field_trees_returned_raw(self):
         raw_fields = {
             "col1": {"meta": {b64(b"unit"): b64(b"meters")}},
-            "col2": {
-                "children": {
-                    "item": {"meta": {b64(b"k"): b64(b"v")}}
-                }
-            },
+            "col2": {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}},
         }
         blob = {"fields": raw_fields}
         kv = {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
@@ -214,9 +205,7 @@ class TestLoadArrowMetadata:
     def test_schema_and_fields_together(self):
         blob = {
             "schema": {b64(b"origin"): b64(b"test")},
-            "fields": {
-                "x": {"meta": {b64(b"unit"): b64(b"m")}}
-            },
+            "fields": {"x": {"meta": {b64(b"unit"): b64(b"m")}}},
         }
         kv = {_ARROW_METADATA_KEY: json.dumps(blob).encode("utf-8")}
         schema_meta, field_trees = _load_arrow_metadata(kv)
@@ -308,11 +297,7 @@ class TestRestoreField:
     def test_struct_child_meta_restored(self):
         inner = pa.field("val", pa.float64())
         field = pa.field("s", pa.struct([inner]))
-        stored = {
-            "children": {
-                "val": {"meta": {b64(b"desc"): b64(b"the value")}}
-            }
-        }
+        stored = {"children": {"val": {"meta": {b64(b"desc"): b64(b"the value")}}}}
         restored, changed = _restore_field(field, stored)
         assert changed is True
         assert pa.types.is_struct(restored.type)
@@ -330,11 +315,7 @@ class TestRestoreField:
     def test_list_value_field_meta_restored(self):
         vf = pa.field("item", pa.int32())
         field = pa.field("lst", pa.list_(vf))
-        stored = {
-            "children": {
-                "item": {"meta": {b64(b"k"): b64(b"v")}}
-            }
-        }
+        stored = {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}}
         restored, changed = _restore_field(field, stored)
         assert changed is True
         assert pa.types.is_list(restored.type)
@@ -344,11 +325,7 @@ class TestRestoreField:
     def test_large_list_value_field_meta_restored(self):
         vf = pa.field("item", pa.int32())
         field = pa.field("lst", pa.large_list(vf))
-        stored = {
-            "children": {
-                "item": {"meta": {b64(b"k"): b64(b"v")}}
-            }
-        }
+        stored = {"children": {"item": {"meta": {b64(b"k"): b64(b"v")}}}}
         restored, changed = _restore_field(field, stored)
         assert changed is True
         assert pa.types.is_large_list(restored.type)
@@ -361,11 +338,7 @@ class TestRestoreField:
         outer_field = pa.field("outer", pa.struct([inner_struct_field]))
         stored = {
             "children": {
-                "inner": {
-                    "children": {
-                        "z": {"meta": {b64(b"deep"): b64(b"yes")}}
-                    }
-                }
+                "inner": {"children": {"z": {"meta": {b64(b"deep"): b64(b"yes")}}}}
             }
         }
         restored, changed = _restore_field(outer_field, stored)

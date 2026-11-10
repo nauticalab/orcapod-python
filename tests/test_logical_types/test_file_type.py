@@ -209,7 +209,9 @@ class TestURLFormIdentity:
     def test_hash_is_stable(self):
         h1 = hash(File("memory://ns/x.bin"))
         h2 = hash(File("memory://ns/x.bin"))
-        assert h1 == h2, "hash() must be identical across two constructions of the same URL"
+        assert h1 == h2, (
+            "hash() must be identical across two constructions of the same URL"
+        )
 
     def test_hash_equals_upath_protocol_tuple(self):
         # File.__hash__ delegates to ProxyUPath.__hash__ → UPath.__hash__.

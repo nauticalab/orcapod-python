@@ -60,26 +60,28 @@ def get_git_info(path):
             "repo_root": repo.working_dir,
         }
 
-    except:  # TODO: specify exception
+    except:  # noqa: E722 - TODO: specify exception; narrowing changes behaviour
         return None
 
 
-def get_git_info_for_python_object(python_object, try_cwd:bool=False) -> dict[str, Any] | None:
+def get_git_info_for_python_object(
+    python_object, try_cwd: bool = False
+) -> dict[str, Any] | None:
     """Get git info for the file where the python object is defined"""
     try:
         file_path = inspect.getfile(python_object)
         git_info = get_git_info(file_path)
         git_source = "function"
         if git_info is None:
-                # If the file isn't in a git repo, optionally try the current working directory
+            # If the file isn't in a git repo, optionally try the current working directory
             if try_cwd:
                 git_info = get_git_info(".")
 
             if git_info is None:
                 return None
-        
+
             git_source = "cwd"
-            
+
         env_info = {}
         env_info["git_commit_hash"] = git_info.get("commit_hash")
         env_info["git_repo_status"] = "dirty" if git_info.get("is_dirty") else "clean"

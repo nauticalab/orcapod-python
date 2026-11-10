@@ -97,7 +97,11 @@ class InMemoryHashCacher:
         """
         if self._read_only:
             return
-        if self._min_cache_size_bytes is not None and self._min_cache_size_bytes > 0 and key.size < self._min_cache_size_bytes:
+        if (
+            self._min_cache_size_bytes is not None
+            and self._min_cache_size_bytes > 0
+            and key.size < self._min_cache_size_bytes
+        ):
             return
         self._cache.setdefault((key.path, key.size), {})[key.mtime_ns] = value
 
@@ -162,9 +166,7 @@ class SqliteHashCacher:
                 f"got {min_cache_size_bytes!r}"
             )
         self.db_path = Path(
-            db_path
-            or os.environ.get("ORCAPOD_HASH_CACHE_DB")
-            or self.DEFAULT_DB_PATH
+            db_path or os.environ.get("ORCAPOD_HASH_CACHE_DB") or self.DEFAULT_DB_PATH
         )
         self._read_only = read_only
         self._min_cache_size_bytes = min_cache_size_bytes
@@ -225,8 +227,7 @@ class SqliteHashCacher:
             # schema change would otherwise cause a cryptic INSERT failure in
             # put() rather than a clear diagnostic here.
             columns = {
-                row[1]
-                for row in conn.execute("PRAGMA table_info(file_hash_cache)")
+                row[1] for row in conn.execute("PRAGMA table_info(file_hash_cache)")
             }
             if "cached_at" not in columns:
                 raise ValueError(
@@ -301,7 +302,11 @@ class SqliteHashCacher:
         """
         if self._read_only:
             return
-        if self._min_cache_size_bytes is not None and self._min_cache_size_bytes > 0 and key.size < self._min_cache_size_bytes:
+        if (
+            self._min_cache_size_bytes is not None
+            and self._min_cache_size_bytes > 0
+            and key.size < self._min_cache_size_bytes
+        ):
             return
         conn = self._connection()
         conn.execute(

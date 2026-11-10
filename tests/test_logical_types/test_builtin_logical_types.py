@@ -267,7 +267,9 @@ def test_logical_path_arrow_round_trip():
     originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type)
+    )
 
     recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
@@ -284,7 +286,9 @@ def test_logical_path_polars_round_trip():
     originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type)
+    )
 
     pl_series = pl.from_arrow(ext_arr)
     arr_back = pl_series.to_arrow()
@@ -303,7 +307,9 @@ def test_logical_upath_arrow_round_trip():
     originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type)
+    )
 
     recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
@@ -320,7 +326,9 @@ def test_logical_upath_polars_round_trip():
     originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type)
+    )
 
     pl_series = pl.from_arrow(ext_arr)
     arr_back = pl_series.to_arrow()
@@ -336,10 +344,15 @@ def test_logical_uuid_arrow_round_trip():
     registry = LogicalTypeRegistry()
     registry.register_logical_type(lt)
 
-    originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
+    originals = [
+        uuid_module.UUID("12345678-1234-5678-1234-567812345678"),
+        uuid_module.uuid4(),
+    ]
     storage_vals = [lt.python_to_storage(u) for u in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type)
+    )
 
     recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
@@ -353,10 +366,15 @@ def test_logical_uuid_polars_round_trip():
     registry = LogicalTypeRegistry()
     registry.register_logical_type(lt)
 
-    originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
+    originals = [
+        uuid_module.UUID("12345678-1234-5678-1234-567812345678"),
+        uuid_module.uuid4(),
+    ]
     storage_vals = [lt.python_to_storage(u) for u in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type)
+    )
 
     pl_series = pl.from_arrow(ext_arr)
     arr_back = pl_series.to_arrow()
@@ -552,7 +570,9 @@ def test_pathlib_path_works_via_orcapod_path_alias_arrow_round_trip():
     # Recovered value is a pathlib.Path (which is orcapod.Path)
     recovered = lt.storage_to_python(ext_arr.storage[0].as_py())
     assert recovered == p
-    assert isinstance(recovered, orcapod.Path)  # valid because orcapod.Path is pathlib.Path
+    assert isinstance(
+        recovered, orcapod.Path
+    )  # valid because orcapod.Path is pathlib.Path
     assert isinstance(recovered, pathlib.Path)
 
 
@@ -591,7 +611,9 @@ def test_upath_upath_works_via_orcapod_upath_alias_arrow_round_trip():
     # Recovered value is a upath.UPath (which is orcapod.UPath)
     recovered = lt.storage_to_python(ext_arr.storage[0].as_py())
     assert recovered == up
-    assert isinstance(recovered, orcapod.UPath)  # valid because orcapod.UPath is upath.UPath
+    assert isinstance(
+        recovered, orcapod.UPath
+    )  # valid because orcapod.UPath is upath.UPath
     assert isinstance(recovered, UPath)
 
 
@@ -630,7 +652,9 @@ def test_uuid_uuid_works_via_orcapod_uuid_alias_arrow_round_trip():
     # Recovered value is a uuid.UUID (which is orcapod.UUID)
     recovered = lt.storage_to_python(ext_arr.storage[0].as_py())
     assert recovered == u
-    assert isinstance(recovered, orcapod.UUID)  # valid because orcapod.UUID is uuid.UUID
+    assert isinstance(
+        recovered, orcapod.UUID
+    )  # valid because orcapod.UUID is uuid.UUID
     assert isinstance(recovered, uuid_module.UUID)
 
 
@@ -642,6 +666,7 @@ def test_uuid_uuid_works_via_orcapod_uuid_alias_arrow_round_trip():
 def test_logical_path_python_to_storage_accepts_converter():
     """python_to_storage now accepts a converter param (ignored)."""
     from orcapod.logical_types.builtin_logical_types import LogicalPath
+
     lt = LogicalPath()
     result = lt.python_to_storage(pathlib.Path("/tmp/foo"), converter=None)
     assert result == "/tmp/foo"
@@ -650,6 +675,7 @@ def test_logical_path_python_to_storage_accepts_converter():
 def test_logical_path_storage_to_python_accepts_converter():
     """storage_to_python now accepts a converter param (ignored)."""
     from orcapod.logical_types.builtin_logical_types import LogicalPath
+
     lt = LogicalPath()
     result = lt.storage_to_python("/tmp/foo", converter=None)
     assert result == pathlib.Path("/tmp/foo")
@@ -657,6 +683,7 @@ def test_logical_path_storage_to_python_accepts_converter():
 
 def test_logical_uuid_python_to_storage_accepts_converter():
     from orcapod.logical_types.builtin_logical_types import LogicalUUID
+
     lt = LogicalUUID()
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result = lt.python_to_storage(u, converter=None)
@@ -665,6 +692,7 @@ def test_logical_uuid_python_to_storage_accepts_converter():
 
 def test_logical_uuid_storage_to_python_accepts_converter():
     from orcapod.logical_types.builtin_logical_types import LogicalUUID
+
     lt = LogicalUUID()
     u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
     result = lt.storage_to_python(u.bytes, converter=None)
@@ -673,6 +701,7 @@ def test_logical_uuid_storage_to_python_accepts_converter():
 
 def test_logical_upath_python_to_storage_accepts_converter():
     from orcapod.logical_types.builtin_logical_types import LogicalUPath
+
     lt = LogicalUPath()
     result = lt.python_to_storage(UPath("s3://bucket/key"), converter=None)
     assert result == "s3://bucket/key"
@@ -680,6 +709,7 @@ def test_logical_upath_python_to_storage_accepts_converter():
 
 def test_logical_upath_storage_to_python_accepts_converter():
     from orcapod.logical_types.builtin_logical_types import LogicalUPath
+
     lt = LogicalUPath()
     result = lt.storage_to_python("s3://bucket/key", converter=None)
     assert isinstance(result, UPath)

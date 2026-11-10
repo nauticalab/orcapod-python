@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import threading
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -113,7 +112,9 @@ class TestSemanticAwarePythonHasherPrimitives:
         h2 = hasher.hash_object(value)
         assert h1 == h2
 
-    def test_different_primitives_differ(self, hasher: SemanticAwarePythonHasher) -> None:
+    def test_different_primitives_differ(
+        self, hasher: SemanticAwarePythonHasher
+    ) -> None:
         """Different inputs produce different hashes (collision resistance)."""
         h_int = hasher.hash_object(42)
         h_str = hasher.hash_object("42")
@@ -156,7 +157,9 @@ class TestSemanticAwarePythonHasherStructures:
         h2 = hasher.hash_object({1, 2, 3})
         assert h1 == h2
 
-    def test_dict_key_order_independent(self, hasher: SemanticAwarePythonHasher) -> None:
+    def test_dict_key_order_independent(
+        self, hasher: SemanticAwarePythonHasher
+    ) -> None:
         """Dicts with the same key-value pairs hash identically regardless of order."""
         h1 = hasher.hash_object({"b": 2, "a": 1})
         h2 = hasher.hash_object({"a": 1, "b": 2})
@@ -170,7 +173,9 @@ class TestSemanticAwarePythonHasherStructures:
         # Determinism
         assert result == hasher.hash_object(nested)
 
-    def test_different_structures_differ(self, hasher: SemanticAwarePythonHasher) -> None:
+    def test_different_structures_differ(
+        self, hasher: SemanticAwarePythonHasher
+    ) -> None:
         h1 = hasher.hash_object([1, 2])
         h2 = hasher.hash_object([1, 2, 3])
         assert h1 != h2
@@ -226,11 +231,15 @@ class TestSemanticAwarePythonHasherIdentityStructure:
 class TestSemanticAwarePythonHasherStrictMode:
     """Unknown type in strict mode raises TypeError."""
 
-    def test_unknown_type_strict_raises(self, hasher: SemanticAwarePythonHasher) -> None:
+    def test_unknown_type_strict_raises(
+        self, hasher: SemanticAwarePythonHasher
+    ) -> None:
         class Unknown:
             pass
 
-        with pytest.raises(TypeError, match="no implementation of PythonTypeHandlerProtocol registered"):
+        with pytest.raises(
+            TypeError, match="no implementation of PythonTypeHandlerProtocol registered"
+        ):
             hasher.hash_object(Unknown())
 
     def test_unknown_type_lenient_succeeds(
@@ -278,7 +287,9 @@ class TestSemanticAwarePythonHasherCollisionResistance:
 class TestPythonTypeHandlerRegistryBasics:
     """register() + get_handler() roundtrip."""
 
-    def test_register_and_get_handler(self, registry: PythonTypeHandlerRegistry) -> None:
+    def test_register_and_get_handler(
+        self, registry: PythonTypeHandlerRegistry
+    ) -> None:
         handler = _FakeHandler()
         registry.register(int, handler)
         assert registry.get_handler(42) is handler
@@ -384,7 +395,9 @@ class TestPythonTypeHandlerRegistryRegisteredTypes:
     def test_registered_types_empty(self, registry: PythonTypeHandlerRegistry) -> None:
         assert registry.registered_types() == []
 
-    def test_registered_types_populated(self, registry: PythonTypeHandlerRegistry) -> None:
+    def test_registered_types_populated(
+        self, registry: PythonTypeHandlerRegistry
+    ) -> None:
         registry.register(int, _FakeHandler())
         registry.register(str, _FakeHandler())
         types = registry.registered_types()
@@ -399,7 +412,9 @@ class TestPythonTypeHandlerRegistryRegisteredTypes:
 class TestPythonTypeHandlerRegistryThreadSafety:
     """Concurrent register/lookup doesn't crash."""
 
-    def test_concurrent_register_lookup(self, registry: PythonTypeHandlerRegistry) -> None:
+    def test_concurrent_register_lookup(
+        self, registry: PythonTypeHandlerRegistry
+    ) -> None:
         errors: list[Exception] = []
 
         def register_types(start: int, count: int) -> None:
@@ -421,9 +436,7 @@ class TestPythonTypeHandlerRegistryThreadSafety:
 
         threads = []
         for i in range(5):
-            threads.append(
-                threading.Thread(target=register_types, args=(i * 20, 20))
-            )
+            threads.append(threading.Thread(target=register_types, args=(i * 20, 20)))
             threads.append(threading.Thread(target=lookup_types))
 
         for t in threads:

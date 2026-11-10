@@ -1,5 +1,9 @@
 """Unit tests for PostgreSQLTableSource."""
+
 from __future__ import annotations
+from unittest.mock import MagicMock, patch
+import pyarrow as pa
+import pytest
 
 
 # ===========================================================================
@@ -9,23 +13,21 @@ from __future__ import annotations
 
 def test_import_from_core_sources():
     from orcapod.core.sources import PostgreSQLTableSource
+
     assert PostgreSQLTableSource is not None
 
 
 def test_import_from_orcapod_sources():
     from orcapod.sources import PostgreSQLTableSource
+
     assert PostgreSQLTableSource is not None
 
 
 def test_in_core_sources_all():
     import orcapod.core.sources as m
+
     assert "PostgreSQLTableSource" in m.__all__
 
-
-from unittest.mock import MagicMock, patch
-
-import pyarrow as pa
-import pytest
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -51,11 +53,13 @@ def _make_mock_connector(
     if pk_columns is None:
         pk_columns = ["session_id"]
     if batches is None:
-        schema = pa.schema([
-            pa.field("session_id", pa.large_string()),
-            pa.field("trial", pa.int64()),
-            pa.field("response", pa.float64()),
-        ])
+        schema = pa.schema(
+            [
+                pa.field("session_id", pa.large_string()),
+                pa.field("trial", pa.int64()),
+                pa.field("response", pa.float64()),
+            ]
+        )
         batches = [
             pa.RecordBatch.from_arrays(
                 [
@@ -145,11 +149,13 @@ class TestPKAsDefaultTags:
     def test_composite_pk_all_columns_are_tags(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
-        schema = pa.schema([
-            pa.field("user_id", pa.large_string()),
-            pa.field("event_id", pa.int64()),
-            pa.field("payload", pa.large_string()),
-        ])
+        schema = pa.schema(
+            [
+                pa.field("user_id", pa.large_string()),
+                pa.field("event_id", pa.int64()),
+                pa.field("payload", pa.large_string()),
+            ]
+        )
         batch = pa.RecordBatch.from_arrays(
             [
                 pa.array(["u1", "u1"], type=pa.large_string()),

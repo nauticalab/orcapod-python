@@ -52,7 +52,9 @@ class DictSource(RootSource):
                 # No explicit schema — infer nullable from actual values.
                 # The type converter defaults all fields to nullable=True; derive
                 # the correct flags here so the builder can trust the schema as-is.
-                arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+                arrow_table = arrow_table.cast(
+                    arrow_utils.infer_schema_nullable(arrow_table)
+                )
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

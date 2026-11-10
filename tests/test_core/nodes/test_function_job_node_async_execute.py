@@ -36,9 +36,7 @@ def double_no_db(value: int) -> int:
     return value * 2
 
 
-def _make_no_db_node(
-    n: int = 3, max_concurrency: int | None = None
-) -> FunctionJobNode:
+def _make_no_db_node(n: int = 3, max_concurrency: int | None = None) -> FunctionJobNode:
     """FunctionJobNode with no DB attached."""
     src = _make_source(n)
     pod = FunctionPod(
@@ -143,7 +141,9 @@ class _SpyObserver:
         self.node_starts: list[str] = []
         self.node_ends: list[str] = []
         self.data_starts: list[tuple] = []
-        self.data_ends: list[tuple] = []    # (label, tag, input_data, output_data, cached)
+        self.data_ends: list[
+            tuple
+        ] = []  # (label, tag, input_data, output_data, cached)
         self.data_crashes: list[tuple] = []
 
     def contextualize(self, *path):

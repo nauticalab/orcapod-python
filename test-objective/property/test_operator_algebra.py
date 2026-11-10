@@ -11,7 +11,6 @@ Tests mathematical properties that operators must satisfy:
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.operators import (
     DropDataColumns,
@@ -38,7 +37,9 @@ def _sorted_rows(table: pa.Table, sort_col: str = "id") -> list[dict]:
     return sorted(rows, key=lambda r: r.get(sort_col, 0))
 
 
-def _make_stream(tag_data: dict, data_data: dict, tag_cols: list[str]) -> ArrowTableStream:
+def _make_stream(
+    tag_data: dict, data_data: dict, tag_cols: list[str]
+) -> ArrowTableStream:
     all_data = {**tag_data, **data_data}
     return ArrowTableStream(pa.table(all_data), tag_columns=tag_cols)
 

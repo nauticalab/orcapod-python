@@ -12,12 +12,9 @@ Covers:
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
-from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
@@ -63,7 +60,9 @@ def _make_source_stream(
     table = pa.table(
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in rows[0]}
     )
-    source = ArrowTableSource(table, tag_columns=tag_columns, source_id=source_id, infer_nullable=True)
+    source = ArrowTableSource(
+        table, tag_columns=tag_columns, source_id=source_id, infer_nullable=True
+    )
     return source
 
 
@@ -272,7 +271,9 @@ class TestPhase1Phase2PipelineEntryId:
         node1, _ = _make_node(stream1, db=db)
         node1.run()
 
-        pipeline_count_after_first = db.get_all_records(node1._versioned_pipeline_path).num_rows
+        pipeline_count_after_first = db.get_all_records(
+            node1._versioned_pipeline_path
+        ).num_rows
         assert pipeline_count_after_first == 1
 
         # Second run: tag=1, x=10 (same data, different tag)
@@ -314,13 +315,17 @@ class TestPhase1Phase2PipelineEntryId:
         stream2 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
         node2, _ = _make_node(stream2, db=db)
 
-        pipeline_count_before = db.get_all_records(node2._versioned_pipeline_path).num_rows
+        pipeline_count_before = db.get_all_records(
+            node2._versioned_pipeline_path
+        ).num_rows
 
         results = list(node2.iter_data())
         assert len(results) == 2
 
         # No new pipeline records should be added
-        pipeline_count_after = db.get_all_records(node2._versioned_pipeline_path).num_rows
+        pipeline_count_after = db.get_all_records(
+            node2._versioned_pipeline_path
+        ).num_rows
         assert pipeline_count_after == pipeline_count_before
 
 
@@ -425,19 +430,25 @@ class TestComputeBaseEntryId:
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
         data = Data({"x": 10})
-        assert node.compute_base_entry_id(tag, data) == node.compute_base_entry_id(tag, data)
+        assert node.compute_base_entry_id(tag, data) == node.compute_base_entry_id(
+            tag, data
+        )
 
     def test_different_tags_produce_different_ids(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         data = Data({"x": 10})
-        assert node.compute_base_entry_id(Tag({"id": 0}), data) != node.compute_base_entry_id(Tag({"id": 1}), data)
+        assert node.compute_base_entry_id(
+            Tag({"id": 0}), data
+        ) != node.compute_base_entry_id(Tag({"id": 1}), data)
 
     def test_different_data_produce_different_ids(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
-        assert node.compute_base_entry_id(tag, Data({"x": 10})) != node.compute_base_entry_id(tag, Data({"x": 99}))
+        assert node.compute_base_entry_id(
+            tag, Data({"x": 10})
+        ) != node.compute_base_entry_id(tag, Data({"x": 99}))
 
     def test_differs_from_versioned_entry_id_at_index_zero(self):
         """After ITL-508, compute_pipeline_entry_id includes the index in the preimage,
@@ -462,18 +473,24 @@ class TestVersionedEntryIdDiffersByIndex:
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
         data = Data({"x": 10})
-        assert node.compute_pipeline_entry_id(tag, data, 0) != node.compute_pipeline_entry_id(tag, data, 1)
+        assert node.compute_pipeline_entry_id(
+            tag, data, 0
+        ) != node.compute_pipeline_entry_id(tag, data, 1)
 
     def test_same_index_produces_same_id(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
         data = Data({"x": 10})
-        assert node.compute_pipeline_entry_id(tag, data, 1) == node.compute_pipeline_entry_id(tag, data, 1)
+        assert node.compute_pipeline_entry_id(
+            tag, data, 1
+        ) == node.compute_pipeline_entry_id(tag, data, 1)
 
     def test_default_index_zero_is_consistent(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
         data = Data({"x": 10})
-        assert node.compute_pipeline_entry_id(tag, data) == node.compute_pipeline_entry_id(tag, data, 0)
+        assert node.compute_pipeline_entry_id(
+            tag, data
+        ) == node.compute_pipeline_entry_id(tag, data, 0)

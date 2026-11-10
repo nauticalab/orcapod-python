@@ -133,7 +133,10 @@ class ContentIdentifiableMixin:
                 "ContentIdentifiableMixin.content_hash: computing hash for %s",
                 type(self).__name__,
             )
-            resolver = lambda obj: obj.content_hash(hasher)
+
+            def resolver(obj):
+                return obj.content_hash(hasher)
+
             self._content_hash_cache[cache_key] = hasher.hash_object(
                 structure, resolver=resolver
             )

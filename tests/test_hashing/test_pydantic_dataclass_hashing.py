@@ -208,7 +208,9 @@ class TestBugAExtensionTypeHashable:
             )
             return pa.table({"v": arr})
 
-        assert hasher.hash_table(_table(1.0, 2.0)) != hasher.hash_table(_table(9.0, 9.0))
+        assert hasher.hash_table(_table(1.0, 2.0)) != hasher.hash_table(
+            _table(9.0, 9.0)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -394,10 +396,12 @@ class TestEndToEndPipelineWithModelColumns:
         """
         pydantic_stream = _make_pydantic_stream(ctx)
         # Second stream shares the "id" tag but has a plain score column.
-        plain_table = pa.table({
-            "id": pa.array([1, 2], type=pa.int64()),
-            "score": pa.array([0.9, 0.8], type=pa.float64()),
-        })
+        plain_table = pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "score": pa.array([0.9, 0.8], type=pa.float64()),
+            }
+        )
         plain_stream = ArrowTableStream(plain_table, tag_columns=["id"])
 
         out = Join().process(pydantic_stream, plain_stream)
@@ -410,10 +414,12 @@ class TestEndToEndPipelineWithModelColumns:
     def test_dataclass_column_through_join(self, ctx):
         """Join on a stream with a dataclass column must not crash (Bug B)."""
         dataclass_stream = _make_dataclass_stream(ctx)
-        plain_table = pa.table({
-            "id": pa.array([1, 2], type=pa.int64()),
-            "score": pa.array([0.9, 0.8], type=pa.float64()),
-        })
+        plain_table = pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "score": pa.array([0.9, 0.8], type=pa.float64()),
+            }
+        )
         plain_stream = ArrowTableStream(plain_table, tag_columns=["id"])
 
         out = Join().process(dataclass_stream, plain_stream)
@@ -426,10 +432,12 @@ class TestEndToEndPipelineWithModelColumns:
         """Join with partial tag overlap correctly returns only matched rows."""
         pydantic_stream = _make_pydantic_stream(ctx)
         # Second stream only has id=1 — join result should be 1 row.
-        plain_table = pa.table({
-            "id": pa.array([1], type=pa.int64()),
-            "score": pa.array([0.9], type=pa.float64()),
-        })
+        plain_table = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "score": pa.array([0.9], type=pa.float64()),
+            }
+        )
         plain_stream = ArrowTableStream(plain_table, tag_columns=["id"])
 
         out = Join().process(pydantic_stream, plain_stream)

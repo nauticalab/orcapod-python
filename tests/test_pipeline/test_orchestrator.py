@@ -449,6 +449,7 @@ class TestAsyncOrchestratorErrorPropagation:
 
     def test_node_failure_does_not_abort_pipeline(self):
         """A crashing data function is skipped; the pipeline completes normally."""
+
         def failing_fn(value: int) -> int:
             raise ValueError("intentional failure")
 
@@ -465,6 +466,7 @@ class TestAsyncOrchestratorErrorPropagation:
 
     def test_node_failure_calls_on_data_crash(self):
         """When an observer is set, on_data_crash is called for the failing data."""
+
         def failing_fn(value: int) -> int:
             raise ValueError("intentional failure")
 
@@ -504,35 +506,45 @@ class TestAsyncOrchestratorObserverInjection:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, tag, data):
                 events.append(("data_start", node_label))
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("data_end", node_label, cached))
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 return NoOpObserver().create_data_logger(tag, data)
+
             def contextualize(self, *identity_path):
                 return self
 
         job.run(orchestrator=AsyncPipelineOrchestrator(), observer=RecordingObserver())
 
         # Source fires node_start/node_end (label contains "ArrowTableSource" or similar)
-        source_starts = [e for e in events if e[0] == "node_start" and e[1] != "doubler"]
+        source_starts = [
+            e for e in events if e[0] == "node_start" and e[1] != "doubler"
+        ]
         assert len(source_starts) >= 1
 
         # Function fires node_start, per-data hooks, node_end
         assert ("node_start", "doubler") in events
         assert ("node_end", "doubler") in events
-        fn_data_ends = [
-            e for e in events
-            if e[0] == "data_end" and e[1] == "doubler"
-        ]
+        fn_data_ends = [e for e in events if e[0] == "data_end" and e[1] == "doubler"]
         assert len(fn_data_ends) == 2
         # All should be cached=False (first run, no DB)
         assert all(e[2] is False for e in fn_data_ends)
@@ -556,19 +568,30 @@ class TestAsyncOrchestratorObserverInjection:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id, pipeline_uri=""): pass
-            def on_run_end(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_uri=""):
+                pass
+
+            def on_run_end(self, run_id):
+                pass
+
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
+
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
+
             def on_data_start(self, node_label, tag, data):
                 events.append(("data_start", node_label))
+
             def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("data_end", node_label))
-            def on_data_crash(self, node_label, tag, data, exc): pass
+
+            def on_data_crash(self, node_label, tag, data, exc):
+                pass
+
             def create_data_logger(self, tag, data, **kwargs):
                 return NoOpObserver().create_data_logger(tag, data)
+
             def contextualize(self, *identity_path):
                 return self
 
@@ -602,5 +625,6 @@ class TestAsyncOrchestratorObserverInjection:
 
 def test_async_orchestrator_accepts_observer_in_run():
     import inspect
+
     sig = inspect.signature(AsyncPipelineOrchestrator.run)
     assert "observer" in sig.parameters

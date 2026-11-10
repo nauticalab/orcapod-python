@@ -9,6 +9,7 @@ Planned implementations:
     PostgreSQLConnector -- PLT-1075 (psycopg3)
     SpiralDBConnector   -- PLT-1074
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -141,11 +142,9 @@ class DBConnectorProtocol(Protocol):
         """Release the database connection and any associated resources."""
         ...
 
-    def __enter__(self) -> DBConnectorProtocol:
-        ...
+    def __enter__(self) -> DBConnectorProtocol: ...
 
-    def __exit__(self, *args: Any) -> None:
-        ...
+    def __exit__(self, *args: Any) -> None: ...
 
     # ── Serialization ─────────────────────────────────────────────────────────
 

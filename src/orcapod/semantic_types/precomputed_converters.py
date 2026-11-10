@@ -146,7 +146,10 @@ class SemanticSchemaConverter:
                 when the caller needs to enforce specific field types or nullable
                 flags that differ from what was inferred at construction time.
         """
-        return pa.Table.from_pylist(self.python_dicts_to_struct_dicts(data), schema=arrow_schema or self.arrow_schema)
+        return pa.Table.from_pylist(
+            self.python_dicts_to_struct_dicts(data),
+            schema=arrow_schema or self.arrow_schema,
+        )
 
     def arrow_table_to_python_dicts(self, table: pa.Table) -> list[dict[str, Any]]:
         """

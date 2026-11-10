@@ -68,7 +68,6 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
-
 class _FunctionPodBase(TraceableBase):
     """Base pod that applies a data function to each input data."""
 
@@ -91,7 +90,10 @@ class _FunctionPodBase(TraceableBase):
         self._post_run_hooks: list[PostRunHook] = []
         # ctx-injection support: ctx_arg_name is excluded from the pod's
         # exposed input schema and auto-injected per row at process_data time.
-        if ctx_arg_name is not None and ctx_arg_name not in data_function.input_data_schema:
+        if (
+            ctx_arg_name is not None
+            and ctx_arg_name not in data_function.input_data_schema
+        ):
             raise ValueError(
                 f"ctx_arg_name={ctx_arg_name!r} is not a parameter of the data function "
                 f"(schema keys: {list(data_function.input_data_schema.keys())})"
@@ -129,6 +131,7 @@ class _FunctionPodBase(TraceableBase):
         if self._ctx_arg_name is None or self._ctx_arg_name not in schema:
             return schema
         from orcapod.types import Schema
+
         items = {k: v for k, v in schema.items() if k != self._ctx_arg_name}
         opt = schema.optional_fields - {self._ctx_arg_name}
         return Schema(items, optional_fields=opt)
@@ -269,7 +272,9 @@ class _FunctionPodBase(TraceableBase):
         """
         extra: dict[str, Any] = {}
         if self._ctx_arg_name is not None:
-            extra[self._ctx_arg_name] = self._build_invocation_context(tag, data, run_id=run_id)
+            extra[self._ctx_arg_name] = self._build_invocation_context(
+                tag, data, run_id=run_id
+            )
         return tag, self.data_function.call(data, logger=logger, **extra)
 
     async def async_process_data(
@@ -298,7 +303,9 @@ class _FunctionPodBase(TraceableBase):
         """
         extra: dict[str, Any] = {}
         if self._ctx_arg_name is not None:
-            extra[self._ctx_arg_name] = self._build_invocation_context(tag, data, run_id=run_id)
+            extra[self._ctx_arg_name] = self._build_invocation_context(
+                tag, data, run_id=run_id
+            )
         return tag, await self.data_function.async_call(data, logger=logger, **extra)
 
     def add_post_run_hook(self, hook: PostRunHook) -> None:
@@ -365,9 +372,7 @@ class _FunctionPodBase(TraceableBase):
         Returns:
             A ``PostRunPayload`` ready to pass to registered hooks.
         """
-        record_id = (
-            str(output_data.datagram_uuid) if output_data is not None else None
-        )
+        record_id = str(output_data.datagram_uuid) if output_data is not None else None
         invocation_context = self._build_invocation_context(tag, data, run_id=run_id)
         return PostRunPayload(
             record_id_hash=record_id,
@@ -420,13 +425,21 @@ class _FunctionPodBase(TraceableBase):
         output_data: DataProtocol | None = None
 
         try:
-            out_tag, output_data = self.process_data(tag, data, logger=logger, run_id=run_id)
+            out_tag, output_data = self.process_data(
+                tag, data, logger=logger, run_id=run_id
+            )
         except Exception as exc:
             finished_at = datetime.now(timezone.utc)
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
-                    tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc, run_id=run_id,
+                    tag,
+                    data,
+                    None,
+                    started_at,
+                    finished_at,
+                    InvocationStatus.ERROR,
+                    exc,
+                    run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -434,8 +447,14 @@ class _FunctionPodBase(TraceableBase):
         finished_at = datetime.now(timezone.utc)
         self._fire_post_run_hooks(
             self._build_post_run_payload(
-                tag, data, output_data, started_at, finished_at,
-                InvocationStatus.COMPUTED, None, run_id=run_id,
+                tag,
+                data,
+                output_data,
+                started_at,
+                finished_at,
+                InvocationStatus.COMPUTED,
+                None,
+                run_id=run_id,
             )
         )
         return out_tag, output_data
@@ -465,7 +484,9 @@ class _FunctionPodBase(TraceableBase):
             A ``(tag, output_data)`` tuple.
         """
         if not self._post_run_hooks:
-            return await self.async_process_data(tag, data, logger=logger, run_id=run_id)
+            return await self.async_process_data(
+                tag, data, logger=logger, run_id=run_id
+            )
 
         started_at = datetime.now(timezone.utc)
         out_tag = tag
@@ -479,8 +500,14 @@ class _FunctionPodBase(TraceableBase):
             finished_at = datetime.now(timezone.utc)
             self._fire_post_run_hooks(
                 self._build_post_run_payload(
-                    tag, data, None, started_at, finished_at,
-                    InvocationStatus.ERROR, exc, run_id=run_id,
+                    tag,
+                    data,
+                    None,
+                    started_at,
+                    finished_at,
+                    InvocationStatus.ERROR,
+                    exc,
+                    run_id=run_id,
                 )
             )
             raise  # bare raise — preserves the original traceback exactly
@@ -488,8 +515,14 @@ class _FunctionPodBase(TraceableBase):
         finished_at = datetime.now(timezone.utc)
         self._fire_post_run_hooks(
             self._build_post_run_payload(
-                tag, data, output_data, started_at, finished_at,
-                InvocationStatus.COMPUTED, None, run_id=run_id,
+                tag,
+                data,
+                output_data,
+                started_at,
+                finished_at,
+                InvocationStatus.COMPUTED,
+                None,
+                run_id=run_id,
             )
         )
         return out_tag, output_data
@@ -780,7 +813,11 @@ class FunctionPod(_FunctionPodBase):
         if config.get("pod_config") is not None:
             pod_config = PodConfig(**config["pod_config"])
 
-        return cls(data_function=data_function, pod_config=pod_config, ctx_arg_name=config.get("ctx_arg_name"))
+        return cls(
+            data_function=data_function,
+            pod_config=pod_config,
+            ctx_arg_name=config.get("ctx_arg_name"),
+        )
 
 
 class FunctionPodStream(StreamBase):
@@ -840,9 +877,7 @@ class FunctionPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        tag_schema, data_schema = self.output_schema(
-            columns=columns, all_info=all_info
-        )
+        tag_schema, data_schema = self.output_schema(columns=columns, all_info=all_info)
 
         return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
@@ -1055,7 +1090,9 @@ class FunctionPodStream(StreamBase):
                 .sort(by=self.keys()[0], descending=False)
                 .to_arrow()
             )
-            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
+            output_table = arrow_utils.restore_schema_nullability(
+                output_table, output_table_schema
+            )
             # output_table = output_table.sort_by(
             #     [(column, "ascending") for column in self.keys()[0]]
             # )
@@ -1270,6 +1307,7 @@ def side_effect_function_pod(
     Raises:
         ValueError: If ``ctx_arg_name`` is not in ``fn``'s signature.
     """
+
     def decorator(func: Callable) -> FunctionPod:
         pod = FunctionPod.from_fn(
             func,

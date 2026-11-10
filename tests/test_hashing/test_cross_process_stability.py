@@ -25,7 +25,6 @@ import sys
 import textwrap
 
 import pyarrow as pa
-import pytest
 
 from orcapod.hashing.versioned_hashers import (
     get_versioned_semantic_arrow_hasher,
@@ -172,24 +171,45 @@ class TestArrowSchemaHashCrossProcess:
         """Hash computed locally equals hash computed in a fresh subprocess."""
         hasher = get_versioned_semantic_arrow_hasher()
         local = {
-            "simple": hasher.hash_schema(pa.schema([
-                pa.field("id", pa.int64(), nullable=False),
-                pa.field("value", pa.float64(), nullable=True),
-            ])).digest.hex(),
-            "string_types": hasher.hash_schema(pa.schema([
-                pa.field("name", pa.utf8()),
-                pa.field("data", pa.large_binary()),
-            ])).digest.hex(),
-            "nested_struct": hasher.hash_schema(pa.schema([
-                pa.field("point", pa.struct([
-                    pa.field("x", pa.float32()),
-                    pa.field("y", pa.float32()),
-                ])),
-            ])).digest.hex(),
-            "simple_reordered": hasher.hash_schema(pa.schema([
-                pa.field("value", pa.float64(), nullable=True),
-                pa.field("id", pa.int64(), nullable=False),
-            ])).digest.hex(),
+            "simple": hasher.hash_schema(
+                pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("value", pa.float64(), nullable=True),
+                    ]
+                )
+            ).digest.hex(),
+            "string_types": hasher.hash_schema(
+                pa.schema(
+                    [
+                        pa.field("name", pa.utf8()),
+                        pa.field("data", pa.large_binary()),
+                    ]
+                )
+            ).digest.hex(),
+            "nested_struct": hasher.hash_schema(
+                pa.schema(
+                    [
+                        pa.field(
+                            "point",
+                            pa.struct(
+                                [
+                                    pa.field("x", pa.float32()),
+                                    pa.field("y", pa.float32()),
+                                ]
+                            ),
+                        ),
+                    ]
+                )
+            ).digest.hex(),
+            "simple_reordered": hasher.hash_schema(
+                pa.schema(
+                    [
+                        pa.field("value", pa.float64(), nullable=True),
+                        pa.field("id", pa.int64(), nullable=False),
+                    ]
+                )
+            ).digest.hex(),
         }
         remote = _run_subprocess(_ARROW_SCHEMA_SCRIPT, pythonhashseed="42")
         assert local == remote
@@ -218,28 +238,54 @@ class TestArrowTableHashCrossProcess:
         """Hash computed locally equals hash computed in a fresh subprocess."""
         hasher = get_versioned_semantic_arrow_hasher()
         local = {
-            "integers": hasher.hash_table(pa.table({
-                "id": pa.array([1, 2, 3], type=pa.int64()),
-                "x":  pa.array([10, 20, 30], type=pa.int64()),
-            })).digest.hex(),
-            "with_nulls": hasher.hash_table(pa.table({
-                "a": pa.array([1, None, 3], type=pa.int32()),
-                "b": pa.array([None, 2.0, 3.0], type=pa.float64()),
-            })).digest.hex(),
-            "strings": hasher.hash_table(pa.table({
-                "name": pa.array(["alice", "bob", "carol"], type=pa.large_utf8()),
-            })).digest.hex(),
-            "empty": hasher.hash_table(pa.table({
-                "x": pa.array([], type=pa.int64()),
-            })).digest.hex(),
-            "integers_col_swap": hasher.hash_table(pa.table({
-                "x":  pa.array([10, 20, 30], type=pa.int64()),
-                "id": pa.array([1, 2, 3], type=pa.int64()),
-            })).digest.hex(),
-            "integers_row_reversed": hasher.hash_table(pa.table({
-                "id": pa.array([3, 2, 1], type=pa.int64()),
-                "x":  pa.array([30, 20, 10], type=pa.int64()),
-            })).digest.hex(),
+            "integers": hasher.hash_table(
+                pa.table(
+                    {
+                        "id": pa.array([1, 2, 3], type=pa.int64()),
+                        "x": pa.array([10, 20, 30], type=pa.int64()),
+                    }
+                )
+            ).digest.hex(),
+            "with_nulls": hasher.hash_table(
+                pa.table(
+                    {
+                        "a": pa.array([1, None, 3], type=pa.int32()),
+                        "b": pa.array([None, 2.0, 3.0], type=pa.float64()),
+                    }
+                )
+            ).digest.hex(),
+            "strings": hasher.hash_table(
+                pa.table(
+                    {
+                        "name": pa.array(
+                            ["alice", "bob", "carol"], type=pa.large_utf8()
+                        ),
+                    }
+                )
+            ).digest.hex(),
+            "empty": hasher.hash_table(
+                pa.table(
+                    {
+                        "x": pa.array([], type=pa.int64()),
+                    }
+                )
+            ).digest.hex(),
+            "integers_col_swap": hasher.hash_table(
+                pa.table(
+                    {
+                        "x": pa.array([10, 20, 30], type=pa.int64()),
+                        "id": pa.array([1, 2, 3], type=pa.int64()),
+                    }
+                )
+            ).digest.hex(),
+            "integers_row_reversed": hasher.hash_table(
+                pa.table(
+                    {
+                        "id": pa.array([3, 2, 1], type=pa.int64()),
+                        "x": pa.array([30, 20, 10], type=pa.int64()),
+                    }
+                )
+            ).digest.hex(),
         }
         remote = _run_subprocess(_ARROW_TABLE_SCRIPT, pythonhashseed="1337")
         assert local == remote
@@ -273,19 +319,21 @@ class TestSemanticHashCrossProcess:
         """Hash computed locally equals hash computed in a fresh subprocess."""
         hasher = get_versioned_semantic_hasher()
         local = {
-            "int":         hasher.hash_object(42).digest.hex(),
-            "neg_int":     hasher.hash_object(-7).digest.hex(),
-            "float":       hasher.hash_object(3.14159).digest.hex(),
-            "string":      hasher.hash_object("hello world").digest.hex(),
-            "none":        hasher.hash_object(None).digest.hex(),
-            "bool_true":   hasher.hash_object(True).digest.hex(),
-            "bool_false":  hasher.hash_object(False).digest.hex(),
-            "list":        hasher.hash_object([1, 2, 3]).digest.hex(),
-            "nested_dict": hasher.hash_object({"a": 1, "b": [2, 3], "c": {"d": 4}}).digest.hex(),
-            "set":         hasher.hash_object({1, 2, 3}).digest.hex(),
-            "tuple":       hasher.hash_object((1, 2, 3)).digest.hex(),
-            "empty_list":  hasher.hash_object([]).digest.hex(),
-            "empty_dict":  hasher.hash_object({}).digest.hex(),
+            "int": hasher.hash_object(42).digest.hex(),
+            "neg_int": hasher.hash_object(-7).digest.hex(),
+            "float": hasher.hash_object(3.14159).digest.hex(),
+            "string": hasher.hash_object("hello world").digest.hex(),
+            "none": hasher.hash_object(None).digest.hex(),
+            "bool_true": hasher.hash_object(True).digest.hex(),
+            "bool_false": hasher.hash_object(False).digest.hex(),
+            "list": hasher.hash_object([1, 2, 3]).digest.hex(),
+            "nested_dict": hasher.hash_object(
+                {"a": 1, "b": [2, 3], "c": {"d": 4}}
+            ).digest.hex(),
+            "set": hasher.hash_object({1, 2, 3}).digest.hex(),
+            "tuple": hasher.hash_object((1, 2, 3)).digest.hex(),
+            "empty_list": hasher.hash_object([]).digest.hex(),
+            "empty_dict": hasher.hash_object({}).digest.hex(),
         }
         remote = _run_subprocess(_SEMANTIC_SCRIPT, pythonhashseed="42")
         assert local == remote

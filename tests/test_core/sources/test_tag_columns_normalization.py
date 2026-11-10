@@ -5,6 +5,7 @@ Covers:
 - Per-source integration: all user-facing sources accept bare string identically
   to a single-element list.
 """
+
 from __future__ import annotations
 
 import re
@@ -109,8 +110,12 @@ class TestArrowTableSourceTagColumns:
         from orcapod.core.sources import ArrowTableSource
 
         t = _make_table()
-        src_str = ArrowTableSource(table=t, tag_columns="session_id", infer_nullable=True)
-        src_list = ArrowTableSource(table=t, tag_columns=["session_id"], infer_nullable=True)
+        src_str = ArrowTableSource(
+            table=t, tag_columns="session_id", infer_nullable=True
+        )
+        src_list = ArrowTableSource(
+            table=t, tag_columns=["session_id"], infer_nullable=True
+        )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
@@ -119,7 +124,9 @@ class TestArrowTableSourceTagColumns:
         from orcapod.core.sources import ArrowTableSource
 
         t = _make_table()
-        src = ArrowTableSource(table=t, tag_columns=("session_id",), infer_nullable=True)
+        src = ArrowTableSource(
+            table=t, tag_columns=("session_id",), infer_nullable=True
+        )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
 
@@ -251,8 +258,12 @@ class TestDeltaTableSourceTagColumns:
     def test_bare_string_same_as_list(self, delta_path):
         from orcapod.core.sources import DeltaTableSource
 
-        src_str = DeltaTableSource(delta_table_path=delta_path, tag_columns="session_id")
-        src_list = DeltaTableSource(delta_table_path=delta_path, tag_columns=["session_id"])
+        src_str = DeltaTableSource(
+            delta_table_path=delta_path, tag_columns="session_id"
+        )
+        src_list = DeltaTableSource(
+            delta_table_path=delta_path, tag_columns=["session_id"]
+        )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
@@ -295,9 +306,15 @@ class _MockConnector:
 
     def get_column_info(self, table_name: str):
         from orcapod.types import ColumnInfo
-        return [ColumnInfo(name=f.name, arrow_type=f.type) for f in self._tables[table_name].schema]
 
-    def iter_batches(self, query: str, params: Any = None, batch_size: int = 1000) -> Iterator[pa.RecordBatch]:
+        return [
+            ColumnInfo(name=f.name, arrow_type=f.type)
+            for f in self._tables[table_name].schema
+        ]
+
+    def iter_batches(
+        self, query: str, params: Any = None, batch_size: int = 1000
+    ) -> Iterator[pa.RecordBatch]:
         m = re.search(r'FROM\s+"?(\w+)"?', query, re.IGNORECASE)
         if m:
             table = self._tables.get(m.group(1))
@@ -354,7 +371,9 @@ class TestDBTableSourceTagColumns:
         from orcapod.core.sources import DBTableSource
 
         with pytest.raises(TypeError):
-            DBTableSource(connector=_MockConnector(), table_name="events", tag_columns=42)
+            DBTableSource(
+                connector=_MockConnector(), table_name="events", tag_columns=42
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -26,10 +26,10 @@ from __future__ import annotations
 
 import heapq
 from collections.abc import Hashable
-from graphlib import CycleError, TopologicalSorter
+from graphlib import TopologicalSorter
 from typing import TYPE_CHECKING, Any, Generic, Iterable, Iterator, TypeVar
 
-from orcapod.pipeline.dag import Comparable, ComparableNodeT
+from orcapod.pipeline.dag import ComparableNodeT
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

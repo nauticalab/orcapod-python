@@ -1,4 +1,5 @@
 """Tests for the OperatorNode / OperatorJobNode split."""
+
 from __future__ import annotations
 
 import pytest
@@ -114,7 +115,11 @@ class TestSiblingHierarchy:
         )
 
     def test_both_inherit_from_base(self):
-        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNode, OperatorNodeBase
+        from orcapod.core.nodes.operator_node import (
+            OperatorJobNode,
+            OperatorNode,
+            OperatorNodeBase,
+        )
 
         assert issubclass(OperatorNode, OperatorNodeBase)
         assert issubclass(OperatorJobNode, OperatorNodeBase)

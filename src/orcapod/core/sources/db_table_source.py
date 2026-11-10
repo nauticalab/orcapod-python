@@ -9,6 +9,7 @@ Example::
     source = DBTableSource(connector, "measurements")          # PKs → tags
     source = DBTableSource(connector, "events", tag_columns=["session_id"])
 """
+
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -117,10 +118,12 @@ class DBTableSource(RootSource):
         col_infos = connector.get_column_info(table_name)
         if col_infos:
             db_nullable = {ci.name: ci.nullable for ci in col_infos}
-            db_schema = pa.schema([
-                pa.field(f.name, f.type, nullable=db_nullable.get(f.name, True))
-                for f in table.schema
-            ])
+            db_schema = pa.schema(
+                [
+                    pa.field(f.name, f.type, nullable=db_nullable.get(f.name, True))
+                    for f in table.schema
+                ]
+            )
             table = pa.Table.from_arrays(
                 [table.column(i) for i in range(table.num_columns)],
                 schema=db_schema,

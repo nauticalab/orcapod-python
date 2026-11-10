@@ -8,13 +8,17 @@ import uuid
 import pyarrow as pa
 import pytest
 
-from orcapod.logical_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.logical_types.registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+)
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _unique_name() -> str:
     """Unique Arrow extension name to avoid cross-test global-registry collisions."""
@@ -48,10 +52,12 @@ def _make_field_metadata_schema(
     than a ``pa.ExtensionType`` instance.
     """
     _storage = storage or pa.large_utf8()
-    field = pa.field("col", _storage).with_metadata({
-        b"ARROW:extension:name": arrow_name.encode(),
-        b"ARROW:extension:metadata": metadata,
-    })
+    field = pa.field("col", _storage).with_metadata(
+        {
+            b"ARROW:extension:name": arrow_name.encode(),
+            b"ARROW:extension:metadata": metadata,
+        }
+    )
     return pa.schema([field])
 
 
@@ -63,6 +69,7 @@ def _make_stub_factory():
     extension type, which requires the Arrow ext type to be in PyArrow's global
     registry.  To avoid cross-test collisions, each test uses a unique arrow name.
     """
+
     class _Factory:
         def __init__(self):
             self.calls: list[tuple] = []
@@ -70,7 +77,9 @@ def _make_stub_factory():
         def supports_class(self, python_type):
             return False
 
-        def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, converter):
+        def reconstruct_from_arrow(
+            self, arrow_extension_name, storage_type, metadata, converter
+        ):
             import polars as pl
             from orcapod.logical_types.registry import make_arrow_extension_type
 
@@ -83,6 +92,7 @@ def _make_stub_factory():
             class _PolarsExt(pl.BaseExtension):
                 def __init__(self):
                     super().__init__(_name, _pl_storage, None)
+
                 @classmethod
                 def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
                     return cls()
@@ -91,15 +101,20 @@ def _make_stub_factory():
                 @property
                 def logical_type_name(self):
                     return _name
+
                 @property
                 def python_type(self):
                     return str
+
                 def get_arrow_extension_type(self):
                     return _arrow_cls()
+
                 def get_polars_extension_type(self):
                     return _PolarsExt()
+
                 def python_to_storage(self, value, converter=None):
                     return str(value)
+
                 def storage_to_python(self, storage_value, converter=None):
                     return storage_value
 
@@ -124,6 +139,7 @@ def _make_converter(factory=None, category=None) -> UniversalTypeConverter:
 # Fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def fresh_converter():
     """A fresh, isolated converter (with empty registry) for each test."""
@@ -134,17 +150,23 @@ def fresh_converter():
 # Tests
 # ---------------------------------------------------------------------------
 
+
 def test_no_extension_types_is_noop(fresh_converter):
     """Schema with only primitives — register_discovered_logical_types returns without touching registry."""
     from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
-    schema = pa.schema([
-        pa.field("id", pa.int64()),
-        pa.field("name", pa.large_utf8()),
-    ])
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64()),
+            pa.field("name", pa.large_utf8()),
+        ]
+    )
     register_discovered_logical_types(fresh_converter, schema)
     # fresh registry is empty — no error means no spurious lookup was triggered
-    assert fresh_converter._logical_type_registry.get_by_arrow_extension_name("anything") is None
+    assert (
+        fresh_converter._logical_type_registry.get_by_arrow_extension_name("anything")
+        is None
+    )
 
 
 def test_known_type_is_registered():
@@ -160,7 +182,10 @@ def test_known_type_is_registered():
 
     register_discovered_logical_types(converter, schema)
 
-    assert converter._logical_type_registry.get_by_arrow_extension_name(arrow_name) is not None
+    assert (
+        converter._logical_type_registry.get_by_arrow_extension_name(arrow_name)
+        is not None
+    )
     assert len(factory.calls) == 1
 
 
@@ -261,12 +286,17 @@ def test_nested_extension_type():
     converter = _make_converter(factory=factory, category="TestCat")
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
-    inner_ext_cls = make_arrow_extension_type(arrow_name, pa.large_utf8(), metadata=metadata_bytes)
+    inner_ext_cls = make_arrow_extension_type(
+        arrow_name, pa.large_utf8(), metadata=metadata_bytes
+    )
 
     struct_type = pa.struct([pa.field("inner", inner_ext_cls())])
     schema = pa.schema([pa.field("outer", struct_type)])
 
     register_discovered_logical_types(converter, schema)
 
-    assert converter._logical_type_registry.get_by_arrow_extension_name(arrow_name) is not None
+    assert (
+        converter._logical_type_registry.get_by_arrow_extension_name(arrow_name)
+        is not None
+    )
     assert len(factory.calls) == 1

@@ -708,12 +708,12 @@ def _serialize_array_fallback(
         try:
             null_mask = pc.is_null(array)  # type: ignore
             is_null = null_mask[i].as_py()
-        except:
+        except:  # noqa: E722 - narrowing would change which exceptions are swallowed
             # Fallback null check
             try:
                 value = array[i].as_py()
                 is_null = value is None
-            except:
+            except:  # noqa: E722 - narrowing would change which exceptions are swallowed
                 is_null = False
 
         if is_null:
@@ -1049,7 +1049,7 @@ def run_comprehensive_tests():
     print("=" * 70)
 
     # Test cases
-    test_cases = [
+    test_cases = [  # noqa: F841 - reference list of the manual harness, not iterated
         ("Basic table", create_test_table_1),
         ("Reordered columns", create_test_table_reordered_columns),
         ("Reordered rows", create_test_table_reordered_rows),
@@ -1222,9 +1222,7 @@ def run_comprehensive_tests():
         times = []
         for _ in range(3):  # Run 3 times for average
             start = time.time()
-            hash_result = serialize_table_logical_hash(
-                large_table, order_options=order_opts
-            )
+            serialize_table_logical_hash(large_table, order_options=order_opts)
             end = time.time()
             times.append(end - start)
 

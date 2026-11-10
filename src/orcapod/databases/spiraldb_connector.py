@@ -14,6 +14,7 @@ Example::
     db.add_record(("results", "my_fn"), record_id="abc", record=table)
     db.flush()
 """
+
 from __future__ import annotations
 
 import base64
@@ -163,8 +164,7 @@ def _load_arrow_metadata(
     schema_meta: dict[bytes, bytes] | None = None
     if "schema" in blob:
         schema_meta = {
-            base64.b64decode(k): base64.b64decode(v)
-            for k, v in blob["schema"].items()
+            base64.b64decode(k): base64.b64decode(v) for k, v in blob["schema"].items()
         }
 
     field_trees: dict[str, dict] = blob.get("fields", {})
@@ -203,8 +203,7 @@ def _restore_field(field: pa.Field, stored: dict | None) -> tuple[pa.Field, bool
     has_new_meta = False
     if "meta" in stored:
         new_meta = {
-            base64.b64decode(k): base64.b64decode(v)
-            for k, v in stored["meta"].items()
+            base64.b64decode(k): base64.b64decode(v) for k, v in stored["meta"].items()
         }
         has_new_meta = True
     else:
@@ -468,7 +467,9 @@ class SpiralDBConnector:
             needs_rebuild = False
             for field in schema:
                 # Recursively restore field metadata (including nested struct/list).
-                restored_field, field_changed = _restore_field(field, field_trees.get(field.name))
+                restored_field, field_changed = _restore_field(
+                    field, field_trees.get(field.name)
+                )
                 # Apply large_string / large_binary normalization on the top-level type.
                 if restored_field.type == _pa.string():
                     restored_field = _pa.field(
@@ -489,7 +490,9 @@ class SpiralDBConnector:
                 new_fields.append(restored_field)
                 needs_rebuild = needs_rebuild or field_changed
 
-            restored_schema_meta = schema_meta if schema_meta is not None else schema.metadata
+            restored_schema_meta = (
+                schema_meta if schema_meta is not None else schema.metadata
+            )
             if restored_schema_meta != schema.metadata:
                 needs_rebuild = True
 
@@ -619,10 +622,7 @@ class SpiralDBConnector:
 
         # skip_existing=True: full scan → client-side key filter → write novel rows.
         existing = self._spiral.scan(tbl.select()).to_table()
-        existing_keys = {
-            tuple(row[k] for k in pk_cols)
-            for row in existing.to_pylist()
-        }
+        existing_keys = {tuple(row[k] for k in pk_cols) for row in existing.to_pylist()}
         mask = pa.array(
             [
                 tuple(row[k] for k in pk_cols) not in existing_keys

@@ -336,7 +336,9 @@ class TestSourceId:
 
     def test_explicit_source_id_honoured(self):
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table, source_id="my_explicit_id", infer_nullable=True)
+        src = ArrowTableSource(
+            table=table, source_id="my_explicit_id", infer_nullable=True
+        )
         assert src.source_id == "my_explicit_id"
 
     def test_source_id_in_provenance_tokens(self, arrow_src):
@@ -365,8 +367,12 @@ class TestContentHash:
         assert src1.content_hash() == src2.content_hash()
 
     def test_different_data_different_content_hash(self):
-        src1 = ArrowTableSource(table=pa.table({"x": pa.array([1], type=pa.int64())}), infer_nullable=True)
-        src2 = ArrowTableSource(table=pa.table({"x": pa.array([2], type=pa.int64())}), infer_nullable=True)
+        src1 = ArrowTableSource(
+            table=pa.table({"x": pa.array([1], type=pa.int64())}), infer_nullable=True
+        )
+        src2 = ArrowTableSource(
+            table=pa.table({"x": pa.array([2], type=pa.int64())}), infer_nullable=True
+        )
         assert src1.content_hash() != src2.content_hash()
 
 

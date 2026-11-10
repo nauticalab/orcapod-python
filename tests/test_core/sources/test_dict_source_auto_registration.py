@@ -3,6 +3,7 @@
 Verifies that DictSource construction and iteration succeed for Pydantic BaseModel
 and @dataclass column types that have never been registered via a function pod.
 """
+
 from __future__ import annotations
 
 import dataclasses

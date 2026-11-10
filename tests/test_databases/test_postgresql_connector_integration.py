@@ -18,6 +18,7 @@ PostgreSQL instance (e.g. `docker run -e POSTGRES_PASSWORD=postgres -p 5432:5432
 Each test gets an isolated schema (created fresh, dropped after), so tests can
 share a single database without interfering with each other.
 """
+
 from __future__ import annotations
 
 import os
@@ -77,10 +78,12 @@ def _make_columns() -> list[ColumnInfo]:
 
 
 def _make_table(ids: list[str], values: list[float | None]) -> pa.Table:
-    return pa.table({
-        "__record_id": pa.array(ids, type=pa.large_string()),
-        "value": pa.array(values, type=pa.float64()),
-    })
+    return pa.table(
+        {
+            "__record_id": pa.array(ids, type=pa.large_string()),
+            "value": pa.array(values, type=pa.float64()),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +159,9 @@ class TestGetPkColumns:
         connector._conn.commit()
         assert connector.get_pk_columns("t") == []
 
-    def test_nonexistent_table_returns_empty(self, connector: PostgreSQLConnector) -> None:
+    def test_nonexistent_table_returns_empty(
+        self, connector: PostgreSQLConnector
+    ) -> None:
         assert connector.get_pk_columns("no_such_table") == []
 
     def test_raises_on_invalid_table_name(self, connector: PostgreSQLConnector) -> None:
@@ -209,7 +214,9 @@ class TestGetColumnInfo:
         assert infos["a"].nullable is False
         assert infos["b"].nullable is True
 
-    def test_nonexistent_table_returns_empty(self, connector: PostgreSQLConnector) -> None:
+    def test_nonexistent_table_returns_empty(
+        self, connector: PostgreSQLConnector
+    ) -> None:
         assert connector.get_column_info("no_such_table") == []
 
     def test_raises_on_invalid_table_name(self, connector: PostgreSQLConnector) -> None:
@@ -238,7 +245,9 @@ class TestCreateTableIfNotExists:
     def test_idempotent(self, connector: PostgreSQLConnector) -> None:
         cols = _make_columns()
         connector.create_table_if_not_exists("tbl", cols, "__record_id")
-        connector.create_table_if_not_exists("tbl", cols, "__record_id")  # must not raise
+        connector.create_table_if_not_exists(
+            "tbl", cols, "__record_id"
+        )  # must not raise
 
     def test_pk_column_set(self, connector: PostgreSQLConnector) -> None:
         connector.create_table_if_not_exists("tbl", _make_columns(), "__record_id")
@@ -250,13 +259,17 @@ class TestCreateTableIfNotExists:
         assert infos["__record_id"].nullable is False
         assert infos["value"].nullable is True
 
-    def test_raises_when_pk_column_not_in_columns(self, connector: PostgreSQLConnector) -> None:
+    def test_raises_when_pk_column_not_in_columns(
+        self, connector: PostgreSQLConnector
+    ) -> None:
         with pytest.raises(ValueError, match="not found in columns"):
             connector.create_table_if_not_exists("tbl", _make_columns(), "missing_pk")
 
     def test_raises_on_invalid_table_name(self, connector: PostgreSQLConnector) -> None:
         with pytest.raises(ValueError, match="double-quote"):
-            connector.create_table_if_not_exists('bad"name', _make_columns(), "__record_id")
+            connector.create_table_if_not_exists(
+                'bad"name', _make_columns(), "__record_id"
+            )
 
 
 @pytest.mark.postgres
@@ -266,29 +279,41 @@ class TestUpsertRecords:
 
     def test_insert_new_records(self, connector: PostgreSQLConnector) -> None:
         self.setup_table(connector)
-        connector.upsert_records("tbl", _make_table(["a", "b"], [1.0, 2.0]), "__record_id")
+        connector.upsert_records(
+            "tbl", _make_table(["a", "b"], [1.0, 2.0]), "__record_id"
+        )
         batches = list(connector.iter_batches('SELECT * FROM "tbl"'))
         assert sum(b.num_rows for b in batches) == 2
 
     def test_replace_existing(self, connector: PostgreSQLConnector) -> None:
         self.setup_table(connector)
         connector.upsert_records("tbl", _make_table(["a"], [1.0]), "__record_id")
-        connector.upsert_records("tbl", _make_table(["a"], [99.0]), "__record_id", skip_existing=False)
-        batches = list(connector.iter_batches('SELECT * FROM "tbl" WHERE "__record_id" = \'a\''))
+        connector.upsert_records(
+            "tbl", _make_table(["a"], [99.0]), "__record_id", skip_existing=False
+        )
+        batches = list(
+            connector.iter_batches('SELECT * FROM "tbl" WHERE "__record_id" = \'a\'')
+        )
         table = pa.Table.from_batches(batches)
         assert table.column("value")[0].as_py() == 99.0
 
     def test_skip_existing_keeps_original(self, connector: PostgreSQLConnector) -> None:
         self.setup_table(connector)
         connector.upsert_records("tbl", _make_table(["a"], [1.0]), "__record_id")
-        connector.upsert_records("tbl", _make_table(["a"], [99.0]), "__record_id", skip_existing=True)
-        batches = list(connector.iter_batches('SELECT * FROM "tbl" WHERE "__record_id" = \'a\''))
+        connector.upsert_records(
+            "tbl", _make_table(["a"], [99.0]), "__record_id", skip_existing=True
+        )
+        batches = list(
+            connector.iter_batches('SELECT * FROM "tbl" WHERE "__record_id" = \'a\'')
+        )
         table = pa.Table.from_batches(batches)
         assert table.column("value")[0].as_py() == 1.0
 
     def test_raises_on_invalid_table_name(self, connector: PostgreSQLConnector) -> None:
         with pytest.raises(ValueError, match="double-quote"):
-            connector.upsert_records('bad"name', _make_table(["a"], [1.0]), "__record_id")
+            connector.upsert_records(
+                'bad"name', _make_table(["a"], [1.0]), "__record_id"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -306,12 +331,14 @@ class TestIterBatches:
             ColumnInfo("active", pa.bool_(), nullable=True),
         ]
         connector.create_table_if_not_exists("data", cols, "id")
-        records = pa.table({
-            "id": pa.array(["a", "b", "c"], type=pa.large_string()),
-            "score": pa.array([1.5, 2.5, 3.5], type=pa.float64()),
-            "count": pa.array([10, 20, 30], type=pa.int64()),
-            "active": pa.array([True, False, True], type=pa.bool_()),
-        })
+        records = pa.table(
+            {
+                "id": pa.array(["a", "b", "c"], type=pa.large_string()),
+                "score": pa.array([1.5, 2.5, 3.5], type=pa.float64()),
+                "count": pa.array([10, 20, 30], type=pa.int64()),
+                "active": pa.array([True, False, True], type=pa.bool_()),
+            }
+        )
         connector.upsert_records("data", records, "id")
 
     def test_returns_all_rows(self, connector: PostgreSQLConnector) -> None:
@@ -339,7 +366,9 @@ class TestIterBatches:
         batches = list(connector.iter_batches('SELECT * FROM "data" WHERE 1=0'))
         assert batches == []
 
-    def test_early_termination_closes_cursor(self, connector: PostgreSQLConnector) -> None:
+    def test_early_termination_closes_cursor(
+        self, connector: PostgreSQLConnector
+    ) -> None:
         """Abandoning the generator mid-iteration must not leak server-side cursors."""
         self.setup_data(connector)
         gen = connector.iter_batches('SELECT * FROM "data"', batch_size=1)
@@ -428,7 +457,13 @@ class TestConnectorArrowDatabaseWithPostgreSQL:
         record_v1 = pa.table({"x": pa.array([1], type=pa.int64())})
         record_v2 = pa.table({"x": pa.array([99], type=pa.int64())})
         db.add_record(("fn", "dup"), record_id="r1", record=record_v1, flush=True)
-        db.add_record(("fn", "dup"), record_id="r1", record=record_v2, skip_duplicates=True, flush=True)
+        db.add_record(
+            ("fn", "dup"),
+            record_id="r1",
+            record=record_v2,
+            skip_duplicates=True,
+            flush=True,
+        )
         result = db.get_record_by_id(("fn", "dup"), "r1")
         assert result is not None
         assert result.column("x")[0].as_py() == 1  # original preserved

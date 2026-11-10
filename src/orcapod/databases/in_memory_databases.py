@@ -47,9 +47,17 @@ class InMemoryArrowDatabase:
         self._root = _root
         self._scoped_path = _scoped_path
         self.max_hierarchy_depth = max_hierarchy_depth
-        self._tables: dict[str, pa.Table] = _shared_tables if _shared_tables is not None else {}
-        self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
-        self._pending_record_ids: dict[str, set[bytes]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
+        self._tables: dict[str, pa.Table] = (
+            _shared_tables if _shared_tables is not None else {}
+        )
+        self._pending_batches: dict[str, pa.Table] = (
+            _shared_pending_batches if _shared_pending_batches is not None else {}
+        )
+        self._pending_record_ids: dict[str, set[bytes]] = (
+            _shared_pending_record_ids
+            if _shared_pending_record_ids is not None
+            else defaultdict(set)
+        )
 
     # ------------------------------------------------------------------
     # Path helpers
@@ -298,7 +306,9 @@ class InMemoryArrowDatabase:
         """
         for i, component in enumerate(path_components):
             if not component or not isinstance(component, str):
-                raise ValueError(f"at() path component {i} is invalid: {repr(component)}")
+                raise ValueError(
+                    f"at() path component {i} is invalid: {repr(component)}"
+                )
             if "/" in component or "\0" in component:
                 raise ValueError(
                     f"at() path component {repr(component)} contains an invalid character "
@@ -331,7 +341,7 @@ class InMemoryArrowDatabase:
                 seen.add(key)
             elif key.startswith(prefix_slash):
                 # Strip the prefix and leading slash to get relative key
-                seen.add(key[len(prefix_slash):])
+                seen.add(key[len(prefix_slash) :])
         return sorted(tuple(k.split("/")) for k in seen if k)
 
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
@@ -448,7 +458,9 @@ class InMemoryArrowDatabase:
         existing flat format unchanged (backward compatible).
         """
         if self._root is not None and db_registry is not None:
-            root_config = self._root.to_config()  # root emits its own format (no registry)
+            root_config = (
+                self._root.to_config()
+            )  # root emits its own format (no registry)
             ref = db_registry.register(root_config)
             return {
                 "type": "scoped",

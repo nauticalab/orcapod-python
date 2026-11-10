@@ -50,9 +50,7 @@ class MergeJoin(BinaryOperator):
 
         # Colliding data columns must have identical types since they are
         # merged into list[T] — both sides must contribute the same T.
-        colliding_keys = set(left_data_schema.keys()) & set(
-            right_data_schema.keys()
-        )
+        colliding_keys = set(left_data_schema.keys()) & set(right_data_schema.keys())
         for key in colliding_keys:
             left_type = left_data_schema[key]
             right_type = right_data_schema[key]
@@ -96,9 +94,7 @@ class MergeJoin(BinaryOperator):
         )
 
         merged_data_schema = {}
-        all_data_keys = set(left_data_schema.keys()) | set(
-            right_data_schema.keys()
-        )
+        all_data_keys = set(left_data_schema.keys()) | set(right_data_schema.keys())
         for key in all_data_keys:
             if key in colliding_schema:
                 merged_data_schema[key] = list[colliding_schema[key]]
@@ -197,9 +193,18 @@ class MergeJoin(BinaryOperator):
         # Only capture tag and data columns — system tag and source columns
         # are internally created with Arrow's all-nullable default; those fall
         # through to null-count inference below.
-        captured_cols = set(left_tag_keys) | set(left_data_keys) | set(right_tag_keys) | set(right_data_keys)
-        left_nullable = {f.name: f.nullable for f in left_table.schema if f.name in captured_cols}
-        right_nullable = {f.name: f.nullable for f in right_table.schema if f.name in captured_cols}
+        captured_cols = (
+            set(left_tag_keys)
+            | set(left_data_keys)
+            | set(right_tag_keys)
+            | set(right_data_keys)
+        )
+        left_nullable = {
+            f.name: f.nullable for f in left_table.schema if f.name in captured_cols
+        }
+        right_nullable = {
+            f.name: f.nullable for f in right_table.schema if f.name in captured_cols
+        }
         # Build expected output nullable map
         output_nullable: dict[str, bool] = {}
         output_nullable.update(left_nullable)
@@ -288,13 +293,21 @@ class MergeJoin(BinaryOperator):
             joined = joined.drop(right_col_name)
 
             elem_arrow_type = colliding_col_types.get(col)
-            if elem_arrow_type is not None and isinstance(elem_arrow_type, pa.ExtensionType):
+            if elem_arrow_type is not None and isinstance(
+                elem_arrow_type, pa.ExtensionType
+            ):
                 elem_python_type = tc.arrow_type_to_python_type(elem_arrow_type)
-                list_logical_type = tc.get_logical_type_for_python_type(list[elem_python_type])
+                list_logical_type = tc.get_logical_type_for_python_type(
+                    list[elem_python_type]
+                )
                 if list_logical_type is not None:
                     list_ext_type = list_logical_type.get_arrow_extension_type()
-                    storage_array = pa.array(merged_vals, type=list_ext_type.storage_type)
-                    merged_array = pa.ExtensionArray.from_storage(list_ext_type, storage_array)
+                    storage_array = pa.array(
+                        merged_vals, type=list_ext_type.storage_type
+                    )
+                    merged_array = pa.ExtensionArray.from_storage(
+                        list_ext_type, storage_array
+                    )
                 else:
                     merged_array = pa.array(merged_vals)
             else:
@@ -335,14 +348,18 @@ class MergeJoin(BinaryOperator):
 
         # Reconstruct schema from captured input nullable flags.
         # Fall back to null-count inference for any unexpected columns.
-        result_schema = pa.schema([
-            pa.field(
-                col_name,
-                joined.schema.field(col_name).type,
-                nullable=output_nullable.get(col_name, joined.column(i).null_count > 0),
-            )
-            for i, col_name in enumerate(joined.column_names)
-        ])
+        result_schema = pa.schema(
+            [
+                pa.field(
+                    col_name,
+                    joined.schema.field(col_name).type,
+                    nullable=output_nullable.get(
+                        col_name, joined.column(i).null_count > 0
+                    ),
+                )
+                for i, col_name in enumerate(joined.column_names)
+            ]
+        )
         joined = pa.Table.from_arrays(
             [joined.column(i) for i in range(joined.num_columns)],
             schema=result_schema,

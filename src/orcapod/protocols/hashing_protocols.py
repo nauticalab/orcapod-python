@@ -42,7 +42,9 @@ class ContentIdentifiableProtocol(Protocol):
         """Return a structure that represents the semantic identity of this object."""
         ...
 
-    def content_hash(self, hasher: "SemanticHasherProtocol | None" = None) -> ContentHash:
+    def content_hash(
+        self, hasher: "SemanticHasherProtocol | None" = None
+    ) -> ContentHash:
         """Returns the content hash."""
         ...
 
@@ -98,7 +100,9 @@ class HandlerRegistryProtocol(Protocol):
         """Look up the handler for *obj* using MRO-aware resolution."""
         ...
 
-    def get_handler_for_type(self, target_type: type) -> "PythonTypeHandlerProtocol | None":
+    def get_handler_for_type(
+        self, target_type: type
+    ) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for a type object (rather than an instance)."""
         ...
 

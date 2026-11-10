@@ -10,7 +10,6 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import DataProtocol, SourceProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 

@@ -17,6 +17,7 @@ _SYS_TAG_KEY = f"{constants.SYSTEM_TAG_PREFIX}src:abc"
 def _make_context():
     """Create a DataContext for tests."""
     from orcapod.contexts import resolve_context
+
     return resolve_context(None)
 
 
@@ -24,12 +25,15 @@ def _make_context():
 # System tags stored separately from data columns
 # ---------------------------------------------------------------------------
 
+
 class TestTagSystemTagsSeparation:
     """System tags are stored separately from data columns."""
 
     def test_system_tags_not_in_keys_by_default(self):
         ctx = _make_context()
-        tag = Tag({"x": 1, "y": "hello"}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
+        tag = Tag(
+            {"x": 1, "y": "hello"}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"}
+        )
         keys = list(tag.keys())
         assert "x" in keys
         assert "y" in keys
@@ -45,7 +49,9 @@ class TestTagSystemTagsSeparation:
         ctx = _make_context()
         tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         table = tag.as_table()
-        assert not any(name.startswith(constants.SYSTEM_TAG_PREFIX) for name in table.column_names)
+        assert not any(
+            name.startswith(constants.SYSTEM_TAG_PREFIX) for name in table.column_names
+        )
 
     def test_system_tags_not_in_schema_by_default(self):
         ctx = _make_context()
@@ -57,6 +63,7 @@ class TestTagSystemTagsSeparation:
 # ---------------------------------------------------------------------------
 # System tags included with ColumnConfig
 # ---------------------------------------------------------------------------
+
 
 class TestTagSystemTagsWithConfig:
     """With ColumnConfig system_tags=True or all_info=True, system tags are included."""
@@ -77,7 +84,9 @@ class TestTagSystemTagsWithConfig:
         ctx = _make_context()
         tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         table = tag.as_table(columns=ColumnConfig(system_tags=True))
-        assert any(name.startswith(constants.SYSTEM_TAG_PREFIX) for name in table.column_names)
+        assert any(
+            name.startswith(constants.SYSTEM_TAG_PREFIX) for name in table.column_names
+        )
 
     def test_keys_with_all_info(self):
         ctx = _make_context()
@@ -95,6 +104,7 @@ class TestTagSystemTagsWithConfig:
 # ---------------------------------------------------------------------------
 # system_tags() returns a dict COPY
 # ---------------------------------------------------------------------------
+
 
 class TestTagSystemTagsCopy:
     """system_tags() returns a dict COPY (not a reference)."""
@@ -119,6 +129,7 @@ class TestTagSystemTagsCopy:
 # copy() preserves system tags
 # ---------------------------------------------------------------------------
 
+
 class TestTagCopy:
     """copy() preserves system tags."""
 
@@ -141,6 +152,7 @@ class TestTagCopy:
 # as_datagram() returns Datagram, not Tag
 # ---------------------------------------------------------------------------
 
+
 class TestTagAsDatagram:
     """as_datagram() returns a Datagram (not Tag)."""
 
@@ -162,6 +174,7 @@ class TestTagAsDatagram:
 # ---------------------------------------------------------------------------
 # date and datetime tag values
 # ---------------------------------------------------------------------------
+
 
 class TestTagDatetimeValues:
     """Tags accept date and datetime values and round-trip them correctly."""

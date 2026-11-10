@@ -105,9 +105,7 @@ class TestSimpleFunctionPodProcess:
         stream = make_int_stream(n=4)
         via_process = double_pod.process(stream)
         via_call = double_pod(stream)
-        assert len(list(via_process.iter_data())) == len(
-            list(via_call.iter_data())
-        )
+        assert len(list(via_process.iter_data())) == len(list(via_call.iter_data()))
 
     def test_output_stream_producer_is_pod(self, double_pod):
         assert double_pod.process(make_int_stream()).producer is double_pod

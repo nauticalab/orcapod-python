@@ -1,4 +1,5 @@
 """Smoke tests for the ``orcapod migrate`` CLI sub-commands."""
+
 from __future__ import annotations
 
 import json
@@ -32,18 +33,27 @@ class TestMigratePipelineDbCli:
         """--dry-run with a non-existent DB path exits 0 (nothing to migrate)."""
         db_path = str(tmp_path / "pipeline_db")
         result = _run(
-            "migrate", "pipeline-db",
-            db_path, db_path, "my_node/path",
-            "--dry-run", "--no-progress",
+            "migrate",
+            "pipeline-db",
+            db_path,
+            db_path,
+            "my_node/path",
+            "--dry-run",
+            "--no-progress",
         )
         assert result.returncode == 0
 
     def test_json_summary_output(self, tmp_path):
         db_path = str(tmp_path / "pipeline_db")
         result = _run(
-            "migrate", "pipeline-db",
-            db_path, db_path, "my_node/path",
-            "--dry-run", "--json-summary", "--no-progress",
+            "migrate",
+            "pipeline-db",
+            db_path,
+            db_path,
+            "my_node/path",
+            "--dry-run",
+            "--json-summary",
+            "--no-progress",
         )
         assert result.returncode == 0
         summary = json.loads(result.stdout.strip())
@@ -60,18 +70,25 @@ class TestMigrateResultDbCli:
     def test_dry_run_exits_zero(self, tmp_path):
         db_path = str(tmp_path / "result_db")
         result = _run(
-            "migrate", "result-db",
-            db_path, "my_pod/path",
-            "--dry-run", "--no-progress",
+            "migrate",
+            "result-db",
+            db_path,
+            "my_pod/path",
+            "--dry-run",
+            "--no-progress",
         )
         assert result.returncode == 0
 
     def test_json_summary_output(self, tmp_path):
         db_path = str(tmp_path / "result_db")
         result = _run(
-            "migrate", "result-db",
-            db_path, "my_pod/path",
-            "--dry-run", "--json-summary", "--no-progress",
+            "migrate",
+            "result-db",
+            db_path,
+            "my_pod/path",
+            "--dry-run",
+            "--json-summary",
+            "--no-progress",
         )
         assert result.returncode == 0
         summary = json.loads(result.stdout.strip())

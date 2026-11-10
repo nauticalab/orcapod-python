@@ -10,6 +10,7 @@ Example::
     db.add_record(("results", "my_fn"), record_id="abc", record=table)
     db.flush()
 """
+
 from __future__ import annotations
 
 import itertools
@@ -78,10 +79,22 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
     if t == "uuid":
         return _pa.binary(16)
 
-    if t in ("text", "varchar", "character varying", "char", "bpchar",
-             "name", "json", "jsonb", "time", "timetz"):
+    if t in (
+        "text",
+        "varchar",
+        "character varying",
+        "char",
+        "bpchar",
+        "name",
+        "json",
+        "jsonb",
+        "time",
+        "timetz",
+    ):
         if t in ("time", "timetz"):
-            logger.warning("PostgreSQL type %r mapped to pa.large_string() (known gap)", t)
+            logger.warning(
+                "PostgreSQL type %r mapped to pa.large_string() (known gap)", t
+            )
         return _pa.large_string()
     if t == "bytea":
         return _pa.large_binary()
@@ -104,7 +117,11 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
         logger.warning("PostgreSQL type %r mapped to pa.large_string() (known gap)", p)
         return _pa.large_string()
 
-    logger.warning("Unknown PostgreSQL type %r (udt_name=%r); mapping to pa.large_string()", pg_type_name, udt_name)
+    logger.warning(
+        "Unknown PostgreSQL type %r (udt_name=%r); mapping to pa.large_string()",
+        pg_type_name,
+        udt_name,
+    )
     return _pa.large_string()
 
 
@@ -126,8 +143,13 @@ def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
     if arrow_type == _pa.bool_():
         return "BOOLEAN"
     if _pa.types.is_integer(arrow_type):
-        if arrow_type in (_pa.int8(), _pa.int16(), _pa.int32(),
-                          _pa.uint8(), _pa.uint16()):
+        if arrow_type in (
+            _pa.int8(),
+            _pa.int16(),
+            _pa.int32(),
+            _pa.uint8(),
+            _pa.uint16(),
+        ):
             return "INTEGER"
         return "BIGINT"
     if arrow_type == _pa.float32():
@@ -212,7 +234,7 @@ def _resolve_column_type_lookup(
 
     # Inspect the text after the table name up to the next major SQL clause.
     # A comma before the clause boundary means comma-joined tables ("FROM a, b").
-    from_tail = query[match.end():]
+    from_tail = query[match.end() :]
     clause_boundary = re.search(
         r"\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|OFFSET|HAVING|UNION|EXCEPT|INTERSECT)\b",
         from_tail,
@@ -494,7 +516,7 @@ class PostgreSQLConnector:
 
             sql = (
                 f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders}) '
-                f'{conflict_clause}'
+                f"{conflict_clause}"
             )
             rows_iter = (tuple(row[c] for c in cols) for row in records.to_pylist())
             try:

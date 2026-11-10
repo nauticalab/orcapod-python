@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from orcapod.types import ContentHash, Schema
+from orcapod.utils.canonical_type_names import canonical_type_name
 
 if TYPE_CHECKING:
     from orcapod.protocols.hashing_protocols import (
@@ -54,9 +55,7 @@ class BytesHandler:
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if isinstance(obj, (bytes, bytearray)):
             return obj.hex()
-        raise TypeError(
-            f"BytesHandler: expected bytes or bytearray, got {type(obj)!r}"
-        )
+        raise TypeError(f"BytesHandler: expected bytes or bytearray, got {type(obj)!r}")
 
 
 class FunctionHandler:
@@ -88,7 +87,10 @@ class TypeObjectHandler:
     *type_converter* to their stable ``logical_type_name``
     (e.g. ``"type:orcapod.file"`` for ``op.File``).
     Falls back to ``"type:<module>.<qualname>"`` for unregistered types or
-    when no ``type_converter`` is provided.
+    when no ``type_converter`` is provided. The module is the canonical one
+    from ``canonical_type_name``, so standard-library types that moved into a
+    private submodule (``pathlib._local`` on Python 3.13) hash identically on
+    every Python version.
 
     Args:
         type_converter: Optional ``TypeConverterProtocol``.  When provided,
@@ -110,9 +112,7 @@ class TypeObjectHandler:
             lt = self._type_converter.get_logical_type(obj)
             if lt is not None:
                 return f"type:{lt.logical_type_name}"
-        module: str = obj.__module__ or "<unknown>"
-        qualname: str = obj.__qualname__
-        return f"type:{module}.{qualname}"
+        return f"type:{canonical_type_name(obj)}"
 
 
 class SpecialFormHandler:
@@ -169,6 +169,7 @@ class ArrowTableHandler:
         if self._arrow_hasher is not None:
             return self._arrow_hasher
         from orcapod.contexts import get_default_context
+
         return get_default_context().arrow_hasher  # type: ignore[return-value]
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
@@ -231,9 +232,7 @@ class SchemaHandler:
                 provided and a field type is not Arrow-translatable.
         """
         if not isinstance(obj, Schema):
-            raise TypeError(
-                f"SchemaHandler: expected a Schema, got {type(obj)!r}"
-            )
+            raise TypeError(f"SchemaHandler: expected a Schema, got {type(obj)!r}")
         result: dict[str, str] = {}
         for field_name, python_type in obj.items():
             if self._type_converter is not None:
@@ -272,10 +271,9 @@ class FileHandler:
         # Deferred import breaks the circular dependency between this module and
         # file_type.py — the same pattern used by ArrowTableHandler.
         from orcapod.logical_types.file_type import File
+
         if not isinstance(obj, File):
-            raise TypeError(
-                f"FileHandler: expected an orcapod.File, got {type(obj)!r}"
-            )
+            raise TypeError(f"FileHandler: expected an orcapod.File, got {type(obj)!r}")
         wrapped = getattr(obj, "__wrapped__")
         logger.debug("FileHandler: hashing file content at %s", wrapped)
         return self.file_hasher.hash_file(wrapped)
@@ -302,6 +300,7 @@ class DirectoryHandler:
         # Deferred import breaks the circular dependency between this module and
         # directory_type.py — the same pattern used by FileHandler.
         from orcapod.logical_types.directory_type import Directory
+
         if not isinstance(obj, Directory):
             raise TypeError(
                 f"DirectoryHandler: expected an orcapod.Directory, got {type(obj)!r}"
@@ -348,6 +347,7 @@ class NumpyArrayHandler:
         import hashlib
         import io
         import numpy as np
+
         if not isinstance(obj, np.ndarray):
             raise TypeError(
                 f"NumpyArrayHandler: expected numpy.ndarray, got {type(obj)!r}"
@@ -360,7 +360,9 @@ class NumpyArrayHandler:
             )
         buf = io.BytesIO()
         np.save(buf, obj, allow_pickle=False)
-        return ContentHash(method="sha256", digest=hashlib.sha256(buf.getvalue()).digest())
+        return ContentHash(
+            method="sha256", digest=hashlib.sha256(buf.getvalue()).digest()
+        )
 
 
 class PandasDataFrameHandler:
@@ -387,6 +389,7 @@ class PandasDataFrameHandler:
         if self._arrow_hasher is not None:
             return self._arrow_hasher
         from orcapod.contexts import get_default_context
+
         return get_default_context().arrow_hasher  # type: ignore[return-value]
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
@@ -447,6 +450,7 @@ class PandasSeriesHandler:
         if self._arrow_hasher is not None:
             return self._arrow_hasher
         from orcapod.contexts import get_default_context
+
         return get_default_context().arrow_hasher  # type: ignore[return-value]
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
@@ -536,10 +540,12 @@ def register_builtin_python_type_handlers(
     """
     if file_hasher is None:
         from orcapod.hashing.file_hashers import FileHasher
+
         file_hasher = FileHasher(algorithm="sha256")
 
     if directory_hasher is None:
         from orcapod.hashing.directory_hashers import BasicDirectoryHasher
+
         directory_hasher = BasicDirectoryHasher(
             file_hasher=file_hasher,
             algorithm="sha256",
@@ -549,6 +555,7 @@ def register_builtin_python_type_handlers(
         from orcapod.hashing.semantic_hashing.function_info_extractors import (
             FunctionSignatureExtractor,
         )
+
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
@@ -562,9 +569,11 @@ def register_builtin_python_type_handlers(
     registry.register(UUID, UUIDHandler())
 
     from orcapod.logical_types.file_type import File
+
     registry.register(File, FileHandler(file_hasher))
 
     from orcapod.logical_types.directory_type import Directory
+
     registry.register(Directory, DirectoryHandler(directory_hasher))
 
     import types as _types
@@ -581,6 +590,7 @@ def register_builtin_python_type_handlers(
     registry.register(_types.GenericAlias, generic_alias_hasher)
     try:
         import typing as _typing
+
         registry.register(_typing._GenericAlias, generic_alias_hasher)  # type: ignore[attr-defined]
         registry.register(_typing._SpecialForm, SpecialFormHandler())  # type: ignore[attr-defined]
     except AttributeError:
@@ -589,14 +599,17 @@ def register_builtin_python_type_handlers(
     registry.register(Schema, SchemaHandler(type_converter=type_converter))
 
     import pyarrow as _pa
+
     arrow_table_hasher = ArrowTableHandler(arrow_hasher)
     registry.register(_pa.Table, arrow_table_hasher)
     registry.register(_pa.RecordBatch, arrow_table_hasher)
 
     import numpy as _np
+
     registry.register(_np.ndarray, NumpyArrayHandler())
 
     import pandas as _pd
+
     registry.register(_pd.DataFrame, PandasDataFrameHandler(arrow_hasher))
     registry.register(_pd.Series, PandasSeriesHandler(arrow_hasher))
 

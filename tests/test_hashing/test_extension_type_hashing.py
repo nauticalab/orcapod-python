@@ -13,7 +13,9 @@ from orcapod.logical_types.file_type import File
 from orcapod.logical_types.builtin_logical_types import LogicalPath
 from orcapod.logical_types.list_logical_type_factory import ListLogicalType
 from orcapod.hashing.visitors import SemanticHashingVisitor
-from orcapod.hashing.semantic_hashing.type_handler_registry import PythonTypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import (
+    PythonTypeHandlerRegistry,
+)
 from orcapod.hashing.semantic_hashing.semantic_hasher import SemanticAwarePythonHasher
 from orcapod.contexts import get_default_context
 
@@ -34,7 +36,9 @@ def ctx():
 
 
 class TestArrowTypeDataVisitorExtension:
-    def test_visit_dispatches_to_visit_extension_for_extension_types(self, ctx, tmp_path):
+    def test_visit_dispatches_to_visit_extension_for_extension_types(
+        self, ctx, tmp_path
+    ):
         """visit() routes ExtensionType columns to visit_extension(), not visit_struct()."""
         # Create a real file so File can be constructed without errors
         real_file = tmp_path / "dummy.txt"
@@ -150,7 +154,9 @@ class TestSemanticHashingVisitorExtension:
         )
 
         arrow_type = ctx.type_converter.register_python_class(uuid.UUID)
-        storage_val = ctx.type_converter.python_to_storage(uuid.UUID("12345678-1234-5678-1234-567812345678"), uuid.UUID)
+        storage_val = ctx.type_converter.python_to_storage(
+            uuid.UUID("12345678-1234-5678-1234-567812345678"), uuid.UUID
+        )
 
         visitor = SemanticHashingVisitor(ctx.type_converter, stripped_hasher)
         new_type, new_data = visitor.visit(arrow_type, storage_val)
@@ -278,8 +284,10 @@ class TestListExtensionHashing:
         returning (extension_type, storage_value). This assertion on new_type
         would fail.
         """
-        f0 = tmp_path / "f0.txt"; f0.write_text("alpha")
-        f1 = tmp_path / "f1.txt"; f1.write_text("beta")
+        f0 = tmp_path / "f0.txt"
+        f0.write_text("alpha")
+        f1 = tmp_path / "f1.txt"
+        f1.write_text("beta")
 
         list_ext_type = self._make_list_file_ext_type(ctx)
         s0 = self._file_storage(ctx, f0)
@@ -306,8 +314,10 @@ class TestListExtensionHashing:
         where h0 and h1 are the scalar visit results for the same files.
         Splitting the suffix by \\x00 recovers individual element hashes.
         """
-        f0 = tmp_path / "contract0.txt"; f0.write_text("content zero")
-        f1 = tmp_path / "contract1.txt"; f1.write_text("content one")
+        f0 = tmp_path / "contract0.txt"
+        f0.write_text("content zero")
+        f1 = tmp_path / "contract1.txt"
+        f1.write_text("content one")
 
         scalar_ext_type = self._make_scalar_file_ext_type(ctx)
         list_ext_type = self._make_list_file_ext_type(ctx)
@@ -352,8 +362,10 @@ class TestListExtensionHashing:
 
     def test_list_file_extension_same_content_same_hash(self, ctx, tmp_path):
         """Two files with identical content produce identical combined hashes."""
-        fa = tmp_path / "a.txt"; fa.write_text("identical")
-        fb = tmp_path / "b.txt"; fb.write_text("identical")
+        fa = tmp_path / "a.txt"
+        fa.write_text("identical")
+        fb = tmp_path / "b.txt"
+        fb.write_text("identical")
 
         list_ext_type = self._make_list_file_ext_type(ctx)
         sa = self._file_storage(ctx, fa)
@@ -375,15 +387,20 @@ class TestListExtensionHashing:
             type_handler_registry=empty_registry,
         )
 
-        f = tmp_path / "f.txt"; f.write_text("test")
+        f = tmp_path / "f.txt"
+        f.write_text("test")
         list_ext_type = self._make_list_file_ext_type(ctx)
         storage_value = [self._file_storage(ctx, f)]
 
         visitor = SemanticHashingVisitor(ctx.type_converter, stripped_hasher)
         new_type, new_data = visitor.visit(list_ext_type, storage_value)
 
-        assert new_type == list_ext_type, "Must passthrough extension type when no handler"
-        assert new_data == storage_value, "Must passthrough storage value when no handler"
+        assert new_type == list_ext_type, (
+            "Must passthrough extension type when no handler"
+        )
+        assert new_data == storage_value, (
+            "Must passthrough storage value when no handler"
+        )
 
     def test_list_path_extension_passthrough(self, ctx, tmp_path):
         """extension<list[orcapod.path]> must passthrough — Path has no content handler."""
@@ -404,8 +421,10 @@ class TestListExtensionHashing:
         The type must be registered with the converter before visiting so that
         ``arrow_type_to_python_type`` can resolve it.
         """
-        f0 = tmp_path / "s0.txt"; f0.write_text("set alpha")
-        f1 = tmp_path / "s1.txt"; f1.write_text("set beta")
+        f0 = tmp_path / "s0.txt"
+        f0.write_text("set alpha")
+        f1 = tmp_path / "s1.txt"
+        f1.write_text("set beta")
 
         ctx.type_converter.register_python_class(set[File])
         set_ext_type = ctx.type_converter.python_type_to_arrow_type(set[File])
@@ -429,7 +448,8 @@ class TestListExtensionHashing:
         tables holding the same file produced identical hashes — a silent hash
         collision that allows memoised records keyed on one to be served for the other.
         """
-        f = tmp_path / "same.txt"; f.write_text("collision test")
+        f = tmp_path / "same.txt"
+        f.write_text("collision test")
 
         ctx.type_converter.register_python_class(list[File])
         ctx.type_converter.register_python_class(set[File])
@@ -458,9 +478,12 @@ class TestListExtensionHashing:
         Both the inner and outer list types must be registered with the converter so
         that ``arrow_type_to_python_type`` can resolve them.
         """
-        f0 = tmp_path / "n0.txt"; f0.write_text("nested zero")
-        f1 = tmp_path / "n1.txt"; f1.write_text("nested one")
-        f2 = tmp_path / "n2.txt"; f2.write_text("nested two")
+        f0 = tmp_path / "n0.txt"
+        f0.write_text("nested zero")
+        f1 = tmp_path / "n1.txt"
+        f1.write_text("nested one")
+        f2 = tmp_path / "n2.txt"
+        f2.write_text("nested two")
 
         # Register both inner and outer list types so the converter knows them.
         ctx.type_converter.register_python_class(list[File])
@@ -476,9 +499,7 @@ class TestListExtensionHashing:
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         new_type, new_data = visitor.visit(outer_ext_type, storage_value)
 
-        assert new_type == pa.large_binary(), (
-            f"Expected large_binary(), got {new_type}"
-        )
+        assert new_type == pa.large_binary(), f"Expected large_binary(), got {new_type}"
         assert isinstance(new_data, bytes)
         # Outer type prefix encodes the nesting depth
         assert b"list[" in new_data[:30]
@@ -504,18 +525,22 @@ class TestListExtensionHashing:
         """
         # Register the dataclass to get its Arrow extension type.
         ctx.type_converter.register_python_class(FileBundle)
-        ext_type = ctx.type_converter.python_type_to_arrow_type(FileBundle)
+        ctx.type_converter.python_type_to_arrow_type(FileBundle)
         # The storage is a struct<name: large_string, files: large_list<item: large_string>>.
         # We need to reconstruct the struct type with the list[File] extension type
         # for the `files` field so that visit_struct -> visit_extension(list[File]) fires.
         list_file_ext_type = self._make_list_file_ext_type(ctx)
-        struct_type = pa.struct([
-            pa.field("name", pa.large_utf8()),
-            pa.field("files", list_file_ext_type),
-        ])
+        struct_type = pa.struct(
+            [
+                pa.field("name", pa.large_utf8()),
+                pa.field("files", list_file_ext_type),
+            ]
+        )
 
-        f0 = tmp_path / "dc0.txt"; f0.write_text("dc alpha")
-        f1 = tmp_path / "dc1.txt"; f1.write_text("dc beta")
+        f0 = tmp_path / "dc0.txt"
+        f0.write_text("dc alpha")
+        f1 = tmp_path / "dc1.txt"
+        f1.write_text("dc beta")
 
         s0 = ctx.type_converter.python_to_storage(File(f0), File)
         s1 = ctx.type_converter.python_to_storage(File(f1), File)

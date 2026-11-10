@@ -5,6 +5,7 @@ recording time.  Their ``content_hash()`` is structurally identical to the
 corresponding compiled node's ``content_hash()``, which means the same hash
 key can be used in both ``_invocation_lut`` and ``_persistent_node_map``.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -155,5 +156,3 @@ class SideEffectInvocation(PodInvocation):
                 f"got {len(input_streams)}."
             )
         super().__init__(pod=pod, input_streams=input_streams, label=label)
-
-

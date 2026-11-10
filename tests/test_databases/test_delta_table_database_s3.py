@@ -7,6 +7,7 @@ fixture (testcontainers locally, env vars in CI).
 Run with:  uv run pytest tests/test_databases/test_delta_table_database_s3.py -v
 Skip automatically if Docker is unavailable and MINIO_ENDPOINT is not set.
 """
+
 import pyarrow as pa
 import pytest
 from upath import UPath
@@ -19,6 +20,7 @@ pytestmark = pytest.mark.minio
 # ---------------------------------------------------------------------------
 # Core S3 operations
 # ---------------------------------------------------------------------------
+
 
 def test_s3_add_record_and_retrieve(s3_base_uri, s3_storage_options):
     db = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)
@@ -66,6 +68,7 @@ def test_s3_skip_duplicates(s3_base_uri, s3_storage_options):
 # UPath credential passthrough
 # ---------------------------------------------------------------------------
 
+
 def test_s3_upath_credentials(s3_base_uri, minio_server):
     """
     DeltaTableDatabase accepts a UPath with embedded S3 credentials (key/secret/endpoint_url).
@@ -103,6 +106,7 @@ def test_s3_upath_credentials(s3_base_uri, minio_server):
 # ---------------------------------------------------------------------------
 # Cloud-specific behaviour
 # ---------------------------------------------------------------------------
+
 
 def test_s3_list_sources_raises(s3_base_uri, s3_storage_options):
     db = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)

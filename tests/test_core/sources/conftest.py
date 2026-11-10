@@ -7,6 +7,7 @@ Installs a lightweight mock psycopg module into sys.modules so that:
 Note: ``@pytest.mark.postgres`` skip logic lives in the root conftest.py
 (opt-in via ``--postgres``).
 """
+
 from __future__ import annotations
 
 import sys

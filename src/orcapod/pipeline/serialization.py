@@ -224,9 +224,10 @@ def _get_observer_registry() -> dict[str, Any]:
         from orcapod.pipeline.status_observer import StatusObserver
         from orcapod.pipeline.logging_observer import LoggingObserver
         from orcapod.pipeline.composite_observer import CompositeObserver
+
         _observer_registry = {
-            "status":    lambda cfg, reg: StatusObserver.from_config(cfg, reg),
-            "logging":   lambda cfg, reg: LoggingObserver.from_config(cfg, reg),
+            "status": lambda cfg, reg: StatusObserver.from_config(cfg, reg),
+            "logging": lambda cfg, reg: LoggingObserver.from_config(cfg, reg),
             "composite": lambda cfg, reg: CompositeObserver.from_config(cfg, reg),
         }
     return _observer_registry
@@ -271,7 +272,9 @@ def _ensure_registries() -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_database_from_config(config: dict[str, Any], db_registry: dict | None = None) -> Any:
+def resolve_database_from_config(
+    config: dict[str, Any], db_registry: dict | None = None
+) -> Any:
     """Reconstruct a database instance from a config dict.
 
     Args:
@@ -296,7 +299,9 @@ def resolve_database_from_config(config: dict[str, Any], db_registry: dict | Non
             raise ValueError("db_registry required to resolve scoped database config")
         ref = config["ref"]
         if ref not in db_registry:
-            raise ValueError(f"Registry key {ref!r} not found; available keys: {sorted(db_registry.keys())}")
+            raise ValueError(
+                f"Registry key {ref!r} not found; available keys: {sorted(db_registry.keys())}"
+            )
         root_config = db_registry[ref]
         root_db = resolve_database_from_config(root_config)
         return root_db.at(*config["path"])

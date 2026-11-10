@@ -560,7 +560,9 @@ class TestDryRun:
 
         from orcapod.hashing.cache_population import populate_hash_cache
 
-        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+        stats = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True
+        )
         assert stats.hashed == 2
         assert stats.total_bytes_hashed == 50
 
@@ -572,7 +574,9 @@ class TestDryRun:
         from orcapod.hashing.cache_population import populate_hash_cache
 
         populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db)
-        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+        stats = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True
+        )
 
         assert stats.already_cached == 1
         assert stats.total_bytes_cached == 20
@@ -613,7 +617,9 @@ class TestDryRun:
 
         from orcapod.hashing.cache_population import populate_hash_cache
 
-        stats = populate_hash_cache(tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True)
+        stats = populate_hash_cache(
+            tmp_path, min_size_bytes=_MIN, db_path=db, dry_run=True
+        )
 
         assert stats.errors == 1
         assert stats.hashed == 0
@@ -660,7 +666,7 @@ class TestProgressCallback:
     def test_callback_not_fired_for_skipped_small(self, tmp_path):
         """Files below min_size_bytes do not trigger the callback."""
         db = tmp_path / "cache.db"
-        _write(tmp_path, "small.bin", 5)   # below _MIN=10
+        _write(tmp_path, "small.bin", 5)  # below _MIN=10
         _write(tmp_path, "big.bin", 20)
 
         from orcapod.hashing.cache_population import populate_hash_cache
@@ -767,6 +773,7 @@ class TestCLI:
     def _app(self):
         import typer
         from orcapod.cli.warm_cache import warm_cache
+
         app = typer.Typer()
         app.command()(warm_cache)
         return app
@@ -821,14 +828,24 @@ class TestCLI:
         # Dry run with force — should say "would be hashed" even though file is cached.
         result = runner.invoke(
             app,
-            [str(tmp_path), "--min-size", "0", "--db-path", str(db), "--dry-run", "--force"],
+            [
+                str(tmp_path),
+                "--min-size",
+                "0",
+                "--db-path",
+                str(db),
+                "--dry-run",
+                "--force",
+            ],
         )
         assert result.exit_code == 0
         assert "would be hashed" in result.output
         assert "Dry run" in result.output
 
         # Real run after combined dry+force should still find the file cached (no writes happened).
-        real_run = runner.invoke(app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)])
+        real_run = runner.invoke(
+            app, [str(tmp_path), "--min-size", "0", "--db-path", str(db)]
+        )
         assert "1 already cached" in real_run.output
 
     def test_normal_output_includes_cached_gb(self, tmp_path):

@@ -114,6 +114,7 @@ class OperatorNodeBase(StreamBase):
         # nodes. Initialized here so they are always present on the concrete class
         # (avoids getattr access for possibly-absent attributes).
         from orcapod.pipeline.serialization import LoadStatus
+
         self._load_status: LoadStatus = LoadStatus.FULL
         self._stored_content_hash: str | None = None
         self._stored_pipeline_hash: str | None = None
@@ -205,9 +206,7 @@ class OperatorNodeBase(StreamBase):
             tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
             data_keys = tuple(self._stored_schema.get("data", {}).keys())
             return tag_keys, data_keys
-        tag_schema, data_schema = self.output_schema(
-            columns=columns, all_info=all_info
-        )
+        tag_schema, data_schema = self.output_schema(columns=columns, all_info=all_info)
         return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
@@ -431,7 +430,9 @@ class OperatorNode(OperatorNodeBase):
         )
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict)
+            if config_dict is not None
+            else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -709,7 +710,9 @@ class OperatorJobNode(OperatorNodeBase):
         )
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict)
+            if config_dict is not None
+            else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -822,7 +825,9 @@ class OperatorJobNode(OperatorNodeBase):
         record_hashes = []
         for batch in output_table.to_batches():
             for i in range(len(batch)):
-                record_hashes.append(arrow_hasher.hash_table(batch.slice(i, 1)).to_hex())
+                record_hashes.append(
+                    arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
+                )
 
         output_table = output_table.add_column(
             0,
@@ -1066,7 +1071,9 @@ class OperatorJobNode(OperatorNodeBase):
         with correct schema before ``run()`` or ``execute()`` is called.
         """
         if self._cached_output_stream is not None:
-            return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
+            return self._cached_output_stream.as_table(
+                columns=columns, all_info=all_info
+            )
         db_stream = self._load_cached_stream_from_db()
         if db_stream is not None:
             return db_stream.as_table(columns=columns, all_info=all_info)

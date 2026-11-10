@@ -9,13 +9,10 @@ Tests the three system tag evolution rules from the design specification:
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.operators import Batch, Join, MapTags, PolarsFilter, SelectDataColumns
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.streams import ArrowTableStream
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +77,10 @@ class TestNamePreserving:
     def test_select_preserves_system_tags(self):
         source = _make_source(
             {"id": pa.array([1, 2], type=pa.int64())},
-            {"a": pa.array([10, 20], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())},
+            {
+                "a": pa.array([10, 20], type=pa.int64()),
+                "b": pa.array([30, 40], type=pa.int64()),
+            },
             ["id"],
         )
         source_table = source.as_table(all_info=True)

@@ -20,12 +20,29 @@ will be auto-registered on pod declaration.
 from __future__ import annotations
 
 from .protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
-from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
+from .registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+    make_polars_extension_type,
+)
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
 from .database_hooks import apply_logical_types, register_discovered_logical_types
-from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
-from .pydantic_logical_type_factory import PYDANTIC_CATEGORY, PydanticLogicalType, PydanticLogicalTypeFactory
-from .list_logical_type_factory import LIST_CATEGORY, SET_CATEGORY, ListLogicalType, ListLogicalTypeFactory
+from .dataclass_logical_type_factory import (
+    DATACLASS_CATEGORY,
+    DataclassLogicalType,
+    DataclassLogicalTypeFactory,
+)
+from .pydantic_logical_type_factory import (
+    PYDANTIC_CATEGORY,
+    PydanticLogicalType,
+    PydanticLogicalTypeFactory,
+)
+from .list_logical_type_factory import (
+    LIST_CATEGORY,
+    SET_CATEGORY,
+    ListLogicalType,
+    ListLogicalTypeFactory,
+)
 from .file_type import LogicalFile  # ITL-450
 from .directory_type import LogicalDirectory  # ITL-451
 from .numpy_type import LogicalNumpyArray  # ITL-460

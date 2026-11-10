@@ -11,6 +11,7 @@ Example::
     db.add_record(("results", "my_fn"), record_id="abc", record=table)
     db.flush()
 """
+
 from __future__ import annotations
 
 import logging
@@ -292,7 +293,7 @@ class SQLiteConnector:
             type_lookup: dict[str, _pa.DataType] = {}
             table_match = _re.search(r'FROM\s+"([^"]+)"', query, _re.IGNORECASE)
             if not table_match:
-                table_match = _re.search(r'FROM\s+(\w+)', query, _re.IGNORECASE)
+                table_match = _re.search(r"FROM\s+(\w+)", query, _re.IGNORECASE)
             if table_match:
                 queried_table = table_match.group(1)
                 for ci in self.get_column_info(queried_table):
@@ -303,7 +304,9 @@ class SQLiteConnector:
             if "rowid" in col_names and "rowid" not in type_lookup:
                 type_lookup["rowid"] = _pa.int64()
 
-            arrow_types = [type_lookup.get(name, _pa.large_string()) for name in col_names]
+            arrow_types = [
+                type_lookup.get(name, _pa.large_string()) for name in col_names
+            ]
             schema = _pa.schema(
                 [_pa.field(name, atype) for name, atype in zip(col_names, arrow_types)]
             )

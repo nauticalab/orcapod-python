@@ -10,7 +10,11 @@ import pytest
 import pyarrow as pa
 from upath import UPath
 
-from orcapod.logical_types.directory_type import Directory, LogicalDirectory, _try_import_callable
+from orcapod.logical_types.directory_type import (
+    Directory,
+    LogicalDirectory,
+    _try_import_callable,
+)
 
 
 class TestDirectoryConstructor:
@@ -136,6 +140,7 @@ class TestLogicalDirectory:
 
     def test_python_to_storage_with_named_callable_stores_qualname(self, tmp_path):
         import json as _json_mod
+
         d = tmp_path / "d"
         d.mkdir()
         # json.dumps: __module__="json", __qualname__="dumps" — stable and importable
@@ -182,6 +187,7 @@ class TestLogicalDirectory:
 
     def test_round_trip_named_callable_recovered(self, tmp_path):
         import json as _json_mod
+
         d = tmp_path / "d"
         d.mkdir()
         obj = Directory(d, ignore=_json_mod.dumps)
@@ -227,6 +233,7 @@ class TestLogicalDirectory:
 class TestTryImportCallable:
     def test_imports_known_function(self):
         import json as _json_mod
+
         result = _try_import_callable("json:dumps")
         assert result is _json_mod.dumps
 

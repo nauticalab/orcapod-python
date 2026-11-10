@@ -29,18 +29,14 @@ class ObservabilityReader:
     def __init__(self, root: str | Path | UPath) -> None:
         self._root = root if isinstance(root, Path) else Path(root)
         if not self._root.exists():
-            raise ValueError(
-                f"Results root does not exist: {self._root}"
-            )
+            raise ValueError(f"Results root does not exist: {self._root}")
 
         self._status_tables: dict[str, list[Path]] = {}
         self._log_tables: dict[str, list[Path]] = {}
         self._discover_tables()
 
         if not self._status_tables and not self._log_tables:
-            raise ValueError(
-                f"No observability Delta tables found under: {self._root}"
-            )
+            raise ValueError(f"No observability Delta tables found under: {self._root}")
 
         self._status_df: pl.DataFrame | None = None
         self._logs_df: pl.DataFrame | None = None
@@ -57,16 +53,12 @@ class ObservabilityReader:
                 idx = parts.index("_status")
                 if idx + 1 < len(parts):
                     node_name = parts[idx + 1]
-                    self._status_tables.setdefault(node_name, []).append(
-                        table_dir
-                    )
+                    self._status_tables.setdefault(node_name, []).append(table_dir)
             elif "_log" in parts:
                 idx = parts.index("_log")
                 if idx + 1 < len(parts):
                     node_name = parts[idx + 1]
-                    self._log_tables.setdefault(node_name, []).append(
-                        table_dir
-                    )
+                    self._log_tables.setdefault(node_name, []).append(table_dir)
 
     @property
     def nodes(self) -> list[str]:
@@ -78,7 +70,8 @@ class ObservabilityReader:
         """Inferred user tag column names."""
         status = self._get_status_df()
         return sorted(
-            col for col in status.columns
+            col
+            for col in status.columns
             if not col.startswith("__")
             and not col.startswith("_status_")
             and not col.startswith("_log_")
@@ -96,7 +89,9 @@ class ObservabilityReader:
                     df = pl.read_delta(str(table_dir))
                     df = df.with_columns(pl.lit(node_name).alias("node_label"))
                     frames.append(df)
-            self._status_df = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+            self._status_df = (
+                pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+            )
         return self._status_df
 
     def _get_logs_df(self) -> pl.DataFrame:
@@ -108,7 +103,9 @@ class ObservabilityReader:
                     df = pl.read_delta(str(table_dir))
                     df = df.with_columns(pl.lit(node_name).alias("node_label"))
                     frames.append(df)
-            self._logs_df = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+            self._logs_df = (
+                pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
+            )
         return self._logs_df
 
     # -- Column rename mappings ------------------------------------------------
@@ -130,10 +127,13 @@ class ObservabilityReader:
 
     _DROP_PREFIXES: ClassVar[tuple[str, ...]] = ("__", "_tag_", "_tag::")
     _STATUS_DROP_EXACT: ClassVar[set[str]] = {
-        "_status_id", "_status_run_id", "_status_pipeline_uri",
+        "_status_id",
+        "_status_run_id",
+        "_status_pipeline_uri",
     }
     _LOG_DROP_EXACT: ClassVar[set[str]] = {
-        "_log_id", "_log_run_id",
+        "_log_id",
+        "_log_run_id",
     }
 
     # -- Internal helpers ------------------------------------------------------
@@ -141,12 +141,14 @@ class ObservabilityReader:
     def _clean_status_df(self, df: pl.DataFrame) -> pl.DataFrame:
         """Strip system columns and rename status columns."""
         drop_cols = [
-            col for col in df.columns
+            col
+            for col in df.columns
             if any(col.startswith(p) for p in self._DROP_PREFIXES)
             or col in self._STATUS_DROP_EXACT
         ]
         drop_cols.extend(
-            col for col in df.columns
+            col
+            for col in df.columns
             if col.startswith("_status_") and col not in self._STATUS_RENAMES
         )
         df = df.drop([c for c in drop_cols if c in df.columns])
@@ -157,12 +159,14 @@ class ObservabilityReader:
     def _clean_logs_df(self, df: pl.DataFrame) -> pl.DataFrame:
         """Strip system columns and rename log columns."""
         drop_cols = [
-            col for col in df.columns
+            col
+            for col in df.columns
             if any(col.startswith(p) for p in self._DROP_PREFIXES)
             or col in self._LOG_DROP_EXACT
         ]
         drop_cols.extend(
-            col for col in df.columns
+            col
+            for col in df.columns
             if col.startswith("_log_") and col not in self._LOG_RENAMES
         )
         df = df.drop([c for c in drop_cols if c in df.columns])
@@ -222,9 +226,7 @@ class ObservabilityReader:
             KeyError: If ``node`` is not found.
         """
         if node not in self._status_tables and node not in self._log_tables:
-            raise KeyError(
-                f"Node {node!r} not found. Available nodes: {self.nodes}"
-            )
+            raise KeyError(f"Node {node!r} not found. Available nodes: {self.nodes}")
         df = self._get_logs_df()
         if df.is_empty():
             return df

@@ -174,9 +174,7 @@ class OrcapodConfig:
 
         for key in data:
             if key not in known_sections:
-                logger.warning(
-                    "Unknown config section %r%s — ignored", key, path_str
-                )
+                logger.warning("Unknown config section %r%s — ignored", key, path_str)
 
         hashing_dict = data.get("hashing", {})
         known_hashing = set(HashingConfig.__dataclass_fields__)
@@ -290,9 +288,7 @@ def load_config(
         # Warn on unknown top-level sections.
         for key in data:
             if key not in {"hashing", "display", "datetime"}:
-                logger.warning(
-                    "Unknown config section %r in %s — ignored", key, path
-                )
+                logger.warning("Unknown config section %r in %s — ignored", key, path)
 
         # Apply only the keys explicitly present in this file so that a
         # higher-precedence file can reset a field back to its default value
@@ -323,9 +319,7 @@ def load_config(
                     logger.warning(
                         "Unknown field %r in [display] in %s — ignored", key, path
                     )
-        display_updates = {
-            k: v for k, v in display_data.items() if k in known_display
-        }
+        display_updates = {k: v for k, v in display_data.items() if k in known_display}
 
         datetime_data = data.get("datetime", {})
         if not isinstance(datetime_data, dict):

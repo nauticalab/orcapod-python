@@ -112,11 +112,9 @@ def deserialize_to_pyarrow_table(serialized_str: str) -> "pa.Table":
     if "data" in parsed_data and "schema" in parsed_data:
         # New format with schema and data
         data_dict = parsed_data["data"]
-        schema_info = parsed_data["schema"]
     else:
         # Old format - just data dict
         data_dict = parsed_data
-        schema_info = None
 
     if not data_dict:
         return pa.table([])

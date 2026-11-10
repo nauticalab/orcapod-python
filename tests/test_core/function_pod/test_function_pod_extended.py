@@ -42,15 +42,31 @@ class TestTrackedDataFunctionPodHandleInputStreams:
     def test_multiple_streams_returns_joined_stream(self, add_pod):
         stream_x = ArrowTableStream(
             pa.table(
-                {"id": pa.array([0, 1], type=pa.int64()), "x": pa.array([0, 1], type=pa.int64())},
-                schema=pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]),
+                {
+                    "id": pa.array([0, 1], type=pa.int64()),
+                    "x": pa.array([0, 1], type=pa.int64()),
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("x", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
         stream_y = ArrowTableStream(
             pa.table(
-                {"id": pa.array([0, 1], type=pa.int64()), "y": pa.array([10, 20], type=pa.int64())},
-                schema=pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("y", pa.int64(), nullable=False)]),
+                {
+                    "id": pa.array([0, 1], type=pa.int64()),
+                    "y": pa.array([10, 20], type=pa.int64()),
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("y", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
@@ -151,7 +167,12 @@ class TestFunctionPodStreamContentHash:
 class TestFunctionPodStreamSortByTags:
     def test_sort_by_tags_returns_sorted_table(self, double_pod):
         n = 5
-        schema = pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)])
+        schema = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("x", pa.int64(), nullable=False),
+            ]
+        )
         table = pa.table(
             {
                 "id": pa.array(list(reversed(range(n))), type=pa.int64()),
@@ -167,7 +188,12 @@ class TestFunctionPodStreamSortByTags:
     def test_default_table_may_be_unsorted(self, double_pod):
         n = 5
         reversed_ids = list(reversed(range(n)))
-        schema = pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)])
+        schema = pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("x", pa.int64(), nullable=False),
+            ]
+        )
         table = pa.table(
             {
                 "id": pa.array(reversed_ids, type=pa.int64()),

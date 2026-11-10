@@ -60,9 +60,7 @@ class TestFunctionPodStreamProtocolConformance:
         assert isinstance(data_keys, tuple)
 
     def test_has_output_schema_method(self, double_pod):
-        tag_schema, data_schema = double_pod.process(
-            make_int_stream()
-        ).output_schema()
+        tag_schema, data_schema = double_pod.process(make_int_stream()).output_schema()
         assert isinstance(tag_schema, Mapping)
         assert isinstance(data_schema, Mapping)
 

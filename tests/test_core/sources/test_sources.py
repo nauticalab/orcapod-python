@@ -133,7 +133,9 @@ class TestArrowTableSourceRecordIdColumnValidation:
     def test_nonexistent_record_id_column_raises_at_construction(self):
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         with pytest.raises(ValueError, match="record_id_column"):
-            ArrowTableSource(table=table, record_id_column="nonexistent", infer_nullable=True)
+            ArrowTableSource(
+                table=table, record_id_column="nonexistent", infer_nullable=True
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -197,14 +197,18 @@ class GroupBy(UnaryOperator):
                     key=lambda r: tuple((r[c] is None, r[c]) for c in sort_columns)
                 )
 
-            grouped_rows.append({
-                **dict(zip(self.by, key)),
-                **{c: [m[c] for m in members] for c in member_columns},
-                **{
-                    c: arrow_utils.fold_system_tag_values(c, [m[c] for m in members])
-                    for c in system_tag_columns
-                },
-            })
+            grouped_rows.append(
+                {
+                    **dict(zip(self.by, key)),
+                    **{c: [m[c] for m in members] for c in member_columns},
+                    **{
+                        c: arrow_utils.fold_system_tag_values(
+                            c, [m[c] for m in members]
+                        )
+                        for c in system_tag_columns
+                    },
+                }
+            )
 
         grouped_table = arrow_utils.build_aggregated_table(
             grouped_rows,

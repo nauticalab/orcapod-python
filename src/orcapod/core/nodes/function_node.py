@@ -31,7 +31,11 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.core.datagrams.tag_data import EmptyData, Tag
-from orcapod.errors import EphemeralResultMissingError, PipelineJobRequiredError, SchemaVersionError
+from orcapod.errors import (
+    EphemeralResultMissingError,
+    PipelineJobRequiredError,
+    SchemaVersionError,
+)
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -46,7 +50,11 @@ from orcapod.protocols.observability_protocols import (
     DataExecutionLoggerProtocol,
     ExecutionObserverProtocol,
 )
-from orcapod.system_constants import constants, PIPELINE_DB_SCHEMA_VERSION, RESULT_DB_SCHEMA_VERSION
+from orcapod.system_constants import (
+    constants,
+    PIPELINE_DB_SCHEMA_VERSION,
+    RESULT_DB_SCHEMA_VERSION,
+)
 from orcapod.types import (
     ColumnConfig,
     ContentHash,
@@ -99,7 +107,9 @@ def _build_record_id_preimage(
     """
     return tag.as_table(columns={"system_tags": True}).append_column(
         constants.INPUT_DATA_HASH_COL,
-        pa.array([input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()),
+        pa.array(
+            [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
+        ),
     )
 
 
@@ -188,6 +198,7 @@ class FunctionNodeBase(StreamBase):
         # nodes.  Initialized here so they are always present on the concrete class
         # (avoids getattr access for possibly-absent attributes).
         from orcapod.pipeline.serialization import LoadStatus
+
         self._load_status: LoadStatus = LoadStatus.FULL
         self._stored_content_hash: str | None = None
         self._stored_pipeline_hash: str | None = None
@@ -307,9 +318,7 @@ class FunctionNodeBase(StreamBase):
             tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
             data_keys = tuple(self._stored_schema.get("data", {}).keys())
             return tag_keys, data_keys
-        tag_schema, data_schema = self.output_schema(
-            columns=columns, all_info=all_info
-        )
+        tag_schema, data_schema = self.output_schema(columns=columns, all_info=all_info)
         return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
     # ------------------------------------------------------------------
@@ -384,8 +393,12 @@ class FunctionNodeBase(StreamBase):
                 all_data.append(data.as_dict(all_info=True))
 
             converter = self.data_context.type_converter
-            tag_arrow_schema = converter.python_schema_to_arrow_schema(tag_python_schema)
-            data_arrow_schema = converter.python_schema_to_arrow_schema(data_python_schema)
+            tag_arrow_schema = converter.python_schema_to_arrow_schema(
+                tag_python_schema
+            )
+            data_arrow_schema = converter.python_schema_to_arrow_schema(
+                data_python_schema
+            )
 
             if not all_tags:
                 # No data was produced (node has not been run yet or produced zero
@@ -406,7 +419,9 @@ class FunctionNodeBase(StreamBase):
                     all_tags, schema=tag_arrow_schema
                 )
                 if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                    all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+                    all_tags_as_tables = all_tags_as_tables.drop(
+                        [constants.CONTEXT_KEY]
+                    )
                 all_data_as_tables: pa.Table = pa.Table.from_pylist(
                     struct_data, schema=data_arrow_schema
                 )
@@ -586,7 +601,9 @@ class FunctionNode(FunctionNodeBase):
 
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict)
+            if config_dict is not None
+            else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -672,8 +689,6 @@ class FunctionNode(FunctionNodeBase):
                 invoking ``as_node()``.
         """
         if self._function_pod is None:
-            from orcapod.pipeline.serialization import LoadStatus
-
             raise RuntimeError(
                 f"Cannot clone FunctionNode {self._label!r} into a blueprint: "
                 "the node is UNAVAILABLE (no live function pod was provided when "
@@ -1021,7 +1036,9 @@ class FunctionJobNode(FunctionNodeBase):
         )
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict)
+            if config_dict is not None
+            else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -1046,7 +1063,8 @@ class FunctionJobNode(FunctionNodeBase):
         # ``content_hash()`` on the deserialised node matches the hash that was
         # computed when the original node ran.
         node._stored_content_hash = (
-            job_content_hash if job_content_hash is not None
+            job_content_hash
+            if job_content_hash is not None
             else descriptor.get("content_hash")
         )
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
@@ -1288,9 +1306,7 @@ class FunctionJobNode(FunctionNodeBase):
                         ctx_obs.on_node_end(node_label, node_hash)
                         raise
                 else:
-                    ctx_obs.on_data_end(
-                        node_label, tag, data, result, cached=False
-                    )
+                    ctx_obs.on_data_end(node_label, tag, data, result, cached=False)
                     if result is not None:
                         output.append((tag_out, result))
 
@@ -1447,7 +1463,9 @@ class FunctionJobNode(FunctionNodeBase):
         if self._cached_function_pod is None or not base_entry_ids:
             return {}
 
-        missing = [eid for eid in base_entry_ids if eid not in self._cached_output_datas]
+        missing = [
+            eid for eid in base_entry_ids if eid not in self._cached_output_datas
+        ]
         if missing:
             loaded = self._load_cached_entries(missing)
             self._cached_output_datas.update(loaded)
@@ -1721,10 +1739,15 @@ class FunctionJobNode(FunctionNodeBase):
                     [self.content_hash().to_prefixed_digest()], type=pa.large_binary()
                 ),
                 constants.INPUT_DATA_HASH_COL: pa.array(
-                    [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
+                    [input_data.content_hash().to_prefixed_digest()],
+                    type=pa.large_binary(),
                 ),
                 constants.OUTPUT_DATA_HASH_COL: pa.array(
-                    [output_data_hash.to_prefixed_digest() if output_data_hash is not None else None],
+                    [
+                        output_data_hash.to_prefixed_digest()
+                        if output_data_hash is not None
+                        else None
+                    ],
                     type=pa.large_binary(),
                 ),
                 f"{constants.META_PREFIX}input_data{constants.CONTEXT_KEY}": pa.array(
@@ -1733,9 +1756,7 @@ class FunctionJobNode(FunctionNodeBase):
                 f"{constants.META_PREFIX}computed": pa.array(
                     [computed], type=pa.bool_()
                 ),
-                constants.IS_EPHEMERAL_COL: pa.array(
-                    [is_ephemeral], type=pa.bool_()
-                ),
+                constants.IS_EPHEMERAL_COL: pa.array([is_ephemeral], type=pa.bool_()),
                 _PIPELINE_BASE_ENTRY_ID_COL: pa.array(
                     [base_entry_id], type=pa.large_binary()
                 ),
@@ -1973,9 +1994,11 @@ class FunctionJobNode(FunctionNodeBase):
         if ephemeral_taginfo_df.height > 0:
             eph_results = None
             if self._ephemeral_cached_pod is not None:
-                eph_results = self._ephemeral_cached_pod.result_database.get_all_records(
-                    self._ephemeral_cached_pod.record_path,
-                    record_id_column=constants.DATA_RECORD_ID,
+                eph_results = (
+                    self._ephemeral_cached_pod.result_database.get_all_records(
+                        self._ephemeral_cached_pod.record_path,
+                        record_id_column=constants.DATA_RECORD_ID,
+                    )
                 )
             if eph_results is not None:
                 if results_schema is None:
@@ -2145,9 +2168,7 @@ class FunctionJobNode(FunctionNodeBase):
                 for k, v in raw_row.items()
                 if k.startswith(constants.SYSTEM_TAG_PREFIX)
             }
-            tag = Tag(
-                tag_data, system_tags=system_tags, data_context=self.data_context
-            )
+            tag = Tag(tag_data, system_tags=system_tags, data_context=self.data_context)
             loaded[base_eid] = (tag, empty_data)
 
         return loaded
@@ -2322,7 +2343,9 @@ class FunctionJobNode(FunctionNodeBase):
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
         try:
-            tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
+            tag_schema = self._input_stream.output_schema(
+                columns={"system_tags": True}
+            )[0]
             ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
@@ -2348,11 +2371,17 @@ class FunctionJobNode(FunctionNodeBase):
                 if loaded:
                     self._cached_output_table = None
                     self._cached_content_hash_column = None
-                cached_by_base_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
+                cached_by_base_entry_id: dict[
+                    bytes, tuple[TagProtocol, DataProtocol]
+                ] = dict(loaded)
 
                 # Intermediate channels (bounded for backpressure).
-                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
-                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(buffer_size=16)
+                compute_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(
+                    buffer_size=16
+                )
+                result_channel: Channel[tuple[TagProtocol, DataProtocol]] = Channel(
+                    buffer_size=16
+                )
 
                 # Local dict: correlation_key → (original_tag, original_input_data)
                 input_store: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
@@ -2363,7 +2392,9 @@ class FunctionJobNode(FunctionNodeBase):
                         async for tag, data in input_channel:
                             base_entry_id = self.compute_base_entry_id(tag, data)
                             if base_entry_id in cached_by_base_entry_id:
-                                cached_tag, cached_data = cached_by_base_entry_id[base_entry_id]
+                                cached_tag, cached_data = cached_by_base_entry_id[
+                                    base_entry_id
+                                ]
                                 ctx_obs.on_data_start(node_label, tag, data)
                                 ctx_obs.on_data_end(
                                     node_label, tag, data, cached_data, cached=True
@@ -2398,11 +2429,16 @@ class FunctionJobNode(FunctionNodeBase):
                             output_data_hash=output_data.content_hash(),
                         )
                         # Update in-memory cache so iter_data() sees the result.
-                        base_entry_id = self.compute_base_entry_id(original_tag, input_data)
+                        base_entry_id = self.compute_base_entry_id(
+                            original_tag, input_data
+                        )
                         clean_tag = output_tag.drop_meta_columns(
                             _TAG_NODE_INPUT_REF, ignore_missing=True
                         )
-                        self._cached_output_datas[base_entry_id] = (clean_tag, output_data)
+                        self._cached_output_datas[base_entry_id] = (
+                            clean_tag,
+                            output_data,
+                        )
                         self._cached_output_table = None
                         self._cached_content_hash_column = None
                         await output.send((clean_tag, output_data))
@@ -2517,4 +2553,3 @@ class FunctionJobNode(FunctionNodeBase):
             ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
-

@@ -23,7 +23,6 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Data
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
@@ -38,10 +37,16 @@ from orcapod.types import PipelineConfig, PodConfig, resolve_concurrency
 
 def make_stream(n: int = 5) -> ArrowTableStream:
     schema = pa.schema(
-        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
     )
     table = pa.table(
-        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "x": pa.array(list(range(n)), type=pa.int64()),
+        },
         schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])

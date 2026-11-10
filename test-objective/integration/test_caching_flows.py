@@ -7,19 +7,13 @@ as documented in the design specification.
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import (
-    FunctionNode,
-    OperatorNode,
-)
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DerivedSource
-from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
 

@@ -9,7 +9,13 @@ from __future__ import annotations
 import logging
 import os
 import time
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    Future,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal
@@ -331,9 +337,7 @@ def populate_hash_cache(
                 try:
                     entries = list(current.iterdir())
                 except OSError:
-                    logger.warning(
-                        "Cannot access directory %s", current, exc_info=True
-                    )
+                    logger.warning("Cannot access directory %s", current, exc_info=True)
                     accumulator.record_directory_error()
                     continue
 
@@ -352,9 +356,7 @@ def populate_hash_cache(
                             continue
                         file_stat = resolved.stat()
                     except OSError:
-                        logger.warning(
-                            "Cannot stat file %s", entry, exc_info=True
-                        )
+                        logger.warning("Cannot stat file %s", entry, exc_info=True)
                         accumulator.record(entry, "error", 0)
                         continue
 
@@ -396,9 +398,7 @@ def populate_hash_cache(
                                 continue
                             file_stat = resolved.stat()
                         except OSError:
-                            logger.warning(
-                                "Cannot stat file %s", entry, exc_info=True
-                            )
+                            logger.warning("Cannot stat file %s", entry, exc_info=True)
                             accumulator.record(entry, "error", 0)
                             continue
 
@@ -407,7 +407,9 @@ def populate_hash_cache(
                             continue
 
                         if len(pending) >= _max_pending:
-                            done_futures, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
+                            done_futures, _ = wait(
+                                pending.keys(), return_when=FIRST_COMPLETED
+                            )
                             for fut in done_futures:
                                 p = pending.pop(fut)
                                 outcome, nbytes = fut.result()

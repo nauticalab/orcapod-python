@@ -10,6 +10,7 @@ The annotation/function golden JSON was generated pre-fix by generate_type_annot
 The schema golden JSON (hash_samples/schema_hash_golden.json) was generated post-fix and
 locks in the stable canonical hash values.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,38 +58,47 @@ ANNOTATION_CASES: dict[str, object] = {
 
 # Annotation keys that are expected to change after the fix.
 # Any key not in this set must have an UNCHANGED hash.
-EXPECTED_CHANGED_KEYS: frozenset[str] = frozenset({
-    "op.File",
-    "op.Directory",
-    "op.Path",
-    "op.UUID",
-    "list[op.File]",
-    "dict[str, op.File]",
-    "op.File | None",
-    "Optional[op.File]",
-})
+EXPECTED_CHANGED_KEYS: frozenset[str] = frozenset(
+    {
+        "op.File",
+        "op.Directory",
+        "op.Path",
+        "op.UUID",
+        "list[op.File]",
+        "dict[str, op.File]",
+        "op.File | None",
+        "Optional[op.File]",
+    }
+)
 
 
 def fn_no_annotations():
     return None
 
+
 def fn_builtin_param(x: int, y: str) -> float:
     return float(x)
+
 
 def fn_orcapod_param(f: op.File) -> str:
     return str(f)
 
+
 def fn_orcapod_return(s: str) -> op.File:
     return op.File(s)  # type: ignore[arg-type]
+
 
 def fn_generic_orcapod(files: list[op.File]) -> list[str]:
     return []
 
+
 def fn_union_orcapod(f: op.File | None) -> op.File | None:
     return f
 
+
 def fn_mixed(f: op.File, n: int) -> op.Directory:
     return op.Directory(str(f))  # type: ignore[arg-type]
+
 
 FUNCTION_CASES: dict[str, object] = {
     "fn_no_annotations": fn_no_annotations,
@@ -101,13 +111,15 @@ FUNCTION_CASES: dict[str, object] = {
 }
 
 # Functions expected to have different hashes after the fix.
-EXPECTED_CHANGED_FUNCTIONS: frozenset[str] = frozenset({
-    "fn_orcapod_param",
-    "fn_orcapod_return",
-    "fn_generic_orcapod",
-    "fn_union_orcapod",
-    "fn_mixed",
-})
+EXPECTED_CHANGED_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "fn_orcapod_param",
+        "fn_orcapod_return",
+        "fn_generic_orcapod",
+        "fn_union_orcapod",
+        "fn_mixed",
+    }
+)
 
 
 @pytest.fixture(scope="module")
@@ -127,6 +139,7 @@ def hasher():
 @pytest.fixture(scope="module")
 def extractor():
     from orcapod.contexts import get_default_context
+
     return FunctionSignatureExtractor(
         include_module=True,
         include_defaults=True,
@@ -147,7 +160,7 @@ class TestGoldenStability:
             if current != expected:
                 mismatches[key] = {"expected": expected, "current": current}
         assert not mismatches, (
-            f"Unexpected hash changes in stable annotations:\n"
+            "Unexpected hash changes in stable annotations:\n"
             + "\n".join(f"  {k}: {v}" for k, v in mismatches.items())
         )
 
@@ -162,7 +175,7 @@ class TestGoldenStability:
             if current != expected:
                 mismatches[key] = {"expected": expected, "current": current}
         assert not mismatches, (
-            f"Unexpected hash changes in stable functions:\n"
+            "Unexpected hash changes in stable functions:\n"
             + "\n".join(f"  {k}: {v}" for k, v in mismatches.items())
         )
 
@@ -182,7 +195,7 @@ class TestGoldenCanonical:
             if current == expected:
                 unchanged[key] = current
         assert not unchanged, (
-            f"Expected these annotation hashes to change after the fix, but they didn't:\n"
+            "Expected these annotation hashes to change after the fix, but they didn't:\n"
             + "\n".join(f"  {k}: {v}" for k, v in unchanged.items())
         )
 
@@ -197,7 +210,7 @@ class TestGoldenCanonical:
             if current == expected:
                 unchanged[key] = current
         assert not unchanged, (
-            f"Expected these function hashes to change after the fix, but they didn't:\n"
+            "Expected these function hashes to change after the fix, but they didn't:\n"
             + "\n".join(f"  {k}: {v}" for k, v in unchanged.items())
         )
 
@@ -224,7 +237,7 @@ def schema_golden() -> dict:
     assert SCHEMA_GOLDEN_PATH.exists(), (
         f"Schema golden file not found: {SCHEMA_GOLDEN_PATH}. "
         "Regenerate it by running: "
-        "uv run python -c \"<see generate_type_annotation_golden.py for pattern>\""
+        'uv run python -c "<see generate_type_annotation_golden.py for pattern>"'
     )
     return json.loads(SCHEMA_GOLDEN_PATH.read_text())
 
@@ -317,7 +330,9 @@ class TestSchemaHashBehavior:
         before = hasher.hash_object(schema).to_string()
         original_module = op.File.__module__
         try:
-            op.File.__module__ = "orcapod.extension_types.file_type"  # simulate old path
+            op.File.__module__ = (
+                "orcapod.extension_types.file_type"  # simulate old path
+            )
             after = hasher.hash_object(schema).to_string()
         finally:
             op.File.__module__ = original_module
@@ -328,6 +343,7 @@ class TestSchemaHashBehavior:
 
     def test_schema_handler_rejects_unregistered_type(self, hasher):
         """Hashing a schema with an unregistered type must raise TypeError."""
+
         class _Unregistered:
             pass
 
@@ -339,7 +355,9 @@ class TestSchemaHashBehavior:
         """Two schemas that differ only in optional_fields must hash identically."""
         s1 = Schema({"f": op.File})
         s2 = Schema({"f": op.File}, optional_fields={"f"})
-        assert hasher.hash_object(s1).to_string() == hasher.hash_object(s2).to_string(), (
+        assert (
+            hasher.hash_object(s1).to_string() == hasher.hash_object(s2).to_string()
+        ), (
             "Schema hashes differ based on optional_fields — "
             "optionality must not be part of the schema hash."
         )
