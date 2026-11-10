@@ -141,6 +141,32 @@ When asked to respond to PR reviewer comments:
 
 Never implement changes or reply to reviewers before the plan has been approved.
 
+## Coordinating issue-specific agents with Orca
+
+When the developer asks you to coordinate, supervise, or dispatch issue work across agents,
+follow `AGENT_COORDINATION.md` at the project root. In short:
+
+- The coordinator owns scope, task specs, and reporting. It never edits issue code and never
+  substitutes generic subagents for Orca workers.
+- Each Linear issue gets its own Orca worktree (from `origin/main`, on the issue's exact
+  `gitBranchName`) and one dedicated worker, started with `orca orchestration worker-start`.
+- Workers route every question through the orchestration `ask` command. Wherever this file
+  says to ask the user or wait for approval, a dispatched worker asks its coordinator.
+- Workers push and open PRs against `main`. No agent merges a PR, cuts a release, or marks
+  an issue Done.
+- The coordinator approves obvious plans and specs itself and raises only critical decisions
+  (public API, hash or stored-schema changes, new dependencies, scope growth, release) to
+  the developer.
+- Every wave opens with a discussion of its key decision points, and the developer selects
+  what is dispatched. Issues the developer did not file are suggestions to triage, not
+  decisions.
+- A PR reaches the developer only after its CodeRabbit rounds are addressed and CI is green
+  (the runbook's PR readiness pipeline). Every GitHub comment, reply, and review an agent
+  posts ends with the agent signature the runbook gives.
+
+Load the version-matched guides (`orca skills get orca-cli`, `orca skills get orchestration`)
+before running Orca commands.
+
 ## Git commits
 
 Always use [Conventional Commits](https://www.conventionalcommits.org/) style:
