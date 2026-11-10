@@ -366,6 +366,50 @@ Prefixes are computed from SystemConstant in system_constants.py.
   detection and automatic recomputation.
 - Source delegation — CSVSource, DictSource, etc. create an internal ArrowTableSource.
 
+### Arrow types
+
+Governing principle (developer, November 9, 2026): minimize convenient inference and hold to
+complete predictability, even when that is more tedious for the user; explicit type conversion
+is always preferred over implicit coercion. So an operator never widens, promotes or picks a
+side when its inputs' types disagree; a result's type never depends on data values, argument
+order or the path the data took; and inferring a type from Python values is a last resort for
+when no type is known.
+
+Respect the Arrow types the inputs already have, normalized to their large variants (developer,
+November 10, 2026: large and non-large variants hash identically, so always normalize to large
+for consistency). Infer an Arrow type from Python values only when no Arrow type is known, and
+then through the data context's type converter — never call pa.array(values) /
+pa.Table.from_pylist(rows) without a type for a column whose input type is known, because
+inference widens int8 to int64, float32 to double, and takes decimal precision from the
+data. The rules:
+
+- Every output column takes the large-normalized form of its input type
+  (arrow_utils.normalize_to_large_types: string to large_string, binary to large_binary, list
+  to large_list, recursively). Width, nullability and logical (extension) types are never
+  changed; int8 stays int8, and null stays null (operators and the type converter pass
+  keep_null=True; only Data maps null to large_string, the function's default). An
+  operator that round-trips through Polars casts its columns back
+  to the normalized input types (arrow_utils.restore_column_types, or
+  restore_schema_nullability when nullability is restored too).
+- List columns built by Batch, GroupBy and MergeJoin are typed by
+  arrow_utils.aggregated_list_type (directly or through build_aggregated_table):
+  large_list<normalized T>, or for a logical T the logical list type from the type converter
+  (it raises, naming the column, if the converter has none; never strip the element to its
+  storage type). Source-info list columns are large_list<large_string>. Zero-row and
+  non-empty results have the same types.
+- When two inputs give the same column different Arrow types, normalize both: equal proceeds,
+  anything else raises InputValidationError naming the column and both types — no widening,
+  promotion or picking a side. For MergeJoin this is _resolve_disagreeing_types, called in
+  binary_static_process before the join; output_schema() exposes only Python types, so such
+  disagreements are invisible at graph-build time.
+- The type converter keys synthesized struct classes by the large-normalized struct, so
+  struct<b: string> and struct<b: large_string> are one Python type (a workaround,
+  TODO(ITL-841)).
+- normalize_to_large_types changes layouts only: every nested field (list items, struct
+  children, map keys and items) keeps its name, nullability and metadata, so it never changes
+  a schema or value hash. Never rebuild a nested type as pa.large_list(element_type), which
+  drops the item's non-null flag.
+
 ### Important implementation details
 
 - ArrowTableSource raises ValueError if any tag_columns are not in the table.
@@ -375,7 +419,10 @@ Prefixes are computed from SystemConstant in system_constants.py.
 - Empty data → ArrowTableSource raises ValueError("Table is empty").
 - DerivedSource before run() → raises ValueError (no computed records).
 - Join requires non-overlapping data columns; raises InputValidationError on collision.
-- MergeJoin requires colliding columns to have identical types; merges into sorted list[T].
+- MergeJoin requires colliding data columns to have identical Python types; merges into sorted
+  large_list<T> with source columns reordered to match, where T is the large-normalized input
+  Arrow type; inputs whose Arrow types still differ after normalization raise
+  InputValidationError. Non-empty struct columns cannot be merged yet (ITL-839).
 - Operators predict output schema (including system tag names) without computation. Verify a
   prediction against unary_static_process(stream).output_schema(...), NOT against process(...)
   (circular — it delegates back to the pod) and NOT against as_table() (legitimately differs:
@@ -391,11 +438,11 @@ Prefixes are computed from SystemConstant in system_constants.py.
   row of a list-valued column — mixing in a bare None makes per-row as_table() schemas diverge
   and pa.concat_tables fail on the barrier path.
 - Aggregating operators (Batch, GroupBy) must build list-valued columns via
-  arrow_utils.build_aggregated_table, never pa.list_(field.type). Arrow cannot embed an
-  extension type inside a list value field, so the naive call raises
-  ArrowNotImplementedError on any logical-typed column (e.g. a pod annotated -> Path).
-  The helper builds the list over the element's storage type and wraps it in the outer
-  list[<element>] extension type from ListLogicalType.
+  arrow_utils.build_aggregated_table, never pa.list_(field.type). The helper types every list
+  column with aggregated_list_type: large_list of the large-normalized element, or, because
+  Arrow cannot embed an extension type inside a list value field, the logical list type
+  (list[<element>] from ListLogicalType) for a logical element such as a pod annotated
+  -> Path; it builds that list over the element's storage and wraps it.
 - Never build an identity or hash input from a type's raw __module__, or from
   repr/str/inspect.formatannotation of a type, without going through
   utils/canonical_type_names.py (canonical_module_name, canonical_type_name,

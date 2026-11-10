@@ -75,6 +75,51 @@ Orcapod code that needs to inspect or clean Arrow schema metadata.
 
 ### Breaking Changes
 
+#### Operator outputs keep their inputs' Arrow types, normalized to large variants (ITL-832, ITL-813)
+
+`MergeJoin` no longer infers Arrow types from Python values, and it no longer fails on a
+zero-row input. Every output column of `MergeJoin` and `PolarsFilter` takes the
+large-normalized form of its input Arrow type: `string` becomes `large_string`, `binary`
+becomes `large_binary` and `list` becomes `large_list`, recursively. Width, nullability and
+logical types are kept.
+
+| Column | Before | After |
+|---|---|---|
+| `MergeJoin` merged column, `int8` input | `list<int64>` | `large_list<int8>` |
+| `MergeJoin` merged column, `float32` input | `list<double>` | `large_list<float>` |
+| `MergeJoin` merged column, `string` / `large_string` input | `list<string>` | `large_list<large_string>` |
+| `MergeJoin` merged column, `decimal128(5, 2)` input | precision taken from the data | `large_list<decimal128(5, 2)>` |
+| `MergeJoin` merged source-info column | `list<string>` | `large_list<large_string>` |
+| `MergeJoin` result with a zero-row input | raised | same types as a non-empty result |
+| `Batch` / `GroupBy` list column, `int8` input | `list<int8>` | `large_list<int8>` |
+| `MergeJoin` / `PolarsFilter` pass-through `string` column | `large_string` (via Polars) | `large_string` |
+
+**Inputs that disagree:** when the two inputs of `MergeJoin` give a colliding data column or a
+shared tag column different Arrow types, both are normalized first. If they are then the same
+(for example `string` and `large_string`), the join proceeds. Otherwise (for example `int8` and
+`int64`, two timestamp units, or two decimal precisions) it now raises `InputValidationError`
+naming the column and both types; cast one input explicitly. This used to produce a type
+inferred from the values, or a Polars `SchemaError`.
+
+**Hashes:** large and non-large variants hash identically, so normalization and
+`list` → `large_list` change no content hash. The one change is that a merged column narrower
+than `int64`/`double` no longer widens, so the data content hash of each row containing such a
+merged column changes, along with the stored record of any operator node or function node that
+consumes it. Tag hashes and pipeline hashes are unchanged.
+
+**Nested nullability:** `normalize_to_large_types` now keeps every nested field's nullability
+and metadata. A column such as `list<item: int64 not null>` keeps its non-null item flag
+through `Data`, operators and storage instead of losing it. Measured `Data`, `Tag`, stream
+and source hashes are unchanged; only the stored Arrow schema of such columns changes.
+
+**Struct Python types:** `struct<b: string>` and `struct<b: large_string>` now map to one
+synthesized Python class. Hashes are unchanged.
+
+**Logical list elements:** an aggregating operator (`Batch`, `GroupBy`, `MergeJoin`) over a
+column whose extension type has no logical list type in the type converter (for example
+PyArrow's canonical `arrow.uuid`) raises a `ValueError` naming the column. It used to fail
+with `ArrowNotImplementedError: extension`.
+
 #### `pathlib.Path` and `upath.UPath` no longer hash file content (ITL-450)
 
 `pathlib.Path` and `upath.UPath` values now hash from the **path string** only —

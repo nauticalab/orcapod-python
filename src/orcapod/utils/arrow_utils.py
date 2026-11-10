@@ -88,15 +88,24 @@ def schema_drop(
     return pa.schema(remaining_fields)
 
 
-def normalize_to_large_types(arrow_type: "pa.DataType") -> "pa.DataType":
+def normalize_to_large_types(
+    arrow_type: "pa.DataType", *, keep_null: bool = False
+) -> "pa.DataType":
     """
     Recursively convert Arrow types to their large variants where available.
 
     This ensures consistent schema representation regardless of the original
-    type choices (e.g., string vs large_string, binary vs large_binary).
+    type choices (e.g., string vs large_string, binary vs large_binary). Only
+    layouts change: every nested field keeps its name, nullability and
+    metadata, and widths are untouched, so the Arrow hasher gives the
+    normalized type the same schema and value hashes.
 
     Args:
         arrow_type: Arrow data type to normalize
+        keep_null: Keep ``null`` types (at any depth) as ``null``. By default
+            ``null`` becomes ``large_string``, which ``Data`` relies on; that is
+            a type change, not a layout change, so code that must change
+            layouts only (operators, the type converter) passes ``True``.
 
     Returns:
         Arrow data type with large variants substituted
@@ -113,8 +122,7 @@ def normalize_to_large_types(arrow_type: "pa.DataType") -> "pa.DataType":
     """
     # Handle primitive types that have large variants
     if pa.types.is_null(arrow_type):
-        # TODO: make this configurable
-        return pa.large_string()
+        return arrow_type if keep_null else pa.large_string()
     if pa.types.is_string(arrow_type) or pa.types.is_string_view(arrow_type):
         # string_view has no comparison/sort kernels in PyArrow (>=23, <=24), so
         # normalizing it to large_string is required for filtering, not just for
@@ -122,70 +130,67 @@ def normalize_to_large_types(arrow_type: "pa.DataType") -> "pa.DataType":
         return pa.large_string()
     elif pa.types.is_binary(arrow_type) or pa.types.is_binary_view(arrow_type):
         return pa.large_binary()
-    elif pa.types.is_list(arrow_type):
-        # Regular list -> large_list with normalized element type
-        element_type = normalize_to_large_types(arrow_type.value_type)
-        return pa.large_list(element_type)
-
-    # Large variants and fixed-size lists stay as-is (already normalized or no large variant)
     elif pa.types.is_large_string(arrow_type) or pa.types.is_large_binary(arrow_type):
         return arrow_type
-    elif pa.types.is_large_list(arrow_type):
-        # Still need to normalize the element type
-        element_type = normalize_to_large_types(arrow_type.value_type)
-        return pa.large_list(element_type)
+    # Nested types: every nested field is rebuilt with ``Field.with_type`` so
+    # its name, nullability and metadata are kept. Dropping a non-null flag
+    # would change the type's Arrow schema hash.
+    elif pa.types.is_list(arrow_type) or pa.types.is_large_list(arrow_type):
+        return pa.large_list(
+            _normalize_field_to_large_types(arrow_type.value_field, keep_null)
+        )
     elif pa.types.is_fixed_size_list(arrow_type):
-        # Fixed-size lists don't have large variants, but normalize element type
-        element_type = normalize_to_large_types(arrow_type.value_type)
-        return pa.list_(element_type, arrow_type.list_size)
-
-    # Handle struct types recursively
+        # Fixed-size lists have no large variant; normalize the element only.
+        return pa.list_(
+            _normalize_field_to_large_types(arrow_type.value_field, keep_null),
+            arrow_type.list_size,
+        )
     elif pa.types.is_struct(arrow_type):
-        normalized_fields = []
-        for field in arrow_type:
-            normalized_field_type = normalize_to_large_types(field.type)
-            normalized_fields.append(
-                pa.field(
-                    field.name,
-                    normalized_field_type,
-                    nullable=field.nullable,
-                    metadata=field.metadata,
-                )
-            )
-        return pa.struct(normalized_fields)
-
-    # Handle map types (key and value types)
+        return pa.struct(
+            [_normalize_field_to_large_types(f, keep_null) for f in arrow_type]
+        )
     elif pa.types.is_map(arrow_type):
-        normalized_key_type = normalize_to_large_types(arrow_type.key_type)
-        normalized_value_type = normalize_to_large_types(arrow_type.item_type)
-        return pa.map_(normalized_key_type, normalized_value_type)
-
-    # Handle union types
+        # pyarrow accepts key and item Fields here; its stubs only list types.
+        return pa.map_(  # pyright: ignore[reportCallIssue]
+            _normalize_field_to_large_types(arrow_type.key_field, keep_null),
+            _normalize_field_to_large_types(arrow_type.item_field, keep_null),
+            keys_sorted=arrow_type.keys_sorted,
+        )
     elif pa.types.is_union(arrow_type):
-        # Union types contain multiple child types
-        normalized_child_types = []
-        for i in range(arrow_type.num_fields):
-            child_field = arrow_type[i]
-            normalized_child_type = normalize_to_large_types(child_field.type)
-            normalized_child_types.append(
-                pa.field(child_field.name, normalized_child_type)
-            )
-
-        # Reconstruct union with normalized child types
+        children = [
+            _normalize_field_to_large_types(arrow_type.field(i), keep_null)
+            for i in range(arrow_type.num_fields)
+        ]
         if isinstance(arrow_type, pa.SparseUnionType):
-            return pa.sparse_union(normalized_child_types)
-        else:  # dense union
-            return pa.dense_union(normalized_child_types)
-
-    # Handle dictionary types
+            return pa.sparse_union(children, arrow_type.type_codes)
+        return pa.dense_union(children, arrow_type.type_codes)
     elif pa.types.is_dictionary(arrow_type):
         # Normalize the value type (dictionary values), keep index type as-is
-        normalized_value_type = normalize_to_large_types(arrow_type.value_type)
-        return pa.dictionary(arrow_type.index_type, normalized_value_type)  # type: ignore
+        return pa.dictionary(
+            arrow_type.index_type,
+            # The stubs restrict value_type to a few basic types; any type works.
+            normalize_to_large_types(arrow_type.value_type, keep_null=keep_null),  # pyright: ignore[reportArgumentType]
+            ordered=arrow_type.ordered,
+        )
 
     # All other types (int, float, bool, date, timestamp, etc.) don't have large variants
     else:
         return arrow_type
+
+
+def _normalize_field_to_large_types(
+    field: "pa.Field[Any]", keep_null: bool
+) -> "pa.Field[Any]":
+    """Return ``field`` with its type normalized, keeping name, nullability and metadata.
+
+    Args:
+        field: A nested field (list value, struct child, map key or item, ...).
+        keep_null: Passed through to ``normalize_to_large_types``.
+
+    Returns:
+        The same field with ``normalize_to_large_types`` applied to its type.
+    """
+    return field.with_type(normalize_to_large_types(field.type, keep_null=keep_null))
 
 
 def normalize_schema_to_large_types(schema: "pa.Schema") -> "pa.Schema":
@@ -1285,6 +1290,111 @@ def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | byt
     return combine_hashes(*["" if v is None else str(v) for v in values], order=False)
 
 
+def aggregated_list_type(
+    element_type: pa.DataType,
+    type_converter: TypeConverterProtocol,
+    *,
+    column: str,
+) -> pa.DataType:
+    """Return the list type for a column that aggregates ``element_type`` values.
+
+    This is the one construction every aggregating operator (``Batch``,
+    ``GroupBy``, ``MergeJoin``) uses for its ``list[T]`` columns. Nothing is
+    inferred from Python values: the element is the input column's Arrow type
+    normalized to its large variants (``normalize_to_large_types``: ``string``
+    becomes ``large_string``, ``list`` becomes ``large_list``, recursively,
+    which the Arrow hasher treats as identical), keeping integer and float
+    width, struct fields and nullability (``int8`` stays ``int8``). The outer
+    list is ``large_list``, the variant orcapod's type converter gives
+    ``list[T]``.
+
+    Arrow cannot embed an extension type inside a list value field, so for a
+    logical (extension) element the result is the logical list type of that
+    element: the ``list[<element>]`` extension type supplied by
+    ``ListLogicalType`` through the type converter, which keeps the inner
+    logical type. The element is never stripped to its storage type.
+
+    Args:
+        element_type: Arrow type of the input column being aggregated.
+        type_converter: The stream's type converter, used to resolve a logical
+            element's Python type and its logical list type.
+        column: Name of the column being aggregated, for the error message.
+
+    Returns:
+        ``pa.large_list(normalize_to_large_types(element_type))``, or the
+        ``list[...]`` extension type for a logical element.
+
+    Raises:
+        ValueError: If ``element_type`` is an extension type for which the type
+            converter supplies no logical list type.
+    """
+    # BaseExtensionType also covers PyArrow's canonical extensions (arrow.uuid,
+    # arrow.json, ...), which are not ``pa.ExtensionType`` subclasses.
+    if isinstance(element_type, pa.BaseExtensionType):
+        element_python_type = type_converter.arrow_type_to_python_type(element_type)
+        list_type = type_converter.python_type_to_arrow_type(list[element_python_type])
+        if not isinstance(list_type, pa.BaseExtensionType):
+            raise ValueError(
+                f"Column {column!r} has logical Arrow type {element_type} "
+                f"(extension {element_type.extension_name!r}), and the type "
+                f"converter supplies no logical list type for it (it returned "
+                f"{list_type} for list[{element_python_type}]). Register the "
+                f"logical type with the data context's type converter."
+            )
+        return list_type
+    return pa.large_list(normalize_to_large_types(element_type, keep_null=True))
+
+
+def list_array(values: Sequence[Any], list_type: pa.DataType) -> pa.Array[Any]:
+    """Build a list array of exactly ``list_type`` from Python values.
+
+    The type never depends on ``values``, so an empty array has the same type
+    as a non-empty one. An extension ``list_type`` is built over its storage
+    type and then wrapped.
+
+    Args:
+        values: One Python list per row, holding storage values for an
+            extension element.
+        list_type: The target type, normally from ``aggregated_list_type``.
+
+    Returns:
+        The list array.
+    """
+    if isinstance(list_type, pa.BaseExtensionType):
+        storage = pa.array(values, type=list_type.storage_type)
+        return pa.ExtensionArray.from_storage(list_type, storage)
+    return pa.array(values, type=list_type)
+
+
+def restore_column_types(
+    table: pa.Table, reference_types: Mapping[str, pa.DataType]
+) -> pa.Table:
+    """Give columns back the Arrow types they had before a Polars round-trip.
+
+    Polars stores strings, binaries and lists in their large layouts and has
+    no ``fixed_size_binary``, so ``string`` comes back as ``large_string``,
+    ``list`` as ``large_list`` and so on. This casts every column named in
+    ``reference_types`` back to its reference type. Nullability and columns
+    not in ``reference_types`` are left exactly as they are; use
+    ``restore_schema_nullability`` to restore both.
+
+    Args:
+        table: The table produced by the round-trip.
+        reference_types: Column name to the Arrow type to restore.
+
+    Returns:
+        The table cast to the restored types.
+    """
+    fields = [
+        field.with_type(reference_types[field.name])
+        if field.name in reference_types
+        else field
+        for field in table.schema
+    ]
+    restored = table.cast(pa.schema(fields))
+    return restored.replace_schema_metadata(table.schema.metadata)
+
+
 def build_aggregated_table(
     rows: "Sequence[Mapping[str, Any]]",
     input_schema: "pa.Schema",
@@ -1327,15 +1437,12 @@ def build_aggregated_table(
         if field.name not in member_columns:
             fields.append(field)
             continue
-        if isinstance(field.type, pa.ExtensionType):
-            element_python_type = type_converter.arrow_type_to_python_type(field.type)
-            list_type = type_converter.python_type_to_arrow_type(
-                list[element_python_type]
-            )
+        list_type = aggregated_list_type(field.type, type_converter, column=field.name)
+        if isinstance(list_type, pa.BaseExtensionType):
             extension_overrides[field.name] = list_type
             fields.append(pa.field(field.name, list_type.storage_type, nullable=False))
         else:
-            fields.append(pa.field(field.name, pa.list_(field.type), nullable=False))
+            fields.append(pa.field(field.name, list_type, nullable=False))
 
     table = pa.Table.from_pylist(list(rows), schema=pa.schema(fields))
 

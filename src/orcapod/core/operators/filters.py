@@ -8,6 +8,7 @@ from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -55,6 +56,20 @@ class PolarsFilter(UnaryOperator):
         )
         df = pl.DataFrame(table)
         filtered_table = df.filter(*self.predicates, **self.constraints).to_arrow()
+        # A filter passes every column through, so each one takes the
+        # large-normalized form of its input Arrow type (string ->
+        # large_string, list -> large_list, recursively; hash-identical).
+        # This also undoes Polars' other changes, such as fixed_size_binary ->
+        # large_binary for system-tag record ids.
+        filtered_table = arrow_utils.restore_column_types(
+            filtered_table,
+            {
+                field.name: arrow_utils.normalize_to_large_types(
+                    field.type, keep_null=True
+                )
+                for field in table.schema
+            },
+        )
 
         return ArrowTableStream(
             filtered_table,

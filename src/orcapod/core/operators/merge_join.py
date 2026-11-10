@@ -17,6 +17,81 @@ else:
     pl = LazyModule("polars")
 
 
+def _resolve_disagreeing_types(
+    name: str, left_type: "pa.DataType", right_type: "pa.DataType"
+) -> "pa.DataType":
+    """Decide the output type of a column whose two inputs' Arrow types differ.
+
+    This is the single place that rule lives. It applies to a colliding data
+    column (the element type of the merged list), to the source-info column
+    that goes with it, and to a shared tag key. The disagreement cannot be
+    seen at graph-build time: ``output_schema()`` returns Python types, under
+    which ``int8`` and ``int64``, or ``string`` and ``large_string``, are the
+    same, so ``binary_static_process`` calls this as soon as it has the input
+    tables, before the join.
+
+    Both types are normalized to their large variants
+    (``arrow_utils.normalize_to_large_types``: ``string`` to ``large_string``,
+    ``binary`` to ``large_binary``, ``list`` to ``large_list``, recursively),
+    which the Arrow hasher treats as identical. If the normalized types are
+    equal, that is the output type. Anything else (integer or float width,
+    timestamp unit, decimal precision, struct fields, nullability of a nested
+    field, logical type) is an error: MergeJoin never widens, promotes or picks
+    a side. The result does not depend on argument order.
+
+    Args:
+        name: Column name, for the error message.
+        left_type: The column's Arrow type in one input.
+        right_type: The column's Arrow type in the other input.
+
+    Returns:
+        The large-normalized type both inputs share.
+
+    Raises:
+        InputValidationError: If the types still differ after normalization.
+    """
+    normalized_left = arrow_utils.normalize_to_large_types(left_type, keep_null=True)
+    normalized_right = arrow_utils.normalize_to_large_types(right_type, keep_null=True)
+    if normalized_left == normalized_right:
+        return normalized_left
+    raise InputValidationError(
+        f"MergeJoin inputs disagree on the Arrow type of column {name!r}: "
+        f"{left_type} in one input and {right_type} in the other. MergeJoin "
+        f"never widens or promotes a type; cast one input explicitly so both "
+        f"have the same Arrow type."
+    )
+
+
+def _output_types(
+    left_types: "dict[str, pa.DataType]", right_types: "dict[str, pa.DataType]"
+) -> "dict[str, pa.DataType]":
+    """Return the Arrow type each input column takes in the output.
+
+    Every type is the large-normalized form of the input type
+    (``arrow_utils.normalize_to_large_types``); width, nullability and logical
+    types are never changed. A column in both inputs whose types differ goes
+    through ``_resolve_disagreeing_types``, which either finds the shared
+    normalized type or raises.
+
+    Args:
+        left_types: Column name to Arrow type for one input table.
+        right_types: Column name to Arrow type for the other input table.
+
+    Returns:
+        Column name to its output Arrow type, for every column of either input.
+    """
+    resolved: dict[str, pa.DataType] = {}
+    for name in left_types.keys() | right_types.keys():
+        left_type, right_type = left_types.get(name), right_types.get(name)
+        if left_type is not None and right_type is not None:
+            resolved[name] = _resolve_disagreeing_types(name, left_type, right_type)
+        else:
+            known = left_type if left_type is not None else right_type
+            assert known is not None
+            resolved[name] = arrow_utils.normalize_to_large_types(known, keep_null=True)
+    return resolved
+
+
 class MergeJoin(BinaryOperator):
     """
     Binary operator that joins two streams, merging colliding data columns
@@ -30,6 +105,24 @@ class MergeJoin(BinaryOperator):
     For non-colliding columns, values are kept as scalars (same as regular Join).
 
     Tag columns use inner join on shared tags, with union of tag schemas.
+
+    Arrow types: every output column takes the large-normalized form of its
+    input Arrow type (``string`` becomes ``large_string``, ``list`` becomes
+    ``large_list``, recursively; the Arrow hasher treats the two variants as
+    identical), and nothing is inferred from Python values. Integer and float
+    width, nullability and logical (extension) types are kept. A merged column
+    is ``large_list<T>`` where ``T`` is the normalized input element type,
+    built by ``arrow_utils.aggregated_list_type`` (the construction ``Batch``
+    and ``GroupBy`` use), with or without rows; a logical ``T`` yields the
+    logical list type of ``T``. Its source-info column is
+    ``large_list<large_string>``.
+
+    When the two inputs' Arrow types for the same column differ, both are
+    normalized to their large variants; if they are then equal the join
+    proceeds, otherwise it raises ``InputValidationError`` naming the column
+    and both types (``_resolve_disagreeing_types``). Validation cannot detect
+    such a disagreement, because streams expose only Python schemas; it is
+    detected in ``binary_static_process`` before the join.
 
     MergeJoin is commutative: MergeJoin(A, B) produces the same result as
     MergeJoin(B, A), achieved by sorting merged values and system tag values.
@@ -163,6 +256,21 @@ class MergeJoin(BinaryOperator):
     def binary_static_process(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> StreamProtocol:
+        """Inner-join two streams on their shared tags, merging colliding data columns.
+
+        A data column present in both streams becomes a sorted two-element
+        list per row, with its source-info column reordered to match. System
+        tag columns are renamed with each stream's pipeline hash and canonical
+        position. A zero-row input yields a zero-row result with the same
+        column types as a non-empty one.
+
+        Args:
+            left_stream: The left input stream.
+            right_stream: The right input stream.
+
+        Returns:
+            The joined stream, with tag columns first.
+        """
         n_char = self.orcapod_config.hashing.system_tag_n_char
 
         # Determine canonical ordering for system tag positions
@@ -193,14 +301,15 @@ class MergeJoin(BinaryOperator):
         # Find colliding data columns
         colliding_keys = set(left_data_keys) & set(right_data_keys)
 
-        # Snapshot Arrow types of colliding columns BEFORE the Polars round-trip.
-        # The round-trip may strip or alter extension metadata; we need the original
-        # element type to reconstruct the correct list extension type after merging.
-        colliding_col_types: dict[str, "pa.DataType"] = {
-            col: left_table.schema.field(col).type
-            for col in colliding_keys
-            if col in left_table.schema.names
-        }
+        # Snapshot the inputs' Arrow types BEFORE the Polars round-trip, which
+        # stores strings, binaries and lists in their large layouts, drops
+        # fixed_size_binary and may strip extension metadata. Every output
+        # column is typed from these, never from what Arrow infers for the
+        # Python values. Inputs whose types differ beyond layout are rejected
+        # here, before the join (_resolve_disagreeing_types).
+        left_types = {f.name: f.type for f in left_table.schema}
+        right_types = {f.name: f.type for f in right_table.schema}
+        output_types = _output_types(left_types, right_types)
 
         # Capture nullable flags from input schemas BEFORE Polars conversion.
         # Polars' join discards nullable info (defaults all to True); we derive
@@ -238,11 +347,13 @@ class MergeJoin(BinaryOperator):
         COMMON_JOIN_KEY = "_common"
         # COMMON_JOIN_KEY is a temporary column that gets dropped after the join
         output_nullable.pop(COMMON_JOIN_KEY, None)
+        # Use int8 explicitly so a zero-row table doesn't produce a null-typed
+        # column that Polars rejects as a join key (same as Join).
         left_table = left_table.add_column(
-            0, COMMON_JOIN_KEY, pa.array([0] * len(left_table))
+            0, COMMON_JOIN_KEY, pa.array([0] * len(left_table), type=pa.int8())
         )
         right_table = right_table.add_column(
-            0, COMMON_JOIN_KEY, pa.array([0] * len(right_table))
+            0, COMMON_JOIN_KEY, pa.array([0] * len(right_table), type=pa.int8())
         )
 
         join_keys = list(shared_tag_keys | {COMMON_JOIN_KEY})
@@ -307,34 +418,27 @@ class MergeJoin(BinaryOperator):
             joined = joined.drop(left_col_name)
             joined = joined.drop(right_col_name)
 
-            elem_arrow_type = colliding_col_types.get(col)
-            if elem_arrow_type is not None and isinstance(
-                elem_arrow_type, pa.ExtensionType
-            ):
-                elem_python_type = tc.arrow_type_to_python_type(elem_arrow_type)
-                list_logical_type = tc.get_logical_type_for_python_type(
-                    list[elem_python_type]
-                )
-                if list_logical_type is not None:
-                    list_ext_type = list_logical_type.get_arrow_extension_type()
-                    storage_array = pa.array(
-                        merged_vals, type=list_ext_type.storage_type
-                    )
-                    merged_array = pa.ExtensionArray.from_storage(
-                        list_ext_type, storage_array
-                    )
-                else:
-                    merged_array = pa.array(merged_vals)
-            else:
-                merged_array = pa.array(merged_vals)
-            joined = joined.add_column(col_idx, left_col_name, merged_array)
+            list_type = arrow_utils.aggregated_list_type(
+                output_types[col], tc, column=col
+            )
+            joined = joined.add_column(
+                col_idx, left_col_name, arrow_utils.list_array(merged_vals, list_type)
+            )
+            output_types[col] = list_type
 
             if has_source:
                 source_idx = joined.column_names.index(left_source_col)
                 joined = joined.drop(left_source_col)
                 joined = joined.drop(right_source_col)
-                source_array = pa.array(merged_sources)
-                joined = joined.add_column(source_idx, left_source_col, source_array)
+                source_list_type = arrow_utils.aggregated_list_type(
+                    output_types[left_source_col], tc, column=left_source_col
+                )
+                joined = joined.add_column(
+                    source_idx,
+                    left_source_col,
+                    arrow_utils.list_array(merged_sources or [], source_list_type),
+                )
+                output_types[left_source_col] = source_list_type
 
         # Handle remaining Polars-generated _right suffixed columns
         # (only from columns we know Polars auto-suffixed, not original names)
@@ -366,13 +470,17 @@ class MergeJoin(BinaryOperator):
         other_cols = [c for c in joined.column_names if c not in listed]
         joined = joined.select(tag_cols + data_cols + other_cols)
 
-        # Reconstruct schema from captured input nullable flags.
-        # Fall back to null-count inference for any unexpected columns.
+        # Reconstruct the schema: every column takes the type decided above
+        # from the inputs (the large-normalized input type for pass-through
+        # columns, undoing Polars' other changes such as fixed_size_binary to
+        # large_binary; the list type built above for merged columns), and
+        # nullability comes from the captured input flags, falling back to
+        # null-count inference for system tag and source-info columns.
         result_schema = pa.schema(
             [
                 pa.field(
                     col_name,
-                    joined.schema.field(col_name).type,
+                    output_types[col_name],
                     nullable=output_nullable.get(
                         col_name, joined.column(i).null_count > 0
                     ),
@@ -380,10 +488,7 @@ class MergeJoin(BinaryOperator):
                 for i, col_name in enumerate(joined.column_names)
             ]
         )
-        joined = pa.Table.from_arrays(
-            [joined.column(i) for i in range(joined.num_columns)],
-            schema=result_schema,
-        )
+        joined = joined.cast(result_schema)
         return ArrowTableStream(
             joined,
             tag_columns=tuple(tag_cols),

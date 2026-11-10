@@ -318,11 +318,57 @@ With `out=None` the extracted value replaces the column in place; with `out="nam
 as a new column and the original is kept. A row whose list is too short, or whose dict lacks the
 key, is skipped (or raises `RuntimeError` with `fail_on_miss=True`).
 
-Every other column keeps its exact input Arrow type, and the extracted column takes the input's
-element or value Arrow type (a `list<int8>` column yields `int8`). The extracted column is
+Every other column keeps its input Arrow type, and the extracted column takes the input's
+element or value Arrow type (a `list<int8>` column yields `int8`), both normalized to their
+large variants as described in [Arrow types of operator outputs](#arrow-types-of-operator-outputs)
+(a `list<string>` column yields `large_string`). The extracted column is
 `NOT NULL`: its predicted type (`int`, not `int | None`) is not Optional, so an element or value
 that is `None` raises `ValueError` naming the operator, the column and the row's tag, whatever
 `fail_on_miss` is.
+
+## Arrow types of operator outputs
+
+`output_schema()` reports Python types, but every column also has an Arrow type, and
+orcapod keeps it predictable:
+
+- **Nothing is inferred from Python values.** An operator types each output column from its
+  inputs' Arrow types, never from what PyArrow would guess for the values, so a result's
+  types do not depend on the data, on whether it has rows, or on argument order.
+- **Types are normalized to their large variants.** `string` becomes `large_string`,
+  `binary` becomes `large_binary` and `list` becomes `large_list`, recursively (also inside
+  structs). The Arrow hasher treats each pair as identical, so this never changes a hash.
+- **Width, nullability and logical types are kept.** An `int8` column stays `int8`, a
+  `float32` column stays `float32`, and a logical type such as `Path` keeps its logical type.
+- **List columns built by `MergeJoin`, `Batch` and `GroupBy`** are `large_list<T>`, where `T`
+  is the normalized input type, whether or not the result has rows. A list of a logical type
+  is that type's logical list (`list[orcapod.path]` for `Path`). Their source-info columns
+  are `large_list<large_string>`.
+- **Inputs that disagree.** If the two inputs of `MergeJoin` give a colliding data column or
+  a shared tag column different Arrow types, both are normalized first. If they are then the
+  same (for example `string` and `large_string`), the join proceeds. Otherwise (for example
+  `int8` and `int64`, or two timestamp units) it raises `InputValidationError` naming the
+  column and both types; cast one input explicitly. Because `output_schema()` reports Python
+  types, this is detected when the join runs, not when the pipeline is built.
+
+```python
+import pyarrow as pa
+from orcapod.sources import ArrowTableSource
+
+def counts(values):
+    table = pa.table(
+        {
+            "subject_id": pa.array(["mouse_01", "mouse_02"], type=pa.string()),
+            "count": pa.array(values, type=pa.int8()),
+        }
+    )
+    return ArrowTableSource(table, tag_columns=["subject_id"])
+
+merged = MergeJoin()(counts([1, 2]), counts([3, 4]))
+print(merged.as_table().schema.field("count").type)
+# large_list<item: int8>
+print(merged.as_table().schema.field("subject_id").type)
+# large_string
+```
 
 ## Using operators
 

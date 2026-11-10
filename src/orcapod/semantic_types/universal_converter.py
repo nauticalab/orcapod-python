@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 from orcapod.contexts import DataContext, resolve_context
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -1455,7 +1456,20 @@ class UniversalTypeConverter:
     def _get_or_create_typeddict_for_struct(
         self, struct_type: pa.StructType
     ) -> DataType:
-        """Get or create a TypedDict class for an Arrow struct type."""
+        """Get or create a TypedDict class for an Arrow struct type.
+
+        The class is keyed by the struct normalized to its large variants
+        (``arrow_utils.normalize_to_large_types``), so ``struct<b: string>``
+        and ``struct<b: large_string>``, which the Arrow hasher treats as
+        identical, map to one Python class, and that class maps back to the
+        large-normalized struct. Field widths, nullability and logical types
+        still distinguish structs.
+        """
+        # TODO(ITL-841): workaround so both layouts of a struct share one
+        # Python class; revisit with the treatment of large variants everywhere.
+        normalized = arrow_utils.normalize_to_large_types(struct_type, keep_null=True)
+        assert isinstance(normalized, pa.StructType)
+        struct_type = normalized
 
         # Check cache first
         if struct_type in self._struct_signature_to_typeddict:
