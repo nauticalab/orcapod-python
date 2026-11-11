@@ -216,6 +216,20 @@ uv run pytest tests/
 - The Graphviz `dot` binary is optional. The tests that render a graph to an image skip
   when `dot` is not on `PATH` and run when it is.
 
+## Golden hash values
+
+Hash values must stay identical across releases (developer, November 10, 2026). Every hash
+Orcapod stores or embeds in a name is pinned in `tests/test_hashing/golden/data/*.json` and
+checked by `tests/test_hashing/golden/test_golden_hashes.py`.
+
+- A failing golden entry means a hash moved. Treat it as a bug in the change, not a stale
+  file. Never regenerate the golden files to make a test pass.
+- Regenerate (`uv run python tests/test_hashing/golden/generate_golden_hashes.py`) only to add
+  entries (check the diff adds lines and changes none), or for a hash change the developer has
+  approved together with a migration assessment.
+- Never move or rename the fixtures in `tests/test_hashing/golden/cases.py`: function pods,
+  dataclasses and pydantic models hash with their module path.
+
 ## Testing conventions
 
 Tests use the **public interface** wherever possible (developer, November 10, 2026): drive an
