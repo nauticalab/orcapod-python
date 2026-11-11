@@ -171,9 +171,9 @@ class SyncPipelineOrchestrator:
     def _materialize_as_stream(buf: list[tuple[Any, Any]], upstream_node: Any) -> Any:
         """Wrap a (tag, data) buffer as an ArrowTableStream.
 
-        Uses the same column selection pattern as
-        ``StaticOutputOperatorPod._materialize_to_stream``: system_tags
-        for tags, source info for data.
+        Builds the table with ``StaticOutputOperatorPod._rows_to_table``, as
+        ``StaticOutputOperatorPod._materialize_to_stream`` does, so every row
+        keeps its own system tags and source info.
 
         Args:
             buf: List of (tag, data) tuples.
@@ -202,18 +202,10 @@ class SyncPipelineOrchestrator:
                 upstreams=upstream_node.upstreams,
             )
 
-        tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in buf]
-        data_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
+        from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 
-        # Rows may list the same columns in a different order (cached vs
-        # freshly computed), so match columns by name.
-        combined_tags = arrow_utils.concat_tables_by_name(tag_tables)
-        combined_data = arrow_utils.concat_tables_by_name(data_tables)
-
-        user_tag_keys = tuple(buf[0][0].keys())
-        source_info = buf[0][1].source_info()
-
-        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
+        # Each row keeps its own system tags and source info.
+        full_table, user_tag_keys = StaticOutputOperatorPod._rows_to_table(buf)
 
         # Pass the upstream node's producer and upstreams so the
         # materialized stream inherits the correct identity_structure
@@ -226,7 +218,6 @@ class SyncPipelineOrchestrator:
         return ArrowTableStream(
             full_table,
             tag_columns=user_tag_keys,
-            source_info=source_info,
             producer=producer,
             upstreams=upstreams,
         )

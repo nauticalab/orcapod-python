@@ -333,13 +333,6 @@ class TestAsyncChains:
                 == s_data.as_table(columns=WITH_SOURCE).schema
             )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "ITL-845: StaticOutputOperatorPod._materialize_to_stream broadcasts "
-            "rows[0].source_info() to every row. Remove this mark once ITL-845 lands."
-        ),
-    )
     def test_source_info_matches_sync(self, chain: Chain) -> None:
         """Per-row provenance on the async path equals the sync path's."""
         sync_rows = list(chain.result.iter_data())

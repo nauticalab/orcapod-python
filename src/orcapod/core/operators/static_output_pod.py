@@ -192,6 +192,54 @@ class StaticOutputOperatorPod(TraceableBase):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _rows_to_table(
+        rows: Sequence[tuple[TagProtocol, DataProtocol]],
+    ) -> tuple[pa.Table, tuple[str, ...]]:
+        """Concatenate (Tag, Data) pairs into one table, keeping per-row source info.
+
+        Each row contributes its own system-tag and ``_source_*`` columns, so
+        every row keeps its own provenance tokens (a token embeds a per-row
+        identifier, so rows never share one). A ``_source_*`` field is declared
+        non-nullable unless some row's token is ``None``; ``Data.as_table``
+        declares every source-info field nullable, and this keeps the field
+        flags (which the operator node's per-row record hash covers) what they
+        were when a broadcast token made them non-nullable.
+
+        Args:
+            rows: Non-empty sequence of (Tag, Data) pairs.
+
+        Returns:
+            The concatenated table and the user tag column names.
+
+        Raises:
+            ValueError: If ``rows`` is empty.
+        """
+        from orcapod.system_constants import constants
+        from orcapod.utils import arrow_utils
+
+        if not rows:
+            raise ValueError("Cannot materialize an empty list of rows into a stream")
+
+        tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in rows]
+        data_tables = [data.as_table(columns={"source": True}) for _, data in rows]
+
+        # Rows may list the same columns in a different order (cached vs
+        # freshly computed), so match columns by name.
+        combined_tags = arrow_utils.concat_tables_by_name(tag_tables)
+        combined_data = arrow_utils.concat_tables_by_name(data_tables)
+
+        data_schema = combined_data.schema
+        for i, field in enumerate(data_schema):
+            if field.name.startswith(constants.SOURCE_PREFIX):
+                nullable = combined_data.column(i).null_count > 0
+                data_schema = data_schema.set(i, field.with_nullable(nullable))  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+        # Same arrays, new field flags: no cast, so no value or type can change.
+        combined_data = pa.Table.from_arrays(combined_data.columns, schema=data_schema)
+
+        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
+        return full_table, tuple(rows[0][0].keys())
+
+    @staticmethod
     def _materialize_to_stream(
         rows: Sequence[tuple[TagProtocol, DataProtocol]],
     ) -> StreamProtocol:
@@ -199,38 +247,23 @@ class StaticOutputOperatorPod(TraceableBase):
 
         Used by the barrier-mode ``async_execute`` to convert collected
         channel items back into a stream suitable for ``static_process``.
+        Every row keeps its own source info (see ``_rows_to_table``).
+
+        Args:
+            rows: Non-empty sequence of (Tag, Data) pairs.
+
+        Returns:
+            A stream over the rows, in order.
+
+        Raises:
+            ValueError: If ``rows`` is empty.
         """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-        from orcapod.utils import arrow_utils
 
-        if not rows:
-            raise ValueError("Cannot materialize an empty list of rows into a stream")
-
-        tag_tables = []
-        data_tables = []
-
-        for tag, data in rows:
-            tag_tables.append(tag.as_table(columns={"system_tags": True}))
-            data_tables.append(data.as_table(columns={"source": True}))
-
-        # Rows may list the same columns in a different order (cached vs
-        # freshly computed), so match columns by name.
-        combined_tags = arrow_utils.concat_tables_by_name(tag_tables)
-        combined_data = arrow_utils.concat_tables_by_name(data_tables)
-
-        user_tag_keys = tuple(rows[0][0].keys())
-
-        # Preserve actual source_info provenance from the first row
-        # (all rows share the same data columns and source tokens).
-        source_info = rows[0][1].source_info()
-
-        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
-
-        return ArrowTableStream(
-            full_table,
-            tag_columns=user_tag_keys,
-            source_info=source_info,
-        )
+        table, tag_keys = StaticOutputOperatorPod._rows_to_table(rows)
+        # No ``source_info`` argument: the table's own ``_source_*`` columns
+        # pass through, one value per row.
+        return ArrowTableStream(table, tag_columns=tag_keys)
 
     async def async_execute(
         self,

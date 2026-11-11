@@ -81,6 +81,38 @@ column becomes a list of its incoming list type (`large_list<large_list<int8>>`,
 unchanged, `Path` as `list[list[Path]]`), and its source info is a list of the members' source
 info. Hashes of pipelines that already worked are unchanged.
 
+### Fixed
+
+#### Materialized rows keep their own source info (ITL-845)
+
+When rows were collected and turned back into a stream, every row got the source-info
+(`_source_*`) tokens of the first row, so rows after the first were attributed to row 0. This
+affected the sync orchestrator, which does this between every pair of nodes (so every
+function-node tag table written by a sync `PipelineJob` recorded the wrong input provenance),
+the async path of every operator that collects its input (`MergeJoin`, `Batch`, `GroupBy`,
+`PolarsFilter` and the other barrier operators), sync `Index` and `Pick`, and operator nodes
+(`OperatorJobNode.execute` and `async_execute`). After `Batch`, a batch could even list more
+tokens than it had members. Each row now keeps its own tokens.
+
+Only `_source_*` values change. Data values, Arrow types and stored schemas, content hashes,
+pipeline hashes and function-node record IDs are unchanged. The one stored ID that covers
+`_source_*` values is an operator node's per-row `_record_hash`: it changes for every row
+whose token was wrong, and stays the same for rows whose token was right.
+
+**Stored data is not repaired.** Rows stored before this fix (function-node tag tables, and
+operator-node tables written with `cache_mode=LOG`) keep the wrong source-info token for every
+row after the first; nothing else in them is wrong. Orcapod does not rewrite, repair or
+recompute them: a re-run serves function-node rows from the cache unchanged, but stores
+corrected operator-node rows next to the old ones, so that table then holds both versions of
+those rows. To get correct stored values, drop the pipeline tables (the function-node tag
+tables, whose paths end in `pdb_v1`, and any operator-node tables) and re-run the job. The
+function result tables (under `_result/`, ending in `rdb_v1`) can be kept: the re-run then
+serves every result from them and runs no function again. A table's path is the job name
+followed by the node's `node_identity_path` (plus `pdb_v1` for a function node); in a
+`DeltaTableDatabase` it is that directory under the root, and the SQL connectors name the
+table by joining the path components with `__`, each with non-alphanumeric characters
+replaced by `_`. Correcting stored values is tracked in ITL-853.
+
 ### Breaking Changes
 
 #### Operator outputs keep their inputs' Arrow types, normalized to large variants (ITL-832, ITL-813)
