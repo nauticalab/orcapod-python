@@ -1849,6 +1849,11 @@ imports it) to the dev group, dropped the unused `pymongo` and `pyyaml`, restric
 with `only-include` (3.37 MB to 0.47 MB), and added `orcapod.__version__`.
 `tests/test_packaging.py` builds both distributions and pins their contents.
 
+**Update (November 10, 2026, ITL-875):** the license decision was reversed: Orcapod is MIT
+licensed from v0.2.0 on, published on public PyPI as `orcapod`. `LICENSE` holds the MIT text
+and `pyproject.toml` declares the PEP 639 expression `license = "MIT"` (metadata
+`License-Expression: MIT`, no license classifier).
+
 ---
 
 ## `src/orcapod/core/operators/merge_join.py` — Arrow types

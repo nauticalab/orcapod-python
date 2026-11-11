@@ -18,7 +18,29 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
-LICENSE_ID = "LicenseRef-Metamorphic-Proprietary"
+COPYRIGHT_LINE = "Copyright (c) 2025-2026 NauticaLab"
+MIT_LICENSE_TEXT = f"""MIT License
+
+{COPYRIGHT_LINE}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
 
 
 def _pyproject_value(*keys: str) -> object:
@@ -46,15 +68,24 @@ def test_pygraphviz_is_not_a_dependency():
     assert not [d for d in declared if d.lower().startswith("pygraphviz")]
 
 
-def test_license_is_metamorphic_proprietary() -> None:
-    """Orcapod is proprietary to Metamorphic Labs from v0.2 on (ITL-827)."""
-    assert _pyproject_value("project", "license") == {"text": LICENSE_ID}
-    # No license classifier at all: pip-licenses prefers classifiers over the License
-    # field, so "License :: Other/Proprietary License" would fail the org license check.
+def test_license_is_mit() -> None:
+    """Orcapod is MIT licensed from v0.2.0 on (ITL-875, reversing ITL-827)."""
+    # PEP 639 SPDX expression; it is written to the metadata as License-Expression.
+    assert _pyproject_value("project", "license") == "MIT"
+    # PEP 639 forbids license classifiers next to a license expression.
     classifiers = _pyproject_strings("project", "classifiers")
     assert not [c for c in classifiers if c.startswith("License ::")]
-    license_text = (REPO_ROOT / "LICENSE").read_text()
-    assert license_text.startswith("Copyright (c) Metamorphic Labs, Inc.")
+    assert (REPO_ROOT / "LICENSE").read_text() == MIT_LICENSE_TEXT
+
+
+def test_build_backend_supports_license_expressions() -> None:
+    """Hatchling 1.27.0 is the first to emit ``License-Expression`` in metadata 2.4.
+
+    Older releases write the field under ``Metadata-Version: 2.1``, which does not define it.
+    """
+    requires = _pyproject_strings("build-system", "requires")
+    hatchling = [r for r in requires if re.match(r"hatchling\b", r)]
+    assert hatchling == ["hatchling>=1.27.0"]
 
 
 def test_basedpyright_is_a_dev_dependency_only() -> None:
@@ -143,6 +174,37 @@ def test_license_is_shipped_in_sdist_and_wheel(built_dists: tuple[Path, Path]) -
         licenses = [n for n in zf.namelist() if n.endswith(suffix)]
         assert len(licenses) == 1
         assert zf.read(licenses[0]) == expected
+
+
+def _metadata_fields(metadata: str) -> list[tuple[str, str]]:
+    """Return the header fields of a core metadata file, in order."""
+    header = metadata.partition("\n\n")[0]
+    fields = (line.partition(": ") for line in header.splitlines() if ": " in line)
+    return [(name, value) for name, _, value in fields]
+
+
+def test_built_metadata_declares_mit(built_dists: tuple[Path, Path]) -> None:
+    """Wheel METADATA and sdist PKG-INFO both declare the MIT license (ITL-875)."""
+    sdist, wheel = built_dists
+    with zipfile.ZipFile(wheel) as zf:
+        (name,) = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
+        wheel_metadata = zf.read(name).decode()
+    with tarfile.open(sdist) as tar:
+        member = tar.extractfile(f"{sdist.name.removesuffix('.tar.gz')}/PKG-INFO")
+        assert member is not None
+        sdist_metadata = member.read().decode()
+    for metadata in (wheel_metadata, sdist_metadata):
+        fields = _metadata_fields(metadata)
+        # License-Expression and License-File are defined from metadata 2.4 (PEP 639) on.
+        (metadata_version,) = [v for k, v in fields if k == "Metadata-Version"]
+        major, minor = (int(part) for part in metadata_version.split("."))
+        assert (major, minor) >= (2, 4)
+        assert ("License-Expression", "MIT") in fields
+        assert ("License-File", "LICENSE") in fields
+        assert not [v for k, v in fields if k == "License"]
+        assert not [
+            v for k, v in fields if k == "Classifier" and v.startswith("License ::")
+        ]
 
 
 def _declared_version(version_module: str) -> str:
