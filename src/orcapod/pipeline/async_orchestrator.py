@@ -14,7 +14,9 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.channels import BroadcastChannel, Channel
+from orcapod.errors import StoreWriteError
 from orcapod.pipeline.result import OrchestratorResult
+from orcapod.utils.store_errors import keep_store_error
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
@@ -137,6 +139,8 @@ class AsyncPipelineOrchestrator:
         effective_observer = observer if observer is not None else NoOpObserver()
         effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
+        topo_order: list[Any] = []
+        store_error: StoreWriteError | None = None
         try:
             topo_order = list(graph.topological_sort())
             buf = self._buffer_size
@@ -250,8 +254,71 @@ class AsyncPipelineOrchestrator:
             return OrchestratorResult(
                 node_outputs=collectors if materialize_results else {}
             )
+        except ExceptionGroup as group:
+            # A failed store write stops the run. Raise it on its own, as the sync
+            # orchestrator does, rather than inside the TaskGroup's exception group.
+            store_error = _single_store_error(group, topo_order)
+            if store_error is None:
+                raise
+            raise store_error
         finally:
-            effective_observer.on_run_end(run_id)
+            # A failing on_run_end must not replace a failed store write.
+            with keep_store_error(store_error, "Observer on_run_end"):
+                effective_observer.on_run_end(run_id)
+
+
+def _single_store_error(
+    group: ExceptionGroup, topo_order: list[Any]
+) -> StoreWriteError | None:
+    """Pick the one ``StoreWriteError`` an async run raises from its exception group.
+
+    Concurrent node tasks can fail together, so the ``TaskGroup``'s group may hold
+    several store errors and other exceptions. The caller gets a single
+    ``StoreWriteError``, as from the sync orchestrator: the one whose node comes
+    first in topological order (the one the sync orchestrator would meet first),
+    with ties and node-less errors broken by their order in the group. Every other
+    exception stays attached for diagnosis: each is noted on the chosen error,
+    other store errors are also logged at WARNING, and the whole group is the
+    chosen error's ``__context__``. Its ``__cause__`` stays the backend error.
+
+    Args:
+        group: The exception group the run's ``TaskGroup`` raised.
+        topo_order: The run's nodes in topological order.
+
+    Returns:
+        The store error to raise, or ``None`` when the group holds none.
+    """
+    store_errors = StoreWriteError.in_group(group)
+    if not store_errors:
+        return None
+    rank = {getattr(node, "label", None): i for i, node in enumerate(topo_order)}
+    chosen = min(store_errors, key=lambda err: rank.get(err.node_label, len(rank)))
+    for other in _leaves(group):
+        if other is chosen:
+            continue
+        if isinstance(other, StoreWriteError):
+            logger.warning(
+                "Another store write failed in the same run: %s",
+                other,
+                exc_info=other,
+            )
+            chosen.add_note(f"Another store write failed in the same run: {other}")
+        else:
+            chosen.add_note(
+                f"Another node failed in the same run: {type(other).__name__}: {other}"
+            )
+    return chosen
+
+
+def _leaves(group: BaseExceptionGroup) -> list[BaseException]:
+    """Return every non-group exception in ``group``, nested groups flattened."""
+    found: list[BaseException] = []
+    for exc in group.exceptions:
+        if isinstance(exc, BaseExceptionGroup):
+            found.extend(_leaves(exc))
+        else:
+            found.append(exc)
+    return found
 
 
 class _CollectingWriter:

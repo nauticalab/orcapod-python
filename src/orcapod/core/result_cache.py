@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from orcapod.errors import SchemaVersionError
+from orcapod.errors import SchemaVersionError, StoreWriteError
 from orcapod.protocols.core_protocols import DataProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants, RESULT_DB_SCHEMA_VERSION
@@ -287,15 +287,24 @@ class ResultCache:
             pa.array([datetime.now(timezone.utc)], type=pa.timestamp("us", tz="UTC")),
         )
 
-        self._result_database.add_record(
-            self._versioned_record_path,
-            output_data.datagram_uuid.bytes,
-            data_table,
-            skip_duplicates=skip_duplicates,
-        )
-
+        try:
+            self._result_database.add_record(
+                self._versioned_record_path,
+                output_data.datagram_uuid.bytes,
+                data_table,
+                skip_duplicates=skip_duplicates,
+            )
+        except Exception as exc:
+            raise StoreWriteError(self._versioned_record_path) from exc
         if self._auto_flush:
-            self._result_database.flush()
+            try:
+                self._result_database.flush()
+            except Exception as exc:
+                # Views of one store share their pending writes, so the batch that
+                # failed may be an earlier row's or another table's.
+                raise StoreWriteError(
+                    self._result_database.base_path, flush=True
+                ) from exc
 
     def get_all_records(
         self, include_system_columns: bool = False

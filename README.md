@@ -238,7 +238,10 @@ While the following is subject to change based on future development, it represe
       │   on success:
       │       ctx_observer.on_data_end(node_label, tag, data, result, cached=False)
       │       emit (tag_out, result) downstream
-      │   on exception:
+      │   on StoreWriteError (a result or record could not be stored):
+      │       ctx_observer.on_data_crash(node_label, tag, data, exc)
+      │       raise, whatever error_policy is — the run stops (ITL-878)
+      │   on any other exception (the function failed):
       │       ctx_observer.on_data_crash(node_label, tag, data, exc)
       │       if error_policy == "fail_fast": raise
       │       otherwise: skip this data, continue

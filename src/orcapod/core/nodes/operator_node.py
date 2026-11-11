@@ -29,7 +29,7 @@ from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import PipelineJobRequiredError
+from orcapod.errors import PipelineJobRequiredError, StoreWriteError
 from orcapod.protocols.core_protocols import (
     DataProtocol,
     StreamProtocol,
@@ -798,6 +798,11 @@ class OperatorJobNode(OperatorNodeBase):
 
     def _store_output_stream(self, stream: StreamProtocol) -> None:
         """Materialize stream and store in the pipeline database with per-row dedup."""
+        pipeline_database = self._pipeline_database
+        if pipeline_database is None:
+            raise RuntimeError(
+                f"OperatorJobNode {self.label!r} has no pipeline database attached."
+            )
         output_table = stream.as_table(
             columns={"source": True, "system_tags": True},
         )
@@ -839,12 +844,17 @@ class OperatorJobNode(OperatorNodeBase):
         # the hash), so rows from different runs with identical output will have
         # distinct record IDs and both be stored.  skip_duplicates=True still
         # deduplicates exact re-runs of the same node within a single run.
-        self._pipeline_database.add_records(
-            self.node_identity_path,
-            output_table,
-            record_id_column=self.HASH_COLUMN_NAME,
-            skip_duplicates=True,
-        )
+        try:
+            pipeline_database.add_records(
+                self.node_identity_path,
+                output_table,
+                record_id_column=self.HASH_COLUMN_NAME,
+                skip_duplicates=True,
+            )
+        except Exception as exc:
+            raise StoreWriteError(
+                self.node_identity_path, node_label=self.label
+            ) from exc
 
         self._cached_output_table = output_table.drop(
             [self.HASH_COLUMN_NAME, constants.NODE_CONTENT_HASH_COL]

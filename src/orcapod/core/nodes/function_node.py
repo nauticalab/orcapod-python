@@ -35,7 +35,9 @@ from orcapod.errors import (
     EphemeralResultMissingError,
     PipelineJobRequiredError,
     SchemaVersionError,
+    StoreWriteError,
 )
+from orcapod.utils.store_errors import keep_store_error
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -1164,14 +1166,20 @@ class FunctionJobNode(FunctionNodeBase):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _require_pipeline_database(self) -> None:
-        """Raise a clear RuntimeError if no pipeline database is attached.
+    def _require_pipeline_database(self) -> ArrowDatabaseProtocol:
+        """Return the attached pipeline database, raising if there is none.
 
         Called at the top of methods that unconditionally access
         ``self._pipeline_database``.  Provides an actionable error message
         instead of an opaque ``AttributeError: 'NoneType' object has no
         attribute ...`` when a definition-level pipeline is executed without
         supplying a database.
+
+        Returns:
+            The attached pipeline database.
+
+        Raises:
+            RuntimeError: If no pipeline database is attached.
         """
         if self._pipeline_database is None:
             raise RuntimeError(
@@ -1179,6 +1187,7 @@ class FunctionJobNode(FunctionNodeBase):
                 "Either construct the pipeline with a pipeline_database argument, "
                 "or supply one via Pipeline.load(..., pipeline_database=<db>)."
             )
+        return self._pipeline_database
 
     # ------------------------------------------------------------------
     # as_node — return the lightweight FunctionNode equivalent
@@ -1294,6 +1303,15 @@ class FunctionJobNode(FunctionNodeBase):
                     tag_out, result = self._process_data_internal(
                         tag, data, logger=pkt_logger, run_id=run_id
                     )
+                except StoreWriteError as exc:
+                    # A failed store write fails the run whatever the error policy:
+                    # error_policy only decides about rows whose function raised.
+                    exc.add_context(node_label=node_label, tag=tag.as_dict())
+                    with keep_store_error(exc, "Observer on_data_crash"):
+                        ctx_obs.on_data_crash(node_label, tag, data, exc)
+                    with keep_store_error(exc, "Observer on_node_end"):
+                        ctx_obs.on_node_end(node_label, node_hash)
+                    raise
                 except Exception as exc:
                     logger.warning(
                         "Data execution failed in %s: %s",
@@ -1701,14 +1719,14 @@ class FunctionJobNode(FunctionNodeBase):
                 so that downstream ``EmptyData`` flow-through can locate its cached
                 result keyed by the same hash (= the downstream's ``INPUT_DATA_HASH_COL``).
         """
-        self._require_pipeline_database()
+        pipeline_database = self._require_pipeline_database()
         self._ensure_pdb_schema()
         base_entry_id = self.compute_base_entry_id(tag, input_data)
 
         # Determine the next recomputation index by querying all existing rows
         # for this base_entry_id. No await is used here, so within a single-threaded
         # asyncio event loop this read-then-write sequence is uninterrupted.
-        existing = self._pipeline_database.get_records_with_column_value(
+        existing = pipeline_database.get_records_with_column_value(
             self._versioned_pipeline_path,
             {_PIPELINE_BASE_ENTRY_ID_COL: base_entry_id},
         )
@@ -1773,12 +1791,19 @@ class FunctionJobNode(FunctionNodeBase):
             meta_table,
         )
 
-        self._pipeline_database.add_record(
-            self._versioned_pipeline_path,
-            versioned_entry_id,
-            combined_record,
-            skip_duplicates=True,
-        )
+        try:
+            pipeline_database.add_record(
+                self._versioned_pipeline_path,
+                versioned_entry_id,
+                combined_record,
+                skip_duplicates=True,
+            )
+        except Exception as exc:
+            raise StoreWriteError(
+                self._versioned_pipeline_path,
+                node_label=self.label,
+                tag=tag.as_dict(),
+            ) from exc
 
     # ------------------------------------------------------------------
     # Records and sources
@@ -2517,6 +2542,10 @@ class FunctionJobNode(FunctionNodeBase):
                         clean = tag.drop_meta_columns(
                             _TAG_NODE_INPUT_REF, ignore_missing=True
                         )
+                        if isinstance(error, StoreWriteError):
+                            # The pod re-raises a failed store write after this
+                            # call; name the node it belongs to.
+                            error.add_context(node_label=node_label)
                         ctx_obs.on_data_crash(node_label, clean, data, error)
                         # Clean up the dangling input_store entry so it doesn't
                         # accumulate memory during long-running calls with errors.

@@ -10,8 +10,10 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
+from orcapod.errors import StoreWriteError
 from orcapod.pipeline.result import OrchestratorResult
 from orcapod.utils import arrow_utils
+from orcapod.utils.store_errors import keep_store_error
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
@@ -77,6 +79,7 @@ class SyncPipelineOrchestrator:
         effective_observer = observer if observer is not None else NoOpObserver()
         effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
+        store_error: StoreWriteError | None = None
         try:
             topo_order = list(graph.topological_sort())
             buffers: dict[Any, list[tuple[TagProtocol, DataProtocol]]] = {}
@@ -131,8 +134,13 @@ class SyncPipelineOrchestrator:
                 buffers.clear()
 
             return OrchestratorResult(node_outputs=buffers)
+        except StoreWriteError as exc:
+            store_error = exc
+            raise
         finally:
-            effective_observer.on_run_end(run_id)
+            # A failing on_run_end must not replace a failed store write.
+            with keep_store_error(store_error, "Observer on_run_end"):
+                effective_observer.on_run_end(run_id)
 
     @staticmethod
     def _gather_upstream(
