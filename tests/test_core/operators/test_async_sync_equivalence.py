@@ -282,8 +282,8 @@ CASES = [
         MergeJoin,
         lambda: (merge_source("m", 0), merge_source("n", 10)),
     ),
-    # Sync SemiJoin rejects nested data columns (see the xfail below).
     Case("semijoin", SemiJoin, lambda: (source_c(), source_b(nested=False))),
+    Case("semijoin_nested", SemiJoin, lambda: (source_a(), source_b())),
     Case("batch_2", lambda: Batch(batch_size=2), lambda: (source_a(),)),
     Case("batch_all", Batch, lambda: (source_a(),)),
     Case("group_by", lambda: GroupBy(["ta"]), lambda: (source_a(),)),
@@ -356,13 +356,6 @@ def test_async_provenance_equals_sync(case: Case) -> None:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ITL-846: sync SemiJoin fails in Polars when either input has a nested "
-        "data column (struct, list): 'not supported in join non-key field'."
-    ),
-)
 def test_semijoin_with_nested_columns() -> None:
     """SemiJoin over inputs with struct and list data columns, both paths."""
     sources = (source_a(), source_b())
@@ -414,19 +407,16 @@ def _with_meta(source: StreamProtocol, meta: dict[str, Column]) -> ArrowTableStr
     return ArrowTableStream(table, tag_columns=tags)
 
 
-def _meta_columns(prefix: str, n_rows: int, nested: bool = True) -> dict[str, Column]:
+def _meta_columns(prefix: str, n_rows: int) -> dict[str, Column]:
     """Meta columns named after ``prefix``: non-null ``int8``, nullable ``string``
-    and, when ``nested``, nullable ``list<int8>``."""
+    and nullable ``list<int8>``."""
     columns: dict[str, Column] = {
         f"__{prefix}_i8": pa.array(range(n_rows), pa.int8()),
         f"__{prefix}_s": pa.array(
             [None if i == 1 else f"{prefix}{i}" for i in range(n_rows)], pa.string()
         ),
+        f"__{prefix}_l": pa.array([[i] for i in range(n_rows)], pa.list_(pa.int8())),
     }
-    if nested:
-        columns[f"__{prefix}_l"] = pa.array(
-            [[i] for i in range(n_rows)], pa.list_(pa.int8())
-        )
     table = pa.table(list(columns.values()), names=list(columns))
     schema = pa.schema(
         [f.with_nullable(f.name != f"__{prefix}_i8") for f in table.schema]
@@ -435,19 +425,13 @@ def _meta_columns(prefix: str, n_rows: int, nested: bool = True) -> dict[str, Co
     return {name: table.column(name) for name in table.column_names}
 
 
-# Sync SemiJoin rejects nested non-key columns (ITL-846, xfailed above), and a
-# meta column is a non-key column of its Polars join.
-SCALAR_META_ONLY = {"semijoin"}
-
-
 def _meta_case(case: Case) -> Case:
     """``case`` with each source carrying its own, distinctly named meta columns."""
-    nested = case.label not in SCALAR_META_ONLY
 
     def make_sources() -> tuple[StreamProtocol, ...]:
         sources = case.make_sources()
         return tuple(
-            _with_meta(s, _meta_columns(f"m{i}", s.as_table().num_rows, nested))
+            _with_meta(s, _meta_columns(f"m{i}", s.as_table().num_rows))
             for i, s in enumerate(sources)
         )
 

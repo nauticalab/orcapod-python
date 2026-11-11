@@ -1,19 +1,51 @@
+import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.channels import ReadableChannel, WritableChannel
-from orcapod.core.operators.base import BinaryOperator
+from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_type
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
-from orcapod.utils import schema_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
+    import polars as pl
     import pyarrow as pa
+    import pyarrow.compute as pc
 else:
     pa = LazyModule("pyarrow")
+    pc = LazyModule("pyarrow.compute")
+    pl = LazyModule("polars")
+
+
+# The frozen form of a NaN key value: equal to itself, as NaN is in Polars.
+_NAN = object()
+
+
+def _freeze(value: object) -> object:
+    """Return a key value (from ``as_py``) in a hashable form.
+
+    Structs (dicts) become tuples of their items in field order, lists become
+    tuples, and NaN becomes one shared sentinel. Both inputs' key types are
+    checked equal first, so frozen values of different types never meet.
+
+    Args:
+        value: A Python value of an Arrow key column.
+
+    Returns:
+        The hashable form of ``value``.
+    """
+    if isinstance(value, float) and math.isnan(value):
+        return _NAN
+    if isinstance(value, dict):
+        items = cast("dict[str, object]", value)
+        return tuple((name, _freeze(item)) for name, item in items.items())
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in cast("Sequence[object]", value))
+    return value
 
 
 class SemiJoin(BinaryOperator):
@@ -56,17 +88,43 @@ class SemiJoin(BinaryOperator):
 
         # include source info and system tags for left stream
         left_table = left_stream.as_table(columns={"source": True, "system_tags": True})
-
-        # Get the right table for matching
         right_table = right_stream.as_table()
 
-        # Perform left semi join using PyArrow's built-in functionality
-        semi_joined_table = left_table.join(
-            right_table,
-            keys=list(common_keys),
-            join_type="left semi",
+        # A key must have one Arrow type on both sides (up to large layouts);
+        # otherwise Polars would silently unify, e.g., int8 with int16.
+        for key in common_keys:
+            _ = require_shared_arrow_type(
+                "SemiJoin",
+                key,
+                arrow_utils.column_arrow_type(left_table.schema, key),
+                arrow_utils.column_arrow_type(right_table.schema, key),
+            )
+
+        # Only the right side's keys take part. A null key never matches:
+        # Polars already applies that to scalar keys but treats a null struct or
+        # list as equal to another, so drop right rows with a null key.
+        right_keys = right_table.select(list(common_keys))
+        valid = right_keys.column(0).is_valid()
+        for index in range(1, right_keys.num_columns):
+            valid = pc.and_(valid, right_keys.column(index).is_valid())
+        right_keys = right_keys.filter(valid)
+
+        # Polars, unlike Arrow's hash join, accepts nested (list, struct,
+        # struct-backed logical) columns as keys and as passed-through columns,
+        # and matches a string key against a large_string one.
+        semi_joined_table = (
+            pl.DataFrame(left_table)
+            .join(
+                pl.DataFrame(right_keys),
+                on=list(common_keys),
+                how="semi",
+                maintain_order="left",
+            )
+            .to_arrow()
         )
-        # Re-apply left table's schema to restore nullable flags that Arrow join may have reset
+        # The round-trip yields large layouts, nullable fields at every depth and
+        # Polars' own types; give every column back the left input's exact field
+        # (type, top-level and nested nullability, logical type).
         semi_joined_table = semi_joined_table.cast(left_table.schema)
 
         return ArrowTableStream(
@@ -148,6 +206,11 @@ class SemiJoin(BinaryOperator):
 
         Falls back to barrier mode when the right input is empty (schema
         cannot be inferred from data) or when there are no common keys.
+
+        Key types are checked (``require_shared_arrow_type``) on the first row
+        of each input, since channels carry no schema. When either input is
+        empty there is nothing to check, so a key type mismatch the sync path
+        reports gives an empty result here (as in ``Join``'s async path).
         """
         try:
             left_ch, right_ch = inputs[0], inputs[1]
@@ -176,7 +239,7 @@ class SemiJoin(BinaryOperator):
 
             # Phase 2: Probe — stream left rows
             common_keys: tuple[str, ...] | None = None
-            right_lookup: set[tuple] | None = None
+            right_lookup: set[tuple[object, ...]] = set()
 
             async for tag, data in left_ch:
                 if common_keys is None:
@@ -193,20 +256,73 @@ class SemiJoin(BinaryOperator):
                             await output.send((t, p))
                         return
 
-                    # Build right-side lookup
-                    right_lookup = set()
+                    right_tag, right_data = right_rows[0]
+                    for key in common_keys:
+                        _ = require_shared_arrow_type(
+                            "SemiJoin",
+                            key,
+                            self._key_arrow_type(tag, data, key),
+                            self._key_arrow_type(right_tag, right_data, key),
+                        )
+
+                    # Build right-side lookup; a row with a null key never matches.
                     for rt, rp in right_rows:
-                        rd = rt.as_dict()
-                        rd.update(rp.as_dict())
-                        right_lookup.add(tuple(rd[k] for k in common_keys))
+                        right_key = self._match_key(rt, rp, common_keys)
+                        if right_key is not None:
+                            right_lookup.add(right_key)
 
                 # Probe
-                ld = tag.as_dict()
-                ld.update(data.as_dict())
-                if tuple(ld[k] for k in common_keys) in right_lookup:  # type: ignore[arg-type]
+                left_key = self._match_key(tag, data, common_keys)
+                if left_key is not None and left_key in right_lookup:
                     await output.send((tag, data))
         finally:
             await output.close()
+
+    @staticmethod
+    def _key_table(tag: TagProtocol, data: DataProtocol, key: str) -> "pa.Table":
+        """Return the one-row Arrow table, the tag's or the data's, holding ``key``."""
+        table = tag.as_table()
+        return table if key in table.column_names else data.as_table()
+
+    @staticmethod
+    def _key_arrow_type(
+        tag: TagProtocol, data: DataProtocol, key: str
+    ) -> "pa.DataType":
+        """Return the Arrow type of column ``key`` in a row's tag or data."""
+        table = SemiJoin._key_table(tag, data, key)
+        return arrow_utils.column_arrow_type(table.schema, key)
+
+    @staticmethod
+    def _match_key(
+        tag: TagProtocol, data: DataProtocol, keys: Sequence[str]
+    ) -> tuple[object, ...] | None:
+        """Return a row's hashable key for the async lookup, or ``None`` if null.
+
+        Values come from the row's Arrow columns (a logical column's storage),
+        not from ``as_dict()``, and are frozen so that struct and list keys are
+        hashable. The comparison matches the sync path's Polars join: a row
+        whose key has a top-level null never matches, nulls inside a struct or
+        list compare equal, and NaN equals NaN.
+
+        Args:
+            tag: The row's tag.
+            data: The row's data.
+            keys: The common key columns.
+
+        Returns:
+            The frozen key values in ``keys`` order, or ``None`` when any of
+            them is null.
+        """
+        values: list[object] = []
+        for key in keys:
+            scalar = SemiJoin._key_table(tag, data, key).column(key)[0]
+            if isinstance(scalar, pa.ExtensionScalar):
+                scalar = scalar.value
+            value: object = scalar.as_py() if scalar is not None else None
+            if value is None:
+                return None
+            values.append(_freeze(value))
+        return tuple(values)
 
     def identity_structure(self) -> Any:
         return self.__class__.__name__
