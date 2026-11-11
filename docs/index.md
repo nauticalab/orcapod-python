@@ -16,6 +16,9 @@ pip install orcapod
 uv add orcapod
 ```
 
+`0.2.0` is not on PyPI, where the latest release is `0.1.4`; `0.2.0` is the tag `v0.2.0` of
+the repository.
+
 Rendering pipeline graphs additionally requires the [Graphviz](https://graphviz.org/download/)
 `dot` binary on your `PATH`. It is optional: everything else works without it, and no
 Graphviz development headers are needed.
