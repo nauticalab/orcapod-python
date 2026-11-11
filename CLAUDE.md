@@ -437,6 +437,10 @@ then through the data context's type converter — never call `pa.array(values)`
 inference widens `int8` to `int64`, `float32` to `double`, and takes decimal precision from the
 data. The rules:
 
+- **Type strictness** (developer, November 10, 2026): Orcapod is type strict. It never
+  expands or converts a type implicitly; the only exception is normalization to large variants.
+  Inputs that disagree on a column's type are an error naming the column and both types, on
+  every execution path (sync and async).
 - Every output column takes the large-normalized form of its input type
   (`arrow_utils.normalize_to_large_types`: `string` to `large_string`, `binary` to `large_binary`, `list`
   to `large_list`, recursively). Width, nullability and logical (extension) types are never
@@ -457,9 +461,17 @@ data. The rules:
   non-empty results have the same types.
 - When two inputs give the same column different Arrow types, normalize both: equal proceeds,
   anything else raises `InputValidationError` naming the column and both types — no widening,
-  promotion or picking a side. For `MergeJoin` this is `_resolve_disagreeing_types`, called in
-  `binary_static_process` before the join; `output_schema()` exposes only Python types, so such
-  disagreements are invisible at graph-build time.
+  promotion or picking a side. The rule is `arrow_utils.shared_arrow_type`, which takes only the
+  two types and returns the shared large type or `None`; the error is raised by
+  `core/operators/base.require_shared_arrow_type`, called by `MergeJoin` in
+  `binary_static_process` and by `Join` (shared tag keys, sync and async) before the join.
+  Keep error wording in the caller, not in the type rule. `output_schema()` exposes only Python
+  types, so such disagreements are invisible at graph-build time.
+- An operator with its own `async_execute` must yield exactly the rows of its sync path (types,
+  nullability, column order, system tags, content hashes). Build output rows from the incoming
+  datagrams' Arrow tables (`as_table()`), never from `as_dict()` values, and take the data
+  context from those datagrams (`data_context_key`). Add new async operators to
+  `tests/test_core/operators/test_async_sync_equivalence.py`.
 - The type converter keys synthesized struct classes by the large-normalized struct, so
   `struct<b: string>` and `struct<b: large_string>` are one Python type (a workaround,
   `TODO(ITL-841)`).

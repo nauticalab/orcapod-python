@@ -293,6 +293,16 @@ class TestDatagramCopy:
         d2 = d.copy(include_cache=False)
         assert d2._context_table is None
 
+    @pytest.mark.parametrize("include_cache", [True, False])
+    def test_copy_before_schema_is_computed_reports_correct_schema(self, include_cache):
+        """Copying an Arrow-backed datagram before its schema has been read gives
+        the copy the same schema as the original, not an empty one (ITL-859)."""
+        d = Data(pa.table({"a": pa.array([1], pa.int8()), "b": pa.array(["x"])}))
+        # Copy before the original's schema is first read: the state the bug needed.
+        d2 = d.copy(include_cache=include_cache)
+        assert d2.schema() == d.schema()
+        assert d2.with_source_info(a="s").schema() == d.schema()
+
 
 # ---------------------------------------------------------------------------
 # Tag — lazy system-tags table

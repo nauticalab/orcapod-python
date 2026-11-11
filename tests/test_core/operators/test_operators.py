@@ -569,8 +569,8 @@ class TestJoinWithListExtensionColumn:
 
 class TestJoinMetaColumnCollision:
     """Verify that a 3-way join with identical meta columns on all inputs does not
-    raise a DuplicateError.  Instead, colliding meta columns should be renamed
-    with stream-index-based suffixes (e.g. ``__computed_1``, ``__computed_2``)."""
+    raise a DuplicateError. Join drops its inputs' meta columns, so they cannot
+    collide."""
 
     def _make_stream(self, id_vals, pkt_col, pkt_vals, meta_val):
         """Helper: stream with shared tag 'id', one data column, and ``__computed``."""
@@ -595,20 +595,15 @@ class TestJoinMetaColumnCollision:
         assert len(table) == 2
         assert {"id", "alpha", "beta", "gamma"}.issubset(set(table.column_names))
 
-    def test_three_way_join_meta_columns_renamed_with_index_suffix(self):
-        """Colliding meta columns from streams 2+ get an index-based suffix."""
+    def test_three_way_join_drops_meta_columns(self):
+        """No input's meta column, or its source-info column, reaches the output."""
         s1 = self._make_stream([1, 2], "alpha", [10, 20], True)
         s2 = self._make_stream([1, 2], "beta", [100, 200], False)
         s3 = self._make_stream([1, 2], "gamma", [1000, 2000], True)
 
-        result = Join().static_process(s1, s2, s3)
-        table = result.as_table()
-        col_names = set(table.column_names)
+        table = Join()(s1, s2, s3).as_table(all_info=True)
 
-        # Original meta column preserved; colliding ones renamed with suffix
-        assert "__computed" in col_names
-        assert "__computed_1" in col_names
-        assert "__computed_2" in col_names
+        assert not [c for c in table.column_names if "__computed" in c]
 
 
 class TestJoinOutputSchemaSystemTags:

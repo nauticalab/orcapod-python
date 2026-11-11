@@ -1024,8 +1024,10 @@ class Datagram(ContentIdentifiableBase):
         new_d._data_dict = (
             dict(self._data_dict) if self._data_dict is not None else None
         )
-        new_d._data_python_schema = Schema(
-            dict(self._data_python_schema)
+        # A lazy (None) Python schema stays lazy; wrapping None in Schema would
+        # make it an empty schema that is never recomputed.
+        new_d._data_python_schema = (
+            Schema(dict(self._data_python_schema))
             if self._data_python_schema is not None
             else None
         )

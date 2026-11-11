@@ -160,6 +160,42 @@ column whose extension type has no logical list type in the type converter (for 
 PyArrow's canonical `arrow.uuid`) raises a `ValueError` naming the column. It used to fail
 with `ArrowNotImplementedError: extension`.
 
+#### `Join` gives the same rows on its async path as on its sync path (ITL-837)
+
+`Join`'s async path (`async_execute`, used by async pipelines) rebuilt every merged row from
+Python values, so each column's Arrow type was inferred again: an `int16` tag or an `int8`
+data column became `int64`, and a `dict` column could not be built at all. It now builds the
+merged row from the input rows' Arrow tables, for two inputs and for three or more. Types,
+nullability, column order, system tags and content hashes now equal those of the sync path.
+
+**Hashes:** the `Tag` and `Data` content hashes of rows produced by an async `Join` over
+columns narrower than `int64`/`double` change (they now equal the sync values), along with the
+stored input hashes of any function node downstream of such a join. Sync hashes, stream content
+hashes and pipeline hashes are unchanged.
+
+**Behaviour change:** when a shared tag key has different Arrow types in two `Join` inputs
+(for example `int16` and `int32`), `Join` now raises `InputValidationError` naming the column
+and both types, on both paths. The sync path used to keep the right-hand input's type silently.
+Types that differ only in layout (`string` and `large_string`) still join.
+
+**Also fixed:** `Datagram.copy()` gave a copy of an Arrow-backed datagram an empty Python
+`schema()` when the schema had not been computed yet; async `Index` and `Pick` returned such
+rows (ITL-859).
+
+#### `Join` no longer carries its inputs' meta columns (ITL-854, ITL-857)
+
+`Join` now drops every input's `Data` meta (`__`-prefixed) columns, on the sync and async
+paths, for two inputs or more: for example a cached function pod's `__computed` flag, the
+result cache's `__pf_*` and `__pod_ts` columns, and the `__` columns of a raw
+`ArrowTableStream`, along with their `_source___*` source-info columns. Previously the sync
+path kept them, renaming colliding names with an index suffix (`__computed_1`), while the
+async path dropped them. That rename could also give two columns the same name and fail with
+a Polars `DuplicateError` (ITL-857). Nothing downstream of a `Join` reads these columns, and
+none of them is hashed: content hashes, pipeline hashes, record IDs and stored tables are
+unchanged. `Join.output_schema()` no longer lists the `__` columns a raw `ArrowTableStream`
+reports as data, matching the joined table. Two inputs that share only a meta column name now
+join instead of failing validation.
+
 #### `pathlib.Path` and `upath.UPath` no longer hash file content (ITL-450)
 
 `pathlib.Path` and `upath.UPath` values now hash from the **path string** only —

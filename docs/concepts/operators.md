@@ -49,7 +49,9 @@ Takes one or more streams. Used for `Join`, which performs an N-ary inner join.
 
 N-ary inner join on shared tag columns. Requires that input streams have non-overlapping
 data columns (raises `InputValidationError` on collision). Join is **commutative** -- the
-order of input streams does not affect the result.
+order of input streams does not affect the result. Join drops its inputs' meta
+(`__`-prefixed) columns, such as a cached function pod's `__computed`, so they never collide
+and never appear in its output.
 
 Column order follows each operator's argument symmetry: commutative operators (`Join`,
 `MergeJoin`) list tag and data columns by first appearance across their inputs in canonical
@@ -329,7 +331,12 @@ that is `None` raises `ValueError` naming the operator, the column and the row's
 ## Arrow types of operator outputs
 
 `output_schema()` reports Python types, but every column also has an Arrow type, and
-orcapod keeps it predictable:
+orcapod keeps it predictable.
+
+**Type strictness.** Orcapod is type strict: it never expands or converts a type
+implicitly. The only exception is normalization to large variants (below). When inputs
+disagree on a column's type, that is an error naming the column and both types, never a
+silent widening; convert explicitly.
 
 - **Nothing is inferred from Python values.** An operator types each output column from its
   inputs' Arrow types, never from what PyArrow would guess for the values, so a result's
@@ -343,12 +350,16 @@ orcapod keeps it predictable:
   is the normalized input type, whether or not the result has rows. A list of a logical type
   is that type's logical list (`list[orcapod.path]` for `Path`). Their source-info columns
   are `large_list<large_string>`.
-- **Inputs that disagree.** If the two inputs of `MergeJoin` give a colliding data column or
-  a shared tag column different Arrow types, both are normalized first. If they are then the
-  same (for example `string` and `large_string`), the join proceeds. Otherwise (for example
-  `int8` and `int64`, or two timestamp units) it raises `InputValidationError` naming the
-  column and both types; cast one input explicitly. Because `output_schema()` reports Python
-  types, this is detected when the join runs, not when the pipeline is built.
+- **Inputs that disagree.** If the inputs of `MergeJoin` give a colliding data column, or
+  the inputs of `Join` or `MergeJoin` give a shared tag column, different Arrow types, both
+  are normalized first. If they are then the same (for example `string` and
+  `large_string`), the join proceeds. Otherwise (for example `int16` and `int32`, or two
+  timestamp units) it raises `InputValidationError` naming the column and both types; cast
+  one input explicitly. Because `output_schema()` reports Python types, this is detected when
+  the join runs, not when the pipeline is built.
+- **Sync and async execution agree.** An operator run asynchronously (`async_execute`, as in
+  an async pipeline) yields rows with the same Arrow types, column order, system tags and
+  content hashes as the same operator run synchronously.
 
 ```python
 import pyarrow as pa

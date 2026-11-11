@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 from abc import abstractmethod
 from collections.abc import Collection, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
+from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
     DataProtocol,
@@ -14,6 +15,47 @@ from orcapod.protocols.core_protocols import (
     TagProtocol,
 )
 from orcapod.types import ColumnConfig, ContentHash, Schema
+from orcapod.utils import arrow_utils
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+
+
+def require_shared_arrow_type(
+    operator: str, name: str, left_type: pa.DataType, right_type: pa.DataType
+) -> pa.DataType:
+    """Return the Arrow type a column's two input types share, or raise.
+
+    The rule is ``arrow_utils.shared_arrow_type``; this adds the error an
+    operator raises when there is no shared type. Operators call it as soon as
+    they have the input tables (or datagrams), before the join, because the
+    disagreement cannot be seen at graph-build time: ``output_schema()``
+    returns Python types, under which ``int8`` and ``int64``, or ``string`` and
+    ``large_string``, are the same.
+
+    Args:
+        operator: The operator's name, for the error message.
+        name: The column's name, for the error message.
+        left_type: The column's Arrow type in one input.
+        right_type: The column's Arrow type in the other input.
+
+    Returns:
+        The large-normalized type both inputs share.
+
+    Raises:
+        InputValidationError: If the types still differ after normalization to
+            their large variants. The message names the operator, the column and
+            both input types as given.
+    """
+    shared = arrow_utils.shared_arrow_type(left_type, right_type)
+    if shared is None:
+        raise InputValidationError(
+            f"{operator} inputs disagree on the Arrow type of column {name!r}: "
+            + f"{left_type} in one input and {right_type} in the other. {operator} "
+            + "never widens or promotes a type; cast one input explicitly so both "
+            + "have the same Arrow type."
+        )
+    return shared
 
 
 class UnaryOperator(StaticOutputOperatorPod):

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.operators.base import BinaryOperator
+from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_type
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -17,51 +17,6 @@ else:
     pl = LazyModule("polars")
 
 
-def _resolve_disagreeing_types(
-    name: str, left_type: "pa.DataType", right_type: "pa.DataType"
-) -> "pa.DataType":
-    """Decide the output type of a column whose two inputs' Arrow types differ.
-
-    This is the single place that rule lives. It applies to a colliding data
-    column (the element type of the merged list), to the source-info column
-    that goes with it, and to a shared tag key. The disagreement cannot be
-    seen at graph-build time: ``output_schema()`` returns Python types, under
-    which ``int8`` and ``int64``, or ``string`` and ``large_string``, are the
-    same, so ``binary_static_process`` calls this as soon as it has the input
-    tables, before the join.
-
-    Both types are normalized to their large variants
-    (``arrow_utils.normalize_to_large_types``: ``string`` to ``large_string``,
-    ``binary`` to ``large_binary``, ``list`` to ``large_list``, recursively),
-    which the Arrow hasher treats as identical. If the normalized types are
-    equal, that is the output type. Anything else (integer or float width,
-    timestamp unit, decimal precision, struct fields, nullability of a nested
-    field, logical type) is an error: MergeJoin never widens, promotes or picks
-    a side. The result does not depend on argument order.
-
-    Args:
-        name: Column name, for the error message.
-        left_type: The column's Arrow type in one input.
-        right_type: The column's Arrow type in the other input.
-
-    Returns:
-        The large-normalized type both inputs share.
-
-    Raises:
-        InputValidationError: If the types still differ after normalization.
-    """
-    normalized_left = arrow_utils.normalize_to_large_types(left_type, keep_null=True)
-    normalized_right = arrow_utils.normalize_to_large_types(right_type, keep_null=True)
-    if normalized_left == normalized_right:
-        return normalized_left
-    raise InputValidationError(
-        f"MergeJoin inputs disagree on the Arrow type of column {name!r}: "
-        f"{left_type} in one input and {right_type} in the other. MergeJoin "
-        f"never widens or promotes a type; cast one input explicitly so both "
-        f"have the same Arrow type."
-    )
-
-
 def _output_types(
     left_types: "dict[str, pa.DataType]", right_types: "dict[str, pa.DataType]"
 ) -> "dict[str, pa.DataType]":
@@ -69,9 +24,9 @@ def _output_types(
 
     Every type is the large-normalized form of the input type
     (``arrow_utils.normalize_to_large_types``); width, nullability and logical
-    types are never changed. A column in both inputs whose types differ goes
-    through ``_resolve_disagreeing_types``, which either finds the shared
-    normalized type or raises.
+    types are never changed. A column in both inputs goes through
+    ``require_shared_arrow_type``, which either finds the shared normalized
+    type or raises.
 
     Args:
         left_types: Column name to Arrow type for one input table.
@@ -84,7 +39,9 @@ def _output_types(
     for name in left_types.keys() | right_types.keys():
         left_type, right_type = left_types.get(name), right_types.get(name)
         if left_type is not None and right_type is not None:
-            resolved[name] = _resolve_disagreeing_types(name, left_type, right_type)
+            resolved[name] = require_shared_arrow_type(
+                "MergeJoin", name, left_type, right_type
+            )
         else:
             known = left_type if left_type is not None else right_type
             assert known is not None
@@ -120,7 +77,7 @@ class MergeJoin(BinaryOperator):
     When the two inputs' Arrow types for the same column differ, both are
     normalized to their large variants; if they are then equal the join
     proceeds, otherwise it raises ``InputValidationError`` naming the column
-    and both types (``_resolve_disagreeing_types``). Validation cannot detect
+    and both types (``require_shared_arrow_type``). Validation cannot detect
     such a disagreement, because streams expose only Python schemas; it is
     detected in ``binary_static_process`` before the join.
 
@@ -306,7 +263,7 @@ class MergeJoin(BinaryOperator):
         # fixed_size_binary and may strip extension metadata. Every output
         # column is typed from these, never from what Arrow infers for the
         # Python values. Inputs whose types differ beyond layout are rejected
-        # here, before the join (_resolve_disagreeing_types).
+        # here, before the join (require_shared_arrow_type).
         left_types = {f.name: f.type for f in left_table.schema}
         right_types = {f.name: f.type for f in right_table.schema}
         output_types = _output_types(left_types, right_types)
