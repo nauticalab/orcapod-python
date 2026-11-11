@@ -11,11 +11,12 @@ from orcapod.types import ContentHash
 
 class TestNumpyArrayHandler:
     def test_returns_content_hash(self):
+        """The handler returns a ``ContentHash`` labeled ``ndarray_v1``."""
         handler = NumpyArrayHandler()
         arr = np.array([1.0, 2.0, 3.0])
         result = handler.handle(arr, hasher=None)
         assert isinstance(result, ContentHash)
-        assert result.method == "sha256"
+        assert result.method == "ndarray_v1"
 
     def test_same_content_same_hash(self):
         handler = NumpyArrayHandler()
@@ -49,7 +50,8 @@ class TestNumpyArrayHandler:
             handler.handle([1, 2, 3], hasher=None)
 
     def test_raises_value_error_for_object_dtype(self):
+        """The handler refuses object arrays with a ``ValueError``."""
         handler = NumpyArrayHandler()
         arr = np.array([1, "hello", None], dtype=object)
-        with pytest.raises(ValueError, match="object-dtype"):
+        with pytest.raises(ValueError, match="object arrays"):
             handler.handle(arr, hasher=None)

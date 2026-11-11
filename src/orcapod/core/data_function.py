@@ -7,6 +7,7 @@ import sys
 import uuid
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
+import types
 import typing
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeVar
 
@@ -109,6 +110,52 @@ def parse_function_outputs(
 
 
 E = TypeVar("E", bound=DataFunctionExecutorProtocol)
+
+
+def _declared_ndarray_type(declared: Any) -> type | None:
+    """Return the ndarray class a declared output type requires, if any.
+
+    Handles ``np.ndarray`` (or a subclass), parameterized aliases such as
+    ``npt.NDArray[np.float32]``, and ``Optional``/``| None`` of either.
+    NumPy is never imported here: a class counts as an ndarray when its MRO
+    contains ``numpy.ndarray``.
+    """
+    candidates = [declared]
+    if typing.get_origin(declared) in (typing.Union, types.UnionType):
+        candidates = [a for a in typing.get_args(declared) if a is not type(None)]
+    for candidate in candidates:
+        # A parameterized alias such as npt.NDArray[np.float32] has origin np.ndarray.
+        candidate = typing.get_origin(candidate) or candidate
+        if isinstance(candidate, type) and any(
+            base.__module__ == "numpy" and base.__qualname__ == "ndarray"
+            for base in candidate.__mro__
+        ):
+            return candidate
+    return None
+
+
+def _check_declared_ndarray_outputs(
+    output_data: dict[str, Any], output_schema: Schema
+) -> None:
+    """Refuse a non-array returned for an output declared as a NumPy array (ITL-883).
+
+    A NumPy scalar (for example ``x * 2`` on a 0-d array) is not an array, and
+    Orcapod never wraps one implicitly.
+
+    Raises:
+        TypeError: Naming the output key, the declared type and the returned type.
+    """
+    for key, value in output_data.items():
+        if value is None:
+            continue
+        required = _declared_ndarray_type(output_schema.get(key))
+        if required is not None and not isinstance(value, required):
+            raise TypeError(
+                f"Output {key!r} is declared as {required.__module__}.{required.__qualname__}"
+                f" but the function returned {type(value).__module__}."
+                f"{type(value).__qualname__} ({value!r}); return an array, for example"
+                " with np.asarray(...)"
+            )
 
 
 class DataFunctionBase(TraceableBase, Generic[E]):
@@ -576,6 +623,7 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             A Data containing the parsed outputs with source info.
         """
         output_data = parse_function_outputs(self._output_keys, values)
+        _check_declared_ndarray_outputs(output_data, self.output_data_schema)
 
         def combine(*components: tuple[str, ...]) -> str:
             inner_parsed = [":".join(component) for component in components]

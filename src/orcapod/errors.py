@@ -30,6 +30,14 @@ class DuplicateTagError(ValueError):
     pass
 
 
+class UnsupportedValueError(ValueError):
+    """A value cannot be stored by the logical type of its column.
+
+    Raised at write time, for example for a masked or object-dtype NumPy array.
+    The type converter prefixes the message with the column name.
+    """
+
+
 class DataFunctionUnavailableError(RuntimeError):
     """Raised when a data function proxy is invoked without a bound function.
 

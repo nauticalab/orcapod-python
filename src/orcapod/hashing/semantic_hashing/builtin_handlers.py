@@ -12,7 +12,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   SchemaHandler         -- Schema objects
   FileHandler           -- orcapod.File: file content hash
   DirectoryHandler      -- orcapod.Directory: recursive Merkle tree hash
-  NumpyArrayHandler     -- numpy.ndarray: SHA-256 ContentHash of .npy bytes
+  NumpyArrayHandler     -- numpy.ndarray: ndarray_v1 value digest (array_digest_v1)
   PandasDataFrameHandler -- pd.DataFrame: Arrow Table via Arrow hasher (lazy default-context fallback)
   PandasSeriesHandler   -- pd.Series: Arrow Table via Arrow hasher (lazy default-context fallback)
   PolarsExprHandler     -- pl.Expr: polars_expr_v1 canonical expression tree (ITL-828)
@@ -313,56 +313,45 @@ class DirectoryHandler:
 
 
 class NumpyArrayHandler:
-    """Hasher for ``numpy.ndarray`` — content hash via SHA-256 of numpy's ``.npy`` bytes.
+    """Hasher for ``numpy.ndarray``: the version-1 value digest under ``ndarray_v1``.
 
-    Serialises the array to numpy's ``.npy`` binary format (which encodes dtype,
-    including structured/record field names, shape, byte order, and data), then
-    returns a ``ContentHash`` produced by SHA-256 of those bytes. This is identical
-    to what ``LogicalNumpyArray`` stores in Arrow, so the hash input and storage
-    representation are always consistent.
+    The array is put in its canonical form (C order, little-endian, structured
+    fields packed in declared order; see ``logical_types.numpy_type``), which is
+    exactly what ``LogicalNumpyArray`` stores. The digest is
+    ``array_format.array_digest_v1(tag, shape, data)`` of that stored row, so
+    memory layout, byte order, structured padding and subclass do not change the
+    hash, while dtype (including structured field names and order), shape and
+    every element bit do.
 
-    Returning ``ContentHash`` directly (rather than the raw ``.npy`` bytes) avoids
-    the hex-expansion and JSON-serialisation overhead that the semantic hasher would
-    apply to ``bytes`` returns — important for large arrays.
-
-    Object-dtype arrays are rejected with ``ValueError`` immediately (before
-    ``np.save`` is called). Structured dtypes containing object-typed fields
-    are caught by ``allow_pickle=False`` in ``np.save``.
+    The label ``ndarray_v1`` names the definition (and binds the digest to the
+    ndarray type): another array type sharing the digest body uses its own label.
     """
 
+    HASH_LABEL = "ndarray_v1"
+    """``ContentHash.method`` of an ndarray hash."""
+
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
-        """Return a SHA-256 ``ContentHash`` of the ``.npy`` bytes for ``obj``.
+        """Return the ``ndarray_v1`` value hash of ``obj``.
 
         Args:
-            obj: A ``numpy.ndarray`` instance.
+            obj: A ``numpy.ndarray`` instance (subclasses are hashed as plain arrays).
             hasher: Ignored. Present for protocol conformance.
 
         Returns:
-            A ``ContentHash`` with ``method="sha256"`` and digest equal to the
-            SHA-256 of the array's ``.npy`` binary representation.
+            ``ContentHash("ndarray_v1", array_digest_v1(tag, shape, data))``.
 
         Raises:
             TypeError: If ``obj`` is not a ``numpy.ndarray``.
-            ValueError: If ``obj`` has ``dtype.kind == "O"`` (object dtype).
+            ValueError: If the array cannot be stored (masked, object,
+                ``StringDType``, ``longdouble``, ...).
         """
-        import hashlib
-        import io
-        import numpy as np
+        from orcapod.logical_types.array_format import array_digest_v1
+        from orcapod.logical_types.numpy_type import array_bytes, canonical_array
 
-        if not isinstance(obj, np.ndarray):
-            raise TypeError(
-                f"NumpyArrayHandler: expected numpy.ndarray, got {type(obj)!r}"
-            )
-        if obj.dtype.kind == "O":
-            raise ValueError(
-                f"NumpyArrayHandler does not support object-dtype arrays "
-                f"(dtype={obj.dtype!r}). Object arrays require pickling, "
-                "which is disabled for security."
-            )
-        buf = io.BytesIO()
-        np.save(buf, obj, allow_pickle=False)
+        tag, array = canonical_array(obj)
         return ContentHash(
-            method="sha256", digest=hashlib.sha256(buf.getvalue()).digest()
+            method=self.HASH_LABEL,
+            digest=array_digest_v1(tag, array.shape, array_bytes(array)),
         )
 
 

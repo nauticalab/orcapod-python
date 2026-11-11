@@ -545,3 +545,76 @@ in any data-level preimage; they serve logging, observability, and result inspec
 | **Known exclusions** | **Not a content hash.** Two datagrams with identical content have different UUIDs. Not used in any hash preimage. Serves as an object identity token, not a content fingerprint. |
 
 ---
+
+## 8. Array Value Digest
+
+**Value hash labels.** A type whose values are hashed by a dedicated handler labels its hash
+`<type>_v<N>`, for example `ndarray_v1` (and later `tensor_v1`). The label is the
+`ContentHash.method` and appears in every token built from the hash. The bytes produced under
+an existing label never change. A new definition gets a new label, so a hash always says
+which definition produced it.
+
+A `numpy.ndarray` value is hashed by value (since v0.3, ITL-888). The semantic hasher's
+`NumpyArrayHandler` returns `ContentHash(method="ndarray_v1", digest=D)`, where `D` is the
+version-1 array digest of the array's stored row. Inside a table hash, an array cell becomes
+the token `b"orcapod:ndarray::ndarray_v1:" + D`: the extension name, then the label and the
+digest. The stored row, the dtype tags and the canonical form are described in
+[NumPy Arrays](../concepts/arrays.md).
+
+For a stored row with dtype tag `T`, shape `(d0, ..., dn-1)` and data bytes `B`:
+
+```
+P = u64le(len(utf8(T))) || utf8(T)
+ || u64le(n) || i64le(d0) || ... || i64le(dn-1)
+ || u64le(len(B)) || B
+D = SHA-256(P)
+```
+
+`u64le` and `i64le` are 8-byte little-endian unsigned and signed integers. Every field is
+length-prefixed, so two different rows never share a preimage. `D` depends only on the stored
+row, so it can be recomputed from a stored table by any SHA-256 implementation. The label
+`ndarray_v1` names this definition; a different definition gets a different label. A
+`torch.Tensor` type is to share the digest under its own label.
+
+| Variation | Same `D`? |
+|---|---|
+| C or Fortran order, strides, views | yes |
+| Little- or big-endian byte order | yes |
+| Structured offsets, alignment padding | yes |
+| `np.matrix`, `np.recarray`, `np.memmap` against the plain array | yes |
+| Dtype (including width), shape, any element bit, structured field names or field order | no |
+
+The reference implementation below uses only the standard library, and the vectors are pinned:
+
+```python
+import hashlib
+import struct
+
+def array_digest_v1(tag: str, shape: tuple[int, ...], data: bytes) -> str:
+    t = tag.encode("utf-8")
+    p = struct.pack("<Q", len(t)) + t + struct.pack("<Q", len(shape))
+    p += b"".join(struct.pack("<q", d) for d in shape)
+    p += struct.pack("<Q", len(data)) + data
+    return hashlib.sha256(p).hexdigest()
+
+print(array_digest_v1("float32", (2, 3), struct.pack("<6f", 0, 1, 2, 3, 4, 5)))
+# 318f6e503e8064e89ce6039453fce709f8e01f60c501af2b63bbbe9cf8fbf90e
+print(array_digest_v1("float64", (), struct.pack("<d", 2.5)))
+# 47f182d862f5dd597d88836deddaed609ed94490827302e75e8364e877633cae
+print(array_digest_v1("int8", (0, 3), b""))
+# 54165f92526b48bf9bae265168aa7020b135a9973d372d9ceaa9ae92f611068a
+```
+
+The same values through Orcapod:
+
+```python
+import numpy as np
+
+from orcapod.contexts import get_default_context
+
+hasher = get_default_context().semantic_hasher
+print(hasher.hash_object(np.arange(6, dtype=np.float32).reshape(2, 3)).to_string())
+# ndarray_v1:318f6e503e8064e89ce6039453fce709f8e01f60c501af2b63bbbe9cf8fbf90e
+print(hasher.hash_object(np.array(2.5)).to_string())
+# ndarray_v1:47f182d862f5dd597d88836deddaed609ed94490827302e75e8364e877633cae
+```

@@ -23,6 +23,7 @@ from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
+from orcapod.errors import UnsupportedValueError
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils import arrow_utils
@@ -1006,7 +1007,13 @@ class UniversalTypeConverter:
             converted_record = {}
             for field_name, converter in converters.items():
                 if field_name in record:
-                    converted_record[field_name] = converter(record[field_name])
+                    try:
+                        converted_record[field_name] = converter(record[field_name])
+                    except UnsupportedValueError as exc:
+                        # The value's own type cannot say which column it was in.
+                        raise UnsupportedValueError(
+                            f"Column {field_name!r}: {exc}"
+                        ) from exc
                 else:
                     converted_record[field_name] = None
             converted_data.append(converted_record)

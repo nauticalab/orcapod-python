@@ -116,6 +116,15 @@ class ListLogicalType(BaseLogicalType):
         return self._logical_type_name
 
     @property
+    def element_logical_type(self) -> LogicalTypeProtocol:
+        """The logical type of the list's elements.
+
+        Returns:
+            The element logical type this list type was built from.
+        """
+        return self._element_logical_type
+
+    @property
     def python_type(self) -> type:
         """The Python generic alias this logical type represents.
 

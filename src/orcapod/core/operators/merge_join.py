@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_type
@@ -47,6 +48,71 @@ def _output_types(
             assert known is not None
             resolved[name] = arrow_utils.normalize_to_large_types(known, keep_null=True)
     return resolved
+
+
+def _identity_key(value: Any) -> Any:
+    """Order stored values as themselves (the default MergeJoin ordering)."""
+    return value
+
+
+def _storage_sort_key(
+    type_converter: Any, arrow_type: "pa.DataType"
+) -> Callable[[Any], Any]:
+    """Return the ordering key MergeJoin uses for a column's stored values.
+
+    The array logical type defines ``storage_sort_key`` (its stored ``(dtype tag,
+    shape, data)``). A list of such values, at any depth (an array column after
+    ``GroupBy`` or ``Batch``), is ordered by the tuple of its elements' keys, with
+    ``None`` first. Every other type is ordered by its stored value as before.
+    General struct ordering is ITL-839.
+    """
+    if isinstance(arrow_type, pa.ExtensionType):
+        lt = type_converter.get_logical_type_by_arrow_extension_name(
+            arrow_type.extension_name
+        )
+        key = _logical_sort_key(lt)
+        if key is not None:
+            return key
+    return _identity_key
+
+
+def _logical_sort_key(logical_type: Any) -> Callable[[Any], Any] | None:
+    """Return a logical type's own ordering key for stored values, if it has one.
+
+    Args:
+        logical_type: A logical type, or ``None``.
+
+    Returns:
+        The type's ``storage_sort_key``; for a list logical type whose elements
+        have a key, a key ordering lists by their elements' keys; otherwise
+        ``None``.
+    """
+    key = getattr(logical_type, "storage_sort_key", None)
+    if callable(key):
+        return key
+    element = getattr(logical_type, "element_logical_type", None)
+    element_key = _logical_sort_key(element) if element is not None else None
+    if element_key is None:
+        return None
+
+    def list_key(storage_value: Any) -> tuple[Any, ...]:
+        """Return the ordering key of one stored list value.
+
+        A null list sorts before every non-null list. Non-null lists compare by
+        the tuple of their elements' keys, element by element in list order, so
+        a list that is a prefix of another sorts first.
+
+        Args:
+            storage_value: The stored list, or ``None`` for a null list.
+
+        Returns:
+            ``(0,)`` for a null list, otherwise ``(1, element keys...)``.
+        """
+        if storage_value is None:
+            return (0,)
+        return (1, tuple(element_key(v) for v in storage_value))
+
+    return list_key
 
 
 class MergeJoin(BinaryOperator):
@@ -357,6 +423,10 @@ class MergeJoin(BinaryOperator):
                 left_sources = joined.column(left_source_col).to_pylist()
                 right_sources = joined.column(right_source_col).to_pylist()
 
+            # A logical type whose stored values are not orderable as Python values
+            # (struct storage comes back as dicts) supplies its own ordering key.
+            sort_key = _storage_sort_key(tc, output_types[col])
+
             merged_vals = []
             merged_sources = [] if has_source else None
             for i in range(len(left_vals)):
@@ -364,11 +434,13 @@ class MergeJoin(BinaryOperator):
                 if has_source:
                     ls, rs = left_sources[i], right_sources[i]
                     # Sort by data value, carry source along
-                    pairs = sorted(zip([lv, rv], [ls, rs]), key=lambda p: p[0])
+                    pairs = sorted(
+                        zip([lv, rv], [ls, rs]), key=lambda p: sort_key(p[0])
+                    )
                     merged_vals.append([p[0] for p in pairs])
                     merged_sources.append([p[1] for p in pairs])
                 else:
-                    merged_vals.append(sorted([lv, rv]))
+                    merged_vals.append(sorted([lv, rv], key=sort_key))
 
             # Replace the left column with merged list, drop right column
             col_idx = joined.column_names.index(left_col_name)

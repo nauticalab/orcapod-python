@@ -187,7 +187,7 @@ def test_pick_dict_missing_key_fail():
 
 
 def test_pick_extension_type_not_implemented():
-    """pick on a Pydantic/dataclass column raises NotImplementedError."""
+    """pick on a Pydantic/dataclass column raises InputValidationError (ITL-883)."""
     from orcapod.contexts import get_default_type_converter
 
     converter = get_default_type_converter()
@@ -198,7 +198,7 @@ def test_pick_extension_type_not_implemented():
     )
     stream = ArrowTableStream(table, tag_columns=["id"])
 
-    with pytest.raises(NotImplementedError, match="does not support pick"):
+    with pytest.raises(InputValidationError, match="does not support pick"):
         Pick("rec", "value")(stream)
 
 

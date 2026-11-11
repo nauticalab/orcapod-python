@@ -137,9 +137,8 @@ class Pick(UnaryOperator):
         Raises:
             InputValidationError: If ``column`` is missing, ``out`` collides
                 with an existing column, or the column type does not support
-                pick.
-            NotImplementedError: If the column holds an extension type whose
-                ``pick_field`` implementation is not yet available.
+                pick (including a logical type without ``pick_field``, such as
+                ``numpy.ndarray``).
         """
         _, data_schema = stream.output_schema()
         data_columns = list(data_schema.keys())
@@ -177,8 +176,16 @@ class Pick(UnaryOperator):
                     f"not a supported pick target (not dict[K,V] and no registered "
                     f"logical type)."
                 )
-            # May raise NotImplementedError for types not yet implemented
-            self._output_type = lt.pick_field(self.key)
+            try:
+                self._output_type = lt.pick_field(self.key)
+            except NotImplementedError as exc:
+                # A logical type without keyed access is an invalid pick target,
+                # reported like every other invalid operator input (ITL-883).
+                raise InputValidationError(
+                    f"Pick: column {self.column!r} has type {col_type!r}, whose "
+                    f"logical type {lt.logical_type_name!r} does not support pick "
+                    f"(keyed field access): {exc}"
+                ) from exc
             self._mode = "struct"
 
         # Resolved now because the streaming path has no stream. A failure is

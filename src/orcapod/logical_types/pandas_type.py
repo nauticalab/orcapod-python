@@ -73,8 +73,7 @@ class LogicalPandasDataFrame(BaseLogicalType):
     nullable integer, boolean, datetime, categorical) is supported. Columns with
     truly mixed Python types that Arrow cannot infer raise ``ValueError``.
 
-    The extension name ``"pandas.dataframe"`` is library-qualified, following the
-    ``"numpy.ndarray"`` precedent.
+    The extension name ``"pandas.dataframe"`` is library-qualified.
 
     Example:
         >>> lt = LogicalPandasDataFrame()
