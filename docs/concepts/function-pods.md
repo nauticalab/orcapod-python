@@ -219,6 +219,35 @@ print("function calls:", len(calls))
     version, e.g. `@function_pod(output_keys="bmi", version="v1.0")` (the default is
     `"v0.0"`; a minor bump such as `"v0.1"` is not enough), or rename the function.
 
+!!! note "When the store cannot be read"
+    A table that does not exist yet reads as empty, and its rows are computed. In a
+    `DeltaTableDatabase`, a table that exists but cannot be read (for example, a data file was
+    deleted or damaged) is never treated as empty: the run stops with
+    `orcapod.errors.StoreReadError`, which names the
+    table, the node and row being processed when they are known, and the underlying error,
+    whatever the orchestrator's `error_policy`. Its stored rows are not recomputed and the
+    table is not overwritten, so you can repair the table or restore the file and run again.
+    A write that fails because the stored table cannot be read raises `StoreReadError` too,
+    not `StoreWriteError` (see *When the store cannot be written* below).
+
+    In a `DeltaTableDatabase`, rows whose column types differ from the stored table's, as
+    Delta stores them (`float64` values for a column stored as `int64`, say), are refused with
+    `InputValidationError`, which names the table, the column and both types, and nothing is
+    written to that table. They are not converted to the stored type. `string` and
+    `large_string`, and the other large and non-large layouts of one type, count as the same
+    type, and so do types the Delta writer converts on the way in (`uint64` is stored as
+    `int64`, every timestamp in microseconds). New columns and new struct fields pass this
+    check; whether they are added follows
+    the database's `allow_schema_evolution` setting. In a job run, a refused append fails the
+    run as a `StoreWriteError` whose cause is the `InputValidationError`.
+
+    When you use the database directly, both errors reach you as themselves, also from
+    `flush()` and from `add_records(..., flush=True)`. When several pending tables fail in one flush, the
+    `StoreReadError` (or else the first `InputValidationError`) is raised, and each other
+    failure is attached to it as a note and logged. Failed rows stay queued, so a later
+    flush tries them again. A flush that fails for any other reason raises `RuntimeError`,
+    with the first failure as its cause.
+
 A node from a job that has run also provides:
 
 - **`get_all_records()`** -- every record this step of the job has stored, as a PyArrow
@@ -246,12 +275,15 @@ This holds whatever `error_policy` the orchestrator was given. `error_policy="co
 default) skips rows whose *function* raised and keeps going; it never skips a row because it
 could not be stored.
 
-The error you get is always one plain `StoreWriteError`, never an exception group and never
-another exception raised in its place. A post-run hook or observer callback that fails while
-the store error is on its way out is logged and recorded as a note on the error
-(`err.__notes__`). When several nodes fail at once on the asynchronous orchestrator, you get
-the store error of the node that comes first in the pipeline, the one the synchronous
-orchestrator would have stopped at; the other failures are logged and noted on it.
+`StoreWriteError` and `StoreReadError` both derive from `orcapod.errors.StoreError`, so
+`except StoreError` handles either. The error you get is always one plain store error, never
+an exception group and never another exception raised in its place. A post-run hook or
+observer callback that fails while the store error is on its way out is logged and recorded
+as a note on the error (`err.__notes__`). When several nodes fail at once on the asynchronous
+orchestrator, read and write failures alike, you get the store error of the node that comes
+first in the pipeline, the one the synchronous orchestrator would have stopped at; the other
+failures are logged and noted on it. A node whose failure the asynchronous orchestrator
+cancelled before it happened is not reported.
 
 After the failure, rows stored before it are kept: `job.run()` commits the writes that
 succeeded before it re-raises, and nothing already stored is rewritten. Once the cause is

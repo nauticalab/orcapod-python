@@ -46,6 +46,15 @@ Just change the code and update all references directly.
 Never manipulate sys.modules directly (e.g. sys.modules.setdefault). If a subpackage
 import path doesn't work, create a proper re-export package with an __init__.py instead.
 
+## No message-only parameters
+
+Never pass a value into a function only so that the function can put it in an error or log
+message (developer, November 11, 2026). If the function does not use the value to do its job,
+it must not receive it: the function raises what it knows, and the caller, which has the
+context, catches and wraps or annotates the error (path, row, column, node label). A helper
+whose job is to report or record (log a suppressed failure, attach a note) legitimately takes
+the label and context it records.
+
 ## Docstrings
 
 Use Google style (https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)

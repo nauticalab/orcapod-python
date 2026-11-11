@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from orcapod.errors import SchemaVersionError, StoreWriteError
+from orcapod.errors import SchemaVersionError, StoreReadError, StoreWriteError
 from orcapod.protocols.core_protocols import DataProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants, RESULT_DB_SCHEMA_VERSION
@@ -294,11 +294,17 @@ class ResultCache:
                 data_table,
                 skip_duplicates=skip_duplicates,
             )
+        except StoreReadError:
+            # The stored table could not be read: report the read failure itself.
+            raise
         except Exception as exc:
             raise StoreWriteError(self._versioned_record_path) from exc
         if self._auto_flush:
             try:
                 self._result_database.flush()
+            except StoreReadError:
+                # The stored table could not be read: report the read failure itself.
+                raise
             except Exception as exc:
                 # Views of one store share their pending writes, so the batch that
                 # failed may be an earlier row's or another table's.

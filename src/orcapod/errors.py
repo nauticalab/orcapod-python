@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Self
 
 
 class InputValidationError(Exception):
@@ -201,16 +201,84 @@ class EphemeralResultMissingError(Exception):
         )
 
 
-class StoreWriteError(RuntimeError):
-    """Raised when a node's results or records could not be written to the store.
+class StoreError(RuntimeError):
+    """Base of the errors raised when the store could not be read or written.
 
-    A failed store write always fails the run, whatever the orchestrator's
+    A store error always fails the run, whatever the orchestrator's
     ``error_policy``: ``error_policy="continue"`` skips rows whose *function*
-    raised, never rows that could not be stored. The run stops at the first
-    failed write. Rows stored before the failure are kept, and re-running the
-    job does not recompute stored function results.
+    raised, never rows whose stored data could not be read or written. Catch
+    ``StoreError`` to handle both ``StoreReadError`` and ``StoreWriteError``.
 
     The backend's own exception is chained as ``__cause__``.
+
+    Attributes:
+        node_label: Label of the node the failure belongs to, or ``None`` when it
+            is not known or not tied to one node.
+        tag: Tag values of the row being processed, or ``None`` when the failure
+            is not tied to one row.
+    """
+
+    def __init__(
+        self,
+        *args: object,
+        node_label: str | None = None,
+        tag: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Create the error.
+
+        Args:
+            *args: The exception arguments, as for any exception.
+            node_label: Label of the node the failure belongs to, if known.
+            tag: Tag values of the row being processed, if known.
+        """
+        self.node_label: str | None = node_label
+        self.tag: dict[str, Any] | None = dict(tag) if tag is not None else None
+        super().__init__(*args)
+
+    @classmethod
+    def in_group(cls, group: BaseExceptionGroup) -> list[Self]:
+        """Return every error of this class in an exception group, nested ones included.
+
+        Args:
+            group: An exception group, such as the one an ``asyncio.TaskGroup``
+                raises.
+
+        Returns:
+            The matching leaves in the order the group holds them.
+        """
+        found: list[Self] = []
+        for exc in group.exceptions:
+            if isinstance(exc, BaseExceptionGroup):
+                found.extend(cls.in_group(exc))
+            elif isinstance(exc, cls):
+                found.append(exc)
+        return found
+
+    def add_context(
+        self, node_label: str | None = None, tag: Mapping[str, Any] | None = None
+    ) -> None:
+        """Fill in the node label and row tag where the raising site did not know them.
+
+        Called by the code that runs the node or the row as the error passes
+        through it. Values that are already set are kept.
+
+        Args:
+            node_label: Label of the node the failure belongs to.
+            tag: Tag values of the row being processed.
+        """
+        if self.node_label is None:
+            self.node_label = node_label
+        if self.tag is None and tag is not None:
+            self.tag = dict(tag)
+
+
+class StoreWriteError(StoreError):
+    """Raised when a node's results or records could not be written to the store.
+
+    The run stops at the first failed write. Rows stored before the failure are
+    kept, and re-running the job does not recompute stored function results.
+    A write that fails because the stored table cannot be read raises
+    ``StoreReadError`` instead.
 
     Attributes:
         record_path: Path of the table the write was for, relative to the
@@ -243,29 +311,10 @@ class StoreWriteError(RuntimeError):
             flush: Whether committing pending writes failed.
         """
         self.record_path: tuple[str, ...] = tuple(record_path)
-        self.node_label: str | None = node_label
-        self.tag: dict[str, Any] | None = dict(tag) if tag is not None else None
         self.flush: bool = flush
-        super().__init__(self.record_path, node_label, tag)
-
-    @classmethod
-    def in_group(cls, group: BaseExceptionGroup) -> "list[StoreWriteError]":
-        """Return every ``StoreWriteError`` in an exception group, nested ones included.
-
-        Args:
-            group: An exception group, such as the one an ``asyncio.TaskGroup``
-                raises.
-
-        Returns:
-            The ``StoreWriteError`` leaves in the order the group holds them.
-        """
-        found: list[StoreWriteError] = []
-        for exc in group.exceptions:
-            if isinstance(exc, BaseExceptionGroup):
-                found.extend(cls.in_group(exc))
-            elif isinstance(exc, cls):
-                found.append(exc)
-        return found
+        super().__init__(
+            self.record_path, node_label, tag, node_label=node_label, tag=tag
+        )
 
     def add_context(
         self, node_label: str | None = None, tag: Mapping[str, Any] | None = None
@@ -279,10 +328,7 @@ class StoreWriteError(RuntimeError):
             node_label: Label of the node that owns the write.
             tag: Tag values of the row being stored.
         """
-        if self.node_label is None:
-            self.node_label = node_label
-        if self.tag is None and tag is not None and not self.flush:
-            self.tag = dict(tag)
+        super().add_context(node_label, None if self.flush else tag)
 
     def __str__(self) -> str:
         """Describe the failed write: node, row, table and the backend's reason."""
@@ -308,4 +354,47 @@ class StoreWriteError(RuntimeError):
         return (
             f"Could not write to the store for {where}{row} "
             f"(table {'/'.join(self.record_path)!r}){reason}. " + retry
+        )
+
+
+class StoreReadError(StoreError):
+    """Raised when a stored table exists but could not be read.
+
+    A table that does not exist reads as empty. A table that exists but cannot be
+    read (a missing or damaged data file, a log the backend cannot load, columns
+    whose stored data no longer matches the table schema) raises this error
+    instead, so stored results never look dropped. Its rows are not recomputed
+    and the table is not overwritten.
+
+    Attributes:
+        table: Location of the table that could not be read (a directory or a
+            cloud URI).
+        record_path: Path of the table, including the database view's prefix.
+        node_label: Label of the node whose read failed, or ``None`` when the
+            read did not happen while a node ran.
+        tag: Tag values of the row being processed when the read failed, or
+            ``None`` when the read was not for one row.
+    """
+
+    def __init__(self, table: str, record_path: tuple[str, ...]) -> None:
+        """Create the error for one table that could not be read.
+
+        Args:
+            table: Location of the table (a directory or a cloud URI).
+            record_path: Path of the table, including the database view's prefix.
+        """
+        self.table: str = table
+        self.record_path: tuple[str, ...] = tuple(record_path)
+        super().__init__(table, self.record_path)
+
+    def __str__(self) -> str:
+        """Describe the failed read: table, node, row and the backend's reason."""
+        node = f" for node {self.node_label!r}" if self.node_label else ""
+        row = f" for row {self.tag!r}" if self.tag else ""
+        cause = self.__cause__
+        reason = f": {type(cause).__name__}: {cause}" if cause is not None else ""
+        return (
+            f"Could not read the stored table at {self.table!r}{node}{row}{reason}. "
+            "The table exists, so its rows are not treated as missing and the table "
+            "was not overwritten."
         )

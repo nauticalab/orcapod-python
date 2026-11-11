@@ -29,7 +29,11 @@ from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import PipelineJobRequiredError, StoreWriteError
+from orcapod.errors import (
+    PipelineJobRequiredError,
+    StoreReadError,
+    StoreWriteError,
+)
 from orcapod.protocols.core_protocols import (
     DataProtocol,
     StreamProtocol,
@@ -851,6 +855,9 @@ class OperatorJobNode(OperatorNodeBase):
                 record_id_column=self.HASH_COLUMN_NAME,
                 skip_duplicates=True,
             )
+        except StoreReadError:
+            # The stored table could not be read: report the read failure itself.
+            raise
         except Exception as exc:
             raise StoreWriteError(
                 self.node_identity_path, node_label=self.label

@@ -12,7 +12,7 @@ from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.side_effects import SideEffectJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
-from orcapod.errors import StoreWriteError
+from orcapod.errors import StoreReadError, StoreWriteError
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.pipeline.dag import OrcaDAG
 from orcapod.protocols import core_protocols as cp
@@ -771,6 +771,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 stops at the first failed write. Writes that succeeded before it
                 are flushed first, so rows stored before the failure are kept, and
                 re-running the job does not recompute stored function results.
+            StoreReadError: If a stored table exists but could not be read,
+                whatever the orchestrator's ``error_policy``, also when the read
+                was needed to write a node's results. Its rows are not recomputed
+                and the table is not overwritten.
         """
         import hashlib
         import uuid
@@ -880,19 +884,23 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             _flush_best_effort(run_error, pipeline_db, result_db)
             raise
 
-        # Flush databases.
+        # Flush databases. Every view of the store shares one set of pending
+        # batches, so a failed batch can leave the ones after it unwritten.
+        pending_note = (
+            "Writes that were still pending when the flush failed, such as a "
+            + "cache_mode=LOG operator's output or a node's last records, may not "
+            + "have been stored."
+        )
         try:
             pipeline_db.flush()
             result_db.flush()
+        except StoreReadError as exc:
+            # A stored table could not be read: report the read failure itself.
+            exc.add_note(pending_note)
+            raise
         except Exception as exc:
             flush_error = StoreWriteError(pipeline_db.base_path, flush=True)
-            # Every view of the store shares one set of pending batches, so a failed
-            # batch can leave the ones after it unwritten.
-            flush_error.add_note(
-                "Writes that were still pending when the flush failed, such as a "
-                + "cache_mode=LOG operator's output or a node's last records, may not "
-                + "have been stored."
-            )
+            flush_error.add_note(pending_note)
             raise flush_error from exc
 
         # Mutate self in place.

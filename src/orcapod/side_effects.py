@@ -19,7 +19,7 @@ from orcapod.core.base import TraceableBase
 from orcapod.core.nodes.function_node import _build_record_id_preimage
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import StoreWriteError
+from orcapod.errors import StoreError, StoreReadError, StoreWriteError
 from orcapod.invocation import (
     InvocationContext,
     InvocationHashConfig,
@@ -270,8 +270,8 @@ def _execute_side_effect_row(
                 run_id=run_id,
             )
         return (tag, data)
-    except StoreWriteError as exc:
-        # A failed store write fails the run, even under on_error="log".
+    except StoreError as exc:
+        # A failed store read or write fails the run, even under on_error="log".
         exc.add_context(node_label=pod_name, tag=tag.as_dict())
         raise
     except Exception as exc:
@@ -326,6 +326,9 @@ def _write_invocation_row(
             record,
             skip_duplicates=True,
         )
+    except StoreReadError:
+        # The stored table could not be read: report the read failure itself.
+        raise
     except Exception as exc:
         raise StoreWriteError(table_path) from exc
 

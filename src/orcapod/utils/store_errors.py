@@ -1,6 +1,6 @@
-"""Helpers that keep a ``StoreWriteError`` intact on its way out of a run.
+"""Helpers that keep a ``StoreError`` intact on its way out of a run.
 
-A failed store write always fails the run (ITL-878). User callbacks that run while
+A failed store read or write always fails the run (ITL-878, ITL-884). User callbacks that run while
 the error propagates (a post-run hook, an observer callback) may fail too; their
 failure is logged and noted on the store error, never raised in its place.
 """
@@ -11,13 +11,13 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from orcapod.errors import StoreWriteError
+from orcapod.errors import StoreError
 
 logger = logging.getLogger(__name__)
 
 
 def note_callback_failure(
-    store_error: StoreWriteError, during: str, failure: Exception
+    store_error: StoreError, during: str, failure: Exception
 ) -> None:
     """Log a callback failure and record it on the propagating store error.
 
@@ -28,7 +28,7 @@ def note_callback_failure(
         failure: The exception the callback raised.
     """
     logger.warning(
-        "%s raised while a store write failure was propagating, which is raised "
+        "%s raised while a store failure was propagating, which is raised "
         + "instead: %s",
         during,
         failure,
@@ -41,9 +41,7 @@ def note_callback_failure(
 
 
 @contextmanager
-def keep_store_error(
-    store_error: StoreWriteError | None, during: str
-) -> Iterator[None]:
+def keep_store_error(store_error: StoreError | None, during: str) -> Iterator[None]:
     """Run a callback so that it cannot replace a propagating store error.
 
     With ``store_error`` set, an ``Exception`` the block raises is logged and noted on
