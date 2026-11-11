@@ -44,6 +44,10 @@ Two construction rules apply to every source and are the most common first error
 - At least one column must be left over as a data column, otherwise it raises
   `ValueError: No data columns found in the table`.
 
+Data with no rows has no columns to read, so `DictSource(data=[], ...)` raises
+`ValueError: Table is empty`. To build a source with no rows, pass `data_schema=` so the
+columns are known.
+
 ### `DerivedSource`
 
 A `DerivedSource` reads the stored results of a node of a

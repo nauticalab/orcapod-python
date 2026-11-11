@@ -186,12 +186,14 @@ class FunctionNodeBase(StreamBase):
             # Use the pod's exposed input schema (ctx excluded) rather than the
             # data function's full schema, because ctx is auto-injected per row.
             expected_data_schema = function_pod.input_data_schema
-            if not schema_utils.check_schema_compatibility(
+            reason = schema_utils.schema_incompatibility(
                 incoming_data_types, expected_data_schema
-            ):
+            )
+            if reason is not None:
                 raise ValueError(
-                    f"Incoming data data type {incoming_data_types} from {input_stream} "
-                    f"is not compatible with expected input schema {expected_data_schema}"
+                    f"Incoming data schema {incoming_data_types} from {input_stream} "
+                    f"is not compatible with expected input schema "
+                    f"{expected_data_schema}: {reason}"
                 )
 
         self._input_stream = input_stream

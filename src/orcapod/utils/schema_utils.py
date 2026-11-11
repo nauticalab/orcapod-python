@@ -39,25 +39,63 @@ def verify_data_schema(data: dict, schema: SchemaLike) -> bool:
 def check_schema_compatibility(
     incoming_types: SchemaLike, receiving_types: Schema
 ) -> bool:
+    """Return whether ``incoming_types`` can be passed to ``receiving_types``.
+
+    See ``schema_incompatibility`` for the rules and for the reason when the
+    answer is no.
+
+    Args:
+        incoming_types: Schema of the data offered (e.g. a stream's data schema).
+        receiving_types: Schema of the parameters that receive it.
+
+    Returns:
+        True if every incoming column is a parameter of a compatible type and
+        every required parameter has a column.
+    """
+    return schema_incompatibility(incoming_types, receiving_types) is None
+
+
+def _type_label(type_info: Any) -> str:
+    """Return a short, readable label for a type in an error message."""
+    if isinstance(type_info, type) and not get_args(type_info):
+        return type_info.__name__
+    return str(type_info)
+
+
+def schema_incompatibility(
+    incoming_types: SchemaLike, receiving_types: Schema
+) -> str | None:
+    """Explain why ``incoming_types`` cannot be passed to ``receiving_types``.
+
+    Every incoming column must be a parameter, its type must be a subhint of
+    the parameter's type, and every parameter without a default must have a
+    column. Nothing is logged: the caller decides how to report the reason.
+
+    Args:
+        incoming_types: Schema of the data offered (e.g. a stream's data schema).
+        receiving_types: Schema of the parameters that receive it.
+
+    Returns:
+        ``None`` when the schemas are compatible, otherwise a one-line reason
+        naming the first offending column or parameter.
+    """
     from beartype.door import is_subhint
 
     for key, type_info in incoming_types.items():
         if key not in receiving_types:
-            logger.warning(f"Key '{key}' not found in parameter types.")
-            return False
+            return f"column '{key}' is not a parameter of the function"
         if not is_subhint(type_info, receiving_types[key]):
-            logger.warning(
-                f"Type mismatch for key '{key}': expected {receiving_types[key]}, got {type_info}."
+            return (
+                f"column '{key}' has type {_type_label(type_info)}, "
+                f"the function expects {_type_label(receiving_types[key])}"
             )
-            return False
 
     # Every receiving key must be present in incoming OR be optional (has a default)
     for key in receiving_types:
         if key not in incoming_types and key not in receiving_types.optional_fields:
-            logger.warning(f"Required key '{key}' missing from incoming types.")
-            return False
+            return f"required parameter '{key}' has no matching column"
 
-    return True
+    return None
 
 
 def extract_function_schemas(

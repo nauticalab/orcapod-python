@@ -146,7 +146,8 @@ class SourceStreamBuilder:
             SourceStreamResult with enriched stream and metadata.
 
         Raises:
-            ValueError: If tag_columns or record_id_column are not in table.
+            ValueError: If the table has no columns ("Table is empty"), or if
+                tag_columns or record_id_column are not in the table.
         """
         tag_columns_tuple = tuple(tag_columns)
         system_tag_columns_tuple = tuple(system_tag_columns)
@@ -154,7 +155,15 @@ class SourceStreamBuilder:
         # 1. Drop system columns from raw input.
         table = arrow_utils.drop_system_columns(table)
 
-        # 2. Validate tag_columns.
+        # 2. Validate tag_columns. A table with no columns at all (e.g. a
+        # DictSource built from no rows and no schema) gets its own error, since
+        # "tag column not found" would point at the wrong problem.
+        if not table.column_names:
+            raise ValueError(
+                "Table is empty: the input has no columns, so its tag and data "
+                "columns cannot be found. To build a source with no rows, give it "
+                "an explicit schema (for example data_schema= on DictSource)."
+            )
         missing_tags = set(tag_columns_tuple) - set(table.column_names)
         if missing_tags:
             raise ValueError(

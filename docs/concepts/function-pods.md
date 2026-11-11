@@ -113,9 +113,10 @@ except ValueError as err:
 # ValueError
 ```
 
-The error message names both schemas, for example `... Schema({'weight': float, 'height':
-float, 'age': int}) is not compatible with expected input schema Schema({'weight': float,
-'height': float})`.
+The error message names both schemas and the first column that does not fit, for example
+`Incoming data schema Schema({'weight': float, 'height': float, 'age': int}) is not
+compatible with expected input schema Schema({'weight': float, 'height': float}): column
+'age' is not a parameter of the function`.
 
 Narrow the stream first with the `SelectDataColumns` [operator](operators.md) (or drop the
 extras with `DropDataColumns`):

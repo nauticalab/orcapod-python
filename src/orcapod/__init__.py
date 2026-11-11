@@ -15,6 +15,7 @@ from .config import (
     OrcapodConfig,
     load_config,
 )
+from .contexts import enable_file_hash_caching
 from .core.function_pod import (
     FunctionPod,
     function_pod,
@@ -78,6 +79,7 @@ __all__ = [
     "HashingConfig",
     "OrcapodConfig",
     "load_config",
+    "enable_file_hash_caching",
     "FunctionPod",
     "function_pod",
     "InvocationContext",

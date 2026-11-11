@@ -21,6 +21,16 @@
   cannot be turned into a record (a naive `datetime`, a value not matching the declared
   type) is still a row failure governed by `error_policy`, like a function that raised. See
   *When the store cannot be written* in the function-pods guide. (ITL-878 #287)
+- `orcapod.enable_file_hash_caching` is exported at the top level (ITL-821).
+- A source built from data with no rows and no schema (e.g. `DictSource(data=[])`) raises
+  `ValueError: Table is empty` instead of `tag_columns not found in table` (ITL-821).
+- Applying a function pod to a stream whose data schema does not fit no longer prints a stray
+  `Key ... not found in parameter types.` line, and the error names the offending column,
+  e.g. `Incoming data schema ... is not compatible with expected input schema ...: column
+  'age' is not a parameter of the function` (it used to say `Incoming data data type`)
+  (ITL-821).
+- `examples/save_and_load_pipelines.py` runs again, rewritten around `PipelineJob`; the test
+  suite now runs every example (ITL-821).
 
 ## [0.2.0] — 2026-11-10
 

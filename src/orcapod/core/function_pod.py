@@ -240,12 +240,12 @@ class _FunctionPodBase(TraceableBase):
         # check_schema_compatibility uses beartype.door.is_subhint which accepts
         # any concrete branch: is_subhint(str, str | Path) → True,
         # is_subhint(int, str | Path) → False.
-        if not schema_utils.check_schema_compatibility(
-            input_schema, expected_data_schema
-        ):
+        reason = schema_utils.schema_incompatibility(input_schema, expected_data_schema)
+        if reason is not None:
             # TODO: use custom exception type for better error handling
             raise ValueError(
-                f"Incoming data data type {input_schema} is not compatible with expected input schema {expected_data_schema}"
+                f"Incoming data schema {input_schema} is not compatible with "
+                f"expected input schema {expected_data_schema}: {reason}"
             )
 
     def process_data(
