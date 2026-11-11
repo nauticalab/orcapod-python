@@ -86,6 +86,24 @@ that raised. See *When the store cannot be written* in the function-pods guide. 
   (ITL-821).
 - `examples/save_and_load_pipelines.py` runs again, rewritten around `PipelineJob`; the test
   suite now runs every example (ITL-821).
+- `polars_filter` with a Polars expression predicate (`stream.polars_filter(pl.col("x") > 0)`)
+  can be hashed, so it works upstream of a join and inside a `PipelineJob` (ITL-828). An
+  expression hashes under the new label `polars_expr_v1`, through Orcapod's own canonical
+  encoding of the expression tree rather than Polars' serialization, which is not stable
+  across Polars versions. Column references, literals, comparisons, arithmetic, boolean
+  operators, `is_null`/`is_not_null`/`is_nan`/`is_not_nan`, `is_in` (a Python list),
+  `is_between`, `all_horizontal`/`any_horizontal`, `str.contains`/`starts_with`/`ends_with`
+  and `cast` are supported. Anything else, notably Python functions (`map_elements`,
+  `map_batches`) and selectors over several columns, raises `ValueError` naming the
+  expression when the filter's identity is needed. Keyword-constraint filters hash as before.
+- Inside a `PipelineJob`, a `PolarsFilter` (keyword constraints too) upstream of a `Join` no
+  longer raises `InputValidationError` (`str` vs `str | None`): the filter now keeps every
+  column's input nullability, instead of returning every column nullable (ITL-828). A filtered
+  row's data hash now equals its source row's, so the data hashes of filtered rows change from
+  `0.2.0`, and a function pod downstream of a `polars_filter` recomputes its results once
+  against a `0.2.0` store.
+- `PolarsFilter(predicates=[...])` and `stream.polars_filter(...)` with the same predicates now
+  have the same hashes (`predicates` is stored as a tuple).
 
 ## [0.2.0] — 2026-11-10
 

@@ -15,6 +15,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   NumpyArrayHandler     -- numpy.ndarray: SHA-256 ContentHash of .npy bytes
   PandasDataFrameHandler -- pd.DataFrame: Arrow Table via Arrow hasher (lazy default-context fallback)
   PandasSeriesHandler   -- pd.Series: Arrow Table via Arrow hasher (lazy default-context fallback)
+  PolarsExprHandler     -- pl.Expr: polars_expr_v1 canonical expression tree (ITL-828)
 
 ``register_builtin_python_type_handlers(registry)`` populates a registry
 with all of the above handlers.
@@ -494,6 +495,39 @@ class PandasSeriesHandler:
         return self._get_arrow_hasher().hash_table(table)
 
 
+class PolarsExprHandler:
+    """Hasher for ``pl.Expr``: the ``polars_expr_v1`` canonical expression tree.
+
+    Delegates to ``polars_expr_content_hash`` in
+    ``orcapod.hashing.semantic_hashing.polars_expr``, whose module docstring defines the
+    grammar. Expressions outside the grammar raise ``ValueError`` naming the expression.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
+        """Return the content hash of ``obj``.
+
+        Args:
+            obj: A ``pl.Expr`` instance.
+            hasher: Ignored. Present for protocol conformance.
+
+        Returns:
+            A ``ContentHash`` with method ``"polars_expr_v1"``.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``pl.Expr``.
+            ValueError: If the expression is outside the ``polars_expr_v1`` grammar.
+        """
+        import polars as _pl
+
+        from orcapod.hashing.semantic_hashing.polars_expr import (
+            polars_expr_content_hash,
+        )
+
+        if not isinstance(obj, _pl.Expr):
+            raise TypeError(f"PolarsExprHandler: expected pl.Expr, got {type(obj)!r}")
+        return polars_expr_content_hash(obj)
+
+
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
@@ -612,6 +646,10 @@ def register_builtin_python_type_handlers(
 
     registry.register(_pd.DataFrame, PandasDataFrameHandler(arrow_hasher))
     registry.register(_pd.Series, PandasSeriesHandler(arrow_hasher))
+
+    import polars as _pl
+
+    registry.register(_pl.Expr, PolarsExprHandler())
 
     logger.debug(
         "register_builtin_python_type_handlers: registered %d hashers",

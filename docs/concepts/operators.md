@@ -310,6 +310,46 @@ print(filt(source).as_table().to_pylist())
 # [{'subject_id': 'mouse_01', 'age': 12, 'weight': 25.3}]
 ```
 
+An expression predicate is part of the filter's identity, so a filtered stream can feed a
+join, a function pod or a `PipelineJob`. Two filters written with the same expression share
+their hashes, even when the expression is spelled differently:
+
+```python
+by_operator = PolarsFilter(predicates=[pl.col("age") > 10])(source)
+by_method = source.polars_filter(pl.col("age").gt(10))
+print(by_operator.pipeline_hash() == by_method.pipeline_hash())
+# True
+```
+
+Orcapod hashes the expression through its own canonical encoding (label `polars_expr_v1`,
+see the [hashing reference](../reference/hashing.md#1c-polars-expression-predicates)), which
+covers column references; literals (numbers, strings, booleans, null, dates, times,
+datetimes, durations, decimals, bytes, and Python lists of integers, floats, strings,
+booleans, dates, times, datetimes or durations, but not of decimals or bytes); comparisons;
+arithmetic;
+`&`, `|`, `^` and `~`; `is_null`, `is_not_null`, `is_nan`, `is_not_nan`, `is_in`,
+`is_between`, `all_horizontal`, `any_horizontal`, `str.contains`, `str.starts_with`,
+`str.ends_with`; and `cast`. A predicate over several columns is supported when each column
+is named, as in `(pl.col("x") > 0) & (pl.col("y") < 5)`.
+
+Anything else (a Python function through `map_elements` or `map_batches`, a selector over
+several columns such as `pl.all()` or `pl.col("x", "y")`, aggregations, `alias`,
+`when/then/otherwise`, NaN or infinite literals, a `pl.Series` literal) raises `ValueError`
+naming the expression as soon as the filter's identity is needed. The message suggests keyword
+constraints for equality filters, or computing a boolean column in a function pod and
+filtering on it:
+
+```python
+udf = source.polars_filter(
+    pl.col("age").map_batches(lambda s: s > 10, return_dtype=pl.Boolean)
+)
+try:
+    udf.pipeline_hash()
+except ValueError as exc:
+    print(str(exc).split(":")[0])
+# Cannot hash the Polars expression 'col("age").python_udf()' for an Orcapod identity
+```
+
 ### Pick and Index
 
 `Pick(column, key)` extracts one entry from a struct- or dict-typed data column, and

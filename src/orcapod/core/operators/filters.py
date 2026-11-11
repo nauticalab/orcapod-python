@@ -39,7 +39,9 @@ class PolarsFilter(UnaryOperator):
         constraints: Mapping[str, Any] | None = None,
         **kwargs,
     ):
-        self.predicates = predicates
+        # A tuple, so PolarsFilter(predicates=[e]) and stream.polars_filter(e) share one
+        # identity (a list and a tuple hash differently).
+        self.predicates = tuple(predicates)
         self.constraints = constraints if constraints is not None else {}
         super().__init__(**kwargs)
 
@@ -61,14 +63,20 @@ class PolarsFilter(UnaryOperator):
         # large_string, list -> large_list, recursively; hash-identical).
         # This also undoes Polars' other changes, such as fixed_size_binary ->
         # large_binary for system-tag record ids.
+        input_fields = [
+            field.with_type(
+                arrow_utils.normalize_to_large_types(field.type, keep_null=True)
+            )
+            for field in table.schema
+        ]
         filtered_table = arrow_utils.restore_column_types(
-            filtered_table,
-            {
-                field.name: arrow_utils.normalize_to_large_types(
-                    field.type, keep_null=True
-                )
-                for field in table.schema
-            },
+            filtered_table, {field.name: field.type for field in input_fields}
+        )
+        # Polars returns every field nullable; every column gets its input
+        # nullability back, so a filtered stream keeps its input schema and
+        # still joins with streams whose tags are non-nullable.
+        filtered_table = arrow_utils.restore_schema_nullability(
+            filtered_table, pa.schema(input_fields)
         )
 
         return ArrowTableStream(

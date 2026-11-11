@@ -242,6 +242,66 @@ The pipeline hash uses the same `SemanticAwarePythonHasher` with the **`pipeline
 
 ---
 
+### 1c. Polars expression predicates
+
+`PolarsFilter.identity_structure()` is `("PolarsFilter", predicates, constraints)`, with
+`predicates` always a tuple. Keyword constraints hash as plain values. A `pl.Expr` predicate
+hashes through `PolarsExprHandler` to the leaf `polars_expr_v1:<hex>`.
+
+Polars' own serialization of an expression (`Expr.meta.serialize`) changed layout between
+1.20, 1.30 and 1.36 and is documented as unstable across versions, and `str(expr)` is lossy
+(`pl.lit(0.1, dtype=pl.Float32)` and `pl.lit(0.1, dtype=pl.Float64)` print alike), so neither
+is hashed. Orcapod parses the JSON serialization with a strict parser into a tree in its own
+grammar and hashes that:
+
+```text
+ContentHash("polars_expr_v1", sha256(canonical JSON of the tree))
+canonical JSON = keys sorted, separators (",", ":"), UTF-8
+
+node    := {"col": <name>} | {"lit": <literal>}
+         | {"binary": [<op>, <node>, <node>]}
+         | {"fn": [<fname>, <options>, [<node>, ...]]}
+         | {"cast": [<dtype>, "strict" | "non_strict", <node>]}
+op      := eq ne eq_missing ne_missing lt le gt ge and or xor add sub mul truediv
+           floordiv mod
+fname   := not is_null is_not_null is_nan is_not_nan negate all_horizontal
+           any_horizontal str.starts_with str.ends_with     (options {})
+         | is_in {"nulls_equal": bool} | is_between {"closed": both|left|right|none}
+         | str.contains {"literal": bool, "strict": bool}
+literal := {"dyn_int": "<decimal>"} | {"dyn_float": "<float.hex()>"}
+         | {"null": null} | {"boolean": bool} | {"string": str}
+         | {"int8" ... "uint64": "<decimal>"} | {"float32" | "float64": "<float.hex()>"}
+         | {"decimal": ["<unscaled>", precision, scale]} | {"binary": "<hex>"}
+         | {"date": days} | {"time": ns}
+         | {"datetime": [value, unit, time zone or null]} | {"duration": [value, unit]}
+         | {"list": [<dtype>, [<value or null>, ...]]}   (no lists of decimals or bytes)
+dtype   := the dtype names of the Polars value descriptor ("int64", "string",
+           {"datetime": [unit, tz]}, {"list": <dtype>}, ...)
+```
+
+The module docstring of `orcapod.hashing.semantic_hashing.polars_expr` is the full
+definition. Consequences:
+
+* `pl.col("x") > 0`, `pl.col("x").gt(0)`, `pl.col("x") > pl.lit(0)` and `0 < pl.col("x")`
+  hash equal. `> 0` (a Python int, typed by Polars against the column), `> 0.0` and
+  `> pl.lit(0, dtype=pl.Int8)` hash differently. The expression is hashed as written:
+  `a & b` and `b & a` differ, and so does the order of the predicates of one filter.
+* Unsupported expressions raise `ValueError` naming the expression: Python functions
+  (`map_elements`, `map_batches`, whose serialized form differs between processes),
+  selectors over several columns (`pl.col("x", "y")`, `pl.all()`, regex columns,
+  `pl.exclude`, `cs.*`, dtype columns), aggregations and windows, `alias`,
+  `when/then/otherwise`, NaN and infinite literals (the JSON form cannot tell them apart),
+  `pl.Series` literals, and any node or layout the parser does not know. A Polars release
+  that changes its serialization therefore fails loudly rather than moving a hash; the parser
+  is then taught the new layout and maps it onto the same tree.
+* Supporting a new construct adds to the grammar without changing any existing hash. Only a
+  change to the encoding of a supported construct needs a new label (`polars_expr_v2`).
+
+The canonical trees of a corpus of expressions are pinned in
+`tests/test_hashing/test_polars_expr_hashing.py`, and their hashes in the golden suite.
+
+---
+
 ## 2. Source Provenance & System Tags
 
 When a source is built by `SourceStreamBuilder`, four hash-related operations happen in

@@ -850,3 +850,94 @@ def pipeline_job() -> dict[str, Any]:
                 _jsonable(v) for v in records.column("__golden_record_id").to_pylist()
             )
     return out
+
+
+def _polars_exprs() -> dict[str, Any]:
+    """Build representative Polars expression predicates, keyed by name."""
+    from datetime import date, datetime, timezone
+
+    import polars as pl
+
+    return {
+        "gt_dyn_int": pl.col("x") > 0,
+        "gt_dyn_float": pl.col("x") > 0.5,
+        "gt_int8": pl.col("x") > pl.lit(0, dtype=pl.Int8),
+        "eq_string": pl.col("s") == "abc",
+        "and_two_columns": (pl.col("x") > 0) & (pl.col("y") < 5),
+        "is_in_strings": pl.col("s").is_in(["a", "b"]),
+        "is_between_dates": pl.col("d").is_between(
+            date(2024, 1, 1), date(2024, 12, 31)
+        ),
+        "gt_datetime_utc": pl.col("t") > datetime(2024, 1, 1, tzinfo=timezone.utc),
+        "is_not_null_cast": pl.col("x").cast(pl.Float32).is_not_null(),
+        "str_contains": pl.col("s").str.contains("^a"),
+    }
+
+
+@case("semantic", "polars_expr")
+def semantic_polars_exprs() -> dict[str, Any]:
+    """Record the ``polars_expr_v1`` semantic hash of each representative expression."""
+    hasher = _ctx().semantic_hasher
+    return {k: hasher.hash_object(e).to_string() for k, e in _polars_exprs().items()}
+
+
+@case("pipeline", "polars_filter_expr")
+def pipeline_polars_filter_expr() -> dict[str, Any]:
+    """Record expression-only and expression-plus-keyword filter streams."""
+    import polars as pl
+
+    from orcapod.operators import PolarsFilter
+
+    out = _prefixed(
+        "expr",
+        stream_summary(PolarsFilter(predicates=[pl.col("weight") > 20])(_grouped())),
+    )
+    out.update(
+        _prefixed(
+            "mixed",
+            stream_summary(
+                PolarsFilter(
+                    predicates=[pl.col("weight") > 20], constraints={"cohort": "a"}
+                )(_grouped())
+            ),
+        )
+    )
+    return out
+
+
+@case("pipeline", "polars_filter_expr_job")
+def pipeline_polars_filter_expr_job() -> dict[str, Any]:
+    """Record a job with an expression filter upstream of a join and a function pod."""
+    import polars as pl
+
+    from orcapod import PipelineJob
+    from orcapod.databases import InMemoryArrowDatabase
+    from orcapod.operators import Join
+
+    db = InMemoryArrowDatabase()
+    job = PipelineJob(name="golden_filter_job", store=db)
+    with job:
+        older = _subjects().polars_filter(pl.col("age") > 3, label="older")
+        joined = Join(label="joined")(older, _scans())
+        golden_adjust.pod(joined, label="adjust")
+    job.run()
+
+    out: dict[str, Any] = {}
+    for label in sorted(job.nodes):
+        out.update(_prefixed(f"node[{label}]", stream_summary(job.nodes[label])))
+    paths = sorted(db.list_sources())
+    out["table_paths"] = ["/".join(p) for p in paths]
+    for path in paths:
+        name = "/".join(path)
+        records = db.get_all_records(path, record_id_column="__golden_record_id")
+        assert records is not None
+        if "__input_data_hash" in records.column_names and "_result" in path:
+            # Result-table record ids are UUIDv7 (volatile); pin the lookup key instead.
+            out[f"table[{name}].input_data_hashes"] = sorted(
+                _jsonable(v) for v in records.column("__input_data_hash").to_pylist()
+            )
+        else:
+            out[f"table[{name}].record_ids"] = sorted(
+                _jsonable(v) for v in records.column("__golden_record_id").to_pylist()
+            )
+    return out
