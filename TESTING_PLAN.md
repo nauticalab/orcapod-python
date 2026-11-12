@@ -11,7 +11,7 @@ Tests are derived from these specification sources (NOT from reading implementat
 2. Protocol definitions in `src/orcapod/protocols/` — interface contracts
 3. Type annotations and docstrings — method signatures and documented behavior
 4. `CLAUDE.md` architecture overview — documented invariants and constraints
-5. `DESIGN_ISSUES.md` — known bugs that tests should catch
+5. `design_issues/` — known bugs that tests should catch
 
 ## Deliverables
 

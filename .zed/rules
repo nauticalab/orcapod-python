@@ -15,17 +15,31 @@ When adding or changing any instruction, update BOTH:
 
 ## Design issues log
 
-DESIGN_ISSUES.md at the project root is the canonical log of known design problems, bugs, and
-code quality issues.
+design_issues/ at the project root is the canonical log of known design problems, bugs, and
+code quality issues: one file per entry (developer, November 11, 2026; ITL-968). There is no
+DESIGN_ISSUES.md; never bring it back, and never put two entries in one file.
+
+- An entry is the file design_issues/<LINEAR-ISSUE-ID>-<ENTRY-ID>.md (e.g.
+  design_issues/ITL-955-GB1.md). Its first line is the "## <area heading>" it belongs
+  under, then a blank line, "### <ENTRY-ID> — <title>", the **Status:** ("open",
+  "in progress" or "resolved"), **Severity:** and **Issue:** lines, a blank line and the
+  body.
+- Read the log with `uv run python scripts/design_issues.py` (index by area; --status open
+  filters; --full prints every entry). Find one entry by id: ls design_issues/*-GB1.md.
+- Check the files with `uv run python scripts/design_issues.py --check`
+  (tests/test_design_issues.py runs it in CI).
+- design_issues/README.md is the full statement of the convention, with the severity
+  guide.
 
 When fixing a bug or addressing a design problem:
-1. Check DESIGN_ISSUES.md first — if a matching issue exists, update its status to
-   "in progress" while working and "resolved" once done, adding a brief Fix: note.
-2. If no matching issue exists, ask the user whether it should be added before proceeding.
-   If yes, add it (status "open" or "in progress" as appropriate).
+1. Check design_issues/ first — if a matching entry exists, edit its file: update its
+   status to "in progress" while working and "resolved" once done, adding a brief Fix:
+   note.
+2. If no matching entry exists, ask the user whether it should be added before proceeding.
+   If yes, add it as a new file (status "open" or "in progress" as appropriate).
 
 When discovering a new issue that won't be fixed immediately, ask the user whether it should be
-logged in DESIGN_ISSUES.md before adding it.
+logged in design_issues/ before adding it.
 
 ## Superpowers artifacts
 
@@ -192,7 +206,9 @@ resolves several issues uses its primary issue's id).
 - The file holds only the text that would have gone under the release heading in
   CHANGELOG.md: the same category headings CHANGELOG.md uses
   (### Breaking changes and migration, ### Added, ### Changed, ### Fixed,
-  ### Known limitations), each followed by its bullet lines; no version heading, no date.
+  ### Known limitations), each followed by its text: bullet lines, or #### sub-headings
+  with paragraphs, as CHANGELOG.md itself has. No version heading, no date, no other
+  #, ## or ### heading, and no empty category.
 - If your branch already edits CHANGELOG.md, restore CHANGELOG.md to its state on the
   branch's base and move that text, unchanged, into the fragment.
 - Check a fragment with uv run python scripts/assemble_changelog.py --check
@@ -376,9 +392,10 @@ element of an output data column came from an input data column, and an operator
 tag column into a data column. When adding or changing an operator, check keys() of the output:
 no input tag name may appear among the data columns.
 
-GroupBy is the only operator that reduces row count many→one: it collapses N rows sharing a
-tag tuple into one row with list-valued members. It synthesizes no new data values and keys
-only on tags, never on data. Its non-key tags stay tags, list-valued, as Batch keeps them.
+Two operators reduce row count many→one. Batch groups consecutive rows by count; GroupBy
+groups by tag values: it collapses the N rows sharing a tag tuple into one row with
+list-valued members. Neither synthesizes new data values, and GroupBy keys only on tags,
+never on data. Its non-key tags stay tags, list-valued, as Batch keeps them.
 
 Operator or derived source? (developer, November 11, 2026) The test is: does any data
 element come from a tag value, or from anywhere other than the input's data elements? If yes,

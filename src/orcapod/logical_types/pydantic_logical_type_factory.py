@@ -89,7 +89,7 @@ class PydanticLogicalType(BaseLogicalType):
             logical_name, storage_type, metadata=_metadata
         )
         self._arrow_ext: pa.ExtensionType | None = None
-        # ``storage_type`` must not contain nested extension types (ET1 in DESIGN_ISSUES.md).
+        # ``storage_type`` must not contain nested extension types (ET1 in design_issues/).
         # On the write path, ``PydanticLogicalTypeFactory.create_for_python_type`` strips any
         # top-level extension type from each field's Arrow type before inserting it into the
         # struct. On the read path, ``reconstruct_from_arrow`` receives a ``storage_type``
@@ -279,7 +279,7 @@ class PydanticLogicalTypeFactory:
             annotation = hints.get(field_name, Any)
             arrow_type = converter.register_python_class(annotation)
             # Strip top-level extension type before inserting into the struct (ET1;
-            # see DESIGN_ISSUES.md): Arrow cannot represent extension types inside
+            # see design_issues/): Arrow cannot represent extension types inside
             # struct field types.
             if isinstance(arrow_type, pa.ExtensionType):
                 arrow_type = arrow_type.storage_type

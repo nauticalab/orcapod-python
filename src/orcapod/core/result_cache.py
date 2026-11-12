@@ -44,7 +44,7 @@ class ResultCache:
     The match strategy is extensible: the default lookup matches on
     ``INPUT_DATA_HASH_COL`` only, but callers can supply additional
     constraints (e.g. function variation columns) to narrow the match.
-    This is the hook for future match-tier support (see DESIGN_ISSUES P6).
+    This is the hook for future match-tier support (see design_issues/ P6).
 
     Args:
         result_database: The database to store/retrieve cached results.

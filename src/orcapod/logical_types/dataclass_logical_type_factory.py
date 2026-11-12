@@ -89,7 +89,7 @@ class DataclassLogicalType(BaseLogicalType):
             logical_name, storage_type, metadata=_metadata
         )
         self._arrow_ext: pa.ExtensionType | None = None
-        # ``storage_type`` must not contain nested extension types (ET1 in DESIGN_ISSUES.md).
+        # ``storage_type`` must not contain nested extension types (ET1 in design_issues/).
         # On the write path, ``DataclassLogicalTypeFactory.create_for_python_type`` strips any
         # top-level extension type from each field's Arrow type before inserting it into the
         # struct. On the read path, ``reconstruct_from_arrow`` receives a ``storage_type``
@@ -274,7 +274,7 @@ class DataclassLogicalTypeFactory:
             arrow_type = converter.register_python_class(annotation)
             # register_python_class returns a storage-safe type: may be extension at the
             # top level, but struct fields are always plain. Strip the top-level extension
-            # type here before inserting into the struct (ET1; see DESIGN_ISSUES.md).
+            # type here before inserting into the struct (ET1; see design_issues/).
             if isinstance(arrow_type, pa.ExtensionType):
                 arrow_type = arrow_type.storage_type
             arrow_fields.append(pa.field(field.name, arrow_type))
