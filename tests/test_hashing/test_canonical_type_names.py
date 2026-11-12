@@ -290,15 +290,18 @@ class TestFunctionSignatureGolden:
 
     def test_extractor_without_converter(self):
         info = FunctionSignatureExtractor().extract_function_info(golden_fn)
-        assert info["params"] == (
-            "a: pathlib.Path, b: pathlib.Path | str, c: list[pathlib.Path], "
-            "d: dict[str, pathlib.Path], e: datetime.datetime"
-        )
+        assert [(p["name"], p["annotation"]) for p in info["parameters"]] == [
+            ("a", "pathlib.Path"),
+            ("b", "pathlib.Path | str"),
+            ("c", "list[pathlib.Path]"),
+            ("d", "dict[str, pathlib.Path]"),
+            ("e", "datetime.datetime"),
+        ]
 
     def test_function_object_hash(self):
         hasher = get_default_context().semantic_hasher
         assert hasher.hash_object(golden_fn).to_string() == (
-            "semantic_v1:79e6590be1c9177a9b564559bd9dea14dd09968593da57174daae80dcfbfb4d0"
+            "semantic_v1:a55cef45f6b09c6d4189f958f97153bcfe1b510ea620695098e9b6c44695868b"
         )
 
 
@@ -312,8 +315,7 @@ class TestFunctionPodGolden:
     def test_function_signature_hash(self, data_function: PythonDataFunction):
         variation = data_function.get_function_variation_data()
         assert variation["function_signature_hash"] == (
-            b"semantic_v1:\x1cT\x97A$\x9d%\xac\x1e\xd4t\xa0#7\xe3Q\x1f*\xa5{"
-            b"\xa8\xfa\xee\xe2E\xf6\xa5\xf7\x80\x8d\xd7\x8b"
+            b"semantic_v1:\x0bHO\x1c\xc0K\xb9qp\x9cf\xcd\xb3\x15\x90T2fS<\xd4\xe5.\xcf\x05\x88\n\xdf*\x1d&\x9e"
         )
 
     def test_function_content_hash(self, data_function: PythonDataFunction):

@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from orcapod.hashing.semantic_hashing.encoded import Encoded
+from orcapod.hashing.semantic_hashing.function_info_extractors import ParameterDefault
 from orcapod.logical_types.identifier import logical_type_identifier
 from orcapod.types import ContentHash, Schema
 from orcapod.utils.canonical_type_names import canonical_type_name
@@ -61,6 +62,25 @@ class BytesHandler:
         raise TypeError(f"BytesHandler: expected bytes or bytearray, got {type(obj)!r}")
 
 
+def hash_default_value(value: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
+    """Hash one parameter default.
+
+    The single place that decides how a default value is hashed: like every other
+    hashed value, by the semantic hasher, never by its ``repr()``.
+
+    Args:
+        value: The default value.
+        hasher: The semantic hasher hashing the function.
+
+    Returns:
+        The hash of the value.
+
+    Raises:
+        TypeError: If the hasher has no way to hash the value.
+    """
+    return hasher.hash_object(value)
+
+
 class FunctionHandler:
     """Hasher for Python functions/callables with a ``__code__`` attribute.
 
@@ -80,7 +100,51 @@ class FunctionHandler:
         func_name = getattr(obj, "__name__", repr(obj))
         logger.debug("FunctionHandler: extracting info for function %r", func_name)
         info: dict[str, Any] = self.function_info_extractor.extract_function_info(obj)
-        return info
+        parameters = info.get("parameters")
+        if not parameters:
+            return info
+        return {
+            **info,
+            "parameters": [
+                self._with_hashed_default(entry, obj, hasher) for entry in parameters
+            ],
+        }
+
+    @staticmethod
+    def _with_hashed_default(
+        entry: dict[str, Any], func: Any, hasher: "SemanticHasherProtocol"
+    ) -> dict[str, Any]:
+        """Return a parameter entry with its default replaced by the default's hash.
+
+        Args:
+            entry: One parameter entry of the extracted function description.
+            func: The function the parameter belongs to.
+            hasher: The semantic hasher hashing the function.
+
+        Returns:
+            ``entry`` unchanged when it has no ``ParameterDefault``; otherwise a
+            copy whose ``"default"`` is the hash of the default value.
+
+        Raises:
+            TypeError: If the default value cannot be hashed. The message names the
+                parameter and the function; the hasher's error is its cause.
+        """
+        default = entry.get("default")
+        if not isinstance(default, ParameterDefault):
+            return entry
+        try:
+            default_hash = hash_default_value(default.value, hasher)
+        except TypeError as exc:
+            module = getattr(func, "__module__", None)
+            qualname = getattr(func, "__qualname__", None) or repr(func)
+            function_name = f"{module}.{qualname}" if module else qualname
+            raise TypeError(
+                f"Cannot hash the default value of parameter {entry['name']!r} of "
+                f"function {function_name}: {exc} A default value is part of the "
+                "function's hash: use a default the hasher can hash, or remove the "
+                "default and supply the value as an input."
+            ) from exc
+        return {**entry, "default": default_hash}
 
 
 class TypeObjectHandler:

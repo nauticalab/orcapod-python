@@ -1,5 +1,6 @@
 import inspect
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.hashing.hash_utils import canonical_annotation_str
@@ -10,60 +11,50 @@ if TYPE_CHECKING:
     from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 
-def _format_param(
-    param: inspect.Parameter,
-    canonical_annotation: str | None,
-    include_defaults: bool,
-) -> str:
-    """Reconstruct a parameter string from its structured components.
+@dataclass(frozen=True)
+class ParameterDefault:
+    """A parameter's default value, not yet hashed.
 
-    Produces output identical to ``str(inspect.Parameter)`` for normal inputs,
-    but substitutes ``canonical_annotation`` for the raw annotation string without
-    any string search/replace.  This avoids two failure modes of the substitution
-    approach:
-
-    1. Accidentally matching the annotation string inside a complex default
-       value's ``repr`` (e.g. a dataclass whose repr embeds the type name).
-    2. Truncating annotations that contain ``=`` (e.g. ``Literal["a=b"]``) when
-       stripping defaults via ``str.split("=")``.
-
-    The format follows CPython's ``inspect.Parameter.__str__`` exactly:
-
-    - With annotation and default:  ``name: type = repr(default)``
-    - With annotation, no default:  ``name: type``
-    - No annotation, with default:  ``name=repr(default)``  (no spaces around ``=``)
-    - No annotation, no default:    ``name``
-    - ``*args`` / ``**kwargs`` get the corresponding prefix.
+    ``FunctionSignatureExtractor`` has no hasher, so it reports each default wrapped
+    in this class and ``FunctionHandler`` replaces it with the semantic hasher's hash
+    of the value. The structure hasher has no handler for this class: a description
+    whose defaults were not replaced is refused instead of being hashed with a raw
+    value in it.
 
     Args:
-        param: The parameter to format.
-        canonical_annotation: Canonical string for the annotation, or ``None``
-            when the parameter carries no annotation.
-        include_defaults: Whether to include the default value.
+        value: The default value as written in the function's signature.
+    """
+
+    value: Any
+
+
+def _parameter_entry(
+    param: inspect.Parameter,
+    canonical_annotation: str | None,
+    include_default: bool,
+) -> dict[str, Any]:
+    """Describe one parameter as a structured entry.
+
+    Args:
+        param: The parameter to describe.
+        canonical_annotation: Canonical text of the annotation, or ``None`` when the
+            parameter carries no annotation.
+        include_default: Whether to report the default value.
 
     Returns:
-        A formatted parameter string.
+        ``{"name", "kind"}`` plus ``"annotation"`` when the parameter is annotated
+        and ``"default"`` (a ``ParameterDefault``) when it has a default and
+        ``include_default`` is true. ``kind`` is the name of the parameter's
+        ``inspect`` kind (``"POSITIONAL_ONLY"``, ``"POSITIONAL_OR_KEYWORD"``,
+        ``"VAR_POSITIONAL"``, ``"KEYWORD_ONLY"`` or ``"VAR_KEYWORD"``). An absent key
+        is different from any value: a default of ``None`` is not "no default".
     """
-    if param.kind == inspect.Parameter.VAR_POSITIONAL:
-        prefix = "*"
-    elif param.kind == inspect.Parameter.VAR_KEYWORD:
-        prefix = "**"
-    else:
-        prefix = ""
-
-    base = f"{prefix}{param.name}"
-    has_default = include_defaults and param.default is not inspect.Parameter.empty
-
+    entry: dict[str, Any] = {"name": param.name, "kind": param.kind.name}
     if canonical_annotation is not None:
-        # "name: type" or "name: type = default"
-        if has_default:
-            return f"{base}: {canonical_annotation} = {repr(param.default)}"
-        return f"{base}: {canonical_annotation}"
-    else:
-        # "name" or "name=default"  (CPython omits spaces around = without annotation)
-        if has_default:
-            return f"{base}={repr(param.default)}"
-        return base
+        entry["annotation"] = canonical_annotation
+    if include_default and param.default is not inspect.Parameter.empty:
+        entry["default"] = ParameterDefault(param.default)
+    return entry
 
 
 class FunctionNameExtractor:
@@ -93,9 +84,11 @@ class FunctionSignatureExtractor:
     reorganisations therefore do not invalidate cached function-pod signatures;
     a change of the type's identifier does.
 
-    For **parameter** annotations each parameter string is reconstructed from
-    its structured components (name, kind, canonical annotation, default) via
-    ``_format_param``, avoiding any string search/replace.
+    Each **parameter** is one structured entry (see ``_parameter_entry``): its
+    name, its kind, the canonical text of its annotation and its default value. A
+    default is reported as a ``ParameterDefault``; ``FunctionHandler`` replaces it
+    with the semantic hasher's hash of the value, so a default never enters the
+    hash as its ``repr()`` (ITL-953).
 
     For **return** annotations the raw annotation object is stored unchanged.
     Canonicalisation happens at hash time: ``TypeObjectHandler`` (wired with the
@@ -146,23 +139,22 @@ class FunctionSignatureExtractor:
 
         tc = self._type_converter
 
-        # Build each parameter string from structured components.
-        # Using _format_param instead of str(param) + string substitution avoids
-        # accidentally matching the annotation text inside a default value's repr,
-        # and correctly handles annotations that contain '=' (e.g. Literal["a=b"]).
-        param_strs = []
-        for _, param in sig.parameters.items():
+        # One structured entry per parameter, in declared order: name, kind,
+        # canonical annotation and default. Nothing is formatted into text, so a
+        # default's value can never be confused with part of an annotation.
+        parameters = []
+        for param in sig.parameters.values():
             annotation = param.annotation
             canonical_ann = (
                 canonical_annotation_str(annotation, tc)
                 if annotation is not inspect.Parameter.empty
                 else None
             )
-            param_strs.append(
-                _format_param(param, canonical_ann, self.include_defaults)
+            parameters.append(
+                _parameter_entry(param, canonical_ann, self.include_defaults)
             )
 
-        parts["params"] = ", ".join(param_strs)
+        parts["parameters"] = parameters
 
         # Add return annotation if present.
         # The raw annotation object is stored here and hashed by the type

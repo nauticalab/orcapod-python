@@ -17,8 +17,8 @@
     "Optional[op.File]": "semantic_v1:7816cc078cf2984dd36907c954daf1faff0272a8f7b66faa1ca5443e0552d8f9"
   },
   "function_info_hashes": {
-    "fn_no_annotations": "semantic_v1:45aaeae8585a01d32864c5bc9b6419cec10c58ac6a4edab012f37fde0125f300",
-    "fn_builtin_param": "semantic_v1:4188e21fba6bb2e56a2f3b5d18b3b61e7c08044bbcfa2188a0a6b2cb13a0526a",
+    "fn_no_annotations": "semantic_v1:cd869089f120616e2030978c623e0f2ed3175fec799837eb3d546a06e3d20784",
+    "fn_builtin_param": "semantic_v1:450ffccf13fe5018da5393a701dcbc31f2e299bc152925a67547f09277ceece1",
     "fn_orcapod_param": "semantic_v1:f6d172eb51f2e924ef5955fca69d873ce35a7a454d7be20903295cb2dd4cfcc5",
     "fn_orcapod_return": "semantic_v1:2ec283815474854f4f869f7f426b9b7d1836baa8179a62958f24298a4628e2a2",
     "fn_generic_orcapod": "semantic_v1:bf9bf058a6b7570e5c9a55a788008d7f12ed310fb4d0e3a433f6ac7a635b5f9b",
@@ -26,8 +26,8 @@
     "fn_mixed": "semantic_v1:cd311a2c94580a0b176784daa422445497a9e305c1bf580b340a71b1b8c3b974"
   },
   "function_object_hashes": {
-    "fn_no_annotations": "semantic_v1:45aaeae8585a01d32864c5bc9b6419cec10c58ac6a4edab012f37fde0125f300",
-    "fn_builtin_param": "semantic_v1:32a86b953b01e9b9b7c0a77a8fe1001b4d2f0a024d24200664eadd1158d4c25f",
+    "fn_no_annotations": "semantic_v1:cd869089f120616e2030978c623e0f2ed3175fec799837eb3d546a06e3d20784",
+    "fn_builtin_param": "semantic_v1:450ffccf13fe5018da5393a701dcbc31f2e299bc152925a67547f09277ceece1",
     "fn_orcapod_param": "semantic_v1:f6d172eb51f2e924ef5955fca69d873ce35a7a454d7be20903295cb2dd4cfcc5",
     "fn_orcapod_return": "semantic_v1:2ec283815474854f4f869f7f426b9b7d1836baa8179a62958f24298a4628e2a2",
     "fn_generic_orcapod": "semantic_v1:bf9bf058a6b7570e5c9a55a788008d7f12ed310fb4d0e3a433f6ac7a635b5f9b",

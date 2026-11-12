@@ -207,7 +207,26 @@ class FunctionInfoExtractorProtocol(Protocol):
         output_typespec: Schema | None = None,
         exclude_function_signature: bool = False,
         exclude_function_body: bool = False,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        """Describe a function as a structure the semantic hasher can hash.
+
+        An extractor that reports parameters returns them under ``"parameters"``
+        as a list of entries, one per parameter. An entry's ``"default"`` that is a
+        ``ParameterDefault`` is replaced by ``FunctionHandler`` with the semantic
+        hasher's hash of the default value; the extractor itself has no hasher.
+
+        Args:
+            func: The function to describe.
+            function_name: Name to use in place of the function's own name.
+            input_typespec: Input schema of the function, when known.
+            output_typespec: Output schema of the function, when known.
+            exclude_function_signature: Whether to leave the signature out.
+            exclude_function_body: Whether to leave the body out.
+
+        Returns:
+            The function's description.
+        """
+        ...
 
 
 class SemanticTypeHasherProtocol(Protocol):

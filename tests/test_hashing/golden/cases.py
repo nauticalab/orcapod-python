@@ -366,6 +366,64 @@ def semantic_values() -> dict[str, Any]:
     return {k: hasher.hash_object(v).to_string() for k, v in SEMANTIC_VALUES.items()}
 
 
+def golden_fn_plain(a: int, b: str) -> float:
+    """Function hashed as a value by the semantic group (ITL-953). DO NOT MOVE."""
+    return float(a)
+
+
+def golden_fn_defaults(
+    a: int,
+    b: str = "x",
+    c: int | None = None,
+    d: tuple[int, ...] = (1, 2),
+    e: frozenset[str] = frozenset({"p", "q", "r"}),
+    f: dict[str, list[int]] = {"k": [1, 2], "j": []},  # noqa: B006  (never mutated)
+) -> float:
+    """Function with default values, hashed as a value (ITL-953). DO NOT MOVE."""
+    return float(a)
+
+
+def golden_fn_kinds(a: int, /, b: int, *, c: int = 0) -> int:
+    """Function with every parameter kind, hashed as a value (ITL-953). DO NOT MOVE."""
+    return a + b + c
+
+
+def golden_scaled(age: int, factor: float = 2.0) -> float:
+    """Data function with a default, pinned by its stored signature hash. DO NOT MOVE."""
+    return age * factor
+
+
+@case("semantic", "function")
+def semantic_functions() -> dict[str, Any]:
+    """Pin the hash of a function used as a value and the stored signature hash.
+
+    A default value enters as the semantic hasher's hash of the value and each
+    parameter carries its kind (ITL-953).
+
+    Returns:
+        The function-value hashes, and the ``function_signature_hash`` a data
+        function stores with every result row.
+    """
+    from orcapod.core.data_function import PythonDataFunction
+
+    hasher = _ctx().semantic_hasher
+    out: dict[str, Any] = {
+        "value.plain": hasher.hash_object(golden_fn_plain).to_string(),
+        "value.defaults": hasher.hash_object(golden_fn_defaults).to_string(),
+        "value.kinds": hasher.hash_object(golden_fn_kinds).to_string(),
+    }
+    data_functions = {
+        "ratio": golden_ratio.pod.data_function,
+        "scaled": PythonDataFunction(golden_scaled, output_keys="scaled"),
+    }
+    for name, data_function in data_functions.items():
+        variation = data_function.get_function_variation_data()
+        out[f"stored_signature.{name}"] = _bytes_text(
+            variation["function_signature_hash"]
+        )
+    return out
+
+
 def _semantic_types() -> dict[str, Any]:
     return {
         "int": int,

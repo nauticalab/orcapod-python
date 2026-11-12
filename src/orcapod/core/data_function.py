@@ -19,7 +19,6 @@ from orcapod.core.base import TraceableBase
 from orcapod.core.datagrams import Datagram, Data
 from orcapod.hashing.hash_utils import (
     get_function_components,
-    get_function_signature,
 )
 from orcapod.core.result_cache import ResultCache
 from orcapod.protocols.core_protocols import DataFunctionProtocol, DataProtocol
@@ -518,8 +517,12 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         self._git_hash = git_hash
 
         semantic_hasher = self.data_context.semantic_hasher
+        # The signature hash is the hash of the function used as a value: one
+        # structured description of the signature (module, name, each parameter's
+        # name, kind, annotation and default, return annotation), with every default
+        # hashed by the semantic hasher (ITL-953).
         self._function_signature_hash = semantic_hasher.hash_object(
-            get_function_signature(function)
+            function
         ).to_prefixed_digest()
         self._function_content_hash = semantic_hasher.hash_object(
             get_function_components(self._function)

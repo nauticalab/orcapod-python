@@ -1,4 +1,9 @@
 {
+  "function.stored_signature.ratio": "semantic_v1:7804cfbf8935f990b4d7941be5dae40aa9b2ff0bc94a3eb81d97a6db4b0dce77",
+  "function.stored_signature.scaled": "semantic_v1:143251902c84387a1acb97e0076d00a3d17c0b4671c3a3449271750c8c38866e",
+  "function.value.defaults": "semantic_v1:a55248ece1fc5e1a3c19860c390217a2325b843a0469982749706f38175d4366",
+  "function.value.kinds": "semantic_v1:1dc69aa0a124034e0ed4a42eaff8b53eaf417f37fdf992b578851b576624825b",
+  "function.value.plain": "semantic_v1:9a1060e257ae4ed91e08cd674ab7504d267df5f6a444a6b63bf7c334817950fc",
   "polars_expr.and_two_columns": "polars_expr_v1:f8d1228cb5a4f9ca281f2918acc70ac9067052301c4784ec205ed71d6648afd7",
   "polars_expr.eq_string": "polars_expr_v1:64fbdf549ede833eed74ee19dd1884292576534c215bfdb2521ce16df514132a",
   "polars_expr.gt_datetime_utc": "polars_expr_v1:b791db9b35617d6296304cc8eda154da2fe7049565b9d0e209c9a39ac731b603",

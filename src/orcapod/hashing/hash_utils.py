@@ -236,6 +236,10 @@ def get_function_signature(
 
     param_strs = []
     for name, param in sig.parameters.items():
+        if not include_defaults:
+            # Drop the default from the parameter itself; cutting the formatted text
+            # at "=" would truncate an annotation such as Literal["a=b"].
+            param = param.replace(default=inspect.Parameter.empty)
         annotation = typing.cast(object, param.annotation)
         param_str = stabilize_type_names(str(param), annotation)
         if annotation is not inspect.Parameter.empty and is_union_annotation(
@@ -248,8 +252,6 @@ def get_function_signature(
             # Replace ": <old_ann>" with ": <new_ann>" (first occurrence only).
             # The ": " prefix distinguishes the annotation from the default value.
             param_str = param_str.replace(f": {old_ann}", f": {new_ann}", 1)
-        if not include_defaults and "=" in param_str:
-            param_str = param_str.split("=")[0].strip()
         param_strs.append(param_str)
 
     parts["params"] = f"({', '.join(param_strs)})"

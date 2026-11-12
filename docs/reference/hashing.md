@@ -421,6 +421,63 @@ definition. Consequences:
 The canonical trees of a corpus of expressions are pinned in
 `tests/test_hashing/test_polars_expr_hashing.py`, and their hashes in the golden suite.
 
+### 1d. Function values and parameter defaults
+
+A function used as a value (inside an identity structure, or passed to
+`semantic_hasher.hash_object`) is hashed from one structured description of its signature:
+
+```text
+{"module": <module>, "name": <name>,
+ "parameters": [{"name": ..., "kind": ..., "annotation": ..., "default": ...}, ...],
+ "returns": <return annotation>}
+```
+
+| Member of a parameter entry | Value | Absent when |
+|---|---|---|
+| `name` | the parameter name | never |
+| `kind` | `POSITIONAL_ONLY`, `POSITIONAL_OR_KEYWORD`, `VAR_POSITIONAL`, `KEYWORD_ONLY` or `VAR_KEYWORD` | never |
+| `annotation` | the canonical text of the annotation (union members sorted, logical types by their identifier) | the parameter has no annotation |
+| `default` | the semantic hasher's hash of the default value, as a nested hash | the parameter has no default |
+
+Parameters are listed in declared order. The function body is not part of this hash.
+
+**A default value is hashed like every other hashed value** (ITL-953): by the semantic
+hasher, never by its `repr()`. Equal defaults give equal hashes in every process and under
+every `PYTHONHASHSEED`; a default of `None` differs from having no default; and because a
+default enters as a nested hash, no literal default can spell out another default's entry.
+Before v0.3 the default entered as `repr(value)`, so a `frozenset` default hashed differently
+per process and an `object()` default embedded a memory address. Before v0.3 the parameter
+kind was also not hashed: `f(a, *, b)`, `f(a, /, b)` and `f(a, b)` shared a hash.
+
+**A default the hasher cannot hash is an error.** There is no fallback to `repr()` or to the
+type name, either of which would let two different defaults share a hash. Hashing the
+function raises `TypeError` naming the parameter and the function. Since a data function
+computes its signature hash when it is built, **a function pod whose function has such a
+default fails at construction** (`@function_pod`, `FunctionPod.from_fn`,
+`PythonDataFunction`).
+
+| Default value | Hashed as |
+|---|---|
+| `None`, `bool`, `int`, `float`, `str` | the JSON primitive (a subclass such as an `IntEnum` member or `numpy.float64` hashes as the number it is) |
+| `list`, `tuple`, `set`, `frozenset`, `dict`, namedtuple | the container forms of [the algorithm above](#algorithm-semanticawarepythonhasher) |
+| `bytes`, `uuid.UUID`, a function, a type, `numpy.ndarray`, `pandas` objects, `File`, `Directory`, any object with `identity_structure()` | its registered handler |
+| a plain `enum.Enum` member, a dataclass or pydantic instance, `pathlib.Path`, `datetime`, `date`, `Decimal`, `complex`, a numpy scalar other than `numpy.float64`, any other object | **not hashable: `TypeError`** |
+
+Remedies: use a default the hasher can hash (for example a `str` or `None`, building the
+object inside the function); remove the default and supply the value as an input column;
+or register a `PythonTypeHandlerProtocol` for the type in the data context's handler
+registry. Raising is the v0.3 behaviour (developer decision, November 11, 2026); hashing a
+pod parameter's default as the column value it would be, which would cover `Path`,
+`datetime`, `date` and numpy scalars, is the follow-up ITL-971.
+
+**Where the hash is used.** As the hash of a function that appears as a value, and as the
+`function_signature_hash` stored with every result row (the
+`__pf_var_function_signature_hash` column), which is this same hash of the pod's function. A
+function pod's identity does **not** use it: the pod's `uri`, its `pipeline_hash()`, its
+`content_hash()` and its table paths depend on the function's name, version and output
+schema (see [Data Function URI Hash](#5-data-function-uri-hash)), so changing a default
+moves no path.
+
 ---
 
 ## 2. Source Provenance & System Tags

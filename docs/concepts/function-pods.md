@@ -27,6 +27,12 @@ Key points:
 - **Function parameters** must match the input stream's data columns exactly: one data
   column per parameter, with the same names. A parameter with a default value may be left out
   of the stream, and the default is used. See [Input columns must match exactly](#input-columns-must-match-exactly).
+- **Default values** are part of the function's signature hash, so a default must be a value
+  Orcapod can hash: `None`, numbers, strings, `bytes`, and lists, tuples, sets and dicts of
+  them. A default of another type, such as a `Path`, an `Enum` member, a `datetime` or a
+  dataclass instance, raises `TypeError` when the pod is created, naming the parameter. Use
+  a hashable default and build the object inside the function, or supply the value as an
+  input column. See [Function values and parameter defaults](../reference/hashing.md#1d-function-values-and-parameter-defaults).
 - **Parameter types** are used to validate schema compatibility. Give each parameter a type
   annotation, or supply its type through the decorator's `input_schema` mapping. A parameter
   with neither raises `ValueError` when the pod is created.
