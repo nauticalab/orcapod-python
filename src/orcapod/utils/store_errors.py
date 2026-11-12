@@ -8,10 +8,14 @@ failure is logged and noted on the store error, never raised in its place.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from orcapod.errors import StoreError
+
+if TYPE_CHECKING:
+    from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -63,3 +67,44 @@ def keep_store_error(store_error: StoreError | None, during: str) -> Iterator[No
         yield
     except Exception as failure:
         note_callback_failure(store_error, during, failure)
+
+
+def commit_best_effort(run_error: BaseException, commit: Callable[[], None]) -> None:
+    """Commit pending writes after a run failed, noting instead of raising a failure.
+
+    The run's own error is the one to report, and a second failure while committing
+    the writes that did succeed must not replace it. A failed commit is logged and
+    added as a note to ``run_error``, so the caller learns that pending results may
+    not have been stored.
+
+    Args:
+        run_error: The error the run failed with, which the caller re-raises.
+        commit: Commits the pending writes, such as a database's ``flush``.
+    """
+    try:
+        commit()
+    except Exception as flush_error:
+        logger.exception(
+            "Could not flush pending writes after the run failed; "
+            "the rows they hold were not stored"
+        )
+        run_error.add_note(
+            "Flushing pending writes after this failure also failed "
+            + f"({type(flush_error).__name__}: {flush_error}); results that were "
+            + "still pending may not have been stored."
+        )
+
+
+def flush_best_effort(
+    run_error: BaseException, *databases: ArrowDatabaseProtocol
+) -> None:
+    """Flush each database after a run failed, noting instead of raising a failure.
+
+    See ``commit_best_effort``.
+
+    Args:
+        run_error: The error the run failed with, which the caller re-raises.
+        *databases: The databases to flush.
+    """
+    for database in databases:
+        commit_best_effort(run_error, database.flush)

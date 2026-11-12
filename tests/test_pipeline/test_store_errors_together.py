@@ -182,10 +182,13 @@ def test_sync_and_async_raise_the_same_error(
     expected_type, expected_node = (
         (StoreReadError, "rd") if reader_first else (StoreWriteError, "wr")
     )
+    # rd's read failure surfaces when rd commits its batch, which names no row
+    # (ITL-919); wr's failed write of row d names that row.
+    expected_tag = None if reader_first else {"k": "d"}
     for name, err in raised.items():
         assert type(err) is expected_type, (name, err)
         assert err.node_label == expected_node, (name, err)
-        assert err.tag == {"k": "d"}, (name, err)
+        assert err.tag == expected_tag, (name, err)
     sync, async_ = raised["sync"], raised["async"]
     assert str(sync).replace(str(tmp_path / "sync"), "") == str(async_).replace(
         str(tmp_path / "async"), ""
@@ -204,9 +207,31 @@ def test_async_choice_does_not_depend_on_completion_order(
             reader_first=reader_first,
         )
         assert err.node_label == ("rd" if reader_first else "wr"), attempt
-        notes = "\n".join(getattr(err, "__notes__", []))
-        other = "write" if reader_first else "read"
-        assert f"Another store {other} failed in the same run" in notes, attempt
+        notes = list(getattr(err, "__notes__", []))
+        if reader_first:
+            assert any(
+                n.startswith("Another store write failed in the same run")
+                for n in notes
+            ), attempt
+            continue
+        # rd's read failure surfaces only when its batch is committed (ITL-919). wr's
+        # failed write stops the run first, so rd never commits inside the run: the
+        # job's flush after the failure meets rd's unreadable table and notes it.
+        assert not any("Another store read failed" in n for n in notes), attempt
+        flush_notes = [
+            n
+            for n in notes
+            if n.startswith(
+                "Flushing pending writes after this failure also failed "
+                + "(StoreReadError: Could not read the stored table at "
+            )
+        ]
+        assert flush_notes, (attempt, notes)
+        for note in flush_notes:
+            assert "/together/_result/double/" in note, note
+            assert note.endswith(
+                "results that were still pending may not have been stored."
+            ), note
 
 
 def test_selection_is_independent_of_group_order() -> None:
@@ -248,7 +273,8 @@ def test_read_failure_while_writing_is_a_store_read_error(tmp_path: Path) -> Non
     assert err.node_label == "rd"
     assert isinstance(err.__cause__, DeltaError)
     assert "node 'rd'" in str(err)
-    assert "row {'k': 'd'}" in str(err)
+    # Surfaced when rd commits its batch (ITL-919): a commit names no row.
+    assert err.tag is None
 
 
 def test_refused_append_is_a_store_write_error(tmp_path: Path) -> None:

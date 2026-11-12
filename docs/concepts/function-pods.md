@@ -248,6 +248,52 @@ print("function calls:", len(calls))
     flush tries them again. A flush that fails for any other reason raises `RuntimeError`,
     with the first failure as its cause.
 
+### When results are committed
+
+Inside `job.run()`, each function node commits its results and pipeline records to the
+store in batches: every `commit_every_rows` rows (default 100), when the node finishes,
+before a failed run raises, and when the job ends. Committing in batches keeps a run's time
+linear in its rows; on a `DeltaTableDatabase` each commit is one Delta version per table, so
+a 1,000-row node writes 10 versions per table instead of 1,000.
+
+```python
+job.run(commit_every_rows=500)  # fewer, larger commits
+```
+
+`commit_every_rows=1` commits after every row. A node or a cached pod used on its own,
+outside `job.run()`, also commits after every row. On a `DeltaTableDatabase`,
+`commit_every_rows` must be smaller than the store's `batch_size` (default 1000):
+the store commits every pending table by itself once one table holds that many pending
+rows, which would not keep the order described below, so `job.run()` refuses a larger value
+with `ValueError`. Create the store with a larger `batch_size` to commit less often. For the same reason, `job.run()` first commits
+whatever such a store already holds pending (writes made without a flush, or the batches of a
+run that failed); if that fails, the run stops before computing anything.
+
+**Memory.** A `DeltaTableDatabase` keeps the committed rows of every table it looks rows up
+in (each function node's result and pipeline-record tables) in memory for as long as the
+store object lives, so that a lookup never re-reads the table. These copies are held
+together, so plan memory for all of them at once: for a function returning one `int`, about
+1.6 KB per stored row per function node (result and pipeline-record tables together), more
+for larger outputs. Before, each lookup read one whole table and released it. To release
+the copies, use a new store object, for example one per job.
+
+**What a hard crash loses.** If the process dies without raising (power loss, `kill -9`,
+the machine restarts), a durable store such as `DeltaTableDatabase` keeps every batch
+committed before the crash; at most the rows the running node processed since its last
+commit are lost, and nothing stored is damaged. Run the job again: it computes only the rows
+whose results were not committed. A node commits its results before their pipeline records,
+so a crash between those two commits leaves results stored without pipeline records. Reading
+the node (`as_table()`, `get_all_records()`) does not show those rows until the next run,
+which finds their results in the store, computes nothing for them and writes their pipeline
+records.
+
+**Reads see the version this process loaded.** A `DeltaTableDatabase` keeps the committed
+rows of each table it has read in memory and answers lookups from them, extending them with
+its own commits. Rows another process commits to the same table are not seen by a store
+object that has already loaded the table until its own next commit to that table reloads it;
+a new `DeltaTableDatabase` object reads them at once. This was already the case before
+batching; only the re-reading per lookup is gone.
+
 A node from a job that has run also provides:
 
 - **`get_all_records()`** -- every record this step of the job has stored, as a PyArrow
@@ -263,13 +309,20 @@ A node from a job that has run also provides:
 A failed write to the store always fails the run. If a node's results or records cannot be
 stored -- the disk is full, the connection drops, or the database cannot hold one of the
 output types -- `job.run()` raises `StoreWriteError` (from `orcapod.errors`) at the first
-failed write, on both the synchronous and the asynchronous orchestrator. The error names the
-node, the row being stored and the table, and the database's own exception is chained as its
-cause. When committing pending writes fails, the error has `flush=True` and names the store
-instead of a row and table: every view of a store shares its pending writes, so the write
-that failed may belong to an earlier row or another table. A run that returns normally has
-stored every result that could be turned into a record; a result rejected before that is a
-row failure (see below).
+failed write, on both the synchronous and the asynchronous orchestrator. A row's write that
+fails names the node, the row being stored and the table, and the database's own exception
+is chained as its cause. When committing pending writes fails, the error has `flush=True`
+and names the node and the store instead of a row and table: a commit holds a batch of rows
+(see *When results are committed*), and every view of a store shares its pending writes, so
+the write that failed may belong to any row of the batch or another table. A run that
+returns normally has stored every result that could be turned into a record; a result
+rejected before that is a row failure (see below).
+
+With batched commits, a store failure that only committing reveals (an unreadable table, a
+full disk) surfaces at the node's next commit point, not at the row that caused it: the rows
+the node computed since its last commit are not stored and are computed again on the next
+run. `job.run(commit_every_rows=1)` commits after every row, so such a failure surfaces at
+its row, at the cost of one commit per row.
 
 This holds whatever `error_policy` the orchestrator was given. `error_policy="continue"` (the
 default) skips rows whose *function* raised and keeps going; it never skips a row because it
@@ -285,8 +338,10 @@ first in the pipeline, the one the synchronous orchestrator would have stopped a
 failures are logged and noted on it. A node whose failure the asynchronous orchestrator
 cancelled before it happened is not reported.
 
-After the failure, rows stored before it are kept: `job.run()` commits the writes that
-succeeded before it re-raises, and nothing already stored is rewritten. Once the cause is
+After the failure, rows stored before it are kept: every batch committed before the failure
+stays, and `job.run()` tries once more to commit the writes still pending before it
+re-raises (a failed commit's batch stays pending, so this is its one retry; if it fails
+again, that is noted on the error), and nothing already stored is rewritten. Once the cause is
 fixed, run the job again: stored function results are not recomputed, only the missing ones
 are. An operator with `cache_mode=LOG` recomputes its output on every run, as it always does.
 A side effect is different: if its delivery completed but the write to its invocation log

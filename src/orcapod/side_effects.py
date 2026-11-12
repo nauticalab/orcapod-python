@@ -238,7 +238,12 @@ def _execute_side_effect_row(
         and pipeline_database is not None
         and table_path is not None
     ):
-        prior = pipeline_database.get_record_by_id(table_path, record_id)
+        try:
+            prior = pipeline_database.get_record_by_id(table_path, record_id)
+        except StoreError as exc:
+            # A failed lookup fails the run like a failed write: name pod and row.
+            exc.add_context(node_label=pod_name, tag=tag.as_dict())
+            raise
         if prior is not None:
             return (tag, data)  # already completed — re-emit without re-delivery
 

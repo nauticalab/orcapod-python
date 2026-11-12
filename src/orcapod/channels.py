@@ -99,6 +99,10 @@ class _ChannelReader(Generic[T]):
     async def receive(self) -> T:
         if self._channel._drained:
             raise ChannelClosed()
+        if self._channel._close_pending and self._channel._queue.empty():
+            # Closed while the queue was full: every item is received; the end now.
+            self._channel._drained = True
+            raise ChannelClosed()
         item = await self._channel._queue.get()
         if isinstance(item, _Sentinel):
             self._channel._drained = True
@@ -143,9 +147,20 @@ class _ChannelWriter(Generic[T]):
         await self._channel._queue.put(item)
 
     async def close(self) -> None:
+        """Signal that no more items will be sent, without waiting.
+
+        Never blocks (ITL-932): on a failed run every reader is cancelled while
+        writers close their outputs in ``finally`` blocks, and a close that waited
+        for room in a full queue would hang the run. When the queue is full, the
+        close is recorded instead of queued; readers receive every queued item and
+        then ``ChannelClosed``, exactly as with a queued close.
+        """
         if not self._channel._closed.is_set():
             self._channel._closed.set()
-            await self._channel._queue.put(_CLOSED)
+            try:
+                self._channel._queue.put_nowait(_CLOSED)
+            except asyncio.QueueFull:
+                self._channel._close_pending = True
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +181,8 @@ class Channel(Generic[T]):
     _queue: asyncio.Queue[T | _Sentinel] = field(init=False)
     _closed: asyncio.Event = field(init=False, default_factory=asyncio.Event)
     _drained: bool = field(init=False, default=False)
+    # Closed while the queue was full: the close is not queued (ITL-932).
+    _close_pending: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         self._queue = asyncio.Queue(maxsize=self.buffer_size)
@@ -193,16 +210,21 @@ class _BroadcastReader(Generic[T]):
     multiple downstream consumers can read at their own pace.
     """
 
-    __slots__ = ("_queue",)
+    __slots__ = ("_closed", "_queue")
 
     def __init__(self, buffer_size: int) -> None:
         self._queue: asyncio.Queue[T | _Sentinel] = asyncio.Queue(maxsize=buffer_size)
+        # Set once this reader's stream has ended, or by a close that found its
+        # queue full (ITL-932): then the end comes once the queue is drained.
+        self._closed = False
 
     async def receive(self) -> T:
+        if self._closed and self._queue.empty():
+            raise ChannelClosed()
         item = await self._queue.get()
         if isinstance(item, _Sentinel):
-            # Re-enqueue so repeated receive() calls also raise
-            await self._queue.put(item)
+            # Remember the end so repeated receive() calls also raise.
+            self._closed = True
             raise ChannelClosed()
         return item  # type: ignore[return-value]
 
@@ -264,7 +286,15 @@ class _BroadcastWriter(Generic[T]):
             await reader._queue.put(item)
 
     async def close(self) -> None:
+        """Signal every reader that no more items will be sent, without waiting.
+
+        Never blocks on a slow or cancelled reader (ITL-932); see
+        ``_ChannelWriter.close``.
+        """
         if not self._broadcast._closed:
             self._broadcast._closed = True
             for reader in self._broadcast._readers:
-                await reader._queue.put(_CLOSED)
+                try:
+                    reader._queue.put_nowait(_CLOSED)
+                except asyncio.QueueFull:
+                    reader._closed = True

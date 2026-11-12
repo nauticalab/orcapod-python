@@ -159,6 +159,27 @@ class ArrowDatabaseWithMetadataProtocol(
     pass
 
 
+class TableCommittingDatabaseProtocol(Protocol):
+    """A database that commits table by table (ITL-919).
+
+    Such a database (``DeltaTableDatabase``) can commit one table's pending writes
+    on its own, and commits a table by itself once that table holds ``batch_size``
+    pending rows. A function node uses ``flush_batch`` to commit its results before
+    its pipeline records; ``PipelineJob.run`` keeps ``commit_every_rows`` below
+    ``batch_size``. A wrapper satisfies this protocol only when the database it
+    wraps does. Check with ``orcapod.databases.utils.as_table_committing``.
+    """
+
+    @property
+    def batch_size(self) -> int:
+        """Pending rows of one table at which the database commits that table."""
+        ...
+
+    def flush_batch(self, record_path: tuple[str, ...]) -> None:
+        """Commit the pending writes of the table at ``record_path`` only."""
+        ...
+
+
 @runtime_checkable
 class DatabaseRegistryProtocol(Protocol):
     """Protocol for a database config registry used during pipeline save/load.

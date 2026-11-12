@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.databases._row_index import KeyIndex, compact_tail, matching_rows
 from orcapod.databases.utils import coerce_record_id
 from orcapod.utils.lazy_module import LazyModule
 
@@ -29,6 +30,10 @@ class InMemoryArrowDatabase:
     Supports the same pending-batch semantics as DeltaTableDatabase:
     records are buffered in a pending batch and become part of the committed
     store only after flush() is called (or flush=True is passed to a write method).
+
+    Lookups by record ID or by a binary or string column value use hash indexes over
+    the committed rows, and each flush appends without copying the stored rows, so the
+    cost of a per-row write, flush or lookup does not grow with the rows already stored.
     """
 
     RECORD_ID_COLUMN = "__record_id"
@@ -40,6 +45,7 @@ class InMemoryArrowDatabase:
         _shared_tables: "dict[str, pa.Table] | None" = None,
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "dict[str, set[bytes]] | None" = None,
+        _shared_indexes: "dict[str, KeyIndex] | None" = None,
         _root: InMemoryArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
     ):
@@ -57,6 +63,9 @@ class InMemoryArrowDatabase:
             _shared_pending_record_ids
             if _shared_pending_record_ids is not None
             else defaultdict(set)
+        )
+        self._indexes: dict[str, KeyIndex] = (
+            _shared_indexes if _shared_indexes is not None else {}
         )
 
     # ------------------------------------------------------------------
@@ -146,22 +155,37 @@ class InMemoryArrowDatabase:
     # Internal helpers for duplicate detection
     # ------------------------------------------------------------------
 
-    def _committed_ids(self, record_key: str) -> "set[bytes]":
+    def _key_index(self, record_key: str, committed: "pa.Table") -> KeyIndex:
+        """Return the indexes of ``committed``, the key's committed table.
+
+        Starts them on first use; ``flush`` extends them as rows are appended.
+        """
+        key_index = self._indexes.get(record_key)
+        if key_index is None or key_index.table is not committed:
+            key_index = KeyIndex(committed)
+            self._indexes[record_key] = key_index
+        return key_index
+
+    def _committed_id_index(self, record_key: str) -> dict[Any, list[int]]:
+        """Return the record-ID index of the key's committed rows (empty if none)."""
         committed = self._tables.get(record_key)
         if committed is None or committed.num_rows == 0:
-            return set()
-        existing_ids = committed[self.RECORD_ID_COLUMN].to_pylist()
-        # TODO: evaluate the efficiency of this implementation
-        return {id for id in existing_ids if id is not None}
+            return {}
+        return self._key_index(record_key, committed).column(self.RECORD_ID_COLUMN)
 
     def _filter_existing_records(
         self, record_key: str, table: "pa.Table"
     ) -> "pa.Table":
         """Filter out records whose IDs are already in pending or committed store."""
         input_ids = set(table[self.RECORD_ID_COLUMN].to_pylist())
-        all_existing = input_ids & (
-            self._pending_record_ids[record_key] | self._committed_ids(record_key)
-        )
+        pending_ids = self._pending_record_ids[record_key]
+        committed_ids = self._committed_id_index(record_key)
+        all_existing = {
+            record_id
+            for record_id in input_ids
+            if record_id in pending_ids
+            or (record_id is not None and record_id in committed_ids)
+        }
         if not all_existing:
             return table
         mask = pc.invert(
@@ -272,16 +296,30 @@ class InMemoryArrowDatabase:
 
             committed = self._tables.get(record_key)
             if committed is None:
-                self._tables[record_key] = pending
-            else:
-                # Insert-if-not-exists: keep committed rows not overwritten by new batch,
-                # then append the new batch on top.
-                new_ids = set(pending[self.RECORD_ID_COLUMN].to_pylist())
+                self._tables[record_key] = pending.combine_chunks()
+                continue
+
+            # Insert-if-not-exists: keep committed rows not overwritten by new batch,
+            # then append the new batch on top.
+            new_ids = pending[self.RECORD_ID_COLUMN].to_pylist()
+            committed_ids = self._committed_id_index(record_key)
+            if any(record_id in committed_ids for record_id in new_ids):
                 mask = pc.invert(
                     pc.is_in(committed[self.RECORD_ID_COLUMN], pa.array(list(new_ids)))
                 )
                 kept = committed.filter(mask)
-                self._tables[record_key] = pa.concat_tables([kept, pending])
+                self._tables[record_key] = pa.concat_tables(
+                    [kept, pending]
+                ).combine_chunks()
+                # Rows moved: the indexes are rebuilt on the next lookup.
+                self._indexes.pop(record_key, None)
+                continue
+
+            appended = compact_tail(pa.concat_tables([committed, pending]))
+            self._tables[record_key] = appended
+            key_index = self._indexes.get(record_key)
+            if key_index is not None and key_index.table is committed:
+                key_index.append(pending, appended)
 
     # ------------------------------------------------------------------
     # Path scoping
@@ -322,6 +360,7 @@ class InMemoryArrowDatabase:
             _shared_tables=self._tables,
             _shared_pending_batches=self._pending_batches,
             _shared_pending_record_ids=self._pending_record_ids,
+            _shared_indexes=self._indexes,
             _root=new_root,
             _scoped_path=new_scoped_path,
         )
@@ -492,12 +531,18 @@ class InMemoryArrowDatabase:
             self.flush()
 
         record_key = self._get_record_key(record_path)
-        table = self._combined_table(record_key)
-        if table is None:
+        committed = self._tables.get(record_key)
+        if committed is not None and committed.num_rows == 0:
+            committed = None
+        pending = self._pending_batches.get(record_key)
+        if pending is not None and pending.num_rows == 0:
+            pending = None
+        if committed is None and pending is None:
             return None
 
+        pair_list: list[tuple[str, Any]]
         if isinstance(column_values, Mapping):
-            pair_list = list(column_values.items())
+            pair_list = list(cast(Mapping[str, Any], column_values).items())
         else:
             pair_list = cast(list[tuple[str, Any]], list(column_values))
 
@@ -506,7 +551,26 @@ class InMemoryArrowDatabase:
         for expr in expressions[1:]:
             combined_expr = combined_expr & expr
 
-        filtered = table.filter(combined_expr)
+        parts = []
+        if committed is not None:
+            parts.append(
+                self._filter_committed(record_key, committed, pair_list, combined_expr)
+            )
+        if pending is not None:
+            parts.append(pending.filter(combined_expr))
+        filtered = parts[0] if len(parts) == 1 else pa.concat_tables(parts)
         if filtered.num_rows == 0:
             return None
         return self._handle_record_id_column(filtered, record_id_column)
+
+    def _filter_committed(
+        self,
+        record_key: str,
+        committed: "pa.Table",
+        pair_list: list[tuple[str, Any]],
+        expression: "pc.Expression",
+    ) -> "pa.Table":
+        """Return the committed rows matching ``expression``, in table order."""
+        return matching_rows(
+            self._key_index(record_key, committed), pair_list, expression
+        )

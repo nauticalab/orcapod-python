@@ -3,12 +3,24 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from orcapod.databases._row_index import (
+    KeyIndex,
+    compact_tail,
+    is_indexed_lookup,
+    matching_rows,
+    rows_at,
+)
 from orcapod.databases.utils import coerce_record_id
 from orcapod.errors import InputValidationError, StoreReadError
-from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
+from orcapod.databases.storage_utils import (
+    delta_to_pyarrow_dataset,
+    is_cloud_uri,
+    parse_base_path,
+)
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -17,6 +29,7 @@ if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
+    import pyarrow.dataset as pa_ds
     from upath import UPath
 else:
     deltalake = LazyModule("deltalake")
@@ -272,13 +285,28 @@ def _store_error_to_raise(errors: list[Exception]) -> Exception | None:
     return None
 
 
-class _DeltaTableReadError(Exception):
-    """A Delta table's data could not be read; the backend error is the ``__cause__``.
+@dataclass
+class _CommittedSnapshot:
+    """What one version of a stored Delta table holds, kept in memory (ITL-919).
 
-    Raised by ``DeltaTableDatabase._read_delta_table`` so that its callers, which
-    know the table's path, can tell a failed read from a bad filter and raise
-    ``StoreReadError``.
+    Per-row lookups are answered from this snapshot instead of re-reading the table.
+    Each part is read on first use and extended in place after this store's own
+    commits, so its cost follows the rows written, not the rows stored.
+
+    Attributes:
+        version: The table version described.
+        ids: The stored record ids (never null), or ``None`` until first needed.
+        rows: Indexes over every stored row, read exactly as ``get_all_records``
+            reads them, or ``None`` until first needed.
+        files: The data files ``rows`` was read from (set together with ``rows``).
+        dataset_schema: The schema of the dataset ``rows`` was read from.
     """
+
+    version: int
+    ids: set[bytes] | None = None
+    rows: KeyIndex | None = None
+    files: frozenset[str] = frozenset()
+    dataset_schema: "pa.Schema | None" = None
 
 
 class DeltaTableDatabase:
@@ -311,6 +339,9 @@ class DeltaTableDatabase:
         _scoped_path: tuple[str, ...] = (),
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "defaultdict[str, set[bytes]] | None" = None,
+        _shared_delta_table_cache: "dict[str, deltalake.DeltaTable] | None" = None,
+        _shared_snapshots: "dict[str, _CommittedSnapshot] | None" = None,
+        _shared_pending_indexes: "dict[str, KeyIndex] | None" = None,
     ):
         self._root_uri, self._storage_options = parse_base_path(
             base_path, storage_options
@@ -335,9 +366,16 @@ class DeltaTableDatabase:
                 )
         # For cloud paths: create_base_path is silently ignored (no directory needed).
 
-        self._delta_table_cache: dict[str, deltalake.DeltaTable] = {}
-        # Shared pending state — when constructed via at(), these dicts are shared
-        # with the root instance so that root.flush() can flush all scoped writes.
+        # Shared state — when constructed via at(), these dicts are shared with the
+        # root instance. Any handle's flush() writes every pending key of the family
+        # and refreshes the loaded table and existing-ids entries for it, so these
+        # caches must be family-wide too: a per-handle cache would keep serving the
+        # snapshot a sibling loaded before the flush (ITL-864). All of them are
+        # touched only from the thread that drives the pipeline (the async
+        # orchestrator runs only user functions in worker threads).
+        self._delta_table_cache: dict[str, deltalake.DeltaTable] = (
+            _shared_delta_table_cache if _shared_delta_table_cache is not None else {}
+        )
         if _shared_pending_batches is not None:
             self._pending_batches = _shared_pending_batches
         else:
@@ -346,8 +384,15 @@ class DeltaTableDatabase:
             self._pending_record_ids = _shared_pending_record_ids
         else:
             self._pending_record_ids: dict[str, set[bytes]] = defaultdict(set)
-        self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
-        self._cache_dirty: dict[str, bool] = defaultdict(lambda: True)
+        # The committed rows of each loaded table version (ITL-919), shared like the
+        # loaded tables: a snapshot describes the cached table's version only.
+        self._snapshots: dict[str, _CommittedSnapshot] = (
+            _shared_snapshots if _shared_snapshots is not None else {}
+        )
+        # Indexes over each pending batch, valid while it is the key's batch.
+        self._pending_indexes: dict[str, KeyIndex] = (
+            _shared_pending_indexes if _shared_pending_indexes is not None else {}
+        )
 
     def _clear_pending(self):
         """Clear all pending state."""
@@ -544,79 +589,113 @@ class DeltaTableDatabase:
                 f"Record ID column '{self.RECORD_ID_COLUMN}' not found in the table and cannot be renamed."
             )
 
-    def _create_record_id_filter(self, record_id: str | bytes) -> list:
-        """
-        Create a proper filter expression for Delta Lake.
+    def _snapshot(
+        self, record_key: str, delta_table: deltalake.DeltaTable
+    ) -> _CommittedSnapshot:
+        """Return the snapshot of ``delta_table``'s version, starting an empty one if needed.
 
         Args:
-            record_id: The entry ID to filter by
+            record_key: The table's absolute record key.
+            delta_table: The loaded table the snapshot must describe.
 
         Returns:
-            List containing the filter expression for Delta Lake
+            The snapshot for the table's version; its parts are read on first use.
         """
-        return [(self.RECORD_ID_COLUMN, "=", coerce_record_id(record_id))]
+        version = delta_table.version()
+        snapshot = self._snapshots.get(record_key)
+        if snapshot is None or snapshot.version != version:
+            snapshot = _CommittedSnapshot(version)
+            self._snapshots[record_key] = snapshot
+        return snapshot
 
-    def _create_record_ids_filter(self, record_ids: list[bytes]) -> list:
-        """
-        Create a proper filter expression for multiple entry IDs.
+    @classmethod
+    def _scan_ids(cls, delta_table: deltalake.DeltaTable) -> set[bytes]:
+        """Read the record ids stored in ``delta_table`` (nulls left out).
 
         Args:
-            record_ids: List of entry IDs to filter by
+            delta_table: The loaded table.
 
         Returns:
-            List containing the filter expression for Delta Lake
+            The stored record ids.
+
+        Raises:
+            Exception: The backend's error when the table's data cannot be read.
         """
-        return [(self.RECORD_ID_COLUMN, "in", record_ids)]
-
-    def _refresh_existing_ids_cache(self, record_path: tuple[str, ...]) -> None:
-        """Refresh the cache of existing IDs in the Delta table."""
-        record_key = self._get_record_key(record_path)
-
-        delta_table = self._get_delta_table(record_path)
-
-        if delta_table is None:
-            self._existing_ids_cache[record_key] = set()
-            self._cache_dirty[record_key] = False
-            return
-
-        try:
-            # Get all existing IDs from Delta table using standard RECORD_ID_COLUMN
-            # TODO: replace this with more targetted loading of only the target column and in batches
-            arrow_table = delta_table.to_pyarrow_table()
-        except Exception as e:
-            # Leave the cache dirty so the next call reads the table again.
-            raise self._read_failed(record_path) from e
-
-        if arrow_table.num_rows == 0:
-            self._existing_ids_cache[record_key] = set()
-        elif self.RECORD_ID_COLUMN not in arrow_table.column_names:
-            # TODO: replace this with proper checking of the table schema first!
-            logger.warning(f"Delta table missing {self.RECORD_ID_COLUMN} column")
-            self._existing_ids_cache[record_key] = set()
-        else:
-            existing_ids = cast(
-                set[str], set(arrow_table[self.RECORD_ID_COLUMN].to_pylist())
-            )
-            self._existing_ids_cache[record_key] = existing_ids
-
-        self._cache_dirty[record_key] = False
-        logger.debug(
-            f"Refreshed existing IDs cache: {len(self._existing_ids_cache)} IDs"
+        stored = _stored_arrow_schema(delta_table)
+        if cls.RECORD_ID_COLUMN not in stored.names:
+            logger.warning(f"Delta table missing {cls.RECORD_ID_COLUMN} column")
+            return set()
+        # Read through a one-column schema: the other columns' types are never
+        # converted, so a logical type stored in a list cannot break the id read.
+        id_field = stored.field(cls.RECORD_ID_COLUMN)
+        id_schema = pa.schema(
+            [id_field.with_type(arrow_utils.normalize_to_large_types(id_field.type))]
         )
+        dataset = delta_to_pyarrow_dataset(delta_table, schema=id_schema)
+        ids = dataset.to_table()[cls.RECORD_ID_COLUMN]
+        return {record_id for record_id in ids.to_pylist() if record_id is not None}
 
-    def _get_existing_ids(self, record_path: tuple[str, ...]) -> set[str]:
-        """Get the set of existing IDs in the Delta table, using cache when possible."""
-        record_key = self._get_record_key(record_path)
-        if (
-            self._cache_dirty.get(record_key)
-            or record_key not in self._delta_table_cache
-        ):
-            self._refresh_existing_ids_cache(record_path)
-        return self._existing_ids_cache.get(record_key) or set()
+    @staticmethod
+    def _scan_rows(
+        delta_table: deltalake.DeltaTable,
+    ) -> tuple[pa.Table, frozenset[str], pa.Schema]:
+        """Read every row of ``delta_table`` as ``get_all_records`` reads it.
 
-    def _invalidate_cache(self, record_path: tuple[str, ...]) -> None:
-        """Mark the existing IDs cache as dirty."""
-        self._cache_dirty[self._get_record_key(record_path)] = True
+        Args:
+            delta_table: The loaded table.
+
+        Returns:
+            The rows (view types normalized: PyArrow has no comparison kernels for
+            ``string_view``, ENG-601), the data
+            files they were read from and the dataset's schema.
+
+        Raises:
+            Exception: The backend's error when the table's data cannot be read.
+        """
+        # deltalake builds a FileSystemDataset; its data files identify a version.
+        dataset = cast(
+            "pa_ds.FileSystemDataset",
+            delta_to_pyarrow_dataset(delta_table, as_large_types=True),
+        )
+        table = arrow_utils.normalize_table_view_types(dataset.to_table())
+        return table.combine_chunks(), frozenset(dataset.files), dataset.schema
+
+    def _stored_ids(self, record_path: tuple[str, ...]) -> set[bytes]:
+        """Return the record ids stored at ``record_path`` (in the loaded version).
+
+        Raises:
+            StoreReadError: If the table exists but its ids could not be read.
+        """
+        delta_table = self._get_delta_table(record_path)
+        if delta_table is None:
+            return set()
+        snapshot = self._snapshot(self._get_record_key(record_path), delta_table)
+        if snapshot.ids is None:
+            try:
+                snapshot.ids = self._scan_ids(delta_table)
+            except Exception as e:
+                raise self._read_failed(record_path) from e
+        return snapshot.ids
+
+    def _stored_rows(self, record_path: tuple[str, ...]) -> KeyIndex | None:
+        """Return the indexed rows stored at ``record_path``, or ``None`` if no table.
+
+        Raises:
+            StoreReadError: If the table exists but could not be read.
+        """
+        delta_table = self._get_delta_table(record_path)
+        if delta_table is None:
+            return None
+        snapshot = self._snapshot(self._get_record_key(record_path), delta_table)
+        if snapshot.rows is None:
+            try:
+                table, files, schema = self._scan_rows(delta_table)
+            except Exception as e:
+                raise self._read_failed(record_path) from e
+            snapshot.rows = KeyIndex(table)
+            snapshot.files = files
+            snapshot.dataset_schema = schema
+        return snapshot.rows
 
     def add_record(
         self,
@@ -706,9 +785,15 @@ class DeltaTableDatabase:
         # Step 5: Add to pending batch (no overwrite logic needed)
         self._add_to_pending_batch(record_path, schema_compatible_table)
 
-        # Step 6: Auto-flush if needed
-        if flush or self._should_auto_flush(record_path):
+        # Step 6: Flush if asked to; otherwise commit this table alone once its
+        # pending batch reaches batch_size. Only the full table: committing every
+        # pending table here would commit another table's rows, such as pipeline
+        # records whose results are still pending, out of their writer's order
+        # (ITL-919).
+        if flush:
             self.flush()
+        elif self._should_auto_flush(record_path):
+            self.flush_batch(record_path)
 
     def _deduplicate_within_table(self, table: pa.Table) -> pa.Table:
         # TODO: consider erroring out if duplicates are found
@@ -747,7 +832,7 @@ class DeltaTableDatabase:
         existing_in_pending = input_ids.intersection(
             self._pending_record_ids[record_key]
         )
-        existing_in_delta = input_ids.intersection(self._get_existing_ids(record_path))
+        existing_in_delta = input_ids.intersection(self._stored_ids(record_path))
         all_existing = existing_in_pending.union(existing_in_delta)
 
         if not all_existing:
@@ -777,7 +862,7 @@ class DeltaTableDatabase:
             )
 
         # Check conflicts with Delta table
-        existing_ids = self._get_existing_ids(record_path)
+        existing_ids = self._stored_ids(record_path)
         delta_conflicts = input_ids.intersection(existing_ids)
         if delta_conflicts:
             raise ValueError(
@@ -871,9 +956,15 @@ class DeltaTableDatabase:
         if pending_batch is None:
             self._pending_batches[record_key] = table
         else:
-            self._pending_batches[record_key] = pa.concat_tables([pending_batch, table])
+            # Kept at O(log n) record batches, and its indexes extended in place, so a
+            # lookup's cost does not grow with the rows pending (ITL-919).
+            grown = compact_tail(pa.concat_tables([pending_batch, table]))
+            self._pending_batches[record_key] = grown
+            index = self._pending_indexes.get(record_key)
+            if index is not None and index.table is pending_batch:
+                index.append(table, grown)
 
-        pending_ids = cast(list[str], table[self.RECORD_ID_COLUMN].to_pylist())
+        pending_ids = cast(list[bytes], table[self.RECORD_ID_COLUMN].to_pylist())
         self._pending_record_ids[record_key].update(pending_ids)
 
     def _should_auto_flush(self, record_path: tuple[str, ...]) -> bool:
@@ -884,6 +975,130 @@ class DeltaTableDatabase:
             and self._pending_batches[record_key].num_rows >= self.batch_size
         )
 
+    def _pending_rows(self, record_path: tuple[str, ...]) -> KeyIndex | None:
+        """Return the indexed pending rows at ``record_path``, or ``None`` if none.
+
+        The indexes are built on first use and describe the current pending batch
+        only (``_add_to_pending_batch`` extends them; a flush or schema change
+        replaces the batch, and with it the indexes).
+        """
+        record_key = self._get_record_key(record_path)
+        pending = self._pending_batches.get(record_key)
+        if pending is None or pending.num_rows == 0:
+            return None
+        index = self._pending_indexes.get(record_key)
+        if index is None or index.table is not pending:
+            index = KeyIndex(pending)
+            self._pending_indexes[record_key] = index
+        return index
+
+    def _without_stored_ids(
+        self, record_path: tuple[str, ...], pending: pa.Table
+    ) -> pa.Table | None:
+        """Return the pending rows a flush would insert: those whose id is not stored.
+
+        A flush inserts only rows whose record id is not stored yet (the merge is
+        ``when_not_matched_insert_all``), so a pending row with a stored id is
+        never returned by a read: the stored row is. The stored ids are read even
+        when ``pending`` is empty, so a read with rows pending raises
+        ``StoreReadError`` whenever the stored ids cannot be read.
+
+        Args:
+            record_path: Path components relative to this database view.
+            pending: Pending rows of the table at ``record_path``.
+
+        Returns:
+            The rows whose record id is not stored, or ``None`` if there are none.
+        """
+        stored_ids = self._stored_ids(record_path)
+        if stored_ids and pending.num_rows > 0:
+            # The mask is built from the pending ids against the cached set, so its
+            # cost follows the pending rows, not the stored table. A null id is
+            # never matched by the merge (``null = null`` is not true), so its row
+            # is kept.
+            keep = [
+                record_id is None or record_id not in stored_ids
+                for record_id in pending[self.RECORD_ID_COLUMN].to_pylist()
+            ]
+            if not all(keep):
+                pending = pending.filter(pa.array(keep, type=pa.bool_()))
+        return pending if pending.num_rows > 0 else None
+
+    def _pending_not_stored(self, record_path: tuple[str, ...]) -> pa.Table | None:
+        """Return every pending row a flush would insert at ``record_path``, or ``None``.
+
+        Args:
+            record_path: Path components relative to this database view.
+
+        Returns:
+            The pending rows whose record id is not stored, or ``None``.
+        """
+        pending = self._pending_rows(record_path)
+        if pending is None:
+            return None
+        return self._without_stored_ids(record_path, pending.table)
+
+    def _combine_stored_and_pending(
+        self,
+        stored: pa.Table | None,
+        pending: pa.Table | None,
+        record_id_column: str | None,
+    ) -> pa.Table | None:
+        """Combine stored rows with pending rows into one read result.
+
+        Combined rows have the schema a flush would give them: both parts take
+        their large layouts (a stored table reads back large), a column missing
+        on one side is null-filled, a ``null``-typed column takes the other
+        side's type, nullability is merged (nullable if either side is), and
+        struct children are merged, as Delta's merge evolves the stored schema.
+        A column whose types still differ raises ``pyarrow.ArrowTypeError``;
+        nothing is widened. A single part is returned as it is.
+
+        Args:
+            stored: Rows read from the Delta table, or ``None``.
+            pending: Pending rows that are not stored (see ``_pending_not_stored``),
+                already filtered by the read's condition, or ``None``.
+            record_id_column: Name to give the record id column, or ``None`` to
+                drop it.
+
+        Returns:
+            The combined rows, or ``None`` if there are none.
+        """
+        parts = [t for t in (stored, pending) if t is not None and t.num_rows > 0]
+        if not parts:
+            return None
+        if len(parts) == 1:
+            table = parts[0]
+        else:
+            table = pa.concat_tables(
+                [self._large_layout(t) for t in parts], promote_options="default"
+            )
+        return self._handle_record_id_column(table, record_id_column)
+
+    @staticmethod
+    def _large_layout(table: pa.Table) -> pa.Table:
+        """Return ``table`` with every column in its large layout.
+
+        Only layouts change (``string`` to ``large_string``, ``list`` to
+        ``large_list``, recursively); ``null`` stays ``null``, and names,
+        nullability and metadata are kept.
+
+        Args:
+            table: The table to normalize.
+
+        Returns:
+            The table with large-normalized column types.
+        """
+        schema = table.schema
+        for index, field in enumerate(table.schema):
+            schema = schema.set(
+                index,
+                field.with_type(
+                    arrow_utils.normalize_to_large_types(field.type, keep_null=True)
+                ),
+            )
+        return table if schema.equals(table.schema) else table.cast(schema)
+
     def get_all_records(
         self,
         record_path: tuple[str, ...],
@@ -893,45 +1108,33 @@ class DeltaTableDatabase:
         """
         Get all records from both pending batch and Delta table.
 
+        Every read method returns the rows a flush would leave: the stored rows
+        plus the pending rows whose record id is not stored yet, as seen through
+        any handle of this ``at()`` family.
+
         Returns:
             Combined Arrow table with all records, or None if no records exist
 
         Raises:
             StoreReadError: If the Delta table exists but could not be read.
         """
-        record_key = self._get_record_key(record_path)
-
         tables_to_combine = []
 
         # Add Delta table data
         if (delta_table := self._get_delta_table(record_path)) is not None:
             try:
-                delta_table_data = delta_table.to_pyarrow_dataset(
-                    as_large_types=True
+                delta_table_data = delta_to_pyarrow_dataset(
+                    delta_table, as_large_types=True
                 ).to_table()
             except Exception as e:
                 raise self._read_failed(record_path) from e
             if delta_table_data.num_rows > 0:
                 tables_to_combine.append(delta_table_data)
 
-        # Add pending batch data
-        if (
-            retrieve_pending
-            and (pending_batch := self._pending_batches.get(record_key)) is not None
-        ):
-            if pending_batch.num_rows > 0:
-                tables_to_combine.append(pending_batch)
-
-        if not tables_to_combine:
-            return None
-
-        if len(tables_to_combine) == 1:
-            table_to_return = tables_to_combine[0]
-        else:
-            table_to_return = pa.concat_tables(tables_to_combine)
-
-        # Handle record_id_column if specified
-        return self._handle_record_id_column(table_to_return, record_id_column)
+        # Add the pending rows a flush would insert
+        pending = self._pending_not_stored(record_path) if retrieve_pending else None
+        stored = pa.concat_tables(tables_to_combine) if tables_to_combine else None
+        return self._combine_stored_and_pending(stored, pending, record_id_column)
 
     def get_records_with_column_value(
         self,
@@ -942,14 +1145,12 @@ class DeltaTableDatabase:
     ) -> "pa.Table | None":
         if flush:
             self.flush_batch(record_path)
-        # check if record_id is found in pending batches
-        record_key = self._get_record_key(record_path)
-        pending_batch = self._pending_batches.get(record_key)
 
+        pair_list: list[tuple[str, Any]]
         if isinstance(column_values, Mapping):
             # Convert Mapping to list of tuples
-            pair_list = list(column_values.items())
-        elif isinstance(column_values, Collection):
+            pair_list = list(cast(Mapping[str, Any], column_values).items())
+        else:
             # Ensure it's a list of tuples
             pair_list = cast(list[tuple[str, Any]], list(column_values))
 
@@ -958,26 +1159,40 @@ class DeltaTableDatabase:
         for next_expression in expressions[1:]:
             combined_expression = combined_expression & next_expression
 
-        if pending_batch is not None:
-            filtered_table = pending_batch.filter(combined_expression)
-            return self._handle_record_id_column(filtered_table, record_id_column)
+        pending = self._pending_rows(record_path)
+        if pending is not None:
+            # Rows are pending: the stored ids decide which of them a read returns.
+            self._stored_ids(record_path)
+        stored = self._stored_rows(record_path)
 
-        # Now check the Delta table
-        delta_table = self._get_delta_table(record_path)
-        if delta_table is None:
-            return None
+        # A side without a queried column holds null there once flushed, and
+        # ``column == value`` never matches null, so it contributes no rows. A
+        # column neither side has is unknown: the filter raises as before.
+        queried = {c for c, _ in pair_list}
+        stored_columns = set() if stored is None else set(stored.table.column_names)
+        pending_columns = set() if pending is None else set(pending.table.column_names)
+        if queried <= stored_columns | pending_columns:
+            if not queried <= pending_columns:
+                pending = None
+            if not queried <= stored_columns:
+                stored = None
 
-        # Use schema-preserving read
-        try:
-            result = self._read_delta_table(delta_table, expression=combined_expression)
-        except _DeltaTableReadError as e:
-            raise self._read_failed(record_path) from e.__cause__
-
-        if len(result) == 0:
-            return None
-
-        # Handle (remove/rename) the record id column before returning
-        return self._handle_record_id_column(result, record_id_column)
+        # Both sides are answered from indexes (ITL-919): no re-read, no scan.
+        pending_matches = (
+            None
+            if pending is None
+            else self._without_stored_ids(
+                record_path, matching_rows(pending, pair_list, combined_expression)
+            )
+        )
+        result = (
+            None
+            if stored is None
+            else matching_rows(stored, pair_list, combined_expression)
+        )
+        return self._combine_stored_and_pending(
+            result, pending_matches, record_id_column
+        )
 
     def get_record_by_id(
         self,
@@ -1001,14 +1216,19 @@ class DeltaTableDatabase:
             self.flush_batch(record_path)
 
         record_id = coerce_record_id(record_id)
-        # check if record_id is found in pending batches
+        # Serve a pending record only if its id is not stored: a flush keeps the
+        # stored row and drops the pending one.
         record_key = self._get_record_key(record_path)
-        if record_id in self._pending_record_ids[record_key]:
+        if record_id in self._pending_record_ids[
+            record_key
+        ] and record_id not in self._stored_ids(record_path):
             # Return the pending record after removing the entry id column
-            pending_batch = self._pending_batches[record_key]
-            assert pending_batch is not None, "Pending batch should not be None"
-            filtered_table = pending_batch.filter(
-                pc.field(self.RECORD_ID_COLUMN) == record_id
+            pending = self._pending_rows(record_path)
+            assert pending is not None, "Pending batch should not be None"
+            filtered_table = self._rows_with_ids(
+                pending,
+                [record_id],
+                pending.table.schema.field(self.RECORD_ID_COLUMN).type,
             )
             if filtered_table.num_rows != 1:
                 raise ValueError(
@@ -1016,19 +1236,12 @@ class DeltaTableDatabase:
                 )
             return self._handle_record_id_column(filtered_table, record_id_column)
 
-        # Now check the Delta table
-        delta_table = self._get_delta_table(record_path)
-        if delta_table is None:
+        # Now check the stored rows (the indexed snapshot, ITL-919)
+        stored = self._stored_rows(record_path)
+        if stored is None:
             return None
-
-        # Use schema-preserving read
-        filter_expr = self._create_record_id_filter(record_id)
-        try:
-            result = self._read_delta_table(delta_table, filters=filter_expr)
-        except _DeltaTableReadError as e:
-            raise self._read_failed(record_path) from e.__cause__
-
-        if len(result) == 0:
+        result = self._rows_with_ids(stored, [record_id])
+        if result.num_rows == 0:
             return None
 
         # Handle (remove/rename) the record id column before returning
@@ -1070,84 +1283,23 @@ class DeltaTableDatabase:
         if len(record_ids) == 0:
             return None
 
-        # check inside the batch
-        delta_table = self._get_delta_table(record_path)
-        if delta_table is None:
-            return None
-        # Use schema-preserving read with filters
-        filter_expr = self._create_record_ids_filter(record_ids_list)
-        try:
-            result = self._read_delta_table(delta_table, filters=filter_expr)
-        except _DeltaTableReadError as e:
-            raise self._read_failed(record_path) from e.__cause__
+        stored = self._stored_rows(record_path)
+        pending = self._pending_rows(record_path)
+        result = None
+        if stored is not None:
+            result = self._rows_with_ids(stored, record_ids_list)
 
-        if len(result) == 0:
-            return None
-
-        # Handle record_id column based on parameter
-        return self._handle_record_id_column(result, record_id_column)
-
-    def _read_delta_table(
-        self,
-        delta_table: deltalake.DeltaTable,
-        filters: list | None = None,
-        expression: pc.Expression | None = None,
-    ) -> pa.Table:
-        """
-        Read table using to_pyarrow_dataset with original schema preservation.
-
-        Args:
-            delta_table: The Delta table to read from
-            filters: Optional filters to apply
-            expression: Optional filter expression, used instead of ``filters``
-
-        Returns:
-            Arrow table with preserved schema
-
-        Raises:
-            _DeltaTableReadError: If the table's data could not be read, with the
-                backend's error as its ``__cause__``. An error in the filter itself
-                (an unknown column, say) is raised as is.
-        """
-        filter_expr = None
-        # Use to_pyarrow_dataset with as_large_types for Polars compatible arrow table loading
-        try:
-            dataset = delta_table.to_pyarrow_dataset(as_large_types=True)
-        except Exception as e:
-            raise _DeltaTableReadError from e
-        if filters and expression is None:
-            for filt in filters:
-                if len(filt) == 3:
-                    col, op, val = filt
-                    if op == "=":
-                        expr = pc.equal(pc.field(col), pa.scalar(val))  # type: ignore
-                    elif op == "in":
-                        expr = pc.is_in(pc.field(col), pa.array(val))  # type: ignore
-                    else:
-                        logger.warning(
-                            f"Unsupported filter operation: {op}. Falling back to table-level filter application which may be less efficient."
-                        )
-                        # Fallback to table-level filtering
-                        return dataset.to_table()(filters=filters)
-
-                    if filter_expr is None:
-                        filter_expr = expr
-                    else:
-                        filter_expr = pc.and_(filter_expr, expr)  # type: ignore
-        elif expression is not None:
-            filter_expr = expression
-
-        # Convert view types before filtering: PyArrow has no comparison/sort
-        # kernels for string_view, so filtering the scan directly crashes
-        # (ENG-601). Trades predicate pushdown for correctness.
-        try:
-            scanned = dataset.to_table()
-        except Exception as e:
-            raise _DeltaTableReadError from e
-        table = arrow_utils.normalize_table_view_types(scanned)
-        if filter_expr is not None:
-            return table.filter(filter_expr)
-        return table
+        pending_matches = None
+        if pending is not None:
+            id_type = pending.table.schema.field(self.RECORD_ID_COLUMN).type
+            # Reading the stored ids drops the pending rows a flush would not
+            # insert; it raises StoreReadError when the stored table cannot be read.
+            pending_matches = self._without_stored_ids(
+                record_path, self._rows_with_ids(pending, record_ids_list, id_type)
+            )
+        return self._combine_stored_and_pending(
+            result, pending_matches, record_id_column
+        )
 
     def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""
@@ -1272,7 +1424,7 @@ class DeltaTableDatabase:
 
         try:
             # Combine all tables in the batch. Convert view types so they never
-            # reach storage (see _read_delta_table / ENG-601).
+            # reach storage (ENG-601).
             combined_table = arrow_utils.normalize_table_view_types(
                 pending_batch.combine_chunks()
             )
@@ -1306,6 +1458,8 @@ class DeltaTableDatabase:
                     schema_mode="merge" if self.allow_schema_evolution else "overwrite",
                     storage_options=self._storage_options or None,
                 )
+                base = _CommittedSnapshot(version=-1, ids=set())
+                inserted_ids = self._non_null_ids(combined_table)
                 logger.debug(
                     f"Created new Delta table for {record_key} with {len(combined_table)} records"
                 )
@@ -1320,27 +1474,37 @@ class DeltaTableDatabase:
                         f"{combined_table.schema.field(column).type}). "
                         "The stored rows are unchanged and nothing was written."
                     )
-                delta_table.merge(
-                    source=combined_table,
-                    predicate=f"target.{self.RECORD_ID_COLUMN} = source.{self.RECORD_ID_COLUMN}",
-                    source_alias="source",
-                    target_alias="target",
-                    merge_schema=self.allow_schema_evolution,
-                ).when_not_matched_insert_all().execute()
+                base = self._snapshot_for_commit(
+                    record_key, delta_table, table_uri, abs_path_components
+                )
+                assert base.ids is not None
+                incoming_ids = self._non_null_ids(combined_table)
+                inserted_ids = incoming_ids - base.ids
+                if len(inserted_ids) == len(incoming_ids) and self._stores_as_is(
+                    delta_table, combined_table
+                ):
+                    # Every pending id is new in the version just loaded and the rows
+                    # have the stored schema: append (ITL-919). A MERGE reads the whole
+                    # stored table on each commit; it remains for every other batch.
+                    deltalake.write_deltalake(
+                        table_uri,
+                        combined_table,
+                        mode="append",
+                        storage_options=self._storage_options or None,
+                    )
+                else:
+                    # Some pending ids are stored already: insert only the others.
+                    delta_table.merge(
+                        source=combined_table,
+                        predicate=f"target.{self.RECORD_ID_COLUMN} = source.{self.RECORD_ID_COLUMN}",
+                        source_alias="source",
+                        target_alias="target",
+                        merge_schema=self.allow_schema_evolution,
+                    ).when_not_matched_insert_all().execute()
 
                 logger.debug(
                     f"Appended batch of {len(combined_table)} records to {record_key}"
                 )
-
-            # Update cache
-            self._delta_table_cache[record_key] = deltalake.DeltaTable(
-                table_uri, storage_options=self._storage_options or None
-            )
-
-            # Invalidate the existing-IDs cache directly by record_key to avoid
-            # double-prefixing that would occur if _invalidate_cache() were used
-            # (it prepends _path_prefix again via _get_record_key).
-            self._cache_dirty[record_key] = True
 
         except Exception as e:
             logger.error(f"Error flushing batch for {record_key}: {e}")
@@ -1348,6 +1512,185 @@ class DeltaTableDatabase:
             self._pending_batches[record_key] = pending_batch
             self._pending_record_ids[record_key] = pending_ids
             raise
+
+        # The rows are committed: nothing below may put them back in the queue.
+        try:
+            committed = deltalake.DeltaTable(
+                table_uri, storage_options=self._storage_options or None
+            )
+            self._delta_table_cache[record_key] = committed
+            self._snapshots[record_key] = self._extend_snapshot(
+                base, committed, inserted_ids
+            )
+        except Exception as e:
+            # The next read loads the table again and reports a failure itself.
+            logger.warning(f"Could not reload {record_key} after committing: {e}")
+            self._delta_table_cache.pop(record_key, None)
+            self._snapshots.pop(record_key, None)
+
+    def _rows_with_ids(
+        self,
+        rows: KeyIndex,
+        record_ids: list[bytes],
+        value_type: pa.DataType | None = None,
+    ) -> pa.Table:
+        """Return the rows whose record id is one of ``record_ids``, in table order.
+
+        Served from the record-id index (ITL-919); a table whose id column is not
+        binary is filtered instead, with Arrow's comparison.
+
+        Args:
+            rows: The indexed rows (stored or pending).
+            record_ids: The ids looked up.
+            value_type: The Arrow type to build the looked-up ids with for the
+                filter, or ``None`` to infer it from the ids.
+
+        Returns:
+            The matching rows (possibly none).
+        """
+        id_type = rows.table.schema.field(self.RECORD_ID_COLUMN).type
+        if not all(is_indexed_lookup(id_type, r) for r in record_ids):
+            return rows.table.filter(
+                pc.is_in(
+                    pc.field(self.RECORD_ID_COLUMN),
+                    pa.array(record_ids, type=value_type),
+                )
+            )
+        id_index = rows.column(self.RECORD_ID_COLUMN)
+        positions = {p for r in set(record_ids) for p in id_index.get(r, ())}
+        return rows_at(rows.table, sorted(positions))
+
+    @staticmethod
+    def _stores_as_is(delta_table: deltalake.DeltaTable, batch: pa.Table) -> bool:
+        """Whether ``batch`` has exactly the stored schema once the Delta writer converts it.
+
+        Only such a batch is appended: an append stores it unchanged, as the MERGE
+        would. A batch that needs a cast (a ``null``-typed column, a nullability
+        difference) or evolves the schema goes through the MERGE, which handles it.
+
+        Args:
+            delta_table: The loaded stored table.
+            batch: The rows about to be committed.
+
+        Returns:
+            Whether an append stores ``batch`` exactly as the MERGE would.
+        """
+        try:
+            incoming = _as_delta_writer_stores(batch.schema)
+        except Exception:
+            # A type Delta cannot store directly (null): leave it to the MERGE.
+            return False
+        return incoming.equals(_stored_arrow_schema(delta_table), check_metadata=False)
+
+    @classmethod
+    def _non_null_ids(cls, table: pa.Table) -> set[bytes]:
+        """Return the record ids of ``table``'s rows, nulls left out."""
+        return {
+            record_id
+            for record_id in table[cls.RECORD_ID_COLUMN].to_pylist()
+            if record_id is not None
+        }
+
+    def _snapshot_for_commit(
+        self,
+        record_key: str,
+        delta_table: deltalake.DeltaTable,
+        table_uri: str,
+        abs_path_components: tuple[str, ...],
+    ) -> _CommittedSnapshot:
+        """Return the stored ids of the version a commit is about to build on.
+
+        ``delta_table`` was loaded for this commit, so whether the pending ids are
+        new is decided against the table as it is now, never against an older
+        cached version. The cached snapshot is reused when it describes this
+        version; otherwise the ids are read from it.
+
+        Args:
+            record_key: The table's absolute record key.
+            delta_table: The table freshly loaded for the commit.
+            table_uri: The table's location, for the error.
+            abs_path_components: The table's absolute path, for the error.
+
+        Returns:
+            A snapshot of the loaded version with its ``ids`` read.
+
+        Raises:
+            StoreReadError: If the stored ids could not be read.
+        """
+        cached = self._snapshots.get(record_key)
+        if (
+            cached is not None
+            and cached.ids is not None
+            and cached.version == delta_table.version()
+        ):
+            return cached
+        try:
+            ids = self._scan_ids(delta_table)
+        except Exception as e:
+            raise StoreReadError(table_uri, abs_path_components) from e
+        return _CommittedSnapshot(delta_table.version(), ids=ids)
+
+    def _extend_snapshot(
+        self,
+        base: _CommittedSnapshot,
+        committed: deltalake.DeltaTable,
+        inserted_ids: set[bytes],
+    ) -> _CommittedSnapshot:
+        """Return the snapshot of ``committed``, built from ``base`` plus this commit.
+
+        When ``committed`` is the version right after ``base`` (no other writer
+        committed in between), its ids are ``base``'s plus the inserted ones, and
+        its rows, if ``base`` has them, are ``base``'s plus the rows of the data
+        files the commit added, read as ``get_all_records`` reads them. Anything
+        else (a skipped version, a removed file, a changed schema) leaves that
+        part to be read again on first use.
+
+        Args:
+            base: The snapshot of the version the commit built on.
+            committed: The table reloaded after the commit.
+            inserted_ids: The non-null record ids the commit inserted.
+
+        Returns:
+            The new snapshot.
+        """
+        version = committed.version()
+        if version != base.version + 1:
+            return _CommittedSnapshot(version)
+        assert base.ids is not None
+        snapshot = _CommittedSnapshot(version, ids=base.ids | inserted_ids)
+        if base.rows is None:
+            return snapshot
+        dataset = cast(
+            "pa_ds.FileSystemDataset",
+            delta_to_pyarrow_dataset(committed, as_large_types=True),
+        )
+        files = frozenset(dataset.files)
+        if (
+            base.dataset_schema is None
+            or not base.files <= files
+            or not dataset.schema.equals(base.dataset_schema)
+        ):
+            return snapshot
+        added = files - base.files
+        new_rows = arrow_utils.normalize_table_view_types(
+            pa.concat_tables(
+                [
+                    fragment.to_table(schema=dataset.schema)
+                    for fragment in dataset.get_fragments()
+                    if fragment.path in added
+                ]
+            )
+            if added
+            else dataset.schema.empty_table()
+        )
+        if not new_rows.schema.equals(base.rows.table.schema):
+            return snapshot
+        rows = base.rows
+        rows.append(new_rows, compact_tail(pa.concat_tables([rows.table, new_rows])))
+        snapshot.rows = rows
+        snapshot.files = files
+        snapshot.dataset_schema = dataset.schema
+        return snapshot
 
     @staticmethod
     def _incompatible_append_column(
@@ -1453,6 +1796,9 @@ class DeltaTableDatabase:
             _scoped_path=new_scoped_path,
             _shared_pending_batches=root_instance._pending_batches,
             _shared_pending_record_ids=root_instance._pending_record_ids,
+            _shared_delta_table_cache=root_instance._delta_table_cache,
+            _shared_snapshots=root_instance._snapshots,
+            _shared_pending_indexes=root_instance._pending_indexes,
         )
 
     def list_sources(self) -> list[tuple[str, ...]]:

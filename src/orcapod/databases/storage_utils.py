@@ -1,20 +1,30 @@
 """
 Storage utility helpers for DeltaTableDatabase.
 
-Provides two public functions:
+Provides three public functions:
 - parse_base_path: Converts any path type (str, Path, UPath) into a URI string
   and a merged dict of deltalake-compatible storage_options.
 - is_cloud_uri: Returns True for cloud storage schemes (s3://, gs://, etc.).
+- delta_to_pyarrow_dataset: Opens a Delta table as a pyarrow dataset, reading local
+  tables through a native filesystem.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import deltalake
+    import pyarrow.dataset as pa_ds
+    import pyarrow.fs as pa_fs
     from upath import UPath
+else:
+    pa_fs = LazyModule("pyarrow.fs")
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +46,42 @@ def is_cloud_uri(uri: str) -> bool:
         return False
     scheme = uri.split("://", 1)[0].lower()
     return scheme in _CLOUD_SCHEMES
+
+
+def delta_to_pyarrow_dataset(
+    delta_table: deltalake.DeltaTable, **kwargs: Any
+) -> pa_ds.Dataset:
+    """Open a Delta table as a pyarrow dataset, natively for local tables.
+
+    By default ``DeltaTable.to_pyarrow_dataset`` reads through
+    ``PyFileSystem(DeltaStorageHandler)``, a filesystem implemented in Python. Arrow
+    finishes tearing down a scan on a thread-pool worker after the scan returns. If that
+    worker releases a Python-backed buffer while the interpreter is finalizing, the process
+    hangs at exit in Arrow's thread-pool destructor, or aborts on Linux with Python
+    3.11/3.12 (ITL-892; apache/arrow#50482, apache/arrow#54536).
+
+    A local table is therefore read through a native pyarrow filesystem rooted at the
+    table, which returns the same schema and values without Python file objects. Any other
+    URI, a cloud store or a ``filesystem`` passed by the caller, keeps deltalake's reader.
+
+    ``table_uri`` is percent-encoded: deltalake 1.0.2 and 1.2.1 return a bare path such as
+    ``/data/a%20b/``, and 1.6.6 returns ``file:///data/a%20b/``. pyarrow's own URI parser
+    decodes it to the native path. A root that is neither a ``file://`` URI nor an absolute
+    POSIX path (a Windows drive path, untested) keeps deltalake's reader.
+
+    Args:
+        delta_table: The Delta table to open.
+        **kwargs: Passed to ``DeltaTable.to_pyarrow_dataset`` unchanged.
+
+    Returns:
+        The pyarrow dataset over the table's current version.
+    """
+    uri = delta_table.table_uri
+    file_uri = f"file://{uri}" if uri.startswith("/") else uri
+    if kwargs.get("filesystem") is None and file_uri.startswith("file://"):
+        filesystem, root = pa_fs.FileSystem.from_uri(file_uri)
+        kwargs["filesystem"] = pa_fs.SubTreeFileSystem(root, filesystem)
+    return delta_table.to_pyarrow_dataset(**kwargs)
 
 
 def _extract_upath_options(upath: UPath) -> dict[str, str]:

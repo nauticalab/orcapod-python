@@ -1,0 +1,929 @@
+Analysis of sampling python (pid 11236) every 1 millisecond
+Process:         python3.13 [11236]
+Path:            /Users/USER/*/python3.13
+Load Address:    0x104010000
+Identifier:      python3.13
+Version:         ???
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.13 [11231]
+Target Type:     live task
+
+Date/Time:       2026-11-10 22:12:59.567 -0800
+Launch Time:     2026-11-10 22:12:53.520 -0800
+OS Version:      macOS 26.7.2 (25G332)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         46.9M
+Physical footprint (peak):  46.9M
+Idle exit:                  untracked
+----
+
+Call graph:
+    758 Thread_4566938   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 758 start  (in dyld) + 7040  [0x18bc09514]
+    +   758 dyld4::LibSystemHelpersWrapper::exit(int) const  (in dyld) + 164  [0x18bc095f0]
+    +     758 dyld4::LibSystemHelpers::exit(int) const  (in libdyld.dylib) + 20  [0x18bbd02e4]
+    +       758 exit  (in libsystem_c.dylib) + 44  [0x18be895dc]
+    +         758 __cxa_finalize_ranges  (in libsystem_c.dylib) + 416  [0x18be897dc]
+    +           758 std::shared_ptr<arrow::internal::ThreadPool>::~shared_ptr[abi:ue170006]()  (in libarrow.2300.dylib) + 56  [0x1105a372c]
+    +             758 arrow::internal::ThreadPool::~ThreadPool()  (in libarrow.2300.dylib) + 12  [0x11083281c]
+    +               758 arrow::internal::ThreadPool::~ThreadPool()  (in libarrow.2300.dylib) + 56  [0x110832538]
+    +                 758 arrow::internal::ThreadPool::Shutdown(bool)  (in libarrow.2300.dylib) + 168  [0x110832694]
+    +                   758 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x18beea858]
+    +                     758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                       758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567081
+    + 758 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x18bfcfc10]
+    +   758 _pthread_wqthread  (in libsystem_pthread.dylib) + 368  [0x18bfd0f0c]
+    +     758 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x18bf929f0]
+    758 Thread_4567250: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567251: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567252: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2ef0  [0x122a5eef0]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418a650  [0x122a46650]
+    +                               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4189168  [0x122a45168]
+    +                                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a70d0  [0x122a630d0]
+    +                                   758 kevent  (in libsystem_kernel.dylib) + 8  [0x18bf96fc4]
+    758 Thread_4567253: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef7c  [0x122a5af7c]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8784  [0x122a64784]
+    +               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567254: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567255: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567256: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567257: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567258: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567259: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567261: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2ef0  [0x122a5eef0]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418a650  [0x122a46650]
+    +                               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4189168  [0x122a45168]
+    +                                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a70d0  [0x122a630d0]
+    +                                   758 kevent  (in libsystem_kernel.dylib) + 8  [0x18bf96fc4]
+    758 Thread_4567262: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567263: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567265: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567266: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567268: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567270: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567271: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567273: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567274: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567325: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+    +               758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+    +                 758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+    +                   758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+    +                     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+    +                       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+    +                         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+    +                           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+    +                             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+    +                               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567363: tokio-runtime-worker
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+    +       758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+    +         758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+    +           758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef7c  [0x122a5af7c]
+    +             758 ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8784  [0x122a64784]
+    +               758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +                 758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567429
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 std::__thread_proxy[abi:ue170006]<std::tuple<std::unique_ptr<std::__thread_struct>, arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::$_8>>(void*)  (in libarrow.2300.dylib) + 756  [0x1108374d0]
+    +       758 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x18beea858]
+    +         758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +           758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567436
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 std::__thread_proxy[abi:ue170006]<std::tuple<std::unique_ptr<std::__thread_struct>, arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::$_8>>(void*)  (in libarrow.2300.dylib) + 756  [0x1108374d0]
+    +       758 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x18beea858]
+    +         758 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+    +           758 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18bf9450c]
+    758 Thread_4567464
+    + 758 thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+    +   758 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+    +     758 std::__thread_proxy[abi:ue170006]<std::tuple<std::unique_ptr<std::__thread_struct>, arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::$_8>>(void*)  (in libarrow.2300.dylib) + 460  [0x1108373a8]
+    +       758 std::__bind_return<arrow::detail::ContinueFuture, std::tuple<arrow::Future<arrow::internal::Empty>, std::function<arrow::Status ()>>, std::tuple<>, __is_valid_bind_return<arrow::detail::ContinueFuture, std::tuple<arrow::Future<arrow::internal::Empty>, std::function<arrow::Status ()>>, std::tuple<>>::value>::type std::__bind<arrow::detail::ContinueFuture, arrow::Future<arrow::internal::Empty>&, std::function<arrow::Status ()>>::operator()[abi:ue170006]<>()  (in libarrow_acero.2300.dylib) + 52  [0x10b056d20]
+    +         758 std::enable_if<!std::is_void<arrow::Status>::value && !is_future<arrow::Status>::value && (!arrow::Future<arrow::internal::Empty>::is_empty || std::is_same<arrow::Status, arrow::Status>::value), void>::type arrow::detail::ContinueFuture::operator()<std::function<arrow::Status ()>&, arrow::Status, arrow::Future<arrow::internal::Empty>>(arrow::Future<arrow::internal::Empty>, std::function<arrow::Status ()>&) const  (in libarrow_acero.2300.dylib) + 56  [0x10b056db0]
+    +           758 arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status)  (in libarrow_acero.2300.dylib) + 52  [0x10b03530c]
+    +             758 arrow::Future<arrow::internal::Empty>::DoMarkFinished(arrow::Result<arrow::internal::Empty>)  (in libarrow_acero.2300.dylib) + 132  [0x10b0354a4]
+    +               758 arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+    +                 758 arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool)  (in libarrow.2300.dylib) + 252  [0x110866ed8]
+    +                   758 arrow::util::(anonymous namespace)::AsyncTaskSchedulerImpl::OnTaskFinished(arrow::Status const&)  (in libarrow.2300.dylib) + 96  [0x1108a2588]
+    +                     758 arrow::util::(anonymous namespace)::AsyncTaskSchedulerImpl::MaybeEndUnlocked(std::unique_lock<std::mutex>&&)  (in libarrow.2300.dylib) + 104  [0x1108a6d0c]
+    +                       758 arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status)  (in libarrow.2300.dylib) + 52  [0x1100323a4]
+    +                         758 arrow::Future<arrow::internal::Empty>::DoMarkFinished(arrow::Result<arrow::internal::Empty>)  (in libarrow.2300.dylib) + 132  [0x11003253c]
+    +                           758 arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+    +                             758 arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool)  (in libarrow.2300.dylib) + 252  [0x110866ed8]
+    +                               758 arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapResultOnComplete::Callback<arrow::Future<arrow::internal::Empty>::ThenOnComplete<arrow::util::AsyncTaskScheduler::Make(arrow::internal::FnOnce<arrow::Status (arrow::util::AsyncTaskScheduler*)>, arrow::internal::FnOnce<void (arrow::Status const&)>, arrow::StopToken)::$_0, arrow::Future<arrow::internal::Empty>::PassthruOnFailure<arrow::util::AsyncTaskScheduler::Make(arrow::internal::FnOnce<arrow::Status (arrow::util::AsyncTaskScheduler*)>, arrow::internal::FnOnce<void (arrow::Status const&)>, arrow::StopToken)::$_0>>>>::invoke(arrow::FutureImpl const&)  (in libarrow.2300.dylib) + 64  [0x1108a8918]
+    +                                 758 arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status)  (in libarrow.2300.dylib) + 52  [0x1100323a4]
+    +                                   758 arrow::Future<arrow::internal::Empty>::DoMarkFinished(arrow::Result<arrow::internal::Empty>)  (in libarrow.2300.dylib) + 132  [0x11003253c]
+    +                                     758 arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+    +                                       758 arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool)  (in libarrow.2300.dylib) + 252  [0x110866ed8]
+    +                                         758 arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapStatusyOnComplete::Callback<arrow::acero::(anonymous namespace)::ExecPlanImpl::StartProducing()::'lambda0'(arrow::Status const&)>>::invoke(arrow::FutureImpl const&)  (in libarrow_acero.2300.dylib) + 100  [0x10b0a64cc]
+    +                                           758 arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status)  (in libarrow_acero.2300.dylib) + 52  [0x10b03530c]
+    +                                             758 arrow::Future<arrow::internal::Empty>::DoMarkFinished(arrow::Result<arrow::internal::Empty>)  (in libarrow_acero.2300.dylib) + 132  [0x10b0354a4]
+    +                                               758 arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+    +                                                 758 arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool)  (in libarrow.2300.dylib) + 252  [0x110866ed8]
+    +                                                   758 arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapResultOnComplete::Callback<arrow::Future<arrow::internal::Empty>::ThenOnComplete<arrow::dataset::(anonymous namespace)::AsyncScanner::ScanBatchesUnorderedAsync(arrow::internal::Executor*, bool, bool)::$_19::operator()() const::'lambda'(arrow::dataset::EnumeratedRecordBatch const&)::operator()(arrow::dataset::EnumeratedRecordBatch const&) const::'lambda'(), arrow::Future<arrow::internal::Empty>::PassthruOnFailure<arrow::dataset::(anonymous namespace)::AsyncScanner::ScanBatchesUnorderedAsync(arrow::internal::Executor*, bool, bool)::$_19::operator()() const::'lambda'(arrow::dataset::EnumeratedRecordBatch const&)::operator()(arrow::dataset::EnumeratedRecordBatch const&) const::'lambda'()>>>>::invoke(arrow::FutureImpl const&)  (in libarrow_dataset.2300.dylib) + 176  [0x10a741b60]
+    +                                                     758 arrow::Future<arrow::dataset::EnumeratedRecordBatch>::MarkFinished(arrow::Result<arrow::dataset::EnumeratedRecordBatch>)  (in libarrow_dataset.2300.dylib) + 120  [0x10a6eb7f4]
+    +                                                       758 arrow::Future<arrow::dataset::EnumeratedRecordBatch>::DoMarkFinished(arrow::Result<arrow::dataset::EnumeratedRecordBatch>)  (in libarrow_dataset.2300.dylib) + 148  [0x10a6eba54]
+    +                                                         758 arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+    +                                                           758 arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool)  (in libarrow.2300.dylib) + 252  [0x110866ed8]
+    +                                                             758 arrow::detail::MarkNextFinished<arrow::Future<arrow::dataset::EnumeratedRecordBatch>, arrow::Future<arrow::dataset::EnumeratedRecordBatch>, false, false>::operator()(arrow::Result<arrow::dataset::EnumeratedRecordBatch> const&) &&  (in libarrow_dataset.2300.dylib) + 152  [0x10a6faaec]
+    +                                                               758 arrow::Future<arrow::dataset::EnumeratedRecordBatch>::MarkFinished(arrow::Result<arrow::dataset::EnumeratedRecordBatch>)  (in libarrow_dataset.2300.dylib) + 120  [0x10a6eb7f4]
+    +                                                                 758 arrow::Future<arrow::dataset::EnumeratedRecordBatch>::DoMarkFinished(arrow::Result<arrow::dataset::EnumeratedRecordBatch>)  (in libarrow_dataset.2300.dylib) + 148  [0x10a6eba54]
+    +                                                                   758 arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+    +                                                                     758 arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::dataset::EnumeratedRecordBatch>::WrapResultOnComplete::Callback<arrow::MappingGenerator<arrow::dataset::EnumeratedRecordBatch, arrow::dataset::EnumeratedRecordBatch>::Callback>>::~FnImpl()  (in libarrow_dataset.2300.dylib) + 72  [0x10a7435ec]
+    +                                                                       758 std::__function::__func<arrow::dataset::(anonymous namespace)::AsyncScanner::ScanBatchesUnorderedAsync(arrow::internal::Executor*, bool, bool)::$_19, arrow::Future<arrow::dataset::EnumeratedRecordBatch> ()>::destroy_deallocate()  (in libarrow_dataset.2300.dylib) + 112  [0x10a740dfc]
+    +                                                                         758 arrow::acero::(anonymous namespace)::ExecPlanImpl::~ExecPlanImpl()  (in libarrow_acero.2300.dylib) + 12  [0x10b0a4d20]
+    +                                                                           758 arrow::acero::(anonymous namespace)::ExecPlanImpl::~ExecPlanImpl()  (in libarrow_acero.2300.dylib) + 280  [0x10b0a4b9c]
+    +                                                                             758 arrow::acero::(anonymous namespace)::SourceNode::~SourceNode()  (in libarrow_acero.2300.dylib) + 12  [0x10b041950]
+    +                                                                               758 arrow::acero::(anonymous namespace)::SourceNode::~SourceNode()  (in libarrow_acero.2300.dylib) + 192  [0x10b0427a8]
+    +                                                                                 758 std::__function::__func<arrow::MappingGenerator<arrow::dataset::EnumeratedRecordBatch, std::optional<arrow::compute::ExecBatch>>, arrow::Future<std::optional<arrow::compute::ExecBatch>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6fda00]
+    +                                                                                   758 std::__function::__func<arrow::ReadaheadGenerator<arrow::dataset::EnumeratedRecordBatch>, arrow::Future<arrow::dataset::EnumeratedRecordBatch> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6f9434]
+    +                                                                                     758 std::__function::__func<arrow::MergedGenerator<arrow::dataset::EnumeratedRecordBatch>, arrow::Future<arrow::dataset::EnumeratedRecordBatch> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6f37d4]
+    +                                                                                       758 arrow::MergedGenerator<arrow::dataset::EnumeratedRecordBatch>::State::~State()  (in libarrow_dataset.2300.dylib) + 160  [0x10a6f3530]
+    +                                                                                         758 std::__function::__func<arrow::MappingGenerator<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>, arrow::dataset::EnumeratedRecordBatch>, arrow::Future<arrow::dataset::EnumeratedRecordBatch> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6ea09c]
+    +                                                                                           758 std::__function::__func<arrow::FutureFirstGenerator<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>>, arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6e8188]
+    +                                                                                             758 std::__shared_ptr_emplace<arrow::FutureFirstGenerator<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>>::State>::__on_zero_shared()  (in libarrow_dataset.2300.dylib) + 116  [0x10a6e7fac]
+    +                                                                                               758 arrow::ConcreteFutureImpl::~ConcreteFutureImpl()  (in libarrow.2300.dylib) + 160  [0x110866a0c]
+    +                                                                                                 758 arrow::Future<std::function<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>> ()>>::SetResult(arrow::Result<std::function<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>> ()>>)::'lambda'(void*)::__invoke(void*)  (in libarrow_dataset.2300.dylib) + 16  [0x10a6e6594]
+    +                                                                                                   758 arrow::Result<std::function<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>> ()>>::~Result()  (in libarrow_dataset.2300.dylib) + 76  [0x10a6e7da0]
+    +                                                                                                     758 std::__function::__func<arrow::EnumeratingGenerator<std::shared_ptr<arrow::RecordBatch>>, arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch>>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6e6ab0]
+    +                                                                                                       758 std::__function::__func<arrow::DefaultIfEmptyGenerator<std::shared_ptr<arrow::RecordBatch>>, arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a6e46d8]
+    +                                                                                                         758 std::__function::__func<arrow::FutureFirstGenerator<std::shared_ptr<arrow::RecordBatch>>, arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a7557b4]
+    +                                                                                                           758 std::__shared_ptr_emplace<arrow::FutureFirstGenerator<std::shared_ptr<arrow::RecordBatch>>::State>::__on_zero_shared()  (in libarrow_dataset.2300.dylib) + 116  [0x10a7555d8]
+    +                                                                                                             758 arrow::ConcreteFutureImpl::~ConcreteFutureImpl()  (in libarrow.2300.dylib) + 160  [0x110866a0c]
+    +                                                                                                               758 arrow::Future<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>>::SetResult(arrow::Result<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>>)::'lambda'(void*)::__invoke(void*)  (in libarrow_dataset.2300.dylib) + 16  [0x10a7158f4]
+    +                                                                                                                 758 arrow::Result<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>>::~Result()  (in libarrow_dataset.2300.dylib) + 76  [0x10a72b224]
+    +                                                                                                                   758 std::__function::__func<arrow::SerialReadaheadGenerator<std::shared_ptr<arrow::RecordBatch>>, arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a764a90]
+    +                                                                                                                     758 std::__function::__func<arrow::dataset::SlicingGenerator, arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>::destroy()  (in libarrow_dataset.2300.dylib) + 64  [0x10a76385c]
+    +                                                                                                                       758 std::__function::__func<arrow::MergedGenerator<std::shared_ptr<arrow::RecordBatch>>, arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>::destroy()  (in libparquet.2300.dylib) + 64  [0x10b6104a4]
+    +                                                                                                                         758 arrow::MergedGenerator<std::shared_ptr<arrow::RecordBatch>>::State::~State()  (in libparquet.2300.dylib) + 256  [0x10b610260]
+    +                                                                                                                           758 std::__function::__func<parquet::arrow::RowGroupGenerator, arrow::Future<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch>> ()>> ()>::destroy_deallocate()  (in libparquet.2300.dylib) + 96  [0x10b6037b0]
+    +                                                                                                                             758 parquet::arrow::(anonymous namespace)::FileReaderImpl::~FileReaderImpl()  (in libparquet.2300.dylib) + 112  [0x10b5f7550]
+    +                                                                                                                               758 parquet::ParquetFileReader::~ParquetFileReader()  (in libparquet.2300.dylib) + 60  [0x10b4c3ee4]
+    +                                                                                                                                 758 parquet::SerializedFile::~SerializedFile()  (in libparquet.2300.dylib) + 12  [0x10b4ca98c]
+    +                                                                                                                                   758 parquet::SerializedFile::~SerializedFile()  (in libparquet.2300.dylib) + 336  [0x10b4cb084]
+    +                                                                                                                                     758 arrow::io::internal::ReadRangeCache::~ReadRangeCache()  (in libarrow.2300.dylib) + 40  [0x1107140ac]
+    +                                                                                                                                       758 arrow::io::internal::ReadRangeCache::LazyImpl::~LazyImpl()  (in libarrow.2300.dylib) + 44  [0x110726b68]
+    +                                                                                                                                         758 arrow::io::internal::ReadRangeCache::Impl::~Impl()  (in libarrow.2300.dylib) + 120  [0x110727e34]
+    +                                                                                                                                           758 arrow::ConcreteFutureImpl::~ConcreteFutureImpl()  (in libarrow.2300.dylib) + 160  [0x110866a0c]
+    +                                                                                                                                             758 arrow::Future<std::shared_ptr<arrow::Buffer>>::SetResult(arrow::Result<std::shared_ptr<arrow::Buffer>>)::'lambda'(void*)::__invoke(void*)  (in libarrow.2300.dylib) + 16  [0x11058c9b4]
+    +                                                                                                                                               758 arrow::Result<std::shared_ptr<arrow::Buffer>>::~Result()  (in libarrow.2300.dylib) + 68  [0x110145be8]
+    +                                                                                                                                                 758 arrow::py::PyBuffer::~PyBuffer()  (in libarrow_python.2300.dylib) + 12  [0x10a501ed8]
+    +                                                                                                                                                   758 arrow::py::PyBuffer::~PyBuffer()  (in libarrow_python.2300.dylib) + 40  [0x10a501e2c]
+    +                                                                                                                                                     758 PyGILState_Ensure  (in python3.13) + 68  [0x104204ae4]
+    +                                                                                                                                                       758 _PyThreadState_Attach  (in python3.13) + 56  [0x1040bd4e8]
+    +                                                                                                                                                         758 take_gil  (in python3.13) + 840  [0x1040a2b3c]
+    +                                                                                                                                                           758 PyThread_hang_thread  (in python3.13) + 12  [0x1040a3dac]
+    +                                                                                                                                                             758 pause  (in libsystem_c.dylib) + 44  [0x18bed85d4]
+    +                                                                                                                                                               758 __sigsuspend  (in libsystem_kernel.dylib) + 8  [0x18bf9ebbc]
+    589 Thread_4567082
+      589 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x18bfcfc10]
+        589 _pthread_wqthread  (in libsystem_pthread.dylib) + 368  [0x18bfd0f0c]
+          589 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x18bf929f0]
+
+Total number in stack (recursive counted multiple, when >=5):
+        25       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18bfd4c58]
+        25       thread_start  (in libsystem_pthread.dylib) + 8  [0x18bfcfc1c]
+        23       __psynch_cvwait  (in libsystem_kernel.dylib) + 0  [0x18bf94504]
+        23       _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x18bfd5128]
+        22       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41860ac  [0x122a420ac]
+        22       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x418b5fc  [0x122a475fc]
+        22       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4ac0178  [0x12337c178]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x417db9c  [0x122a39b9c]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4188030  [0x122a44030]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4194774  [0x122a50774]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x4196d58  [0x122a52d58]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ac80  [0x122a56c80]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419b6f4  [0x122a576f4]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419c180  [0x122a58180]
+        20       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x419ef08  [0x122a5af08]
+        18       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a2f70  [0x122a5ef70]
+        18       ???  (in _internal.abi3.so)  load address 0x11e8bc000 + 0x41a8744  [0x122a64744]
+        6       arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState)  (in libarrow.2300.dylib) + 184  [0x110866cb4]
+        5       arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool)  (in libarrow.2300.dylib) + 252  [0x110866ed8]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        17434
+        kevent  (in libsystem_kernel.dylib)        1516
+        __workq_kernreturn  (in libsystem_kernel.dylib)        1347
+        __sigsuspend  (in libsystem_kernel.dylib)        758
+
+Binary Images:
+       0x104010000 -        0x104da0b57 +python3.13 (???) <4C4C4472-5555-3144-A1C9-70709175969C> /Users/*/python3.13
+       0x10a178000 -        0x10a407ffb +lib.cpython-313-darwin.so (0) <B38375CB-10A6-3A04-B798-888937AB00B9> /Users/*/lib.cpython-313-darwin.so
+       0x10a4d0000 -        0x10a5f3ff3 +libarrow_python.2300.dylib (0) <54C409E4-6E5C-3FEB-9211-EF003250889B> /Users/*/libarrow_python.2300.dylib
+       0x10a6b4000 -        0x10a7ebff7 +libarrow_dataset.2300.dylib (0) <00ED4C61-A07E-3188-BEE8-1B1D222854B5> /Users/*/libarrow_dataset.2300.dylib
+       0x10ab44000 -        0x10ade3fd3 +libarrow_substrait.2300.dylib (0) <1491B701-20E5-348B-BB3C-769CC9AAB603> /Users/*/libarrow_substrait.2300.dylib
+       0x10afd8000 -        0x10b0f7ffb +libarrow_acero.2300.dylib (0) <87592EC4-D8A8-32E9-BB7A-9F298D819C2F> /Users/*/libarrow_acero.2300.dylib
+       0x10b1e8000 -        0x10b1f4e3f +_wrappers.cpython-313-darwin.so (0) <CD629CD2-A1D7-39FC-BC81-1647A6C94BE3> /Users/*/_wrappers.cpython-313-darwin.so
+       0x10b428000 -        0x10b697ff7 +libparquet.2300.dylib (0) <B5539094-3645-315F-A066-13E339B3B4F3> /Users/*/libparquet.2300.dylib
+       0x10c768000 -        0x10d207fff +libarrow_compute.2300.dylib (0) <464BED7D-C1A2-31E6-A867-09AB07963EEB> /Users/*/libarrow_compute.2300.dylib
+       0x10de74000 -        0x10e54b937 +_core.abi3.so (0) <B4C15F72-7A40-30DC-8AD2-35F88D2CCC16> /Users/*/_core.abi3.so
+       0x10ff0c000 -        0x10ff17fff +_dataset_orc.cpython-313-darwin.so (0) <40A5175E-B530-3F8C-868F-9DD81A28A51A> /Users/*/_dataset_orc.cpython-313-darwin.so
+       0x10ff28000 -        0x10ff2ffff +libarrow_python_parquet_encryption.2300.dylib (0) <9A703BD0-7CD1-39A6-8CD0-3B03A65D44D1> /Users/*/libarrow_python_parquet_encryption.2300.dylib
+       0x10ff3c000 -        0x10ff67fff +_acero.cpython-313-darwin.so (0) <B17E2639-E9DB-3A6C-A740-EBF2ED44942D> /Users/*/_acero.cpython-313-darwin.so
+       0x10ff88000 -        0x10ff9bfff +_json.cpython-313-darwin.so (0) <8D7F459E-2E6D-3994-A03A-FB8C40C24643> /Users/*/_json.cpython-313-darwin.so
+       0x10ffd4000 -        0x111ac39e7 +libarrow.2300.dylib (0) <C1B84D8F-3EF0-380D-805E-5480F00BC72B> /Users/*/libarrow.2300.dylib
+       0x11295c000 -        0x11297bffb +_substrait.cpython-313-darwin.so (0) <48667F98-E0A6-34C0-9625-BBE176171246> /Users/*/_substrait.cpython-313-darwin.so
+       0x112994000 -        0x1129a7ffb +_azurefs.cpython-313-darwin.so (0) <12B3E521-7E7E-36B5-8E7E-E7AFEE968504> /Users/*/_azurefs.cpython-313-darwin.so
+       0x1129bc000 -        0x1129cfffb +_dataset_parquet_encryption.cpython-313-darwin.so (0) <0D5F59D5-6E7D-379C-A181-6D1ECCE219C6> /Users/*/_dataset_parquet_encryption.cpython-313-darwin.so
+       0x118800000 -        0x118897ff7 +_dataset.cpython-313-darwin.so (0) <0629001B-51FD-3DE6-A515-AB72BAA779D7> /Users/*/_dataset.cpython-313-darwin.so
+       0x1188e4000 -        0x118927ffb +_fs.cpython-313-darwin.so (0) <B39A6BB3-9E4E-34C4-A402-05AD2CBC0E89> /Users/*/_fs.cpython-313-darwin.so
+       0x11894c000 -        0x118987ff3 +_csv.cpython-313-darwin.so (0) <B8752823-0EAF-37B9-B32A-D48C7DC0DB46> /Users/*/_csv.cpython-313-darwin.so
+       0x1189a4000 -        0x1189d7ff3 +_dataset_parquet.cpython-313-darwin.so (0) <C361B675-83E2-35BC-B19D-3A18180F6A12> /Users/*/_dataset_parquet.cpython-313-darwin.so
+       0x1189f8000 -        0x118aa3ff7 +_compute.cpython-313-darwin.so (0) <93316130-BA09-37A9-9EC5-43B16FAF7FCB> /Users/*/_compute.cpython-313-darwin.so
+       0x118c10000 -        0x118c23fff +_gcsfs.cpython-313-darwin.so (0) <891F8DF4-DACD-392F-A979-5D025B757405> /Users/*/_gcsfs.cpython-313-darwin.so
+       0x118c38000 -        0x118c4bfff +_hdfs.cpython-313-darwin.so (0) <E5EC6640-F712-3F78-B742-F7A91513699E> /Users/*/_hdfs.cpython-313-darwin.so
+       0x118c98000 -        0x118cf3ff3 +_parquet.cpython-313-darwin.so (0) <959D3C20-92F9-3FFA-8692-D7D472E411C9> /Users/*/_parquet.cpython-313-darwin.so
+       0x118d20000 -        0x118d4ffff +_parquet_encryption.cpython-313-darwin.so (0) <756EDF32-A1C1-3879-881E-BBD8A95DD162> /Users/*/_parquet_encryption.cpython-313-darwin.so
+       0x118e70000 -        0x118e8bfff +_s3fs.cpython-313-darwin.so (0) <3EF3D445-630F-3279-80D7-79CDF96963E8> /Users/*/_s3fs.cpython-313-darwin.so
+       0x11e8bc000 -        0x124b6f20b +_internal.abi3.so (0) <08478FD8-A9CC-3B89-A2CF-C05B4FADCB4E> /Users/*/_internal.abi3.so
+       0x18bb60000 -        0x18bbb2b4b  libobjc.A.dylib (951.7) <74772A34-83D8-3B3B-82A0-B5678E177C8D> /usr/lib/libobjc.A.dylib
+       0x18bbb3000 -        0x18bbe8115  libdyld.dylib (1387.2) <41529082-1172-3CFC-8ADF-A682ABE693F8> /usr/lib/system/libdyld.dylib
+       0x18bbe9000 -        0x18bc9c523  dyld (1.0.0 - 1387.2) <57F4E7E7-A497-38BB-A3D2-A459C622460B> /usr/lib/dyld
+       0x18bc9d000 -        0x18bca0228  libsystem_blocks.dylib (96) <974D6EDA-1213-3D11-B95D-267A66BADDCF> /usr/lib/system/libsystem_blocks.dylib
+       0x18bca1000 -        0x18bcf555f  libxpc.dylib (3102.160.5.700.1) <4E6ADFFF-C2F0-3404-B820-46F7AE2554FF> /usr/lib/system/libxpc.dylib
+       0x18bcf6000 -        0x18bd16a1f  libsystem_trace.dylib (1861.160.4.700.1) <CFC3D51E-6886-3520-9DCB-C11E276E416D> /usr/lib/system/libsystem_trace.dylib
+       0x18bd17000 -        0x18bdc56b7  libcorecrypto.dylib (1922.160.10.700.1) <1AB30A65-3FE6-3A5A-9078-796D9D590B7C> /usr/lib/system/libcorecrypto.dylib
+       0x18bdc6000 -        0x18be16257  libsystem_malloc.dylib (812.160.5) <8CF02A42-BC33-38BF-B14A-FA9B13B3CA3F> /usr/lib/system/libsystem_malloc.dylib
+       0x18be17000 -        0x18be5e23f  libdispatch.dylib (1542.160.2) <7202DA41-6AF6-3268-9EA3-00013AF42D10> /usr/lib/system/libdispatch.dylib
+       0x18be5f000 -        0x18be61ffb  libsystem_featureflags.dylib (103) <2E4939D0-6A88-38BC-B0A3-612870FBC436> /usr/lib/system/libsystem_featureflags.dylib
+       0x18be62000 -        0x18bee31e7  libsystem_c.dylib (1752.160.4) <8CA64BC9-6B11-3685-84AE-F0AF4247B0C8> /usr/lib/system/libsystem_c.dylib
+       0x18bee4000 -        0x18bf74ae7  libc++.1.dylib (2100.43) <04D82867-1CBD-3AC4-B744-B27DCD09692F> /usr/lib/libc++.1.dylib
+       0x18bf75000 -        0x18bf8f75f  libc++abi.dylib (2100.43) <45F8930E-87C7-3EE1-9638-31B9F476CF68> /usr/lib/libc++abi.dylib
+       0x18bf90000 -        0x18bfcd2f7  libsystem_kernel.dylib (12377.161.15.701.48) <ABE830C7-CBE9-3FEC-8F6D-97E5C691BD54> /usr/lib/system/libsystem_kernel.dylib
+       0x18bfce000 -        0x18bfdab3b  libsystem_pthread.dylib (539.100.4) <275D7230-23C1-32EF-B22B-14F61E30AA89> /usr/lib/system/libsystem_pthread.dylib
+       0x18bfdb000 -        0x18bfe3963  libsystem_platform.dylib (375.120.2) <8BC876D3-95BB-3D23-B7CB-0948531E49EB> /usr/lib/system/libsystem_platform.dylib
+       0x18bfe4000 -        0x18c0136eb  libsystem_info.dylib (600) <309040CE-F9D3-3BC0-8464-C9F9C96B2F90> /usr/lib/system/libsystem_info.dylib
+       0x18c014000 -        0x18c57291f  com.apple.CoreFoundation (6.9 - 5026.6.7.5) <F9299355-BB41-3A69-9DD7-FB7B89839B49> /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation
+       0x18c573000 -        0x18c88e7bf  com.apple.LaunchServices (1141.1 - 1141.1) <DB0B028A-82D8-38F4-BD09-EFA205C2EB4D> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/LaunchServices
+       0x18c88f000 -        0x18ca7795f  com.apple.gpusw.MetalTools (1.0 - 1) <448A8AA5-CAAA-3679-AE59-2CB9CB6BD76E> /System/Library/PrivateFrameworks/MetalTools.framework/Versions/A/MetalTools
+       0x18ca78000 -        0x18d2724bf  libBLAS.dylib (1551.160.2) <B5581F3E-1353-3AAC-ACE4-4CA5802DF7D8> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+       0x18d273000 -        0x18d38235f  com.apple.Lexicon-framework (1.0 - 195.12) <0F92E2F0-D2E3-3400-9928-1CEC60289BCB> /System/Library/PrivateFrameworks/Lexicon.framework/Versions/A/Lexicon
+       0x18d383000 -        0x18d4f238f  libSparse.dylib (184.160.6) <CBED7FA3-B725-3CEE-9775-F254209C18D9> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparse.dylib
+       0x18d4f3000 -        0x18d58610f  com.apple.SystemConfiguration (1.21 - 1.21) <A6E634C1-2104-3A1F-90E5-48100F18B457> /System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration
+       0x18d587000 -        0x18d5bb57b  libCRFSuite.dylib (55) <9A072938-7418-3917-A4DE-85A86FBD5242> /usr/lib/libCRFSuite.dylib
+       0x18d884000 -        0x18e86a8df  com.apple.Foundation (6.9 - 5026.6.7.5) <49A6A088-0B56-326B-A449-26304D8AA0FE> /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+       0x18ea1b000 -        0x18eb3bcbf  com.apple.CoreDisplay (291.4 - 291.4) <C8480063-4EF4-38EC-B30C-3AC2458A4DFD> /System/Library/Frameworks/CoreDisplay.framework/Versions/A/CoreDisplay
+       0x18eb3c000 -        0x18eeff3bf  com.apple.audio.AudioToolboxCore (1.0 - 1556.709.4) <634D846F-E0F8-3DC5-9367-8ECED905C42A> /System/Library/PrivateFrameworks/AudioToolboxCore.framework/Versions/A/AudioToolboxCore
+       0x18ef00000 -        0x18f129ebf  com.apple.CoreText (877.20.0.2 - 877.20.0.2) <18A7C5C7-3C80-3CF8-9C9B-08F0FB314115> /System/Library/Frameworks/CoreText.framework/Versions/A/CoreText
+       0x18f12a000 -        0x18f8c419f  com.apple.audio.CoreAudio (5.0 - 5.0) <B9D3847F-0B2E-3AEB-853E-878E9131CAC0> /System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio
+       0x18f8c5000 -        0x18fce495f  com.apple.security (7.0 - 61901.160.44.702.12) <14DE7D86-8E5F-3D20-AE58-21438978D0C2> /System/Library/Frameworks/Security.framework/Versions/A/Security
+       0x18fce5000 -        0x18ffbad53  libicucore.A.dylib (76142.5.2.1) <B33D8006-11B3-3600-B1C4-51B06FE5128C> /usr/lib/libicucore.A.dylib
+       0x18ffbb000 -        0x18ffc4e5f  libsystem_darwin.dylib (1752.160.4) <51EF635C-A89E-336B-8409-4E44C2443F55> /usr/lib/system/libsystem_darwin.dylib
+       0x18ffc5000 -        0x1902ba0bf  com.apple.CoreServices.CarbonCore (1333 - 1333) <AE92EA43-18C2-373F-9D88-594CA84566C5> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/CarbonCore
+       0x1902bb000 -        0x1902faf47  com.apple.CoreServicesInternal (505 - 505) <24A362F4-01D0-380F-AF66-399B31AAD17B> /System/Library/PrivateFrameworks/CoreServicesInternal.framework/Versions/A/CoreServicesInternal
+       0x1902fb000 -        0x19033a1bf  com.apple.CSStore (1141.1 - 1141.1) <A4177ED6-153C-30FD-987A-92C081493728> /System/Library/PrivateFrameworks/CoreServicesStore.framework/Versions/A/CoreServicesStore
+       0x19033b000 -        0x19042345f  com.apple.framework.IOKit (2.0.2 - 100231.120.3.700.1) <2D0E4804-40BD-308F-B6FA-832C68BC6949> /System/Library/Frameworks/IOKit.framework/Versions/A/IOKit
+       0x190424000 -        0x1904361b6  libsystem_notify.dylib (348.160.3) <455CFD7F-6F0F-3F8B-83CC-C0B5172E4A00> /usr/lib/system/libsystem_notify.dylib
+       0x191d73000 -        0x191d893ff  com.apple.UniformTypeIdentifiers (709 - 709) <72D35790-C084-37C6-847A-4F9021731C63> /System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers
+       0x19226a000 -        0x19234295f  libboringssl.dylib (532.120.8) <9A50ECB4-C845-3C45-ABB8-5ECCE116DB5C> /usr/lib/libboringssl.dylib
+       0x192343000 -        0x1926f81df  com.apple.CFNetwork (1.0 - 3860.700.1) <A1333766-2BCE-33F4-8B9E-545D38A1EC88> /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork
+       0x1926f9000 -        0x192713f7b  libsystem_networkextension.dylib (2226.161.1.700.2) <76849D08-8FBB-3D8A-A1C5-23FE8D7EDD7D> /usr/lib/system/libsystem_networkextension.dylib
+       0x192714000 -        0x192715067  libenergytrace.dylib (23) <006202C4-AE52-3A49-A242-378C753A50D6> /usr/lib/libenergytrace.dylib
+       0x192716000 -        0x1927958ff  libMobileGestalt.dylib (1484.120.3.700.1) <AF5EC128-B5E3-3DA9-8D07-7C307EA04FBA> /usr/lib/libMobileGestalt.dylib
+       0x192796000 -        0x1927adfdf  libsystem_asl.dylib (406) <C2379107-E507-325E-BADE-A9E32156D38A> /usr/lib/system/libsystem_asl.dylib
+       0x1927ae000 -        0x1927d1797  com.apple.TCC (1.0 - 1) <6FB92ED3-5258-3FB4-ABBC-81B22F51BF33> /System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC
+       0x1927d2000 -        0x192d895ff  com.apple.SkyLight (1.600.0 - 922.13.4.3) <D422F0A4-1C28-35B7-A6F5-9EB7BBE0801E> /System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight
+       0x192d8a000 -        0x1934e13ff  com.apple.CoreGraphics (2.0 - 1965.102.1) <DADA3C11-8FF9-39FC-ABA3-BF8DF722AC19> /System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics
+       0x1934e2000 -        0x193689bf3  com.apple.ColorSync (4.13.0 - 3813.102.1) <F24D7E95-1FC8-35BF-AE0B-6F470A898C11> /System/Library/Frameworks/ColorSync.framework/Versions/A/ColorSync
+       0x193ade000 -        0x193ecbf5f  com.apple.CoreData (120 - 1526) <5EDBE1CD-0F1E-3B4A-85FF-C954F4D79A73> /System/Library/Frameworks/CoreData.framework/Versions/A/CoreData
+       0x193ecc000 -        0x193ee7ddf  com.apple.ProtocolBuffer (1 - 310.26.4.23.2) <15AE854F-CF16-32A7-94BA-05341F1F7983> /System/Library/PrivateFrameworks/ProtocolBuffer.framework/Versions/A/ProtocolBuffer
+       0x193ee8000 -        0x1940d0a2f  libsqlite3.dylib (382) <3D1B01EA-9838-3BB5-B59A-E334D19EEB9C> /usr/lib/libsqlite3.dylib
+       0x19416e000 -        0x19425f49f  com.apple.BaseBoard (732.1.1 - 732.1.1) <656BC9E5-BA39-3350-8439-28D3C1F16905> /System/Library/PrivateFrameworks/BaseBoard.framework/Versions/A/BaseBoard
+       0x194260000 -        0x1942cbd5f  com.apple.RunningBoardServices (1.0 - 1015.160.2.0.1) <F4FC015F-2319-3F10-B3F4-E05231B26657> /System/Library/PrivateFrameworks/RunningBoardServices.framework/Versions/A/RunningBoardServices
+       0x1942cc000 -        0x194340c27  com.apple.AE (944 - 944) <899C2106-A1CB-3DE7-B994-2F93EF59E4D3> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/AE.framework/Versions/A/AE
+       0x194341000 -        0x194352d87  libdns_services.dylib (2881.160.4.703.1) <83478DDC-BCE9-37D6-AF9E-259F994206B6> /usr/lib/libdns_services.dylib
+       0x194353000 -        0x19435b387  libsystem_symptoms.dylib (2169.160.3.701.1) <23506ADC-641A-348A-BBEF-590787FD73FC> /usr/lib/system/libsystem_symptoms.dylib
+       0x19435c000 -        0x195b7929f  com.apple.Network (1.0 - 5812.160.9) <15EE499E-FA98-3A9A-A8F1-302D811DFE43> /System/Library/Frameworks/Network.framework/Versions/A/Network
+       0x195b7a000 -        0x195ba9ddf  com.apple.analyticsd (1.0 - 1) <65EDCDA0-8FC3-3709-8AEB-B167115B6D72> /System/Library/PrivateFrameworks/CoreAnalytics.framework/Versions/A/CoreAnalytics
+       0x195baa000 -        0x195bab8bb  libDiagnosticMessagesClient.dylib (113) <CDAC3253-F971-30D7-B3C9-3CDF4AE6D69F> /usr/lib/libDiagnosticMessagesClient.dylib
+       0x195bac000 -        0x195c1837f  com.apple.spotlight.metadata.utilities (1.0 - 2418.6.3.9.403) <403931A0-BC0E-3FAC-B628-B804D926BB0E> /System/Library/PrivateFrameworks/MetadataUtilities.framework/Versions/A/MetadataUtilities
+       0x195c19000 -        0x195ca4b5f  com.apple.Metadata (26.7 - 2418.6.3.9.403) <5553FAD8-87C0-312A-BB59-3CDABA9046D7> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Metadata
+       0x195ca5000 -        0x195cae1eb  com.apple.DiskArbitration (2.7 - 2.7) <B3365165-E7DF-3201-A0DE-48B6E34D88C6> /System/Library/Frameworks/DiskArbitration.framework/Versions/A/DiskArbitration
+       0x195caf000 -        0x1960d306b  com.apple.vImage (8.1 - 632.120.2.703.1) <F2217EF0-B4BD-3433-A78E-F4D969178595> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vImage.framework/Versions/A/vImage
+       0x1960d4000 -        0x1964e9e3f  com.apple.QuartzCore (1195.17.2 - 1195.17.2) <A5C7CA4E-9109-34FF-8BBA-59052F03B0F0> /System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore
+       0x1964ea000 -        0x19653acdf  libFontRegistry.dylib (408.20.0.2) <7268CFEB-8D47-3863-8E8A-EF3BA032E718> /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/ATS.framework/Versions/A/Resources/libFontRegistry.dylib
+       0x196801000 -        0x19680eaff  com.apple.OpenDirectory (26.7 - 666.100.1) <EE34C95B-B8B1-3474-A65B-1165278BCFD5> /System/Library/Frameworks/OpenDirectory.framework/Versions/A/OpenDirectory
+       0x19680f000 -        0x19683827f  com.apple.CFOpenDirectory (26.7 - 666.100.1) <DC8CA2D2-E02B-3213-9B1C-9258AE624122> /System/Library/Frameworks/OpenDirectory.framework/Versions/A/Frameworks/CFOpenDirectory.framework/Versions/A/CFOpenDirectory
+       0x196839000 -        0x19684591b  com.apple.CoreServices.FSEvents (1413.160.2 - 1413.160.2) <44E2AF2E-06AB-33EA-BAA6-14B7B196C0FE> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/FSEvents
+       0x196846000 -        0x19686f0df  com.apple.coreservices.SharedFileList (225 - 225) <71AA0D12-CB6D-3A88-A9BE-D7C00CF8359A> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/SharedFileList.framework/Versions/A/SharedFileList
+       0x196870000 -        0x19687308f  libapp_launch_measurement.dylib (17) <314737A3-B023-34E0-9FE3-64F353E9D470> /usr/lib/libapp_launch_measurement.dylib
+       0x196874000 -        0x1968bc9bf  com.apple.CoreAutoLayout (1.0 - 34) <B8B8064A-6F64-3793-9273-E8B946083C07> /System/Library/PrivateFrameworks/CoreAutoLayout.framework/Versions/A/CoreAutoLayout
+       0x1968bd000 -        0x1969a33c3  libxml2.2.dylib (39.10.3) <9BAB4D9A-63C0-37C3-8CC6-164051B7D922> /usr/lib/libxml2.2.dylib
+       0x1969a4000 -        0x196a24bbf  com.apple.CoreVideo (1.8 - 0.0) <76F663EF-BC03-3B28-9475-A884839D254C> /System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo
+       0x196a25000 -        0x196a27f5f  com.apple.loginsupport (3.0 - 264.4.2.100) <D3C912D3-0B3B-3246-A504-990948A59993> /System/Library/PrivateFrameworks/login.framework/Versions/A/Frameworks/loginsupport.framework/Versions/A/loginsupport
+       0x196a66000 -        0x196a9265f  com.apple.UserManagement (1.0 - 1) <3AEEBF7E-995F-3330-82F5-343757443A29> /System/Library/PrivateFrameworks/UserManagement.framework/Versions/A/UserManagement
+       0x1985f8000 -        0x198630373  libsystem_containermanager.dylib (725.160.3.701.2) <FEB99D23-5EDA-3471-9982-D5EABEB0444B> /usr/lib/system/libsystem_containermanager.dylib
+       0x198631000 -        0x19864d25f  com.apple.IOSurface (393.5.11 - 393.5.11) <8927769F-BC1A-3D1F-8CD8-581ABD3A66E3> /System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface
+       0x19864e000 -        0x19865805f  com.apple.IOAccelerator (487.4.4 - 487.4.4) <EC73E0EF-9202-32E3-AA19-5F21C98D24B4> /System/Library/PrivateFrameworks/IOAccelerator.framework/Versions/A/IOAccelerator
+       0x198659000 -        0x1989330df  com.apple.Metal (373.7.1 - 373.7.1) <1B6C61DC-EFAF-308F-8030-20FC996404DA> /System/Library/Frameworks/Metal.framework/Versions/A/Metal
+       0x198934000 -        0x19895d3ff  com.apple.audio.caulk (1.0 - 214.701.1) <2ED6CF13-E449-3213-9696-38BFDAB3971E> /System/Library/PrivateFrameworks/caulk.framework/Versions/A/caulk
+       0x19895e000 -        0x198aff99f  com.apple.CoreMedia (1.0 - 3330.13.105.4) <A168B775-C9F8-396F-AA6B-0E1CFF6FB616> /System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia
+       0x198b00000 -        0x198dcf4df  libFontParser.dylib (435.20.0.2) <BC33A5D7-6311-39F8-9255-96DDD2E2395F> /System/Library/PrivateFrameworks/FontServices.framework/libFontParser.dylib
+       0x199125000 -        0x1994662df  com.apple.ImageIO (3.3.0 - 2784.102.1) <8E95A90E-BEB9-3264-8868-C51458ABE860> /System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO
+       0x199467000 -        0x199951fbf  com.apple.CoreImage (19.0.0 - 1592.120.3) <A0AB97B1-DBAE-3A09-8552-F2ABE645EF1B> /System/Library/Frameworks/CoreImage.framework/Versions/A/CoreImage
+       0x199952000 -        0x199a0bddf  com.apple.MetalPerformanceShaders.MPSCore (1.0 - 1) <7656EF2E-1251-3DB2-A645-14A6C95FCEE4> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSCore.framework/Versions/A/MPSCore
+       0x199a0c000 -        0x199a105d7  libsystem_configuration.dylib (1405.160.3.702.2) <2B64BA6F-6B26-3743-A977-D485645E6408> /usr/lib/system/libsystem_configuration.dylib
+       0x199a11000 -        0x199a1799f  libsystem_sandbox.dylib (2680.160.6.701.1) <48D7EC25-49F3-3557-B08C-58CBF6A9495B> /usr/lib/system/libsystem_sandbox.dylib
+       0x199a18000 -        0x199a1917f  com.apple.AggregateDictionary (1.0 - 1) <8F1E5926-8AA8-3762-A7B9-0B2EEBE9BAD9> /System/Library/PrivateFrameworks/AggregateDictionary.framework/Versions/A/AggregateDictionary
+       0x199a1a000 -        0x199a1e4d3  com.apple.AppleSystemInfo (3.1.5 - 3.1.5) <65B1E5C9-EF7B-3641-A8CB-0CF5D0EA98FF> /System/Library/PrivateFrameworks/AppleSystemInfo.framework/Versions/A/AppleSystemInfo
+       0x199a1f000 -        0x199a2046b  liblangid.dylib (140) <80168A43-6E10-324B-8231-A0C09CFF4C52> /usr/lib/liblangid.dylib
+       0x199a21000 -        0x199b4045f  com.apple.CoreNLP (1.0 - 313) <12480853-2474-381C-954D-85CF63A4406D> /System/Library/PrivateFrameworks/CoreNLP.framework/Versions/A/CoreNLP
+       0x199b41000 -        0x199b4791f  com.apple.LinguisticData (1.0 - 483.10) <8D51A3D9-8773-3733-ABCE-91E53D29634A> /System/Library/PrivateFrameworks/LinguisticData.framework/Versions/A/LinguisticData
+       0x199b48000 -        0x19abd041f  libBNNS.dylib (1961.160.8) <C62CF081-FC30-3631-9A4E-4DCA50E34372> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBNNS.dylib
+       0x19abd1000 -        0x19ad0e46f  libvDSP.dylib (1126.160.2) <C4F25F56-4542-3369-92FE-E409CB6EE179> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libvDSP.dylib
+       0x19ad43000 -        0x19ad7c267  com.apple.IOMobileFramebuffer (343.0.0 - 343.0.0) <14AEC59B-4CC9-38DD-94D2-97394850F31B> /System/Library/PrivateFrameworks/IOMobileFramebuffer.framework/Versions/A/IOMobileFramebuffer
+       0x19af75000 -        0x19af8c6df  com.apple.MobileKeyBag (2.0 - 1.0) <0D9D9B47-D981-398D-84D1-D6AA2FCAF55C> /System/Library/PrivateFrameworks/MobileKeyBag.framework/Versions/A/MobileKeyBag
+       0x19af8d000 -        0x19af9b0ff  com.apple.AssertionServices (1.0 - 1015.160.2.0.1) <D0A8C0DC-60DA-35BC-BDC5-AFF3790C77DD> /System/Library/PrivateFrameworks/AssertionServices.framework/Versions/A/AssertionServices
+       0x19af9c000 -        0x19b02ea9f  com.apple.securityfoundation (6.0 - 55293) <2AE0DB08-8817-3F9F-AA93-D41EEDC3745D> /System/Library/Frameworks/SecurityFoundation.framework/Versions/A/SecurityFoundation
+       0x19b02f000 -        0x19b0602ff  com.apple.coreservices.BackgroundTaskManagement (1.0 - 104) <00FA73A7-39FE-3445-AE7A-083518EC47AC> /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Versions/A/BackgroundTaskManagement
+       0x19b06c000 -        0x19b06f1db  libquarantine.dylib (196.160.2.701.3) <DA61E1C2-CAC1-3573-84F7-C90BB204A615> /usr/lib/system/libquarantine.dylib
+       0x19b070000 -        0x19b07b2bf  libCheckFix.dylib (33) <7D7B14D9-6482-3560-AAB5-2C458CB6B7BE> /usr/lib/libCheckFix.dylib
+       0x19b07c000 -        0x19b0937ab  libcoretls.dylib (187.100.3) <41CC1599-C714-3F3F-AB2A-5699EF61BC45> /usr/lib/libcoretls.dylib
+       0x19b094000 -        0x19b0a5283  libbsm.0.dylib (90.0.0.700.1) <5B8E3D58-E197-3BE9-86F4-592423C4185D> /usr/lib/libbsm.0.dylib
+       0x19b0a6000 -        0x19b104c6b  libmecab.dylib (1121.5.1) <344314CC-4963-3D13-9A1E-6F4F27D0C931> /usr/lib/libmecab.dylib
+       0x19b105000 -        0x19b10741b  libgermantok.dylib (31) <24969A68-1B6F-3E71-B4D6-B6437B413E2C> /usr/lib/libgermantok.dylib
+       0x19b108000 -        0x19b11be3f  libLinearAlgebra.dylib (1551.160.2) <8AC85A70-926A-3942-BD90-5D6A7CF97303> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLinearAlgebra.dylib
+       0x19b11c000 -        0x19b37217f  com.apple.MetalPerformanceShaders.MPSNeuralNetwork (1.0 - 1) <9B78D5A3-AC97-3DE9-BC2A-B91C8B3D7430> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSNeuralNetwork.framework/Versions/A/MPSNeuralNetwork
+       0x19b373000 -        0x19b3c719f  com.apple.MetalPerformanceShaders.MPSRayIntersector (1.0 - 1) <485E7288-32FB-3B06-84D6-93CD9402B87A> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSRayIntersector.framework/Versions/A/MPSRayIntersector
+       0x19b55b000 -        0x19b58c57f  com.apple.MetalPerformanceShaders.MPSMatrix (1.0 - 1) <C4101AE8-0DAD-3113-ABCB-93F930C0E08F> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSMatrix.framework/Versions/A/MPSMatrix
+       0x19b58d000 -        0x19b75ccdf  com.apple.MetalPerformanceShaders.MPSNDArray (1.0 - 1) <140A929A-C4E7-370B-9FA1-CFEBED216D07> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSNDArray.framework/Versions/A/MPSNDArray
+       0x19b75d000 -        0x19b7f11df  com.apple.MetalPerformanceShaders.MPSImage (1.0 - 1) <0552C9BC-C640-3F38-B44F-C72C17341A0C> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSImage.framework/Versions/A/MPSImage
+       0x19b7f2000 -        0x19b7fd4c3  com.apple.AppleFSCompression (174.160.2 - 1.0) <9652FBA8-60BC-388D-B5E2-4077F0146D13> /System/Library/PrivateFrameworks/AppleFSCompression.framework/Versions/A/AppleFSCompression
+       0x19b7fe000 -        0x19b80a0a3  libbz2.1.0.dylib (49) <5520F12D-5D4C-3E09-8A3B-84F2D081ACA3> /usr/lib/libbz2.1.0.dylib
+       0x19b80b000 -        0x19b811d03  libsystem_coreservices.dylib (191.5.1) <65440E1E-5462-330D-B538-F16B45F4275C> /usr/lib/system/libsystem_coreservices.dylib
+       0x19b812000 -        0x19b843adf  com.apple.CoreServices.OSServices (1141.1 - 1141.1) <2CB23C8A-461F-33FF-852E-C9711B5ED74A> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/OSServices.framework/Versions/A/OSServices
+       0x19bd8b000 -        0x19bd99d97  libz.1.dylib (100.120.1) <1CF4E698-325F-3ED4-84E3-7FFBA3ED965B> /usr/lib/libz.1.dylib
+       0x19bd9a000 -        0x19bdd7a77  libsystem_m.dylib (3312.100.1) <9BFFB8D5-AB8F-3396-AF0F-98A8A4BFBD42> /usr/lib/system/libsystem_m.dylib
+       0x19bdd8000 -        0x19bdd8c9b  libcharset.1.dylib (115.120.2) <21BEE6A3-5B08-350C-8377-336C4C43FE98> /usr/lib/libcharset.1.dylib
+       0x19bdd9000 -        0x19bddc527  libmacho.dylib (1387.2) <A482169A-B97C-30E5-8A3A-2E98DFBA74E7> /usr/lib/system/libmacho.dylib
+       0x19bddd000 -        0x19bdf5dc3  libkxld.dylib (12377.161.15.701.48) <71ED9839-E6BB-3352-A8D6-4ED8533B1914> /usr/lib/system/libkxld.dylib
+       0x19bdf6000 -        0x19be033a7  libcommonCrypto.dylib (600035) <3F3A9815-0AB5-378D-BDF9-9981EE44AB03> /usr/lib/system/libcommonCrypto.dylib
+       0x19be04000 -        0x19be0dca3  libunwind.dylib (2100.2) <EF950883-F36C-3B59-9960-8FAD4BDD66D5> /usr/lib/system/libunwind.dylib
+       0x19be0e000 -        0x19be15349  liboah.dylib (367.9) <81C8280C-CB3A-3F3D-82C9-38C2C1E176FB> /usr/lib/liboah.dylib
+       0x19be16000 -        0x19be20d2b  libcopyfile.dylib (240.160.2.703.1) <8AB5AFDF-C952-3E66-8BE7-F1B22AE7B1E0> /usr/lib/system/libcopyfile.dylib
+       0x19be21000 -        0x19be24987  libcompiler_rt.dylib (103.3) <C6F39A7B-4194-3C96-B35C-E1007EA16736> /usr/lib/system/libcompiler_rt.dylib
+       0x19be25000 -        0x19be2978b  libsystem_collections.dylib (1752.160.4) <40857856-B232-32C2-B91D-7D13B3D889C4> /usr/lib/system/libsystem_collections.dylib
+       0x19be2a000 -        0x19be2d4cf  libsystem_secinit.dylib (168.100.7) <FC9F3012-C4B8-3EE4-A6EC-90E2738A46BB> /usr/lib/system/libsystem_secinit.dylib
+       0x19be2e000 -        0x19be30bf7  libremovefile.dylib (85.100.6) <332434B4-C80C-36C1-8C0B-4813EEE16F55> /usr/lib/system/libremovefile.dylib
+       0x19be31000 -        0x19be31f27  libkeymgr.dylib (31) <7DC4E9CC-C237-3F67-846F-2CCCFAB9000C> /usr/lib/system/libkeymgr.dylib
+       0x19be32000 -        0x19be3ae3f  libsystem_dnssd.dylib (2881.160.4.703.1) <E0DAC488-6562-3A27-929E-20BEFC6A11E4> /usr/lib/system/libsystem_dnssd.dylib
+       0x19be3b000 -        0x19be4009b  libcache.dylib (95) <D4FAC022-C551-3A65-8EF1-8285532030C7> /usr/lib/system/libcache.dylib
+       0x19be41000 -        0x19be42ce3  libSystem.B.dylib (1356) <8A197E38-519D-32D1-9011-49E892FA320D> /usr/lib/libSystem.B.dylib
+       0x19be43000 -        0x19be44fcf  libfakelink.dylib (5) <37FA5FD6-DF7B-3389-A2BD-982FE3AA2FC3> /usr/lib/libfakelink.dylib
+       0x19be45000 -        0x19be45a33  com.apple.SoftLinking (1.0 - 71) <A7EB6DF3-0EF0-3AC1-A52A-1D8EF4AD3775> /System/Library/PrivateFrameworks/SoftLinking.framework/Versions/A/SoftLinking
+       0x19be7b000 -        0x19be822bb  libiconv.2.dylib (115.120.2) <172C9C21-879E-3BD1-86D2-333739A76F29> /usr/lib/libiconv.2.dylib
+       0x19be96000 -        0x19bf8df6f  libarchive.2.dylib (167.160.4.702.1) <7354821C-97F9-3825-8DCE-5D289AE6FC7A> /usr/lib/libarchive.2.dylib
+       0x19bf8e000 -        0x19bff385b  com.apple.SearchKit (1.4.2 - 1.4.2) <35DF27F7-C5B0-38B0-A2BB-9652D4BF92FA> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/SearchKit.framework/Versions/A/SearchKit
+       0x19bff4000 -        0x19bffc18f  libThaiTokenizer.dylib (28) <0259219E-DE8F-35EA-924B-286FEB732800> /usr/lib/libThaiTokenizer.dylib
+       0x19bffd000 -        0x19c020f37  com.apple.applesauce (1.0 - 17.7) <689DCDD8-9ADA-32D5-8B47-09C856C25591> /System/Library/PrivateFrameworks/AppleSauce.framework/Versions/A/AppleSauce
+       0x19c021000 -        0x19c0394ab  libapple_nghttp2.dylib (37.120.3) <7986D4DF-40A8-3E55-8E35-AFFD3858D1EC> /usr/lib/libapple_nghttp2.dylib
+       0x19c03a000 -        0x19c0e338f  libSparseBLAS.dylib (184.160.6) <C475DAA2-984C-31FD-A5A5-6C6ECF130FAB> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparseBLAS.dylib
+       0x19c0e4000 -        0x19c0e563f  com.apple.MetalPerformanceShaders.MetalPerformanceShaders (1.0 - 1) <4B0A0B80-50E5-3439-857C-8AC71D4618F0> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/MetalPerformanceShaders
+       0x19c0e6000 -        0x19c0ebff7  libpam.2.dylib (35) <DA6E9266-F987-3C05-8EAE-F9444E0E6901> /usr/lib/libpam.2.dylib
+       0x19c0ec000 -        0x19c1c079f  libcompression.dylib (193.120.2.700.1) <84629D51-C95B-3264-9A14-D3219455DF85> /usr/lib/libcompression.dylib
+       0x19c1c1000 -        0x19c1c5267  libQuadrature.dylib (8) <F2129A93-0612-3BF3-8DDE-FD3A93F26AB5> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libQuadrature.dylib
+       0x19c1c6000 -        0x19d39694f  libLAPACK.dylib (1551.160.2) <65559823-102D-3789-97AD-F46732A1B00E> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLAPACK.dylib
+       0x19d397000 -        0x19d3ed4ff  com.apple.DictionaryServices (1.2 - 382.0.1) <14B5E968-3418-35DA-9CDA-49DD1EB4737B> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/DictionaryServices.framework/Versions/A/DictionaryServices
+       0x19d3ee000 -        0x19d40c4f7  liblzma.5.dylib (21) <8B8E47AF-35D6-3E91-BA69-765230030893> /usr/lib/liblzma.5.dylib
+       0x19d40d000 -        0x19d40e85f  libcoretls_cfhelpers.dylib (187.100.3) <F8CE3531-6E83-3DA4-BD8F-023BBFBE423D> /usr/lib/libcoretls_cfhelpers.dylib
+       0x19d40f000 -        0x19d482adb  com.apple.APFS (2811.160.7 - 2811.160.7) <EAD5D5C9-E719-3826-9466-BBC16CC7DBCA> /System/Library/PrivateFrameworks/APFS.framework/Versions/A/APFS
+       0x19d483000 -        0x19d49177b  libxar.1.dylib (503.160.5.701.1) <81DADB5B-B121-3CFE-8314-C97638C39E20> /usr/lib/libxar.1.dylib
+       0x19d492000 -        0x19d49579b  libutil.dylib (73) <B7826A4E-1B1C-3167-9C9B-CD93F185C4F2> /usr/lib/libutil.dylib
+       0x19d496000 -        0x19d4c0cbf  libxslt.1.dylib (21.13.2) <A5E22D48-7A90-34EC-9AF4-08829F5B9B7C> /usr/lib/libxslt.1.dylib
+       0x19d4c9000 -        0x19d542587  libvMisc.dylib (1126.160.2) <8F315B9E-0F99-322E-BDD1-633F97D50765> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libvMisc.dylib
+       0x19d543000 -        0x19d5d25df  libate.dylib (3.0.12) <D9C967CD-87BE-326F-8A5E-6120F8FB121F> /usr/lib/libate.dylib
+       0x19d5dc000 -        0x19d5ef1bf  com.apple.CrashReporterSupport (10.13 - 15140) <6882C822-26AB-356F-9FB4-6238D6721670> /System/Library/PrivateFrameworks/CrashReporterSupport.framework/Versions/A/CrashReporterSupport
+       0x19d733000 -        0x19d773f9f  com.apple.pluginkit.framework (1.0 - 1) <1636583E-0813-3704-8CDB-D72DDFBD7A34> /System/Library/PrivateFrameworks/PlugInKit.framework/Versions/A/PlugInKit
+       0x19d7ea000 -        0x19d8329ff  com.apple.AppleVAFramework (6.2.10 - 6.2.10) <A06EFA71-AD2D-3345-AD5B-889856B77EBF> /System/Library/PrivateFrameworks/AppleVA.framework/Versions/A/AppleVA
+       0x19d833000 -        0x19d84dccf  libexpat.1.dylib (47) <560A4B50-E30A-3B07-B38A-C04C5266E391> /usr/lib/libexpat.1.dylib
+       0x19d84e000 -        0x19d857bfb  libheimdal-asn1.dylib (710.160.4.702.2) <04BD4F63-811C-3862-9426-55F0DB55891C> /usr/lib/libheimdal-asn1.dylib
+       0x19d978000 -        0x19da39edf  com.apple.MediaExperience (1.0 - 1) <3C524832-15E3-3CC6-9810-94EA517166C0> /System/Library/PrivateFrameworks/MediaExperience.framework/Versions/A/MediaExperience
+       0x19da67000 -        0x19da767ff  com.apple.GraphVisualizer (1.0 - 307) <DFBC6755-3B0A-3E34-822C-C715556ACB20> /System/Library/PrivateFrameworks/GraphVisualizer.framework/Versions/A/GraphVisualizer
+       0x19da77000 -        0x19dab66df  com.apple.OTSVG (1.0 - 877.20.0.2) <45DF210E-4A98-3DBA-84AC-8092F18B3F18> /System/Library/PrivateFrameworks/OTSVG.framework/Versions/A/OTSVG
+       0x19dab7000 -        0x19dac3c7f  com.apple.xpc.AppServerSupport (1.0 - 3102.160.5.700.1) <7BD45B10-403A-3397-B27D-F256D8B76DE8> /System/Library/PrivateFrameworks/AppServerSupport.framework/Versions/A/AppServerSupport
+       0x19dac4000 -        0x19dacaabf  libspindump.dylib (419.11) <17AFEFB5-0333-3593-B366-8F2AD7431C17> /usr/lib/libspindump.dylib
+       0x19dacb000 -        0x19db8bebf  com.apple.Heimdal (4.0 - 2.0) <77B7D169-4425-3864-8373-661F5687FBF9> /System/Library/PrivateFrameworks/Heimdal.framework/Versions/A/Heimdal
+       0x19de5a000 -        0x19de9e6ef  com.apple.AppleJPEG (1.0 - 1) <930E052C-E433-37C2-B4DF-2331642332D6> /System/Library/PrivateFrameworks/AppleJPEG.framework/Versions/A/AppleJPEG
+       0x19de9f000 -        0x19e05f92f  libJP2.dylib (2784.102.3) <46C50C98-169E-38A0-95EA-061FB4672954> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libJP2.dylib
+       0x19e060000 -        0x19e061e1f  com.apple.WatchdogClient.framework (1.0 - 333) <7D66C07A-4E1F-3516-B662-FA18CC4128A5> /System/Library/PrivateFrameworks/WatchdogClient.framework/Versions/A/WatchdogClient
+       0x19e062000 -        0x19e0a7d7f  com.apple.MultitouchSupport.framework (9461.1 - 9461.1) <3CB6DEE3-1A16-3AC9-8092-7403573A7F33> /System/Library/PrivateFrameworks/MultitouchSupport.framework/Versions/A/MultitouchSupport
+       0x19e0a8000 -        0x19e5fe37f  com.apple.VideoToolbox (1.0 - 3330.13.105.4) <7BA61627-5C74-3F04-A3D8-0F4ED6F22EA7> /System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox
+       0x19e5ff000 -        0x19e62429f  libAudioToolboxUtility.dylib (1556.709.4) <4AE80EF7-CD8C-3404-8D8F-D4E166C61628> /usr/lib/libAudioToolboxUtility.dylib
+       0x19e625000 -        0x19e64f04f  libPng.dylib (2784.102.3) <37DE13DF-D366-30F3-ADAF-764E676C4728> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libPng.dylib
+       0x19e650000 -        0x19e6b0c9b  libTIFF.dylib (2784.102.3) <CFC01127-4E37-309B-8950-2B26E22752B1> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libTIFF.dylib
+       0x19e6b1000 -        0x19e6d0257  com.apple.IOPresentment (67 - 67) <C170BD80-9D90-3F2A-A7EC-6B3B9C9A2434> /System/Library/PrivateFrameworks/IOPresentment.framework/Versions/A/IOPresentment
+       0x19e6d1000 -        0x19e6d57d3  com.apple.GPUWrangler (8.1.12 - 8.1.12) <6C088EE9-4EE0-35A1-860C-BE519A252A46> /System/Library/PrivateFrameworks/GPUWrangler.framework/Versions/A/GPUWrangler
+       0x19e6d6000 -        0x19e6d8913  libRadiance.dylib (2784.102.3) <39844361-FB45-3707-B48E-5738A6ED7E08> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libRadiance.dylib
+       0x19e6d9000 -        0x19e6de2f3  com.apple.DSExternalDisplay (3.1 - 380) <69013A6F-157A-3826-9EE4-4A2B5589973E> /System/Library/PrivateFrameworks/DSExternalDisplay.framework/Versions/A/DSExternalDisplay
+       0x19e6df000 -        0x19e709baf  libJPEG.dylib (2784.102.3) <72551E6D-474D-3BC1-A67F-45149E1FE465> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libJPEG.dylib
+       0x19e738000 -        0x19e73d9fb  libGIF.dylib (2784.102.3) <4F6FB712-9EA7-3E5A-9016-D93ABF086CCB> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libGIF.dylib
+       0x19e73e000 -        0x19e74e19f  com.apple.CMCaptureCore (1.0 - 665.140.9) <ECDF0F57-8983-3F93-AED0-E7FCE512C08F> /System/Library/PrivateFrameworks/CMCaptureCore.framework/Versions/A/CMCaptureCore
+       0x19f6c7000 -        0x19f73586f  libusrtcp.dylib (5812.160.9) <82E3C23F-FD09-34F8-8BE4-41C8C71D35DE> /usr/lib/libusrtcp.dylib
+       0x19f736000 -        0x19fcd87ff  libswiftCore.dylib (6.3.2 - 6.3.2.1.11) <5DAB65A5-E059-3E19-83C4-0418D7D3F481> /usr/lib/swift/libswiftCore.dylib
+       0x19fd8c000 -        0x19fde131f  libSessionUtility.dylib (398.701) <691E27F9-52DF-3594-A44F-016CF843D2EE> /System/Library/PrivateFrameworks/AudioSession.framework/libSessionUtility.dylib
+       0x19fde2000 -        0x19ffb777f  com.apple.audio.toolbox.AudioToolbox (1.14 - 1.14) <EEFCF655-CD7A-3BFD-BE7F-C1AB8F01213A> /System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox
+       0x19ffb8000 -        0x1a0038b7f  com.apple.audio.AudioSession (1.0 - 398.701) <BC467BF8-DC0C-323A-A8EF-F9E33EC6806B> /System/Library/PrivateFrameworks/AudioSession.framework/Versions/A/AudioSession
+       0x1a0039000 -        0x1a005239f  libAudioStatistics.dylib (262.601) <36583214-C4B2-3756-A49A-60F56DEA0F37> /usr/lib/libAudioStatistics.dylib
+       0x1a00cf000 -        0x1a00eb19b  libresolv.9.dylib (96) <81595019-7BEE-3D58-8D47-47151DAC7599> /usr/lib/libresolv.9.dylib
+       0x1a00ec000 -        0x1a00fe7e7  libsasl2.2.dylib (215) <81DD44C8-87DC-3241-8F65-4A1D50ABEA99> /usr/lib/libsasl2.2.dylib
+       0x1a02e7000 -        0x1a03c7337  libSMC.dylib (38) <08CA6AFB-5033-3C4E-9A98-53E23FBFB0F3> /usr/lib/libSMC.dylib
+       0x1a0427000 -        0x1a0434257  com.apple.NetAuth (6.2 - 6.2) <AE37F4A4-F0E5-382E-BE4C-B307379428F6> /System/Library/PrivateFrameworks/NetAuth.framework/Versions/A/NetAuth
+       0x1a0443000 -        0x1a0450b1f  com.apple.perfdata (1.0 - 130) <FE9A3C45-31DA-37A5-889F-848D0EE36AE8> /System/Library/PrivateFrameworks/perfdata.framework/Versions/A/perfdata
+       0x1a0451000 -        0x1a045ec9f  libperfcheck.dylib (46) <392D0B12-8018-3C48-8FA8-A33006303D0C> /usr/lib/libperfcheck.dylib
+       0x1a045f000 -        0x1a0470187  com.apple.Kerberos (3.0 - 1) <D2880EC9-5514-3CCC-8F31-7D668A32ACBC> /System/Library/Frameworks/Kerberos.framework/Versions/A/Kerberos
+       0x1a0471000 -        0x1a04c2b0f  com.apple.GSS (4.0 - 2.0) <FE6C3724-3DFF-35DF-859C-47FFCE66EFF8> /System/Library/Frameworks/GSS.framework/Versions/A/GSS
+       0x1a04c3000 -        0x1a04d3d77  com.apple.CommonAuth (4.0 - 2.0) <1F8FD8D4-F29D-3C46-9C47-E0231FC43DD5> /System/Library/PrivateFrameworks/CommonAuth.framework/Versions/A/CommonAuth
+       0x1a04d4000 -        0x1a05b805f  com.apple.MobileAssets (1.0 - 1837.160.15) <2BD37501-1753-33E2-8D7B-AE4C2A2EBAC8> /System/Library/PrivateFrameworks/MobileAsset.framework/Versions/A/MobileAsset
+       0x1a064b000 -        0x1a065a160  com.apple.CorePhoneNumbers (1.0 - 1) <290C5E70-AE23-354B-9862-2AE245F0C726> /System/Library/PrivateFrameworks/CorePhoneNumbers.framework/Versions/A/CorePhoneNumbers
+       0x1a2239000 -        0x1a232ca36  com.apple.combine (1.0 - 3023) <E75E2493-D928-3E42-9A84-088CEDC6CAC2> /System/Library/Frameworks/Combine.framework/Versions/A/Combine
+       0x1a4568000 -        0x1a45698a7  libpanel.5.4.dylib (79.0.0.701.1) <8F5245FF-A396-3965-BE98-88CCE4F20BF5> /usr/lib/libpanel.5.4.dylib
+       0x1a45a2000 -        0x1a45a286f  com.apple.Accelerate.vecLib (3.11 - vecLib 3.11) <F1350C5C-B09C-3EF6-9FCF-E847AB817D03> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/vecLib
+       0x1a45c7000 -        0x1a45c798f  com.apple.CoreServices (1226 - 1226) <E2968C5C-2C49-3845-9146-E662B29C4B22> /System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices
+       0x1a4846000 -        0x1a4846417  com.apple.Accelerate (1.11 - Accelerate 1.11) <82B20638-E09A-3E9D-B8E3-E23242AB7ED0> /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate
+       0x1a574d000 -        0x1a575c5df  com.apple.SymptomDiagnosticReporter (1.0 - 411.160.2) <85307EE1-4EE4-3AA7-B75A-F1EA29AAF863> /System/Library/PrivateFrameworks/SymptomDiagnosticReporter.framework/Versions/A/SymptomDiagnosticReporter
+       0x1a575d000 -        0x1a578b25f  com.apple.PowerLog (1.0 - 1) <12C75BDD-98FC-369C-BD41-AAEE9D71D85E> /System/Library/PrivateFrameworks/PowerLog.framework/Versions/A/PowerLog
+       0x1a5799000 -        0x1a584a6df  com.apple.DiscRecording (9.0.3 - 9030.4.5) <06D03A94-3021-343E-8DEC-8B9BA4CBDA10> /System/Library/Frameworks/DiscRecording.framework/Versions/A/DiscRecording
+       0x1a584b000 -        0x1a587c137  com.apple.MediaKit (16 - 938) <42BDEE88-2D74-3BFF-857F-2DBAE580AD65> /System/Library/PrivateFrameworks/MediaKit.framework/Versions/A/MediaKit
+       0x1a633f000 -        0x1a6355950  libswiftDispatch.dylib (1542.160.2) <196D36E9-3D7B-3685-8287-0C906B6404B3> /usr/lib/swift/libswiftDispatch.dylib
+       0x1a66a0000 -        0x1a672cc3f  com.apple.BoardServices (1.0 - 732.1.1) <1D7AC93D-0063-3B22-9237-1AC1181F57CC> /System/Library/PrivateFrameworks/BoardServices.framework/Versions/A/BoardServices
+       0x1a676d000 -        0x1a677a53f  com.apple.GraphicsServices (1.0 - 1.0) <691C6DEA-086E-3A7B-9399-B76F61EA55D1> /System/Library/PrivateFrameworks/GraphicsServices.framework/Versions/A/GraphicsServices
+       0x1a6a97000 -        0x1a6ab8e9f  com.apple.DebugSymbols (216 - 217) <0934C19B-C589-308C-9861-642235748590> /System/Library/PrivateFrameworks/DebugSymbols.framework/Versions/A/DebugSymbols
+       0x1a6ab9000 -        0x1a6c1939f  com.apple.CoreSymbolication (16.0 - 64575.57.1) <B6CB7483-3650-391B-B477-A983AFBCBB27> /System/Library/PrivateFrameworks/CoreSymbolication.framework/Versions/A/CoreSymbolication
+       0x1a6c1a000 -        0x1a6c2409f  com.apple.CoreTime (334.0.16.3 - 334.0.16.3) <C1014F42-C4F4-39A8-B696-C2802C9E82E1> /System/Library/PrivateFrameworks/CoreTime.framework/Versions/A/CoreTime
+       0x1a8574000 -        0x1a85e67ff  com.apple.BackBoardServices (1.0 - 1.0) <CCC0195D-560B-3180-87E1-B66895B2EF9A> /System/Library/PrivateFrameworks/BackBoardServices.framework/Versions/A/BackBoardServices
+       0x1a85e7000 -        0x1a86224ef  com.apple.LDAPFramework (2.4.28 - 194.5) <7779E368-1EF2-38C0-893B-FAB57B3AFB6B> /System/Library/Frameworks/LDAP.framework/Versions/A/LDAP
+       0x1a8623000 -        0x1a86247b7  com.apple.TrustEvaluationAgent (2.0 - 38) <896C9C2E-F4D5-3ED5-A1D7-34FFD4183DCE> /System/Library/PrivateFrameworks/TrustEvaluationAgent.framework/Versions/A/TrustEvaluationAgent
+       0x1a8752000 -        0x1a880b61f  com.apple.DiskImagesFramework (683.160.3.702.1 - 683.160.3.702.1) <B1379827-9EE4-320C-B8D7-EEE6AF3FD8D8> /System/Library/PrivateFrameworks/DiskImages.framework/Versions/A/DiskImages
+       0x1a884c000 -        0x1a886259f  com.apple.RemoteServiceDiscovery (1.0 - 219.160.4) <A822CC29-54E3-3370-AA04-A3A8137293F7> /System/Library/PrivateFrameworks/RemoteServiceDiscovery.framework/Versions/A/RemoteServiceDiscovery
+       0x1a8863000 -        0x1a8878c3f  com.apple.xpc.RemoteXPC (1.0 - 3102.160.5.700.1) <C998AAB1-7EF1-348A-95A2-C6C78BD92B2E> /System/Library/PrivateFrameworks/RemoteXPC.framework/Versions/A/RemoteXPC
+       0x1a890d000 -        0x1a898df5b  libcurl.4.dylib (168.0.0.700.1) <E818B124-DAF1-3391-B424-29696797C1F3> /usr/lib/libcurl.4.dylib
+       0x1a8994000 -        0x1a89d741f  com.apple.AppSupport (1.0.0 - 29) <F48CECF4-9200-3BD0-8627-EEE552D95098> /System/Library/PrivateFrameworks/AppSupport.framework/Versions/A/AppSupport
+       0x1a8ca8000 -        0x1a8caaf3f  com.apple.InternationalTextSearch (1.0 - 1) <05D28316-6C43-3D9B-ACE4-83CC8C924207> /System/Library/PrivateFrameworks/InternationalTextSearch.framework/Versions/A/InternationalTextSearch
+       0x1a927b000 -        0x1a927b3f7  libHeimdalProxy.dylib (88) <B186FAD4-12C7-3102-BD68-38B17DB64B69> /System/Library/Frameworks/Kerberos.framework/Versions/A/Libraries/libHeimdalProxy.dylib
+       0x1a92a6000 -        0x1a92c4b9f  com.apple.StreamingZip (1.0 - 1) <451AD4D9-F770-366B-A945-3CBA6B42E314> /System/Library/PrivateFrameworks/StreamingZip.framework/Versions/A/StreamingZip
+       0x1a931e000 -        0x1a93216bf  libswiftObjectiveC.dylib (951.7) <7141DB04-BEA7-3EB1-8C48-9832067B2146> /usr/lib/swift/libswiftObjectiveC.dylib
+       0x1a9322000 -        0x1a933f6ff  libswiftos.dylib (1082) <DAF463DD-7C2F-348D-855F-B808D8B1357A> /usr/lib/swift/libswiftos.dylib
+       0x1aa289000 -        0x1aa31785f  com.apple.proactive.support.ProactiveSupport (1.0 - 418.1) <FB918BF3-DD01-3D01-A85B-4F33E62A29C4> /System/Library/PrivateFrameworks/ProactiveSupport.framework/Versions/A/ProactiveSupport
+       0x1aa416000 -        0x1aa43a29f  com.apple.ASEProcessing (1.55.0 - 1.55.0) <76EEF3D6-8C96-3739-9FF8-18A165BF85A1> /System/Library/PrivateFrameworks/ASEProcessing.framework/Versions/A/ASEProcessing
+       0x1ab69b000 -        0x1ab76c47f  com.apple.audio.midi.CoreMIDI (2.0 - 88) <ADC218C2-A737-39F2-A92D-CE4C2B54011C> /System/Library/Frameworks/CoreMIDI.framework/Versions/A/CoreMIDI
+       0x1ac3af000 -        0x1ac3b375f  com.apple.IOSurfaceAccelerator (1.0.0 - 1.0.0) <534EDB2F-6546-320E-A56C-3642BC3F93E9> /System/Library/PrivateFrameworks/IOSurfaceAccelerator.framework/Versions/A/IOSurfaceAccelerator
+       0x1b167f000 -        0x1b16929ff  com.apple.HID (1.0 - 1) <D50AA033-EC02-3CF3-8268-FC16D2E50F0F> /System/Library/PrivateFrameworks/HID.framework/Versions/A/HID
+       0x1b6274000 -        0x1b628329f  com.apple.NetFS (6.0 - 4.0) <9B589A9D-3944-382A-AE50-3B414DE2A11E> /System/Library/Frameworks/NetFS.framework/Versions/A/NetFS
+       0x1b67d0000 -        0x1b67d2707  libswiftDarwin.dylib (377.160.5) <ACB7B7D9-D342-3D13-811C-6D9DBF43CF4B> /usr/lib/swift/libswiftDarwin.dylib
+       0x1b88f3000 -        0x1b89dc4df  libquic.dylib (5812.160.9) <7AB66E2C-0752-338B-B86F-D285B4C09243> /usr/lib/libquic.dylib
+       0x1b89e8000 -        0x1b8a115bf  com.apple.private.SystemPolicy (1.0 - 1) <FB7D9D72-4434-3357-963E-673C0FF5B2B3> /System/Library/PrivateFrameworks/SystemPolicy.framework/Versions/A/SystemPolicy
+       0x1b98ce000 -        0x1b995cc1f  com.apple.LoggingSupport (1.0 - 1861.160.4.700.1) <B67E6479-ED9A-391F-9E53-9BF4A9B4A613> /System/Library/PrivateFrameworks/LoggingSupport.framework/Versions/A/LoggingSupport
+       0x1b995d000 -        0x1b9969acb  com.apple.MallocStackLogging (1.0 - 65000) <4A6B2663-20AB-3977-BC7B-D2E00AE2081A> /System/Library/PrivateFrameworks/MallocStackLogging.framework/Versions/A/MallocStackLogging
+       0x1b998f000 -        0x1b99e9d9f  libmis.dylib (463.160.2) <419770CF-2387-32FF-8B40-C1104BA6884B> /usr/lib/libmis.dylib
+       0x1b99ea000 -        0x1b99edc5f  com.apple.gpusw.GPURawCounter (34 - 34) <DB0AF0F6-7E3C-3DA6-9FFB-A690FC5EF79B> /System/Library/PrivateFrameworks/GPURawCounter.framework/Versions/A/GPURawCounter
+       0x1b99ee000 -        0x1b9a0d87f  libswiftCoreAudio.dylib (411.701.3) <66636572-FC13-3B03-9913-C93F49A5DAEC> /usr/lib/swift/libswiftCoreAudio.dylib
+       0x1b9a0e000 -        0x1b9a14327  libswiftCoreFoundation.dylib (2411) <3B397CB0-2C97-36BF-BFD6-55B9E3A1DBDF> /usr/lib/swift/libswiftCoreFoundation.dylib
+       0x1b9a21000 -        0x1b9a6d843  libswiftXPC.dylib (128.120.2) <B91BB045-8988-3133-9B81-939409331DDC> /usr/lib/swift/libswiftXPC.dylib
+       0x1b9a6f000 -        0x1b9a6f8a3  libswiftIOKit.dylib (1) <C2316895-0A8D-3BE6-8F1D-B3A4A197A41B> /usr/lib/swift/libswiftIOKit.dylib
+       0x1bbaa1000 -        0x1bbada2c7  libbootpolicy.dylib (289.160.2) <DF315D59-8662-3137-A1EB-2EDE5E4987F6> /usr/lib/libbootpolicy.dylib
+       0x1bd56a000 -        0x1bd58188b  libswiftsimd.dylib (23) <DE69EF83-68A9-3267-B088-5AED9B1D0BA5> /usr/lib/swift/libswiftsimd.dylib
+       0x1bec56000 -        0x1bec9236b  libncurses.5.4.dylib (79.0.0.701.1) <E897FC2F-2076-3095-B1E0-297D3CEA8372> /usr/lib/libncurses.5.4.dylib
+       0x1bec93000 -        0x1bec9c37f  com.apple.IOAccelMemoryInfo (1.0 - 1) <5794E11C-1FEF-37B9-B347-3315736D625F> /System/Library/PrivateFrameworks/IOAccelMemoryInfo.framework/Versions/A/IOAccelMemoryInfo
+       0x1c0363000 -        0x1c036c0be  libswiftCoreMIDI.dylib (6) <3604FA87-191C-3382-9ED7-10C4C2240196> /usr/lib/swift/libswiftCoreMIDI.dylib
+       0x1c0b54000 -        0x1c0b5abbf  com.apple.MSUDataAccessor (1.0 - 1) <E22442FB-4598-3EF3-9235-B14174F3EF06> /System/Library/PrivateFrameworks/MSUDataAccessor.framework/Versions/A/MSUDataAccessor
+       0x1c0f7d000 -        0x1c0fdfddf  com.apple.SoftwareUpdateCoreSupport (1.0 - 1) <475F02C7-6B5F-3FD6-B3E9-B6DF99927A7F> /System/Library/PrivateFrameworks/SoftwareUpdateCoreSupport.framework/Versions/A/SoftwareUpdateCoreSupport
+       0x1c4aab000 -        0x1c4b0225f  com.apple.biome.BiomeFoundation (1.0 - 209.22) <56CF0DE2-487C-316C-AE34-16FED51FFE64> /System/Library/PrivateFrameworks/BiomeFoundation.framework/Versions/A/BiomeFoundation
+       0x1c79e9000 -        0x1c79f6a1f  libswiftMetal.dylib (373.7.1) <48F9AFD3-F894-38A3-90D6-E5D441B7AE62> /usr/lib/swift/libswiftMetal.dylib
+       0x1c79f7000 -        0x1c79fde05  libswiftCompression.dylib (11) <EAE14258-3386-3410-B1D8-64736B0967E0> /usr/lib/swift/libswiftCompression.dylib
+       0x1c8931000 -        0x1c89dbd7f  libFDR.dylib (1499.160.2) <4C334A1E-83F5-35CA-A1D5-5185E29C81E5> /usr/lib/libFDR.dylib
+       0x1c8a5d000 -        0x1c902833f  com.apple.biome.BiomeStreams (1.0 - 209.22) <11C87F1E-CC13-35F3-8F10-10C6EE7CFE5B> /System/Library/PrivateFrameworks/BiomeStreams.framework/Versions/A/BiomeStreams
+       0x1c94fc000 -        0x1c95108ff  com.apple.SoftwareUpdateCoreConnect (1.0 - 1) <4282E980-73AA-3AFB-A86D-B890298A4CE0> /System/Library/PrivateFrameworks/SoftwareUpdateCoreConnect.framework/Versions/A/SoftwareUpdateCoreConnect
+       0x1cb954000 -        0x1cb9bec1f  com.apple.osanalytics.OSAnalytics (1.0 - 1) <F87D0962-0DCC-3263-8923-2A148D4037AA> /System/Library/PrivateFrameworks/OSAnalytics.framework/Versions/A/OSAnalytics
+       0x1cce11000 -        0x1cce12f9f  libswiftQuartzCore.dylib (5) <70766F0E-4DCF-37D4-A24E-565526212D14> /usr/lib/swift/libswiftQuartzCore.dylib
+       0x1cd204000 -        0x1cd2098e7  com.apple.kperf (1.0 - 1) <EE4CFA78-29BC-3E25-8B31-3ABA2E5086EF> /System/Library/PrivateFrameworks/kperf.framework/Versions/A/kperf
+       0x1cd31b000 -        0x1cd32063f  com.apple.MobileSystemServices (1.0 - 1) <C7F00204-AD01-3660-9DFA-72FB9F925C97> /System/Library/PrivateFrameworks/MobileSystemServices.framework/Versions/A/MobileSystemServices
+       0x1ce90d000 -        0x1ce92f29f  libamsupport.dylib (434.160.4) <ED360406-AA45-334A-96DA-AFE2F9C46256> /usr/lib/libamsupport.dylib
+       0x1ced0b000 -        0x1ced6b0ff  com.apple.biome.BiomePubSub (1.0 - 209.22) <EFC3D56B-2935-3470-9D0F-D4078AF67CB4> /System/Library/PrivateFrameworks/BiomePubSub.framework/Versions/A/BiomePubSub
+       0x1ced6c000 -        0x1cedaf19f  com.apple.biome.BiomeStorage (1.0 - 209.22) <027C338C-2145-3062-88B3-6EE24A906260> /System/Library/PrivateFrameworks/BiomeStorage.framework/Versions/A/BiomeStorage
+       0x1d18a9000 -        0x1d18b813f  libswiftUniformTypeIdentifiers.dylib (877.5.2) <46D4134D-32BB-3D9B-96B2-61FBFEA405B6> /usr/lib/swift/libswiftUniformTypeIdentifiers.dylib
+       0x1d18b9000 -        0x1d197ea9b  libswiftAccelerate.dylib (77.100.2) <B8087448-23F0-366A-8A4E-F5F35F891AAC> /usr/lib/swift/libswiftAccelerate.dylib
+       0x1d1ad8000 -        0x1d1ae911f  libpartition2_dynamic.dylib (3476.160.2) <251FA6C1-E9D3-398B-9437-DC8B18DB48A1> /usr/lib/libpartition2_dynamic.dylib
+       0x1d2047000 -        0x1d2051fdf  com.apple.AFKUser (1.0 - 1) <CFE481F7-2569-3099-8547-4F09B8F2943F> /System/Library/PrivateFrameworks/AFKUser.framework/Versions/A/AFKUser
+       0x1d5a4e000 -        0x1d5aaf75f  libswiftCoreMedia.dylib (3330.13.105.4) <4F4F9615-BE1E-3206-9510-4078B0A3B596> /usr/lib/swift/libswiftCoreMedia.dylib
+       0x1d7201000 -        0x1d7202bbf  libswiftOSLog.dylib (10) <FC467420-250D-3856-B5B8-6F773AF23BEC> /usr/lib/swift/libswiftOSLog.dylib
+       0x1db31a000 -        0x1db426d5f  com.apple.Symbolication (16.0 - 64575.70.1) <A8A4A15D-C3A7-3F3A-BCAE-F3ED6307DA94> /System/Library/PrivateFrameworks/Symbolication.framework/Versions/A/Symbolication
+       0x1df9ae000 -        0x1df9be3ff  com.apple.OSLog (1.0 - 1861.160.4.700.1) <3FFE61BB-2BBC-3722-8B11-42813B6330C5> /System/Library/Frameworks/OSLog.framework/Versions/A/OSLog
+       0x1dfcc2000 -        0x1dfdd375f  com.apple.InternalSwiftProtobuf (1.0 - 1.26.0) <9CF0E34A-8FEE-3A92-A454-24FF335AE0F4> /System/Library/PrivateFrameworks/InternalSwiftProtobuf.framework/Versions/A/InternalSwiftProtobuf
+       0x1dfe99000 -        0x1dfea40bf  com.apple.HIDDisplay (1.0 - 1) <BD2C7B06-0452-3385-A739-8F07AE54F8C1> /System/Library/PrivateFrameworks/HIDDisplay.framework/Versions/A/HIDDisplay
+       0x1e5d86000 -        0x1e5da3d9f  libedit.3.dylib (65) <55CEE3FF-EB7E-3B75-9AF1-0E00F1755518> /usr/lib/libedit.3.dylib
+       0x1e7ece000 -        0x1e7eceaf3  com.apple.FeatureFlags (1.0 - 103) <F8CACA60-18BC-30E1-8E18-93C80186800D> /System/Library/PrivateFrameworks/FeatureFlags.framework/Versions/A/FeatureFlags
+       0x1f1622000 -        0x1f16245bf  com.apple.ConfigProfileHelper (18.0 - 1800) <5B5620ED-6CB6-3C7C-AD34-1B073387F9D5> /System/Library/PrivateFrameworks/ConfigProfileHelper.framework/Versions/A/ConfigProfileHelper
+       0x231d3f000 -        0x231d46657  libCoreFSCache.dylib (352.4) <46A96137-3BE4-38CD-AE4E-BE51074D6DDB> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libCoreFSCache.dylib
+       0x231d47000 -        0x231d4c67f  libCoreVMClient.dylib (352.4) <3C75005C-022E-39AB-BFFE-D4AB3869EDDC> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libCoreVMClient.dylib
+       0x231d4d000 -        0x231d5d2b7  com.apple.opengl (23.1.1 - 23.1.1) <C1318FC7-8577-3EFC-81BB-EF4B91ADCBB9> /System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL
+       0x231d5e000 -        0x231d607bf  libCVMSPluginSupport.dylib (23.1.1) <DF6AE818-D6FC-3AF2-BD5E-0AA9FD0BA91C> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libCVMSPluginSupport.dylib
+       0x231d61000 -        0x231d694ff  libGFXShared.dylib (23.1.1) <9F9EBBEC-B6DA-38AD-AD0F-D924EBF6820F> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGFXShared.dylib
+       0x231d6a000 -        0x231d9d54b  libGLImage.dylib (23.1.1) <09E61A14-CD45-3E85-AF27-EE10BDD9A46D> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGLImage.dylib
+       0x231d9e000 -        0x231dd75bf  libGLU.dylib (23.1.1) <E131F9DA-7CE4-3B77-B2EA-A2F5B5A9B3B7> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGLU.dylib
+       0x231f2e000 -        0x231f37bc7  libGL.dylib (23.1.1) <2B0F2036-D9E5-3609-AEB1-2DFA12F45594> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib
+       0x233dca000 -        0x233f3df1f  com.apple.ExtensionFoundation (97 - 97) <AB0D2100-2C64-3C3F-B32A-434BA8ADDA97> /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/ExtensionFoundation
+       0x2351b1000 -        0x2351f3a1f  com.apple.LightweightCodeRequirements (1.0 - 1) <8C5FB0B0-74F3-3DEE-8D82-3800A5231447> /System/Library/Frameworks/LightweightCodeRequirements.framework/Versions/A/LightweightCodeRequirements
+       0x236017000 -        0x2360351ff  com.apple.MPSBenchmarkLoop (1.0 - 1) <49877A92-986C-31B1-8C74-67A2EF5C56E8> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSBenchmarkLoop.framework/Versions/A/MPSBenchmarkLoop
+       0x236036000 -        0x236049e7f  com.apple.MPSFunctions (1.0 - 1) <CEFC6932-0769-3D08-9D41-E466C6778729> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSFunctions.framework/Versions/A/MPSFunctions
+       0x23604a000 -        0x23604f53f  com.apple.MPSHost (1.0 - 1) <DC1000EF-B106-3D3C-AD53-CB30B980EC37> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSHost.framework/Versions/A/MPSHost
+       0x2392fa000 -        0x2394664bf  com.apple.SwiftData (1.0 - 135) <7C841237-6A7B-3D5A-BC78-C7C281304462> /System/Library/Frameworks/SwiftData.framework/Versions/A/SwiftData
+       0x23ffbe000 -        0x23ffd2abf  com.apple.AppleDeviceQuerySupport (1.0 - 408.120.3) <C06A95BC-E271-3CAC-9B72-D52562867520> /System/Library/PrivateFrameworks/AppleDeviceQuerySupport.framework/Versions/A/AppleDeviceQuerySupport
+       0x240750000 -        0x2407cbb46  com.apple.AppleKeyStore (1.0 - 1.0) <5A427A96-52AA-3C53-AEAC-511636EFE836> /System/Library/PrivateFrameworks/AppleKeyStore.framework/Versions/A/AppleKeyStore
+       0x2410f8000 -        0x2411109df  com.apple.private.AppleMobileFileIntegrity-fmk (1.0 - 1) <2846B1E6-5082-3DEE-9584-89F35463A694> /System/Library/PrivateFrameworks/AppleMobileFileIntegrity.framework/Versions/A/AppleMobileFileIntegrity
+       0x24160a000 -        0x24161c799  com.apple.AtomicsInternal (1.1.0 - 5026.6.1) <5E19FB03-4B93-3D08-80A2-B685DAD5140E> /System/Library/PrivateFrameworks/AtomicsInternal.framework/Versions/A/AtomicsInternal
+       0x2416d9000 -        0x2416fbdff  com.apple.imgaudio.AudioAnalytics (1.0 - 1) <62172E64-2743-3E62-8D77-2A45FCDE7BA2> /System/Library/PrivateFrameworks/AudioAnalytics.framework/Versions/A/AudioAnalytics
+       0x241d3f000 -        0x241d8785f  com.apple.BackBoardHIDEventFoundation (1.0 - 1) <22FA7C33-F2BD-3BA4-897C-B78A00B087CD> /System/Library/PrivateFrameworks/BackBoardHIDEventFoundation.framework/Versions/A/BackBoardHIDEventFoundation
+       0x241e20000 -        0x241e3977f  com.apple.biome.BiomeDSL (1.0 - 209.22) <A22778D7-6CE9-3BED-8A73-1EE2D41FF723> /System/Library/PrivateFrameworks/BiomeDSL.framework/Versions/A/BiomeDSL
+       0x241e3a000 -        0x2426f4f7f  com.apple.BiomeLibrary (274.60) <F2E38A7D-D2B5-3E0B-B33D-1926D0E6ACA8> /System/Library/PrivateFrameworks/BiomeLibrary.framework/Versions/A/BiomeLibrary
+       0x2426f5000 -        0x2426fab5f  com.apple.biome.BiomeSync (1.0 - 209.22) <F54B18FA-2747-38F9-B8F7-FB0AA86FBBC5> /System/Library/PrivateFrameworks/BiomeSync.framework/Versions/A/BiomeSync
+       0x243d2b000 -        0x243dc38bf  com.apple.biome.CascadeSets (1.0 - 209.22) <6B9621E7-9D2F-3F62-B959-F522A95019C9> /System/Library/PrivateFrameworks/CascadeSets.framework/Versions/A/CascadeSets
+       0x24517e000 -        0x2452bc4ee  com.apple.CollectionsInternal (1.2.0 - 5026.6.1) <D805F1A8-DB8F-3EBB-A846-80D78CCB5BA2> /System/Library/PrivateFrameworks/CollectionsInternal.framework/Versions/A/CollectionsInternal
+       0x24c890000 -        0x24c8a349f  com.apple.DeviceRecovery (1.0 - 1) <EBDCFE5F-0DEE-3A7E-B228-7CBC2A59556C> /System/Library/PrivateFrameworks/DeviceRecovery.framework/Versions/A/DeviceRecovery
+       0x24eb35000 -        0x24eb382ff  com.apple.FontServices (1.0 - 1) <933F7125-1A40-3CF3-ACAB-D0FCE69F25E4> /System/Library/PrivateFrameworks/FontServices.framework/Versions/A/FontServices
+       0x24eb39000 -        0x24ec28e2f  libXTFontStaticRegistryData.dylib (335.4.0.6) <EA5AB5E8-6DC7-33E8-BBDE-F3E257C548CE> /System/Library/PrivateFrameworks/FontServices.framework/libXTFontStaticRegistryData.dylib
+       0x24ec2a000 -        0x24ec36c9f  com.apple.FramePacing (1.0 - 1) <A9E12708-88EA-3F19-84D4-0D5200175473> /System/Library/PrivateFrameworks/FramePacing.framework/Versions/A/FramePacing
+       0x24fd58000 -        0x24fd5df07  libGPUCompilerUtils.dylib (32023.886.1) <A5FEB958-CFD6-3943-829E-834FB54E63F7> /System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/libGPUCompilerUtils.dylib
+       0x2541cb000 -        0x25420a797  libllvm-flatbuffers.dylib (32023.886.1) <E05C1C3B-7EA5-381B-A8D0-20AD5B112233> /System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/libllvm-flatbuffers.dylib
+       0x25bb4e000 -        0x25bc572bf  com.apple.InstalledContentLibrary (1.0 - 1.0) <77C95DA5-08F2-3199-992A-355B886C6CC4> /System/Library/PrivateFrameworks/InstalledContentLibrary.framework/Versions/A/InstalledContentLibrary
+       0x25e579000 -        0x25ed47d3f  com.apple.IntelligencePlatformLibrary (274.60) <E71CD239-DDDD-3993-8BF2-C91E10043049> /System/Library/PrivateFrameworks/IntelligencePlatformLibrary.framework/Versions/A/IntelligencePlatformLibrary
+       0x260629000 -        0x260cbf923  com.apple.MIL (3520.4 - 3520.4.1) <30A1356F-9686-3F1C-80A6-A9E68CA7B6EA> /System/Library/PrivateFrameworks/MIL.framework/Versions/A/MIL
+       0x26588c000 -        0x2658edabf  com.apple.MessageSecurity (1.0 - 195.160.36) <98A7DD2A-91DF-3F9D-8775-E88D498ABECC> /System/Library/PrivateFrameworks/MessageSecurity.framework/Versions/A/MessageSecurity
+       0x26a900000 -        0x26a92a1bf  com.apple.OSEligibility (319.160.17) <74AF9F5D-6DC1-3957-B7DC-1D654535D92C> /System/Library/PrivateFrameworks/OSEligibility.framework/Versions/A/OSEligibility
+       0x26b58d000 -        0x26b6a585f  com.apple.ParsingInternal (0.0.1 - 5026.6.1) <7E4B597D-6194-38C2-B16B-00C5D6F26CF9> /System/Library/PrivateFrameworks/ParsingInternal.framework/Versions/A/ParsingInternal
+       0x26ea3e000 -        0x26ea5fe1f  com.apple.accessibility.PhotosensitivityProcessing (1.0 - 1) <EF22D37F-C900-3620-8DAC-BC9DAF86B2C2> /System/Library/PrivateFrameworks/PhotosensitivityProcessing.framework/Versions/A/PhotosensitivityProcessing
+       0x26ee53000 -        0x26ee8fa3c  com.apple.PoirotSQLite (1.0 - 1) <9EE0827D-E0C1-3E5F-A6CE-2DE87D7E7843> /System/Library/PrivateFrameworks/PoirotSQLite.framework/Versions/A/PoirotSQLite
+       0x26ee90000 -        0x26eefd25f  com.apple.PoirotSchematizer (1.0 - 1) <C7D9468F-DE65-39CD-B335-C63E10F4B45E> /System/Library/PrivateFrameworks/PoirotSchematizer.framework/Versions/A/PoirotSchematizer
+       0x26eefe000 -        0x26ef33bff  com.apple.PoirotUDFs (1.0 - 1) <8E062647-E2A6-3EE8-B4BF-A16A453FE0BD> /System/Library/PrivateFrameworks/PoirotUDFs.framework/Versions/A/PoirotUDFs
+       0x2700cc000 -        0x270207ddf  com.apple.ProDisplayLibrary (10.6.1 - 10.6.1) <BC80CDB8-2133-3F2F-9335-311CDA84A85B> /System/Library/PrivateFrameworks/ProDisplayLibrary.framework/Versions/A/ProDisplayLibrary
+       0x2711c2000 -        0x2711ca4df  com.apple.ReflectionInternal (1.0.0 - 5026.6.1) <608D10EF-1B34-3CA6-8A67-6F6163055D25> /System/Library/PrivateFrameworks/ReflectionInternal.framework/Versions/A/ReflectionInternal
+       0x272116000 -        0x2721299d7  com.apple.RuntimeInternal (1.0.0 - 5026.6.1) <CE29C4DD-459F-3FAD-A27B-E8B89E553A66> /System/Library/PrivateFrameworks/RuntimeInternal.framework/Versions/A/RuntimeInternal
+       0x272381000 -        0x2723eeabf  com.apple.SILManager (53.19 - 53.19) <34E373AD-4FFD-3422-9645-1F8F6C7E4A28> /System/Library/PrivateFrameworks/SILManager.framework/Versions/A/SILManager
+       0x27d8a2000 -        0x27d8ce4a1  com.apple.security.SwiftASN1Internal (1.0 - 1) <799CAA5F-6D83-32E7-B6F5-66806D01B9DB> /System/Library/PrivateFrameworks/SwiftASN1Internal.framework/Versions/A/SwiftASN1Internal
+       0x280d02000 -        0x280d3e1df  com.apple.tightbeam (1.0 - 483.100.88) <006191A6-65EA-3BF9-BA6B-5E90EA575BDB> /System/Library/PrivateFrameworks/Tightbeam.framework/Versions/A/Tightbeam
+       0x28547a000 -        0x28547b2cf  com.apple.VideoToolboxParavirtualizationSupport (64.5 - 64.5) <13718053-13FB-31F2-A6AB-EF77A1108130> /System/Library/PrivateFrameworks/VideoToolboxParavirtualizationSupport.framework/Versions/A/VideoToolboxParavirtualizationSupport
+       0x28f6ef000 -        0x28f78971f  libAppleArchive.dylib (450.160.2) <7E93D261-69D8-364C-AE92-DF8040C2AEA2> /usr/lib/libAppleArchive.dylib
+       0x28f844000 -        0x28f84e45f  libCoreEntitlements.dylib (80.100.6) <08357E55-E9EA-3943-A7B4-67D019A4AAB5> /usr/lib/libCoreEntitlements.dylib
+       0x28fb3a000 -        0x28fb4187f  libReverseProxyDevice.dylib (104.120.2) <32F462F3-484F-38B5-9B52-81DB78B01E7A> /usr/lib/libReverseProxyDevice.dylib
+       0x28fb42000 -        0x28fb49349  libRosetta.dylib (367.9) <81C8280C-CB3A-3F3D-82C9-38C2C1E176FB> /usr/lib/libRosetta.dylib
+       0x28fbb2000 -        0x28fbbb3ff  libTLE.dylib (80.100.6) <CCB7AE45-65C1-318B-BA53-5C8033A3A8F0> /usr/lib/libTLE.dylib
+       0x2903c8000 -        0x2904d9b17  libcrypto.46.dylib (109.100.2) <D1ED4034-4C7B-3A20-8313-3A2A8414A809> /usr/lib/libcrypto.46.dylib
+       0x290614000 -        0x290630762  libhvf.dylib (11) <44583947-0EE5-3FDF-B0E6-D4D1B107546E> /usr/lib/libhvf.dylib
+       0x290f4d000 -        0x290f85527  libssl.48.dylib (109.100.2) <889831A3-52A5-3880-8F68-B8719ED52404> /usr/lib/libssl.48.dylib
+       0x290fc0000 -        0x290fee2ef  libswiftPrespecialized.dylib (0) <C0AF8009-8D71-3080-AD0F-09356ACCC87B> /usr/lib/libswiftPrespecialized.dylib
+       0x29128a000 -        0x29129c043  libswiftDistributed.dylib (6.3.2 - 6.3.2.1.11) <42B2B8D4-ED11-3DE5-B50D-7212459929E8> /usr/lib/swift/libswiftDistributed.dylib
+       0x2912b3000 -        0x2912c2ebc  libswiftObservation.dylib (6.3.2 - 6.3.2.1.11) <D83D9EAB-224A-382C-B281-A3373E218A46> /usr/lib/swift/libswiftObservation.dylib
+       0x2913ef000 -        0x2914028ef  libswiftSynchronization.dylib (6.3.2 - 6.3.2.1.11) <1ACBFCE7-909F-377A-9621-83A652AB5018> /usr/lib/swift/libswiftSynchronization.dylib
+       0x291403000 -        0x29141be60  libswiftSystem.dylib (75) <73161BFD-1E24-36DA-9AE4-0C854C119572> /usr/lib/swift/libswiftSystem.dylib
+       0x29141d000 -        0x29143379f  libswiftVideoToolbox.dylib (3330.13.105.4) <4ECB3632-0AD8-35F1-85A8-F8DA6F6B0CEE> /usr/lib/swift/libswiftVideoToolbox.dylib
+       0x291435000 -        0x291435669  libswift_Builtin_float.dylib (6.3.2.1.11) <9DD9D39A-B799-38A0-81CD-CB4A1E7464C2> /usr/lib/swift/libswift_Builtin_float.dylib
+       0x291436000 -        0x2914c1095  libswift_Concurrency.dylib (6.3.2 - 6.3.2.1.11) <D8508E43-6809-32B4-9640-2F41A4C34C3B> /usr/lib/swift/libswift_Concurrency.dylib
+       0x2914c2000 -        0x2914c4f83  libswift_DarwinFoundation1.dylib (377.160.5) <10C2BEC4-9ECE-3527-AC0B-2CA9EAE10C62> /usr/lib/swift/libswift_DarwinFoundation1.dylib
+       0x2914c5000 -        0x2914c5eeb  libswift_DarwinFoundation2.dylib (377.160.5) <0E4BC0D5-5940-35AC-B869-27205DE63778> /usr/lib/swift/libswift_DarwinFoundation2.dylib
+       0x2914c6000 -        0x2914c67a7  libswift_DarwinFoundation3.dylib (377.160.5) <5F778523-2170-3787-B0AA-BE7238DA5AE6> /usr/lib/swift/libswift_DarwinFoundation3.dylib
+       0x2914c7000 -        0x29156549f  libswift_RegexParser.dylib (6.3.2 - 6.3.2.1.11) <D6087583-79C3-3694-A8C6-819FC2386BA0> /usr/lib/swift/libswift_RegexParser.dylib
+       0x291566000 -        0x2915f20cd  libswift_StringProcessing.dylib (6.3.2 - 6.3.2.1.11) <CAEAA58F-B84E-34D6-AA19-A59DB70A4FE5> /usr/lib/swift/libswift_StringProcessing.dylib
+       0x291757000 -        0x29175aa4b  libsystem_darwindirectory.dylib (122) <27786CEA-2A9E-38F0-8949-D3CB8CCF1DE1> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x29175b000 -        0x29176539b  libsystem_eligibility.dylib (319.160.17) <B0F822FD-F94D-3C30-BCDE-FDA9C93DB5F1> /usr/lib/system/libsystem_eligibility.dylib
+       0x291766000 -        0x29176d88b  libsystem_sanitizers.dylib (26.1) <35C9CE3E-7ABA-3872-AF41-429F4CA3B51D> /usr/lib/system/libsystem_sanitizers.dylib
+       0x29176e000 -        0x29176ebbf  libsystem_trial.dylib (474.2.18.2.1) <698A199E-73E6-3D12-AB87-C8E100BEA52E> /usr/lib/system/libsystem_trial.dylib

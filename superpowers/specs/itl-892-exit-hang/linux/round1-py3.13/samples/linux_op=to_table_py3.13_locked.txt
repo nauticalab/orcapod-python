@@ -1,0 +1,348 @@
+[New LWP 4558]
+[New LWP 4557]
+[New LWP 4556]
+[New LWP 4554]
+[New LWP 4553]
+[New LWP 4552]
+[New LWP 4551]
+[New LWP 4550]
+[New LWP 4549]
+[New LWP 4548]
+[New LWP 4547]
+[New LWP 4546]
+[New LWP 4545]
+[New LWP 4505]
+[New LWP 4501]
+[New LWP 4499]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+__syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+Thread 17 (Thread 0x75909c1ff6c0 (LWP 4499) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=129263961466408, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x75909c816628, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x75909c816628, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x75909c816628, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x75909c816678, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x75909c816678) at ./nptl/pthread_cond_wait.c:453
+#7  0x000075909e497962 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#8  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 16 (Thread 0x75908ffff6c0 (LWP 4501) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=129263923430488, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x75909a3d0458 <thread_status+88>, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x75909a3d0458 <thread_status+88>, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x75909a3d0458 <thread_status+88>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x75909a3d0410 <thread_status+16>, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x75909a3d0410 <thread_status+16>) at ./nptl/pthread_cond_wait.c:453
+#7  0x0000759099230dfb in blas_thread_server () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/numpy/_core/../../numpy.libs/libscipy_openblas64_-56d6093b.so
+#8  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 15 (Thread 0x7590867ff6c0 (LWP 4505) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=129263598659116, a2=<optimized out>, a3=a3@entry=2256530360, a4=a4@entry=129263592270784, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=30096, futex_word=0x759086e1662c, expected=2256530360, op=7726105, abstime=0x7590867febc0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x759086e1662c, expected=2256530360, clockid=30096, abstime=0x7590867febc0, private=30096, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x759086e1662c, expected=expected@entry=1, clockid=clockid@entry=0, abstime=abstime@entry=0x7590867feda0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab402 in __pthread_cond_wait_common (cond=0x759086e16608, mutex=0x759086e16678, clockid=<optimized out>, abstime=0x7590867feda0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_timedwait64 (cond=0x759086e16608, mutex=0x759086e16678, abstime=0x7590867feda0) at ./nptl/pthread_cond_wait.c:478
+#7  0x0000759087d26d6e in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 14 (Thread 0x75903e08f6c0 (LWP 4545) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000075908c5240e9 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000075908c50583e in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000075908c4fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000075908c4fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908c5150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000075908c511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000075908c4fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000075908c516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000075908c4f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000075908c50e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#15 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 13 (Thread 0x75903de8e6c0 (LWP 4546) "tokio-runtime-w"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a838c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x00007590a273f835 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x000075908c52267a in mio::poll::Poll::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908c50a25f in tokio::runtime::io::driver::Driver::turn () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000075908c50b62d in tokio::runtime::time::Driver::park_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000075908c5057ae in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000075908c4fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000075908c4fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000075908c5150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000075908c511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000075908c4fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000075908c516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x000075908c4f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#15 0x000075908c50e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#16 0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#17 0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#18 0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#19 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#20 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 12 (Thread 0x75903dc8d6c0 (LWP 4547) "tokio-runtime-w"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a838c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x00007590a273f835 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x000075908c52267a in mio::poll::Poll::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908c50a25f in tokio::runtime::io::driver::Driver::turn () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000075908c50b62d in tokio::runtime::time::Driver::park_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000075908c5057ae in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000075908c4fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000075908c4fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000075908c5150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000075908c511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000075908c4fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000075908c516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x000075908c4f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#15 0x000075908c50e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#16 0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#17 0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#18 0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#19 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#20 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 11 (Thread 0x75903da8c6c0 (LWP 4548) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000075908c5240e9 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000075908c50583e in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000075908c4fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000075908c4fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908c5150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000075908c511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000075908c4fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000075908c516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000075908c4f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000075908c50e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#15 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 10 (Thread 0x75903cdff6c0 (LWP 4549) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000075908c524180 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000075908c50e396 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#7  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 9 (Thread 0x759027fff6c0 (LWP 4550) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=129263598659324, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x759086e166fc, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x759086e166fc, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x759086e166fc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x759027ffeda0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab402 in __pthread_cond_wait_common (cond=0x759086e166d8, mutex=0x759086e16748, clockid=<optimized out>, abstime=0x759027ffeda0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_timedwait64 (cond=0x759086e166d8, mutex=0x759086e16748, abstime=0x759027ffeda0) at ./nptl/pthread_cond_wait.c:478
+#7  0x0000759087d266ca in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 8 (Thread 0x759026ffe6c0 (LWP 4551) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=129263598659528, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x759086e167c8, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x759086e167c8, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x759086e167c8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x759086e16818, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x759086e16818) at ./nptl/pthread_cond_wait.c:453
+#7  0x0000759087d267e6 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x75903c5ff6c0 (LWP 4552) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000075908c524180 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000075908c50e396 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#7  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 6 (Thread 0x75903c3fe6c0 (LWP 4553) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000075908c524180 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000075908c50e396 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000075908c51b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000075908c51b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000075908d008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#7  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 5 (Thread 0x7590255ff6c0 (LWP 4554) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=129263598659736, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x759086e16898, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x759086e16898, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x759086e16898, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x759086e168e8, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x759086e168e8) at ./nptl/pthread_cond_wait.c:453
+#7  0x0000759087d267e6 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x75900f1ff6c0 (LWP 4556) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=110043530374456, a2=<optimized out>, a3=a3@entry=2731458932, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x64158189ad38, expected=2731458932, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x64158189ad38, expected=2731458932, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x64158189ad38, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x64158189acf0, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x64158189acf0) at ./nptl/pthread_cond_wait.c:453
+#7  0x000075909cac24b7 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x000075909d913e98 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::{lambda()#1}> > >::_M_run() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#9  0x000075909caf7439 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#10 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#11 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x75900e1fe6c0 (LWP 4557) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=110043530374456, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x64158189ad38, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x64158189ad38, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x64158189ad38, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x64158189acf0, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x64158189acf0) at ./nptl/pthread_cond_wait.c:453
+#7  0x000075909cac24b7 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x000075909d913e98 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::{lambda()#1}> > >::_M_run() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#9  0x000075909caf7439 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#10 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#11 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x75900d1fd6c0 (LWP 4558) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a838c in __internal_syscall_cancel (a1=0, a2=0, a3=0, a4=0, a5=0, a6=0, nr=34) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=0, nr=34) at ./nptl/cancellation.c:75
+#3  0x00007590a2708301 in __libc_pause () at ../sysdeps/unix/sysv/linux/pause.c:29
+#4  0x00007590a2b63359 in PyThread_hang_thread () at Python/thread_pthread.h:440
+#5  0x00007590a2b43e7b in take_gil (tstate=0x759000005590) at Python/ceval_gil.c:318
+#6  0x00007590a2c46ebf in _PyEval_AcquireLock (tstate=<optimized out>) at Python/ceval_gil.c:597
+#7  0x00007590a2c4dc1b in _PyThreadState_Attach (tstate=0x759000005590) at Python/pystate.c:2100
+#8  0x00007590a2c473f2 in PyEval_RestoreThread (tstate=<optimized out>) at Python/ceval_gil.c:663
+#9  0x00007590a2cec124 in PyGILState_Ensure () at Python/pystate.c:2790
+#10 0x00007590a18ea941 in std::_Sp_counted_ptr<arrow::py::PyBuffer*, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_python.so.2300
+#11 0x000075909d200417 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#12 0x000075909d6bc734 in arrow::Future<std::shared_ptr<arrow::Buffer> >::SetResult(arrow::Result<std::shared_ptr<arrow::Buffer> >)::{lambda(void*)#1}::_FUN(void*) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#13 0x000075909d91dacb in arrow::ConcreteFutureImpl::~ConcreteFutureImpl() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#14 0x000075909d230baa in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release_last_use_cold() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#15 0x000075909d82c525 in arrow::io::internal::ReadRangeCache::LazyImpl::~LazyImpl() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#16 0x00007590a0a027b7 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#17 0x00007590a0a8426e in parquet::SerializedFile::~SerializedFile() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#18 0x00007590a0b6ecb7 in parquet::arrow::(anonymous namespace)::FileReaderImpl::~FileReaderImpl() [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#19 0x00007590a0a027b7 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#20 0x00007590a0b6eb20 in std::_Function_handler<arrow::Future<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch> > ()> > (), parquet::arrow::RowGroupGenerator>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#21 0x00007590a0b8410e in std::_Sp_counted_ptr_inplace<arrow::MergedGenerator<std::shared_ptr<arrow::RecordBatch> >::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#22 0x00007590a0a027b7 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#23 0x00007590a0b76220 in std::_Function_handler<arrow::Future<std::shared_ptr<arrow::RecordBatch> > (), arrow::MergedGenerator<std::shared_ptr<arrow::RecordBatch> > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libparquet.so.2300
+#24 0x00007590a1355b19 in std::_Sp_counted_ptr_inplace<arrow::dataset::SlicingGenerator::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#25 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#26 0x00007590a1336772 in std::_Function_handler<arrow::Future<std::shared_ptr<arrow::RecordBatch> > (), arrow::dataset::SlicingGenerator>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#27 0x00007590a1356e6e in std::_Sp_counted_ptr_inplace<arrow::SerialReadaheadGenerator<std::shared_ptr<arrow::RecordBatch> >::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#28 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#29 0x00007590a133d380 in std::_Function_handler<arrow::Future<std::shared_ptr<arrow::RecordBatch> > (), arrow::SerialReadaheadGenerator<std::shared_ptr<arrow::RecordBatch> > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#30 0x00007590a1345e46 in arrow::Future<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch> > ()> >::SetResult(arrow::Result<std::function<arrow::Future<std::shared_ptr<arrow::RecordBatch> > ()> >)::{lambda(void*)#1}::_FUN(void*) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#31 0x000075909d91dacb in arrow::ConcreteFutureImpl::~ConcreteFutureImpl() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#32 0x00007590a132bdfa in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release_last_use_cold() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#33 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#34 0x00007590a133d240 in std::_Function_handler<arrow::Future<std::shared_ptr<arrow::RecordBatch> > (), arrow::FutureFirstGenerator<std::shared_ptr<arrow::RecordBatch> > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#35 0x00007590a1355a19 in std::_Sp_counted_ptr_inplace<arrow::DefaultIfEmptyGenerator<std::shared_ptr<arrow::RecordBatch> >::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#36 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#37 0x00007590a13368d2 in std::_Function_handler<arrow::Future<std::shared_ptr<arrow::RecordBatch> > (), arrow::DefaultIfEmptyGenerator<std::shared_ptr<arrow::RecordBatch> > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#38 0x00007590a13559e9 in std::_Sp_counted_ptr_inplace<arrow::EnumeratingGenerator<std::shared_ptr<arrow::RecordBatch> >::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#39 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#40 0x00007590a1336982 in std::_Function_handler<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> > > (), arrow::EnumeratingGenerator<std::shared_ptr<arrow::RecordBatch> > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#41 0x00007590a136f9d6 in arrow::Future<std::function<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> > > ()> >::SetResult(arrow::Result<std::function<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> > > ()> >)::{lambda(void*)#1}::_FUN(void*) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#42 0x000075909d91dacb in arrow::ConcreteFutureImpl::~ConcreteFutureImpl() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#43 0x00007590a132bdfa in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release_last_use_cold() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#44 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#45 0x00007590a1336a32 in std::_Function_handler<arrow::Future<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> > > (), arrow::FutureFirstGenerator<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> > > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#46 0x00007590a135c48d in std::_Sp_counted_ptr_inplace<arrow::MappingGenerator<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> >, arrow::dataset::EnumeratedRecordBatch>::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#47 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#48 0x00007590a1336ae2 in std::_Function_handler<arrow::Future<arrow::dataset::EnumeratedRecordBatch> (), arrow::MappingGenerator<arrow::Enumerated<std::shared_ptr<arrow::RecordBatch> >, arrow::dataset::EnumeratedRecordBatch> >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#49 0x00007590a135c506 in std::_Sp_counted_ptr_inplace<arrow::MergedGenerator<arrow::dataset::EnumeratedRecordBatch>::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#50 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#51 0x00007590a133cde0 in std::_Function_handler<arrow::Future<arrow::dataset::EnumeratedRecordBatch> (), arrow::MergedGenerator<arrow::dataset::EnumeratedRecordBatch> >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#52 0x00007590a135c39e in std::_Sp_counted_ptr_inplace<arrow::ReadaheadGenerator<arrow::dataset::EnumeratedRecordBatch>::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#53 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#54 0x00007590a133ce80 in std::_Function_handler<arrow::Future<arrow::dataset::EnumeratedRecordBatch> (), arrow::ReadaheadGenerator<arrow::dataset::EnumeratedRecordBatch> >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#55 0x00007590a135c35d in std::_Sp_counted_ptr_inplace<arrow::MappingGenerator<arrow::dataset::EnumeratedRecordBatch, std::optional<arrow::compute::ExecBatch> >::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#56 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#57 0x00007590a133cfc0 in std::_Function_handler<arrow::Future<std::optional<arrow::compute::ExecBatch> > (), arrow::MappingGenerator<arrow::dataset::EnumeratedRecordBatch, std::optional<arrow::compute::ExecBatch> > >::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#58 0x00007590a0732a3b in arrow::acero::(anonymous namespace)::SourceNode::~SourceNode() [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#59 0x00007590a079860e in arrow::acero::(anonymous namespace)::ExecPlanImpl::~ExecPlanImpl() [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#60 0x00007590a07b0102 in std::_Sp_counted_ptr<arrow::acero::(anonymous namespace)::ExecPlanImpl*, (__gnu_cxx::_Lock_policy)2>::_M_dispose() [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#61 0x00007590a132bdfa in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release_last_use_cold() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#62 0x00007590a13459be in std::_Function_handler<arrow::Future<arrow::dataset::EnumeratedRecordBatch> (), arrow::dataset::(anonymous namespace)::AsyncScanner::ScanBatchesUnorderedAsync(arrow::internal::Executor*, bool, bool)::{lambda()#1}>::_M_manager(std::_Any_data&, std::_Any_data const&, std::_Manager_operation) [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#63 0x00007590a135c3ed in std::_Sp_counted_ptr_inplace<arrow::MappingGenerator<arrow::dataset::EnumeratedRecordBatch, arrow::dataset::EnumeratedRecordBatch>::State, std::allocator<void>, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#64 0x00007590a12fad97 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#65 0x00007590a134d81c in arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::dataset::EnumeratedRecordBatch>::WrapResultOnComplete::Callback<arrow::MappingGenerator<arrow::dataset::EnumeratedRecordBatch, arrow::dataset::EnumeratedRecordBatch>::Callback> >::~FnImpl() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#66 0x000075909d9108bc in arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#67 0x000075909d91cd92 in arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#68 0x00007590a134636f in arrow::Future<arrow::dataset::EnumeratedRecordBatch>::MarkFinished(arrow::Result<arrow::dataset::EnumeratedRecordBatch>) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#69 0x00007590a1370878 in arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::dataset::EnumeratedRecordBatch>::WrapResultOnComplete::Callback<arrow::detail::MarkNextFinished<arrow::Future<arrow::dataset::EnumeratedRecordBatch>, arrow::Future<arrow::dataset::EnumeratedRecordBatch>, false, false> > >::invoke(arrow::FutureImpl const&) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#70 0x000075909d9108b3 in arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#71 0x000075909d91cd92 in arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#72 0x00007590a134636f in arrow::Future<arrow::dataset::EnumeratedRecordBatch>::MarkFinished(arrow::Result<arrow::dataset::EnumeratedRecordBatch>) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#73 0x00007590a1365966 in arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapResultOnComplete::Callback<arrow::Future<arrow::internal::Empty>::ThenOnComplete<arrow::dataset::(anonymous namespace)::AsyncScanner::ScanBatchesUnorderedAsync(arrow::internal::Executor*, bool, bool)::{lambda()#1}::operator()() const::{lambda(arrow::dataset::EnumeratedRecordBatch const&)#1}::operator()(arrow::dataset::EnumeratedRecordBatch const&) const::{lambda()#1}, arrow::Future<arrow::internal::Empty>::PassthruOnFailure<arrow::dataset::(anonymous namespace)::AsyncScanner::ScanBatchesUnorderedAsync(arrow::internal::Executor*, bool, bool)::{lambda()#1}::operator()() const::{lambda(arrow::dataset::EnumeratedRecordBatch const&)#1}::operator()(arrow::dataset::EnumeratedRecordBatch const&) const::{lambda()#1}> > > >::invoke(arrow::FutureImpl const&) [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_dataset.so.2300
+#74 0x000075909d9108b3 in arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#75 0x000075909d91cd92 in arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#76 0x00007590a0744206 in void arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#77 0x00007590a07b044a in arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapStatusyOnComplete::Callback<arrow::acero::(anonymous namespace)::ExecPlanImpl::StartProducing()::{lambda(arrow::Status const&)#2}> >::invoke(arrow::FutureImpl const&) [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#78 0x000075909d9108b3 in arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#79 0x000075909d91cd92 in arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#80 0x000075909d24665b in void arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#81 0x000075909d96b4da in arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapResultOnComplete::Callback<arrow::Future<arrow::internal::Empty>::ThenOnComplete<arrow::util::AsyncTaskScheduler::Make(arrow::internal::FnOnce<arrow::Status (arrow::util::AsyncTaskScheduler*)>, arrow::internal::FnOnce<void (arrow::Status const&)>, arrow::StopToken)::{lambda()#1}, arrow::Future<arrow::internal::Empty>::PassthruOnFailure<arrow::util::AsyncTaskScheduler::Make(arrow::internal::FnOnce<arrow::Status (arrow::util::AsyncTaskScheduler*)>, arrow::internal::FnOnce<void (arrow::Status const&)>, arrow::StopToken)::{lambda()#1}> > > >::invoke(arrow::FutureImpl const&) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#82 0x000075909d9108b3 in arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#83 0x000075909d91cd92 in arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#84 0x000075909d24665b in void arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#85 0x000075909d96dd4e in arrow::internal::FnOnce<void (arrow::FutureImpl const&)>::FnImpl<arrow::Future<arrow::internal::Empty>::WrapStatusyOnComplete::Callback<arrow::util::(anonymous namespace)::AsyncTaskSchedulerImpl::DoSubmitTask(std::unique_ptr<arrow::util::AsyncTaskScheduler::Task, std::default_delete<arrow::util::AsyncTaskScheduler::Task> >)::{lambda()#1}::operator()()::{lambda(arrow::Status const&)#1}> >::invoke(arrow::FutureImpl const&) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#86 0x000075909d9108b3 in arrow::ConcreteFutureImpl::RunOrScheduleCallback(std::shared_ptr<arrow::FutureImpl> const&, arrow::FutureImpl::CallbackRecord&&, bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#87 0x000075909d91cd92 in arrow::ConcreteFutureImpl::DoMarkFinishedOrFailed(arrow::FutureState) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#88 0x00007590a0744206 in void arrow::Future<arrow::internal::Empty>::MarkFinished<arrow::internal::Empty, void>(arrow::Status) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#89 0x00007590a0753cc7 in arrow::internal::FnOnce<void ()>::FnImpl<std::_Bind<arrow::detail::ContinueFuture (arrow::Future<arrow::internal::Empty>, std::function<arrow::Status ()>)> >::invoke() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_acero.so.2300
+#90 0x000075909d9140e4 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::{lambda()#1}> > >::_M_run() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#91 0x000075909caf7439 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#92 0x00007590a26abe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#93 0x00007590a273f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x7590a2fe4bc0 (LWP 4494) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007590a26a82fc in __internal_syscall_cancel (a1=a1@entry=110043531371980, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007590a26a86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x64158198e5cc, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x64158198e5cc, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x64158198e5cc, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007590a26ab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x64158198e550, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x64158198e550) at ./nptl/pthread_cond_wait.c:453
+#7  0x000075909cac24b7 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x000075909d915f4b in arrow::internal::ThreadPool::Shutdown(bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#9  0x000075909d9161c2 in std::_Sp_counted_ptr<arrow::internal::ThreadPool*, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#10 0x000075909d200417 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#11 0x00007590a264a940 in __run_exit_handlers (status=0, listp=0x7590a2817680 <__exit_funcs>, run_list_atexit=run_list_atexit@entry=true, run_dtors=run_dtors@entry=true) at ./stdlib/exit.c:118
+#12 0x00007590a264aa1e in __GI_exit (status=<optimized out>) at ./stdlib/exit.c:148
+#13 0x00007590a262a8c8 in __libc_start_call_main (main=main@entry=0x641574652060 <main>, argc=argc@entry=4, argv=argv@entry=0x7ffe1b16fd48) at ../sysdeps/nptl/libc_start_call_main.h:83
+#14 0x00007590a262a9d8 in __libc_start_main_impl (main=0x641574652060 <main>, argc=4, argv=0x7ffe1b16fd48, init=<optimized out>, fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7ffe1b16fd38) at ../csu/libc-start.c:360
+#15 0x0000641574652095 in _start ()
+[Inferior 1 (process 4494) detached]
+
+warning: 56	../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S: No such file or directory

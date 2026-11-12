@@ -76,6 +76,15 @@ class CachedFunctionPod(WrappedFunctionPod):
         """
         self._cache.set_ignore_schema(ignore_schema)
 
+    def set_auto_flush(self, on: bool = True) -> None:
+        """Set whether each stored result is committed (flushed) right away.
+
+        Args:
+            on: ``True`` (the default) commits after every stored result;
+                ``False`` leaves the commit to the caller.
+        """
+        self._cache.set_auto_flush(on)
+
     def lookup_cached_data(self, data: DataProtocol) -> DataProtocol | None:
         """Look up a cached result for ``data`` without triggering computation.
 

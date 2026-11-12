@@ -53,3 +53,4 @@ nav:
     - Types: api/types.md
   - Reference:
     - Hashing: reference/hashing.md
+  - Troubleshooting: troubleshooting.md

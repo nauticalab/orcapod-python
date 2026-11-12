@@ -1,0 +1,276 @@
+[New LWP 6135]
+[New LWP 6134]
+[New LWP 6133]
+[New LWP 6132]
+[New LWP 6131]
+[New LWP 6130]
+[New LWP 6129]
+[New LWP 6128]
+[New LWP 6127]
+[New LWP 6126]
+[New LWP 6125]
+[New LWP 6124]
+[New LWP 6123]
+[New LWP 6080]
+[New LWP 6074]
+[New LWP 6071]
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/x86_64-linux-gnu/libthread_db.so.1".
+__syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+Thread 17 (Thread 0x72005ebff6c0 (LWP 6071) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345921590824, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x72005f216628, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x72005f216628, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x72005f216628, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x72005f216678, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x72005f216678) at ./nptl/pthread_cond_wait.c:453
+#7  0x0000720060e97962 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 16 (Thread 0x7200527ff6c0 (LWP 6074) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345799668824, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x720057dd0458 <thread_status+88>, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x720057dd0458 <thread_status+88>, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x720057dd0458 <thread_status+88>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x720057dd0410 <thread_status+16>, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x720057dd0410 <thread_status+16>) at ./nptl/pthread_cond_wait.c:453
+#7  0x0000720056c30dfb in blas_thread_server () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/numpy/_core/../../numpy.libs/libscipy_openblas64_-56d6093b.so
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 15 (Thread 0x720043fff6c0 (LWP 6080) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345472801832, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x720044616c28, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x720044616c28, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x720044616c28, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x720044616c80, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x720044616c80) at ./nptl/pthread_cond_wait.c:453
+#7  0x000072004d6ae2e7 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/_polars_runtime_32/_polars_runtime.abi3.so
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 14 (Thread 0x71fffbfef6c0 (LWP 6123) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=107518388190316, a2=<optimized out>, a3=a3@entry=4227787776, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x61c99355bc6c, expected=4227787776, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x61c99355bc6c, expected=4227787776, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x61c99355bc6c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x61c99355bc20, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x61c99355bc20) at ./nptl/pthread_cond_wait.c:453
+#7  0x000072005f4c24b7 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x0000720060313e98 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::{lambda()#1}> > >::_M_run() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#9  0x000072005f4f7439 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#10 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#11 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 13 (Thread 0x71fffafee6c0 (LWP 6124) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=107518388190316, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x61c99355bc6c, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x61c99355bc6c, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x61c99355bc6c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x61c99355bc20, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x61c99355bc20) at ./nptl/pthread_cond_wait.c:453
+#7  0x000072005f4c24b7 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x0000720060313e98 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::{lambda()#1}> > >::_M_run() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#9  0x000072005f4f7439 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#10 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#11 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 12 (Thread 0x71fff99ff6c0 (LWP 6125) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345405691432, a2=<optimized out>, a3=a3@entry=3265269968, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x720040616628, expected=3265269968, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x720040616628, expected=3265269968, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x720040616628, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x720040616678, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x720040616678) at ./nptl/pthread_cond_wait.c:453
+#7  0x000071ffecd26f39 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 11 (Thread 0x7200403ff6c0 (LWP 6126) "tokio-runtime-w"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea838c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x0000720064f3f835 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x000071fff152267a in mio::poll::Poll::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000071fff150a25f in tokio::runtime::io::driver::Driver::turn () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000071fff150b62d in tokio::runtime::time::Driver::park_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000071fff15057ae in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000071fff14fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000071fff14fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000071fff15150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000071fff1511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000071fff14fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000071fff1516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x000071fff14f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#15 0x000071fff150e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#16 0x000071fff151b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#17 0x000071fff151b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#18 0x000071fff2008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#19 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#20 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 10 (Thread 0x71fff89fe6c0 (LWP 6127) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000071fff15240e9 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000071fff150583e in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000071fff14fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000071fff14fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000071fff15150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000071fff1511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000071fff14fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000071fff1516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000071fff14f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000071fff150e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000071fff151b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000071fff151b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000071fff2008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#15 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 9 (Thread 0x71fff87fd6c0 (LWP 6128) "tokio-runtime-w"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea838c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x0000720064f3f835 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x000071fff152267a in mio::poll::Poll::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000071fff150a25f in tokio::runtime::io::driver::Driver::turn () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000071fff150b62d in tokio::runtime::time::Driver::park_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000071fff15057ae in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000071fff14fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000071fff14fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000071fff15150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000071fff1511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000071fff14fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000071fff1516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x000071fff14f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#15 0x000071fff150e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#16 0x000071fff151b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#17 0x000071fff151b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#18 0x000071fff2008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#19 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#20 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 8 (Thread 0x71fff85fc6c0 (LWP 6129) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000071fff15240e9 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000071fff150583e in tokio::runtime::scheduler::multi_thread::park::Parker::park () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000071fff14fd6e5 in tokio::runtime::scheduler::multi_thread::worker::Context::park_timeout () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000071fff14fc8d5 in tokio::runtime::scheduler::multi_thread::worker::Context::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000071fff15150b8 in tokio::runtime::context::scoped::Scoped<T>::set () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x000071fff1511368 in tokio::runtime::context::runtime::enter_runtime () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#7  0x000071fff14fba2d in tokio::runtime::scheduler::multi_thread::worker::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x000071fff1516c39 in tokio::runtime::task::core::Core<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#9  0x000071fff14f8671 in tokio::runtime::task::harness::Harness<T,S>::poll () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#10 0x000071fff150e317 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#11 0x000071fff151b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#12 0x000071fff151b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#13 0x000071fff2008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#14 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#15 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x71fff83fb6c0 (LWP 6130) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000071fff1524180 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000071fff150e396 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000071fff151b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000071fff151b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000071fff2008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#7  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 6 (Thread 0x71ffe27ff6c0 (LWP 6131) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345405691640, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x7200406166f8, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x7200406166f8, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7200406166f8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x720040616748, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x720040616748) at ./nptl/pthread_cond_wait.c:453
+#7  0x000071ffecd267e6 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 5 (Thread 0x71ffe17fe6c0 (LWP 6132) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345405691848, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x7200406167c8, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x7200406167c8, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7200406167c8, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x720040616818, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x720040616818) at ./nptl/pthread_cond_wait.c:453
+#7  0x000071ffecd267e6 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x71ffe07fd6c0 (LWP 6133) "tokio-runtime-w"):
+#0  syscall () at ../sysdeps/unix/sysv/linux/x86_64/syscall.S:38
+#1  0x000071fff1524180 in parking_lot::condvar::Condvar::wait_until_internal () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#2  0x000071fff150e396 in tokio::runtime::blocking::pool::Inner::run () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#3  0x000071fff151b0d0 in std::sys::backtrace::__rust_begin_short_backtrace () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#4  0x000071fff151b948 in core::ops::function::FnOnce::call_once{{vtable.shim}} () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#5  0x000071fff2008adb in std::sys::pal::unix::thread::Thread::new::thread_start () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#6  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#7  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 3 (Thread 0x71ffc3dff6c0 (LWP 6134) "jemalloc_bg_thd"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=125345405692056, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x720040616898, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x720040616898, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x720040616898, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x7200406168e8, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x7200406168e8) at ./nptl/pthread_cond_wait.c:453
+#7  0x000071ffecd267e6 in background_thread_entry () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/deltalake/_internal.abi3.so
+#8  0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x71ffc217f6c0 (LWP 6135) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea838c in __internal_syscall_cancel (a1=0, a2=0, a3=0, a4=0, a5=0, a6=0, nr=34) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=a1@entry=0, a2=a2@entry=0, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=0, nr=34) at ./nptl/cancellation.c:75
+#3  0x0000720064f08301 in __libc_pause () at ../sysdeps/unix/sysv/linux/pause.c:29
+#4  0x0000720065363359 in PyThread_hang_thread () at Python/thread_pthread.h:440
+#5  0x0000720065343e7b in take_gil (tstate=0x71ffb0002870) at Python/ceval_gil.c:318
+#6  0x0000720065446ebf in _PyEval_AcquireLock (tstate=<optimized out>) at Python/ceval_gil.c:597
+#7  0x000072006544dc1b in _PyThreadState_Attach (tstate=0x71ffb0002870) at Python/pystate.c:2100
+#8  0x00007200654473f2 in PyEval_RestoreThread (tstate=<optimized out>) at Python/ceval_gil.c:663
+#9  0x00007200654ec124 in PyGILState_Ensure () at Python/pystate.c:2790
+#10 0x00007200642ea941 in std::_Sp_counted_ptr<arrow::py::PyBuffer*, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow_python.so.2300
+#11 0x000072005fc00417 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#12 0x00007200600bc734 in arrow::Future<std::shared_ptr<arrow::Buffer> >::SetResult(arrow::Result<std::shared_ptr<arrow::Buffer> >)::{lambda(void*)#1}::_FUN(void*) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#13 0x000072006031dacb in arrow::ConcreteFutureImpl::~ConcreteFutureImpl() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#14 0x000072005fc30baa in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release_last_use_cold() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#15 0x000072006022583c in arrow::internal::FnOnce<void ()>::FnImpl<std::_Bind<arrow::detail::ContinueFuture (arrow::Future<std::shared_ptr<arrow::Buffer> >, arrow::io::RandomAccessFile::ReadAsync(arrow::io::IOContext const&, long, long)::{lambda()#1})> >::~FnImpl() [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#16 0x00007200603140f1 in std::thread::_State_impl<std::thread::_Invoker<std::tuple<arrow::internal::ThreadPool::LaunchWorkersUnlocked(int)::{lambda()#1}> > >::_M_run() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#17 0x000072005f4f7439 in ?? () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#18 0x0000720064eabe6b in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#19 0x0000720064f3f55c in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 1 (Thread 0x7200658c3bc0 (LWP 6065) "python"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x0000720064ea82fc in __internal_syscall_cancel (a1=a1@entry=107518388215708, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x0000720064ea86d7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x61c993561f9c, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x61c993561f9c, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x61c993561f9c, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x0000720064eab147 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x61c993561f20, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x61c993561f20) at ./nptl/pthread_cond_wait.c:453
+#7  0x000072005f4c24b7 in std::condition_variable::wait(std::unique_lock<std::mutex>&) () from /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+#8  0x0000720060315f4b in arrow::internal::ThreadPool::Shutdown(bool) () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#9  0x00007200603161c2 in std::_Sp_counted_ptr<arrow::internal::ThreadPool*, (__gnu_cxx::_Lock_policy)2>::_M_dispose() () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#10 0x000072005fc00417 in std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>::_M_release() [clone .localalias] [clone .lto_priv.0] () from /home/runner/work/orcapod-python/orcapod-python/.venv/lib/python3.13/site-packages/pyarrow/libarrow.so.2300
+#11 0x0000720064e4a940 in __run_exit_handlers (status=0, listp=0x720065017680 <__exit_funcs>, run_list_atexit=run_list_atexit@entry=true, run_dtors=run_dtors@entry=true) at ./stdlib/exit.c:118
+#12 0x0000720064e4aa1e in __GI_exit (status=<optimized out>) at ./stdlib/exit.c:148
+#13 0x0000720064e2a8c8 in __libc_start_call_main (main=main@entry=0x61c991795060 <main>, argc=argc@entry=5, argv=argv@entry=0x7ffcb197ce58) at ../sysdeps/nptl/libc_start_call_main.h:83
+#14 0x0000720064e2a9d8 in __libc_start_main_impl (main=0x61c991795060 <main>, argc=5, argv=0x7ffcb197ce58, init=<optimized out>, fini=<optimized out>, rtld_fini=<optimized out>, stack_end=0x7ffcb197ce48) at ../csu/libc-start.c:360
+#15 0x000061c991795095 in _start ()
+[Inferior 1 (process 6065) detached]
+
+warning: 56	../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S: No such file or directory

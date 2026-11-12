@@ -173,12 +173,31 @@ def test_store_read_failure_in_a_row_flush_fails_the_run(stored, make_orchestrat
         job.run(orchestrator=orchestrator)
 
     assert Path(info.value.table) == result_table
+    # The failure surfaces when the node commits its batch (ITL-919), here at its
+    # end: e is computed too, and neither d nor e is stored.
+    assert sorted(_CALLS) == [4, 5]
+
+
+def test_store_read_failure_with_per_row_commits_stops_at_the_row(
+    stored, make_orchestrator
+):
+    """With ``commit_every_rows=1`` a read failure surfaces at the row it broke."""
+    result_table, _ = table_dirs(stored)
+    _DAMAGE_ON_NEXT_CALL.append(result_table)
+
+    orchestrator = make_orchestrator()
+    job = build_job(stored, keys="abcde")
+    with pytest.raises(StoreReadError) as info:
+        job.run(orchestrator=orchestrator, commit_every_rows=1)
+
+    assert Path(info.value.table) == result_table
+    assert info.value.node_label is not None
     if isinstance(orchestrator, SyncPipelineOrchestrator):
-        # The run stops at d: e is never computed.
+        # The run stops at d's commit: e is never computed.
         assert _CALLS == [4]
     else:
         # The async pod computes rows concurrently, so e may already be in flight
-        # when d's flush fails.
+        # when d's commit fails.
         assert 4 in _CALLS and len(_CALLS) <= 2
 
 

@@ -22,7 +22,7 @@ Example::
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
 from orcapod.logical_types.database_hooks import register_discovered_logical_types
@@ -166,6 +166,26 @@ class ExtensionAwareDatabase:
 
     def flush(self) -> None:
         self._db.flush()
+
+    @property
+    def batch_size(self) -> int:
+        """The wrapped database's ``batch_size``.
+
+        Raises:
+            AttributeError: If the wrapped database has none, so this wrapper
+                satisfies ``TableCommittingDatabaseProtocol`` only when the
+                wrapped database does.
+        """
+        return getattr(self._db, "batch_size")  # noqa: B009  # AttributeError when absent, by design
+
+    @property
+    def flush_batch(self) -> Callable[[tuple[str, ...]], None]:
+        """The wrapped database's ``flush_batch`` (commits one table's writes).
+
+        Raises:
+            AttributeError: If the wrapped database has none (see ``batch_size``).
+        """
+        return getattr(self._db, "flush_batch")  # noqa: B009  # AttributeError when absent, by design
 
     # ── Structural delegation ─────────────────────────────────────────────────
 
