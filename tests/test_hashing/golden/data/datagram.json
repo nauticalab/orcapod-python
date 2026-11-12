@@ -137,6 +137,42 @@
     "_tag_source_id::09e21beb4bc98046eb825d92f94de9a313d22fc6d43d2309ea042381fc78ebb5",
     "_tag_record_id::09e21beb4bc98046eb825d92f94de9a313d22fc6d43d2309ea042381fc78ebb5"
   ],
+  "dict_order.int_keys.content_hash": "semantic_v1:442c4ae4b8fe16767c99b7ef521f7c9919d96ebba255bc32b154c8cd0bc6eb4d",
+  "dict_order.int_keys.pipeline_hash": "semantic_v1:a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42",
+  "dict_order.int_keys.row[{\"k\":\"r0\"}]._tag_record_id::a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42": "a7a545a63e0d5cfdbbb7444d2ff924c4",
+  "dict_order.int_keys.row[{\"k\":\"r0\"}]._tag_source_id::a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42": "golden_dict_int_keys",
+  "dict_order.int_keys.row[{\"k\":\"r0\"}].data_hash": "arrow_v1:0000020485f86d650cc4b25a2066867c86cef2b910c26cf43f4a8dc31a7347bc50a774",
+  "dict_order.int_keys.row[{\"k\":\"r1\"}]._tag_record_id::a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42": "7e203bc987835298ac9b02baf41ca4cf",
+  "dict_order.int_keys.row[{\"k\":\"r1\"}]._tag_source_id::a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42": "golden_dict_int_keys",
+  "dict_order.int_keys.row[{\"k\":\"r1\"}].data_hash": "arrow_v1:0000020485f86d650cc4b25a2066867c86cef2b910c26cf43f4a8dc31a7347bc50a774",
+  "dict_order.int_keys.system_tag_columns": [
+    "_tag_source_id::a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42",
+    "_tag_record_id::a0b3c7a7c610bfca1b6b4a0e10cb45cf0f50076df1dca06166ea71c576d0ff42"
+  ],
+  "dict_order.nested.content_hash": "semantic_v1:d5697d3ae891cc50f0c17ce018b6189187c86831ef7c5b63aa6e30312496dd38",
+  "dict_order.nested.pipeline_hash": "semantic_v1:62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf",
+  "dict_order.nested.row[{\"k\":\"r0\"}]._tag_record_id::62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf": "f2163b15031857e7b0edc5c8092fe897",
+  "dict_order.nested.row[{\"k\":\"r0\"}]._tag_source_id::62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf": "golden_dict_nested",
+  "dict_order.nested.row[{\"k\":\"r0\"}].data_hash": "arrow_v1:0000023adae205c66a7e47e30426b0b33eb081c7f899b5f12c41bec79437372e0de449",
+  "dict_order.nested.row[{\"k\":\"r1\"}]._tag_record_id::62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf": "f6ab4ac474e750cb89debd9cb2697ccb",
+  "dict_order.nested.row[{\"k\":\"r1\"}]._tag_source_id::62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf": "golden_dict_nested",
+  "dict_order.nested.row[{\"k\":\"r1\"}].data_hash": "arrow_v1:0000023adae205c66a7e47e30426b0b33eb081c7f899b5f12c41bec79437372e0de449",
+  "dict_order.nested.system_tag_columns": [
+    "_tag_source_id::62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf",
+    "_tag_record_id::62e571e4f5d10fc56473c422811afa759f1f14eff284c6991cfc9dc61f92c0cf"
+  ],
+  "dict_order.str_keys.content_hash": "semantic_v1:c5cd4d056d1fe1a459f367e802e2d71f9f6b2993cce05f3c861c4d636df0c084",
+  "dict_order.str_keys.pipeline_hash": "semantic_v1:41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef",
+  "dict_order.str_keys.row[{\"k\":\"r0\"}]._tag_record_id::41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef": "bf6c81a8f6a75d7a9615d4f2034b772f",
+  "dict_order.str_keys.row[{\"k\":\"r0\"}]._tag_source_id::41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef": "golden_dict_str_keys",
+  "dict_order.str_keys.row[{\"k\":\"r0\"}].data_hash": "arrow_v1:0000028fbf610bc86bde65d7d10b0c2e017772a9fca384042dd68cbc5ff14413238ad6",
+  "dict_order.str_keys.row[{\"k\":\"r1\"}]._tag_record_id::41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef": "2cec7386d5645ec48bf8dfa5d661196a",
+  "dict_order.str_keys.row[{\"k\":\"r1\"}]._tag_source_id::41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef": "golden_dict_str_keys",
+  "dict_order.str_keys.row[{\"k\":\"r1\"}].data_hash": "arrow_v1:0000028fbf610bc86bde65d7d10b0c2e017772a9fca384042dd68cbc5ff14413238ad6",
+  "dict_order.str_keys.system_tag_columns": [
+    "_tag_source_id::41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef",
+    "_tag_record_id::41ec07f117de7f219486b87a87f98d4b9f15a6363958fb1d0d1827d134fab3ef"
+  ],
   "list_path.content_hash": "semantic_v1:5713235dbd02b9580552fbde91eeb4ac38371f74366a000eac2fc495aa6b42ad",
   "list_path.pipeline_hash": "semantic_v1:50abad03423f579ea55cada3560e5009a9d9cfb5110be8b95336aaa41d310397",
   "list_path.row[{\"k\":\"r1\"}]._tag_record_id::50abad03423f579ea55cada3560e5009a9d9cfb5110be8b95336aaa41d310397": "059c77251e845bafb5a3839bf547a2f5",

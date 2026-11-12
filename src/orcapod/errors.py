@@ -50,6 +50,16 @@ class DuplicateTagError(ValueError):
     pass
 
 
+class CanonicalOrderError(ValueError):
+    """Raised when a dict or set value has no canonical order.
+
+    Dict entries and set elements are stored in canonical order (ITL-905), so dict keys
+    and set elements must be totally ordered and unique. Raised for a NaN key or element,
+    values that cannot be compared, two keys or elements with the same stored value, or
+    a null entry in a stored key/value list.
+    """
+
+
 class UnsupportedValueError(ValueError):
     """A value cannot be stored by the logical type of its column.
 

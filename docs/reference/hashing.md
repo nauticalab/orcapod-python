@@ -480,6 +480,91 @@ moves no path.
 
 ---
 
+### 1e. `dict` and `set` values: canonical order
+
+A `dict` and a `set` have no order, so equal values must hash equally whatever order they
+were built in. Arrow stores both as lists: `dict[K, V]` as `large_list<struct<key, value>>`
+and a plain `set[T]` as `large_list<T>`. Orcapod puts them in canonical order at the point
+where a Python value becomes Arrow, so the stored list, and therefore the row hash, does not
+depend on insertion order (dicts) or on `PYTHONHASHSEED` (sets of `str` or `bytes`).
+
+```python
+from orcapod.sources import DictSource
+
+
+def dict_row_hash(value):
+    source = DictSource(
+        data=[{"k": "r", "m": value}],
+        tag_columns=["k"],
+        data_schema={"k": str, "m": dict[str, int]},
+    )
+    _, data = next(iter(source.iter_data()))
+    return data.content_hash()
+
+
+print(dict_row_hash({"a": 1, "b": 2}) == dict_row_hash({"b": 2, "a": 1}))
+# True
+```
+
+**Where the order is applied.** In the type converter (`get_python_to_arrow_converter`),
+which every Python-to-Arrow path uses: sources built from Python values, datagrams, function
+pod outputs (sync and async), and dicts nested in lists, dicts or dataclass and pydantic
+fields. A datagram built from Python values also holds its dict values (including dicts
+inside lists, dicts and `Optional`) as key-ordered copies, including values set later with
+`update` or `with_columns`, so a newly computed pod output and the same output read back
+from the cache iterate in the same order (decided November 12, 2026). The caller's dict
+is never modified; dicts inside dataclass or pydantic objects
+keep their own order in memory. Their stored dict values and hashes are canonical, but
+a fresh user-class instance can iterate a nested dict in insertion order while a read-back
+instance iterates it in key order. An order-sensitive pod can therefore observe different
+orders for equal hashed inputs; reconstructing user-class instances is outside this fix.
+
+**The order** is defined on the converted (storage) key or element, in
+`semantic_types/canonical_order.py`:
+
+| Key or element type | Order |
+|---|---|
+| `None` (for `K \| None`) | first |
+| `bool` | `False` before `True` |
+| `int`, `float`, `Decimal` | numeric |
+| `str` | Unicode code point, never locale |
+| `bytes` | unsigned bytewise |
+| `date`, `datetime`, `time`, `timedelta` | natural order; datetimes by instant (they are timezone aware after conversion) |
+
+A NaN key or element (a Python `float`, a NumPy floating scalar or a `Decimal`) has no order
+and raises `CanonicalOrderError` (a `ValueError`) naming the column, as do keys or elements
+that cannot be compared and two keys or elements that convert to the same stored value
+(decided November 12, 2026). A
+dict or set whose nested unordered containers are all already in this order is stored
+byte-for-byte as before this rule existed,
+so its hash did not change.
+
+**Signed zero.** A float is hashed by its stored bytes, and `0.0` and `-0.0` have different
+bytes, so they hash differently wherever they appear: in a plain `float` column and as a
+dict key or set element alike, although Python compares them equal (`{0.0: 1} == {-0.0: 1}`).
+Orcapod does not rewrite `-0.0` to `0.0`: pod code can tell them apart (`math.copysign`,
+`repr`, division), so the finer identity can cost a recompute but never serves a wrong
+result. Within one dict or set the two compare equal, so they cannot both be present.
+
+**Arrow tables are hashed exactly as stored.** `StarfixArrowHasher` never sorts list
+contents. A `list<struct<key, value>>` column that arrives already in Arrow form (an
+`ArrowTableSource`, a Delta table, rows read back from a store) is read by Python as a
+`dict`, but at the Arrow level it is an ordered list and its stored order is part of its
+hash. A `list[T]` value is never sorted: its order is part of its identity. (Tables written
+by `0.2.0`, which stored dicts in insertion order, are not read by v0.3 at all.)
+
+**Two orderings, two layers.** This section is about the order a dict or set is *stored* in,
+which is also the order it is read back in. The semantic hasher (section 1a) separately
+orders the *hash input* it builds for a Python `dict` or `set` object, by each item's
+canonical JSON text (ITL-942); that order is never stored and never seen. The two rules are
+different on purpose (JSON text puts `10` before `2`; storage order is numeric) and neither
+is defined in terms of the other: changing the hasher's order would move semantic hashes
+of affected inputs, and changing storage order would move row hashes and what a pod reads back.
+`set[T]` of a logical type (`set[Path]`, `set[UUID]`) is ordered by `ListLogicalType`, not
+by this rule.
+
+---
+
 ## 2. Source Provenance & System Tags
 
 When a source is built by `SourceStreamBuilder`, four hash-related operations happen in

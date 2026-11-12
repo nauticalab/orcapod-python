@@ -1,4 +1,8 @@
 {
+  "dict_order.kv.sorted": "arrow_v1:0000025649944353e5f5914b62967bf9d5c31062f149408ccdedc4337265a67561ebe2",
+  "dict_order.kv.unsorted": "arrow_v1:000002d4f20c961f702578b0f64808c20be5e461fedcdce533ef37aa4bd81b29b6fca7",
+  "dict_order.pairs.ab": "arrow_v1:00000219aa4c4bd32e76ef40f4e589adcd452740daf41aacd46dc970a97bdd54310d03",
+  "dict_order.pairs.ba": "arrow_v1:0000022a3837a05e7440f8093807593ef22de9d217dcb6cfb431458789ce7587325d6e",
   "extension_no_values.all_null.dataframe": "arrow_v1:00000264edcffc26588d0679426c4f16273a466f883933ed7f3834da20d9c5773e4f9a",
   "extension_no_values.all_null.directory": "arrow_v1:000002453096b2e240ea4cef0a5aea8993c2ee21acc8abb5cb7cd2f5bf2c042698e864",
   "extension_no_values.all_null.file": "arrow_v1:000002891dfab8553a43b65eb4cd139f5faba11b55d68fa51797a2ebfdaf75f00343f3",

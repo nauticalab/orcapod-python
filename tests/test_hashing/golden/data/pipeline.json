@@ -236,10 +236,10 @@
   "index_pick.index.pipeline_hash": "semantic_v1:e70ee3e32ddb810c39dae31d3b178554a10df387b728ef319d08fb547a41f8d0",
   "index_pick.index.row[{\"subject\":\"s1\"}]._tag_record_id::e668b355366a549312dd441a27ad7e566ddaee4f7e4ab754335a277b51ce5175": "dd65b531e3d957a0ae3f2fba11e021d5",
   "index_pick.index.row[{\"subject\":\"s1\"}]._tag_source_id::e668b355366a549312dd441a27ad7e566ddaee4f7e4ab754335a277b51ce5175": "lists",
-  "index_pick.index.row[{\"subject\":\"s1\"}].data_hash": "arrow_v1:0000025f5739a1fc427e583ba103ab5a7c1a5b868aadb554a722a1c0bd1d2081e4a34f",
+  "index_pick.index.row[{\"subject\":\"s1\"}].data_hash": "arrow_v1:000002948e686a8a041a7323c3474c6d7861e4536e57ddb8096704f395daecca80e742",
   "index_pick.index.row[{\"subject\":\"s2\"}]._tag_record_id::e668b355366a549312dd441a27ad7e566ddaee4f7e4ab754335a277b51ce5175": "00c12388e8c4522893b029b39a8ec7aa",
   "index_pick.index.row[{\"subject\":\"s2\"}]._tag_source_id::e668b355366a549312dd441a27ad7e566ddaee4f7e4ab754335a277b51ce5175": "lists",
-  "index_pick.index.row[{\"subject\":\"s2\"}].data_hash": "arrow_v1:000002d9f79b11b0d6928476289f10dc1ffce27ef6af09affa82b079560b96435f62eb",
+  "index_pick.index.row[{\"subject\":\"s2\"}].data_hash": "arrow_v1:000002ecef3b9df41f6928426d3a063d9eb64485f7e78fc72ef50dad5b3c06bd8aee3a",
   "index_pick.index.system_tag_columns": [
     "_tag_source_id::e668b355366a549312dd441a27ad7e566ddaee4f7e4ab754335a277b51ce5175",
     "_tag_record_id::e668b355366a549312dd441a27ad7e566ddaee4f7e4ab754335a277b51ce5175"

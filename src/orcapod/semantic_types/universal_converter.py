@@ -23,7 +23,11 @@ from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
-from orcapod.errors import UnsupportedValueError
+from orcapod.errors import CanonicalOrderError, UnsupportedValueError
+from orcapod.semantic_types.canonical_order import (
+    sort_dict_entries,
+    sort_set_elements,
+)
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils import arrow_utils
@@ -1080,6 +1084,11 @@ class UniversalTypeConverter:
                 if field_name in record:
                     try:
                         converted_record[field_name] = converter(record[field_name])
+                    except CanonicalOrderError as exc:
+                        # The ordering rule cannot say which column it was in.
+                        raise CanonicalOrderError(
+                            f"Column {field_name!r}: {exc}"
+                        ) from exc
                     except UnsupportedValueError as exc:
                         # The value's own type cannot say which column it was in.
                         raise UnsupportedValueError(
@@ -1681,18 +1690,42 @@ class UniversalTypeConverter:
 
         elif origin is list:
             element_converter = self.get_python_to_arrow_converter(args[0])
-            return lambda value: (
-                [element_converter(item) for item in value] if value is not None else []
-            )
+
+            def convert_list(value: Any) -> list[Any]:
+                """Convert list storage, preserving set order independence on updates."""
+                if value is None:
+                    return []
+                elements = [element_converter(item) for item in value]
+                # An Arrow schema remembers a plain set only as a list. Python set
+                # inputs still need canonical storage order; actual lists keep theirs.
+                return (
+                    sort_set_elements(elements) if isinstance(value, set) else elements
+                )
+
+            return convert_list
 
         elif origin is dict:
             key_converter = self.get_python_to_arrow_converter(args[0])
             value_converter = self.get_python_to_arrow_converter(args[1])
+            # A dict is order independent: entries are stored in canonical key order
+            # so equal dicts store and hash identically (ITL-905).
             return lambda value: (
-                [
-                    {"key": key_converter(k), "value": value_converter(v)}
-                    for k, v in value.items()
-                ]
+                sort_dict_entries(
+                    [
+                        {"key": key_converter(k), "value": value_converter(v)}
+                        for k, v in value.items()
+                    ]
+                )
+                if value is not None
+                else []
+            )
+
+        elif origin is set:
+            # A set has no order: elements are stored sorted, never in iteration
+            # order, which depends on PYTHONHASHSEED for str and bytes (ITL-905).
+            element_converter = self.get_python_to_arrow_converter(args[0])
+            return lambda value: (
+                sort_set_elements([element_converter(item) for item in value])
                 if value is not None
                 else []
             )
