@@ -310,6 +310,14 @@ A node from a job that has run also provides:
 - **`as_source()`** -- a `DerivedSource` backed by those stored records, usable as the input
   of another pipeline
 
+An operator node (a `Join`, `Batch`, column selection and so on, applied inside the job) is
+read the same way: after `job.run()` its `as_table()` and `iter_data()` return the rows it
+produced in the latest run, on both the synchronous and the asynchronous orchestrator. It
+keeps that output in memory and, with the default `cache_mode=OFF`, stores nothing. Its
+`get_all_records()` returns `None` when no matching records exist; records from an earlier
+LOG run remain readable after switching to OFF. Calling `clear_cache()` on it discards the
+output, and it then reads as a zero-row table, as before the first run, until the job runs again.
+
 ### When the store cannot be written
 
 A failed write to the store always fails the run. If a node's results or records cannot be

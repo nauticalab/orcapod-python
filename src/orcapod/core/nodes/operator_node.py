@@ -1172,8 +1172,11 @@ class OperatorJobNode(OperatorNodeBase):
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         """Return an iterator over (tag, data) pairs.
 
-        Read-only: never triggers computation. Returns empty before ``run()``
-        or ``execute()`` populates the cache. Call ``node.is_stale`` before
+        Read-only: never triggers computation. Yields the rows of the latest
+        ``run()``, ``execute()`` or ``async_execute()``. With nothing cached in
+        memory (before a run, or after ``clear_cache()``), a node in
+        ``CacheMode.REPLAY`` with a database yields the rows stored there; in
+        any other mode it yields nothing. Call ``node.is_stale`` before
         iterating if you need to detect outdated cached data.
         """
         if self._cached_output_stream is not None:
@@ -1191,8 +1194,11 @@ class OperatorJobNode(OperatorNodeBase):
     ) -> "pa.Table":
         """Return the output as a PyArrow table.
 
-        Read-only: never triggers computation. Returns a zero-row table
-        with correct schema before ``run()`` or ``execute()`` is called.
+        Read-only: never triggers computation. Returns the rows of the latest
+        ``run()``, ``execute()`` or ``async_execute()``. With nothing cached in
+        memory (before a run, or after ``clear_cache()``), a node in
+        ``CacheMode.REPLAY`` with a database returns the rows stored there; in
+        any other mode it returns a zero-row table with the node's columns.
         """
         if self._cached_output_stream is not None:
             return self._cached_output_stream.as_table(
@@ -1225,7 +1231,8 @@ class OperatorJobNode(OperatorNodeBase):
 
         Returns the stored output table with column filtering applied
         per ``ColumnConfig`` conventions.  Returns ``None`` when no
-        database is attached or no records exist.
+        database is attached or no matching records exist. Switching to OFF
+        does not remove records stored by an earlier LOG run.
         """
         if self._pipeline_database is None:
             return None
@@ -1318,13 +1325,18 @@ class OperatorJobNode(OperatorNodeBase):
     ) -> None:
         """Async execution with cache mode handling when DB is attached.
 
-        Without a database, delegates to the wrapped operator's
-        ``async_execute``.
+        Every mode except REPLAY runs the wrapped operator's ``async_execute``,
+        forwards its rows downstream and keeps them on the node, exactly as
+        ``execute()`` does, so ``iter_data()`` and ``as_table()`` return them
+        after the run whichever orchestrator ran the node.
+
+        Without a database, or with one in OFF mode, nothing is stored.
 
         With a database:
             - REPLAY: emit from DB, close output.
-            - OFF: delegate to operator, forward results.
-            - LOG: delegate to operator, forward + collect results, then store in DB.
+            - OFF: delegate to operator, forward and keep results.
+            - LOG: delegate to operator, forward and keep results, then store
+              them in the DB.
 
         Args:
             inputs: Sequence of readable channels from upstream nodes.
@@ -1338,20 +1350,13 @@ class OperatorJobNode(OperatorNodeBase):
         node_hash = self.content_hash().to_string()
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
-        if self._pipeline_database is None:
-            # Simple delegation without DB
-            ctx_obs.on_node_start(node_label, node_hash)
-            hashes = [s.pipeline_hash() for s in self._input_streams]
-            await self._operator.async_execute(
-                inputs, output, input_pipeline_hashes=hashes
-            )
-            ctx_obs.on_node_end(node_label, node_hash)
-            return
-
         try:
             ctx_obs.on_node_start(node_label, node_hash)
 
-            if self._cache_mode == CacheMode.REPLAY:
+            if (
+                self._pipeline_database is not None
+                and self._cache_mode == CacheMode.REPLAY
+            ):
                 self._replay_from_cache()
                 assert self._cached_output_stream is not None
                 for tag, data in self._cached_output_stream.iter_data():
@@ -1359,10 +1364,13 @@ class OperatorJobNode(OperatorNodeBase):
                 ctx_obs.on_node_end(node_label, node_hash)
                 return  # finally block closes output
 
-            # OFF or LOG: delegate to operator, forward results downstream
+            # Delegate to the operator, forward its rows downstream and keep them.
             intermediate: Channel[tuple[TagProtocol, DataProtocol]] = Channel()
-            should_collect = self._cache_mode == CacheMode.LOG
-            if should_collect:
+            should_store = (
+                self._pipeline_database is not None
+                and self._cache_mode == CacheMode.LOG
+            )
+            if should_store:
                 # Rows are forwarded while the operator runs, so an input this node
                 # will refuse to store must be refused before the first row leaves.
                 for input_stream in self._input_streams:
@@ -1373,26 +1381,37 @@ class OperatorJobNode(OperatorNodeBase):
 
             async def forward() -> None:
                 async for item in intermediate.reader:
-                    if should_collect:
-                        collected.append(item)
+                    collected.append(item)
                     await output.send(item)
 
             hashes = [s.pipeline_hash() for s in self._input_streams]
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(
-                    self._operator.async_execute(
-                        inputs,
-                        intermediate.writer,
-                        input_pipeline_hashes=hashes,
+            operator = cast(StaticOutputOperatorPod, self._operator)
+            try:
+                async with asyncio.TaskGroup() as tg:
+                    tg.create_task(
+                        operator.async_execute(
+                            inputs,
+                            intermediate.writer,
+                            input_pipeline_hashes=hashes,
+                        )
                     )
-                )
-                tg.create_task(forward())
+                    tg.create_task(forward())
+            except ExceptionGroup as exc:
+                # Preserve direct operator errors; concurrent failures stay grouped.
+                if len(exc.exceptions) == 1:
+                    raise exc.exceptions[0] from exc
+                raise
 
-            # TaskGroup has completed — store if LOG mode (sync DB write, post-hoc)
-            if should_collect and collected:
+            # TaskGroup has completed. Keep the output on the node, as execute()
+            # does, and store it in LOG mode (sync DB write, post-hoc). A run
+            # with no rows replaces an earlier run's output too: the node then
+            # reads as a zero-row table.
+            self._cached_output_stream = None
+            if collected:
                 stream = StaticOutputOperatorPod._materialize_to_stream(collected)
                 self._cached_output_stream = stream
-                self._store_output_stream(stream)
+                if should_store:
+                    self._store_output_stream(stream)
 
             self._update_modified_time()
 
