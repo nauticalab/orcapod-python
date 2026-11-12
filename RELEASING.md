@@ -28,9 +28,26 @@ requires, on each index, a trusted publisher for the `orcapod` project naming ow
 
 Do these on `main` before triggering the workflow:
 
-1. **Update `CHANGELOG.md`** — rename the top section to the version being released, set
-   its date, and make sure breaking changes carry migration notes. The GitHub Release
-   body is generated from PR titles; `CHANGELOG.md` is the curated record.
+1. **Update `CHANGELOG.md`** in a release pull request, the only kind of pull request that
+   edits it. Feature pull requests add `changelog.d/<ISSUE-ID>.md` fragments instead (see
+   `changelog.d/README.md`).
+   1. Fold the fragments into the section of the version being released:
+
+      ```
+      uv run python scripts/assemble_changelog.py --version X.Y.Z
+      ```
+
+      This appends each fragment's text to the matching category of `## [X.Y.Z]` (in order
+      of issue id, without moving the lines already there), creates the section or a
+      category if it is missing, and deletes the fragments. It stops without changing
+      anything if a fragment is malformed; `--check` reports the same problems without
+      folding. Commit the changed `CHANGELOG.md` and the deleted fragments together;
+      `changelog.d/README.md` stays.
+   2. Set the section's heading to the version being released and its date
+      (`## [X.Y.Z] — YYYY-MM-DD`), and make sure breaking changes carry migration notes.
+
+   The GitHub Release body is generated from PR titles; `CHANGELOG.md` is the curated
+   record.
 2. **Check that `main` is green** — the `Run Tests` workflow on the commit you are
    releasing. The Release workflow re-runs the unit tests on Python 3.11, 3.12 and 3.13
    and the license check, but not the PostgreSQL or SpiralDB integration jobs.

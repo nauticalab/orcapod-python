@@ -183,6 +183,25 @@ Examples:
 - test(function_pod): add schema validation tests
 - refactor(schema_utils): use Schema.optional_fields directly
 
+## Changelog
+
+A pull request never edits CHANGELOG.md (developer, November 11, 2026; ITL-961). It adds
+exactly one file, changelog.d/<ISSUE-ID>.md (e.g. changelog.d/ITL-955.md; a PR that
+resolves several issues uses its primary issue's id).
+
+- The file holds only the text that would have gone under the release heading in
+  CHANGELOG.md: the same category headings CHANGELOG.md uses
+  (### Breaking changes and migration, ### Added, ### Changed, ### Fixed,
+  ### Known limitations), each followed by its bullet lines; no version heading, no date.
+- If your branch already edits CHANGELOG.md, restore CHANGELOG.md to its state on the
+  branch's base and move that text, unchanged, into the fragment.
+- Check a fragment with uv run python scripts/assemble_changelog.py --check
+  (tests/test_changelog_fragments.py runs it in CI).
+- Only the release PR changes CHANGELOG.md: it folds the fragments in with
+  uv run python scripts/assemble_changelog.py --version X.Y.Z, which also deletes them
+  (see RELEASING.md). Entries already in CHANGELOG.md on main stay there.
+- changelog.d/README.md is the full statement of the convention.
+
 ## Lint, format and type checks
 
 Every pull request must pass the metamorphic-labs required CI, which runs exactly these
