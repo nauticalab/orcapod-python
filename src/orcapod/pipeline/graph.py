@@ -287,6 +287,31 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
             if descriptor is None:
                 continue
 
+            from orcapod.logical_types.identifier import LogicalTypeIdentifierError
+            from orcapod.pipeline.serialization import (
+                SavedSchemaVersionError,
+                deserialize_output_schema,
+            )
+
+            # Validate even a leaf node's saved identifiers before exposing the job.
+            context = resolve_saved_context(descriptor.get("data_context_key"))
+            try:
+                deserialize_output_schema(
+                    descriptor.get("output_schema", {}), context.type_converter
+                )
+            except (LogicalTypeIdentifierError, SavedSchemaVersionError) as exc:
+                exc.args = (
+                    f"Cannot restore the output schema of loaded node "
+                    f"{descriptor.get('label')!r}: {exc}",
+                )
+                raise
+            except ValueError as exc:
+                logger.warning(
+                    "Cannot restore the output schema of loaded node %r: %s",
+                    descriptor.get("label"),
+                    exc,
+                )
+
             node_type = descriptor.get("node_type")
             source_config = descriptor.get("source_config") or {}
 
@@ -300,17 +325,27 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                         node_name = descriptor.get("label") or "unknown"
                     if "tag_schema" in source_config and "data_schema" in source_config:
                         tag_schema = Schema(
-                            deserialize_schema(source_config["tag_schema"])
+                            deserialize_schema(
+                                source_config["tag_schema"], context.type_converter
+                            )
                         )
                         data_schema = Schema(
-                            deserialize_schema(source_config["data_schema"])
+                            deserialize_schema(
+                                source_config["data_schema"], context.type_converter
+                            )
                         )
                     else:
                         tag_schema = Schema(
-                            deserialize_schema(descriptor["output_schema"]["tag"])
+                            deserialize_schema(
+                                descriptor["output_schema"]["tag"],
+                                context.type_converter,
+                            )
                         )
                         data_schema = Schema(
-                            deserialize_schema(descriptor["output_schema"]["data"])
+                            deserialize_schema(
+                                descriptor["output_schema"]["data"],
+                                context.type_converter,
+                            )
                         )
                     node = SourceNodeClass(
                         name=node_name,
@@ -365,6 +400,25 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                             op_config.get("class_name"),
                             exc,
                         )
+                if operator is not None:
+                    from orcapod.logical_types.identifier import (
+                        LogicalTypeIdentifierError,
+                    )
+                    from orcapod.pipeline.serialization import SavedSchemaVersionError
+
+                    try:
+                        for upstream in upstream_nodes:
+                            upstream.output_schema()
+                    except (LogicalTypeIdentifierError, SavedSchemaVersionError):
+                        raise
+                    except ValueError as exc:
+                        logger.warning(
+                            "Cannot reconstruct operator node %r because an input "
+                            "schema cannot be restored; keeping a read-only stub: %s",
+                            descriptor.get("label"),
+                            exc,
+                        )
+                        operator = None
                 node = OperatorNode.from_descriptor(
                     descriptor,
                     operator=operator,

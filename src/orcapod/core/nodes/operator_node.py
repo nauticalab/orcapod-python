@@ -234,11 +234,34 @@ class OperatorNodeBase(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Return output schema, using stored value in read-only mode."""
+        """Return output schema, using stored value in read-only mode.
+
+        Raises:
+            ValueError: If the node was loaded and a column's saved type cannot be
+                restored to a Python type (an unregistered logical type).
+        """
         if self._operator is None:
-            tag = Schema(self._stored_schema.get("tag", {}))
-            data = Schema(self._stored_schema.get("data", {}))
-            return tag, data
+            from orcapod.pipeline.serialization import (
+                deserialize_output_schema,
+                SavedSchemaVersionError,
+            )
+            from orcapod.logical_types.identifier import LogicalTypeIdentifierError
+
+            try:
+                return deserialize_output_schema(
+                    self._stored_schema,
+                    self.data_context.type_converter,
+                )
+            except (LogicalTypeIdentifierError, SavedSchemaVersionError) as exc:
+                exc.args = (
+                    f"Cannot restore the output schema of loaded node {self.label!r}: {exc}",
+                )
+                raise
+            except ValueError as exc:
+                raise ValueError(
+                    f"Cannot restore the output schema of loaded node {self.label!r}: "
+                    f"{exc}"
+                ) from exc
         return self._operator.output_schema(
             *self._input_streams,
             columns=columns,
@@ -612,6 +635,10 @@ class OperatorJobNode(OperatorNodeBase):
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cache_mode = CacheMode.OFF
 
+        # True for a node rebuilt by ``from_descriptor`` (a job loaded by
+        # ``PipelineJob.load``): its output was computed by an earlier run.
+        self._loaded = False
+
         if pipeline_database is not None:
             self.attach_databases(
                 pipeline_database=pipeline_database,
@@ -748,6 +775,7 @@ class OperatorJobNode(OperatorNodeBase):
                 )
             node._descriptor = descriptor
             node._load_status = LoadStatus.FULL
+            node._loaded = True
             return node
 
         # Read-only mode: bypass __init__, set minimum required state
@@ -781,12 +809,13 @@ class OperatorJobNode(OperatorNodeBase):
 
         # From OperatorNodeBase
         node._operator = None
-        node._input_streams = ()
+        node._input_streams = tuple(input_streams)
         node.tracker_manager = DEFAULT_TRACKER_MANAGER
 
         # From OperatorJobNode
         node._cached_output_stream = None
         node._cached_output_table = None
+        node._loaded = True
 
         # DB persistence state
         node._pipeline_database = pipeline_db
@@ -816,6 +845,28 @@ class OperatorJobNode(OperatorNodeBase):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _no_stored_results_error(self) -> RuntimeError:
+        """Return the error for reading a loaded operator node with nothing to serve.
+
+        Operator outputs are stored only when caching is enabled. A loaded node
+        needs a readable cache; returning an empty table when none is available
+        would look like the operator produced nothing.
+        """
+        inputs = ", ".join(repr(stream.label) for stream in self._input_streams)
+        return RuntimeError(
+            f"OperatorJobNode {self.label!r} has no stored results available for this read. "
+            "Operator outputs require a stored cache and replay configuration. Read the "
+            f"stored results of its input nodes ({inputs}) instead; an input source "
+            "whose data was not saved must be bound first with job.bind(sources=...)."
+        )
+
+    def _cannot_compute_error(self) -> RuntimeError:
+        """Describe why this loaded node cannot execute an operator."""
+        return RuntimeError(
+            f"OperatorJobNode {self.label!r} was loaded by PipelineJob.load and "
+            "cannot compute; create a fresh PipelineJob to run the pipeline again."
+        )
 
     def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
         """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
@@ -1002,6 +1053,9 @@ class OperatorJobNode(OperatorNodeBase):
             - Returns ``None`` if ``_pipeline_database is None``.
             - Returns ``None`` if ``_cache_mode != CacheMode.REPLAY``
               (LOG/OFF modes may have stale historical records in the DB).
+
+        Raises:
+            RuntimeError: If a loaded REPLAY node's cache table is absent.
         """
         if self._pipeline_database is None:
             return None
@@ -1009,6 +1063,12 @@ class OperatorJobNode(OperatorNodeBase):
             return None
         records = self._read_stored_records()
         if records is None:
+            if self._loaded:
+                raise RuntimeError(
+                    f"OperatorJobNode {self.label!r}: the cache table is absent "
+                    f"({'/'.join(self._stored_table_path)}). Load with the store "
+                    "that holds the saved operator results."
+                )
             if self._operator is None:
                 # Read-only (deserialized) node with no operator: cannot derive
                 # schema without a live operator. Return None so callers fall
@@ -1060,6 +1120,9 @@ class OperatorJobNode(OperatorNodeBase):
             Materialized list of (tag, data) pairs.
         """
         from orcapod.pipeline.observer import NoOpObserver
+
+        if self._loaded:
+            raise self._cannot_compute_error()
 
         node_label = self.label
         node_hash = self.content_hash().to_string()
@@ -1152,6 +1215,8 @@ class OperatorJobNode(OperatorNodeBase):
             - **LOG**: always compute, write results to DB.
             - **REPLAY**: skip computation, load from DB.
         """
+        if self._loaded:
+            raise self._cannot_compute_error()
         if self.is_stale:
             self.clear_cache()
 
@@ -1178,12 +1243,16 @@ class OperatorJobNode(OperatorNodeBase):
         ``CacheMode.REPLAY`` with a database yields the rows stored there; in
         any other mode it yields nothing. Call ``node.is_stale`` before
         iterating if you need to detect outdated cached data.
+
+        Loaded nodes raise when no readable stored cache is available.
         """
         if self._cached_output_stream is not None:
             return self._cached_output_stream.iter_data()
         db_stream = self._load_cached_stream_from_db()
         if db_stream is not None:
             return db_stream.iter_data()
+        if self._loaded:
+            raise self._no_stored_results_error()
         return iter([])
 
     def as_table(
@@ -1199,6 +1268,8 @@ class OperatorJobNode(OperatorNodeBase):
         memory (before a run, or after ``clear_cache()``), a node in
         ``CacheMode.REPLAY`` with a database returns the rows stored there; in
         any other mode it returns a zero-row table with the node's columns.
+
+        Loaded nodes raise when no readable stored cache is available.
         """
         if self._cached_output_stream is not None:
             return self._cached_output_stream.as_table(
@@ -1207,6 +1278,8 @@ class OperatorJobNode(OperatorNodeBase):
         db_stream = self._load_cached_stream_from_db()
         if db_stream is not None:
             return db_stream.as_table(columns=columns, all_info=all_info)
+        if self._loaded:
+            raise self._no_stored_results_error()
         # No cached or stored records yet: construct a zero-row table with the
         # correct schema and route it through ArrowTableStream so that the
         # ColumnConfig / all_info shaping is applied consistently.
@@ -1344,6 +1417,10 @@ class OperatorJobNode(OperatorNodeBase):
             observer: Optional execution observer for hooks.
         """
         from orcapod.pipeline.observer import NoOpObserver
+
+        if self._loaded:
+            await output.close()
+            raise self._cannot_compute_error()
 
         obs = observer if observer is not None else NoOpObserver()
         node_label = self.label

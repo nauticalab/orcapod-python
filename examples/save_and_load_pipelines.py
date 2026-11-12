@@ -1,4 +1,4 @@
-"""Save a pipeline job to JSON, then load it back to inspect its stored results.
+"""Save a pipeline job to JSON, then load it back to read its stored results.
 
 Run from any directory: the database and the saved job are written to the
 current working directory.
@@ -35,13 +35,14 @@ with job:
 job.run()
 print(job.nodes["sum"].as_table().to_pandas())
 
-# Save the job (pipeline topology and store configuration) to JSON ...
+# Save the job (graph, store location and source configuration) to JSON ...
 path = "./pipeline.json"
 job.save(path)
 
-# ... and load it back, for example in a later session, to inspect the stored
-# results. A loaded job is read-only: its nodes read the records in the store
-# with get_all_records(), and the job cannot run again. In-memory sources such
-# as DictSource are not saved, so loading logs that they were skipped.
+# ... and load it back, for example in a later session, to read the stored
+# results. A loaded job is for reading: it cannot be run again, because function
+# pods are not saved with it. Its function nodes serve the rows the run stored.
+# In-memory sources such as DictSource are not saved either (loading logs this at
+# INFO level); that does not affect reading the other nodes.
 job2 = PipelineJob.load(path)
-print(job2.nodes["sum"].get_all_records().to_pandas())
+print(job2.nodes["sum"].as_table().sort_by("id").to_pandas())

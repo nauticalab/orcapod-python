@@ -797,8 +797,8 @@ class TestPipelineJobSerialization:
         assert loaded._sources[src_a.source_id] is src_a
         assert loaded._sources[src_b.source_id] is src_b
 
-    def test_load_is_runnable_after_bind(self, store, tmp_path):
-        """is_runnable() returns True after load() + bind() populates all slots."""
+    def test_load_is_not_runnable_after_bind(self, store, tmp_path):
+        """Binding every source leaves a loaded job read-only."""
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
@@ -819,8 +819,8 @@ class TestPipelineJobSerialization:
             sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store
         )
 
-        # After binding all sources, is_runnable() should return True.
-        assert loaded.is_runnable("adder") is True
+        # Binding sources permits reads, not execution of a loaded job.
+        assert loaded.is_runnable("adder") is False
 
     def test_load_nodes_are_job_nodes(self, store, tmp_path):
         """job.nodes on a loaded job returns FunctionJobNode, not blueprint FunctionNode."""

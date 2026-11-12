@@ -489,7 +489,10 @@ class TestFunctionVersionColumn:
 def _saved_by_v02(job: PipelineJob, path: pathlib.Path) -> None:
     """Save ``job`` and rewrite the file as v0.2 wrote it: every node under the old key."""
     job.save(str(path))
-    text = path.read_text()
+    saved = json.loads(path.read_text())
+    # v0.2 did not save the per-node record expectations added by ITL-904.
+    saved["run"].pop("node_has_stored_records", None)
+    text = json.dumps(saved)
     assert f'"data_context_key": "{CURRENT}"' in text
     path.write_text(
         text.replace(

@@ -106,6 +106,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
         self._has_run: bool = False
         self._run_id: str | None = None
+        # True for a job built by load(): it reads stored results and never runs.
+        self._loaded: bool = False
 
         # Lazy cache for the corresponding Pipeline blueprint.
         # Set to None after compile() to force recomputation on next access.
@@ -715,7 +717,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         return self._store is not None and not self.unbound_sources
 
     def is_runnable(self, node_label: str) -> bool:
-        """Return ``True`` if all upstream inputs of *node_label* are resolved.
+        """Return whether a live job has all upstream inputs of *node_label* resolved.
+
+        A loaded job is read-only and always returns ``False``.
 
         Uses hash-based traversal of ``_hash_graph`` combined with
         ``_persistent_node_map`` to check whether every upstream source slot
@@ -729,7 +733,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         Returns:
             ``True`` if the node can be executed with current bindings.
         """
-        if not self._compiled:
+        if self._loaded or not self._compiled:
             return False
 
         target = self._nodes.get(node_label)
@@ -821,7 +825,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         Raises:
             ValueError: If no store is set, or ``commit_every_rows`` is not a
                 positive integer smaller than the store's ``batch_size``.
-            RuntimeError: If no pipeline has been compiled.
+            RuntimeError: If no pipeline has been compiled, or the job was built
+                by ``PipelineJob.load`` (a loaded job is read-only).
             StoreWriteError: If a node's results or records could not be written
                 to the store, whatever the orchestrator's ``error_policy``. The run
                 stops at the first failed write. Writes that succeeded before it
@@ -855,6 +860,16 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 "PipelineJob has no compiled pipeline. "
                 "Record invocations inside a 'with job:' block first."
             )
+        # A loaded job reads the results its saved run stored and never runs:
+        # function pods are not saved with it, and even an operator-only loaded
+        # job, whose operators are rebuilt, stays read-only.
+        if self._loaded:
+            raise RuntimeError(
+                "PipelineJob.run() cannot execute a loaded job: PipelineJob.load() "
+                "is for reading stored results only. To run a new computation, "
+                "create a fresh PipelineJob from the original pipeline definition."
+            )
+
         table_committing = as_table_committing(self._store)
         if (
             table_committing is not None
@@ -882,11 +897,16 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # inspect results.
         from orcapod.pipeline.serialization import LoadStatus
 
+        # A loaded function node has no function pod, whatever its load status
+        # (READ_ONLY once a store is attached, so it can read its stored results).
         unavailable_labels = [
             node.label
             for node in self._persistent_node_map.values()
-            if isinstance(node, (FunctionJobNode, OperatorJobNode))
-            and node.load_status == LoadStatus.UNAVAILABLE
+            if (
+                isinstance(node, (FunctionJobNode, OperatorJobNode))
+                and node.load_status == LoadStatus.UNAVAILABLE
+            )
+            or (isinstance(node, FunctionJobNode) and node.producer is None)
         ]
         if unavailable_labels:
             raise RuntimeError(
@@ -1096,9 +1116,20 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # stubs whose content_hash() matches the _node_content_hash column in the
         # DB — required for _filter_by_content_hash() in get_all_records().
         node_job_content_hashes: dict[str, str] = {}
+        # Whether the store holds at least one pipeline record of each function
+        # node (a record with the node's content hash), so that load() can tell a
+        # store that holds this run's results from one that does not (a
+        # different store passed to load(), or a moved one).
+        node_has_stored_records: dict[str, bool] = {}
         for node in (self._persistent_node_map or {}).values():
             if isinstance(node, FunctionJobNode):
                 node_job_content_hashes[node.label] = node.content_hash().to_string()
+                # A loaded node keeps the expectation it was saved with: a store
+                # attached since then that lacks the table does not mean the
+                # original run stored nothing.
+                node_has_stored_records[node.label] = (
+                    node._expects_stored_records or node._has_stored_records()
+                )
 
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
@@ -1107,6 +1138,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 "status": status,
                 "unbound_sources": list(self.unbound_sources),
                 "node_job_content_hashes": node_job_content_hashes,
+                "node_has_stored_records": node_has_stored_records,
             },
             "pipeline": pipeline_data,
             "bindings": {
@@ -1124,11 +1156,21 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         path: "str | Path",
         store: "ArrowDatabaseProtocol | None" = None,
     ) -> "PipelineJob":
-        """Deserialize a ``PipelineJob`` from a JSON file.
+        """Deserialize a ``PipelineJob`` from a JSON file to read its stored results.
 
-        The embedded ``Pipeline`` blueprint is always restored. Concrete source
-        bindings are restored for reconstructable source types. Pass *store*
-        explicitly to override any serialized store configuration.
+        A loaded job is for reading the results its saved run stored; it cannot be
+        run again, because function pods are not saved with the job. Read a
+        function node with ``job.nodes[label].as_table()``, ``iter_data()`` or
+        ``get_all_records()``. Operators can store outputs when caching is enabled;
+        reading a loaded operator without a readable cache raises ``RuntimeError``.
+
+        The embedded ``Pipeline`` blueprint is always restored. Sources whose data
+        lives in files (CSV, Delta) are rebuilt from the saved config. In-memory
+        sources (``DictSource``, ``ListSource``, ``ArrowTableSource``,
+        ``DataFrameSource``) are not saved; loading logs that at INFO, and their
+        source nodes can be read after ``job.bind(sources=...)``. A source that
+        cannot be rebuilt for another reason (a moved file) is logged as a
+        warning. Neither affects reading the other nodes.
 
         Args:
             path: Path to the JSON file produced by ``save()``.
@@ -1136,8 +1178,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 over any store configuration in the file.
 
         Returns:
-            A ``PipelineJob`` ready to run (call ``bind()`` if sources are
-            missing).
+            A read-only ``PipelineJob`` whose nodes serve their stored results.
 
         Raises:
             ValueError: If the file's format version is unsupported.
@@ -1178,13 +1219,35 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         for spec_name, src_config in (
             data.get("bindings", {}).get("sources", {}).items()
         ):
+            source_type = src_config.get("source_type")
             try:
                 source = resolve_source_from_config(src_config)
                 if source is not None:
                     sources[spec_name] = source
-            except Exception:
+            except NotImplementedError:
+                # In-memory sources (DictSource, ListSource, ArrowTableSource,
+                # DataFrameSource) are not saved with the job, by design.
+                logger.info(
+                    "Source %r (%s) keeps its data in memory and is not saved with the "
+                    "job; the loaded job has no data for it. Stored function-node "
+                    "results are still readable from the store. To read source node "
+                    "%r itself, bind a source: job.bind(sources={%r: <source>}).",
+                    spec_name,
+                    source_type,
+                    spec_name,
+                    spec_name,
+                )
+            except Exception as exc:
                 logger.warning(
-                    "Could not reconstruct source %r from config — skipping.", spec_name
+                    "Could not reconstruct source %r (%s) from its saved config: %s. "
+                    "Stored function-node results are still readable from the store. "
+                    "To read source node %r itself, bind a source: "
+                    "job.bind(sources={%r: <source>}).",
+                    spec_name,
+                    source_type,
+                    exc,
+                    spec_name,
+                    spec_name,
                 )
 
         # Reconstruct store
@@ -1198,9 +1261,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     )
 
                     effective_store = resolve_database_from_config(store_config)
-                except Exception:
+                except Exception as exc:
                     logger.warning(
-                        "Could not reconstruct store from config — skipping."
+                        "Could not reconstruct the store from its saved config: %s. "
+                        "Node results cannot be read until a store is given: "
+                        "PipelineJob.load(path, store=...) or job.bind(store=...).",
+                        exc,
                     )
 
         # Reconstruct the job directly without going through to_invocations().
@@ -1209,6 +1275,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # path used by from_pipeline() would fail.  Instead, attach the loaded
         # pipeline directly as the compiled blueprint and set up source bindings.
         job = cls(name=pipeline._name, store=effective_store)
+        job._loaded = True
         job._compiled_pipeline = pipeline
         # Mark compiled so save() / compiled_pipeline can be accessed.
         job._compiled = True
@@ -1243,6 +1310,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         node_job_content_hashes: dict[str, str] = run_block.get(
             "node_job_content_hashes", {}
         )
+        # Absent in files saved before ITL-904: such nodes read zero rows from a
+        # store that has none, as before.
+        node_has_stored_records: dict[str, bool] = run_block.get(
+            "node_has_stored_records", {}
+        )
 
         for node_hash in _nx.topological_sort(job._hash_graph):
             bp_node = pipeline._persistent_node_map.get(node_hash)
@@ -1273,6 +1345,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     descriptor,
                     input_stream=input_stream,
                     job_content_hash=live_content_hash,
+                    expect_stored_records=node_has_stored_records.get(
+                        bp_node.label, False
+                    ),
                 )
                 job._persistent_node_map[node_hash] = fjn
 
