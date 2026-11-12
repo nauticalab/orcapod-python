@@ -211,6 +211,7 @@ def test_logical_type_registration_is_unchanged_by_the_move() -> None:
         "list",
         "orcapod.dataclass",
         "orcapod.pydantic",
+        "orcapod.structural",
         "set",
     ]
     assert sorted(

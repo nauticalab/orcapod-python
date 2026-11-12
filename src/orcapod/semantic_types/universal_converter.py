@@ -430,9 +430,11 @@ class UniversalTypeConverter:
 
             # Cycle detection (via the shared ContextVar-backed in_progress set)
             if annotation in in_progress:
-                raise TypeError(
-                    f"Circular type dependency detected while synthesising "
-                    f"LogicalType for {annotation!r}."
+                from orcapod.errors import RecursiveTypeError
+
+                raise RecursiveTypeError(
+                    f"{annotation.__qualname__} (a class that refers back to itself "
+                    f"cannot be stored: Arrow has no recursive struct type)"
                 )
 
             # Factory dispatch via MRO walk

@@ -37,27 +37,6 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
-def _canonical_storage(t: pa.DataType) -> pa.DataType:
-    """Return the canonical large-variant for string/binary families; identity elsewhere.
-
-    Maps:
-      ``string`` / ``string_view``  → ``large_string``
-      ``binary`` / ``binary_view``  → ``large_binary``
-      ``large_string`` / ``large_binary`` → unchanged (already canonical)
-      anything else → unchanged
-
-    Used in ``__arrow_ext_deserialize__`` to accept physically-equivalent but
-    layout-different string/binary variants that Delta Lake or other compaction
-    tools may write (e.g. delta-rs ``optimize.compact()`` normalises
-    ``large_string`` columns to plain ``string`` in the rewritten Parquet files).
-    """
-    if pa.types.is_string(t) or pa.types.is_string_view(t):
-        return pa.large_string()
-    if pa.types.is_binary(t) or pa.types.is_binary_view(t):
-        return pa.large_binary()
-    return t
-
-
 def make_arrow_extension_type(
     extension_name: str,
     storage_type: pa.DataType,
@@ -132,14 +111,22 @@ def make_arrow_extension_type(
         #
         # Cross-family mismatches (string where large_binary was registered, or
         # vice-versa) are genuine semantic errors and always raise.
-        if _canonical_storage(_storage) == _storage:
-            # _storage is the canonical large form — accept any same-family variant.
-            storage_ok = _canonical_storage(storage_type) == _storage
+        from orcapod.utils.arrow_utils import normalize_to_large_types
+
+        if normalize_to_large_types(_storage, keep_null=True) == _storage:
+            # _storage is the canonical large form — accept any same-family variant,
+            # at any nesting depth (a struct field rewritten from large_string to
+            # string by Delta compaction, ITL-881).
+            storage_ok = (
+                normalize_to_large_types(storage_type, keep_null=True) == _storage
+            )
         else:
             # Non-canonical _storage — require exact match.
             storage_ok = storage_type == _storage
+        from orcapod.errors import TypeIdentityError
+
         if not storage_ok:
-            raise ValueError(
+            raise TypeIdentityError(
                 f"Arrow extension type '{_name}': expected storage_type "
                 f"{_storage!r} but got {storage_type!r}."
             )
@@ -229,6 +216,15 @@ def make_polars_extension_type(
     )
 
 
+def _same_arrow_extension(a: pa.ExtensionType, b: pa.ExtensionType) -> bool:
+    """Return True if two extension types have the same name, storage and metadata."""
+    return (
+        a.extension_name == b.extension_name
+        and a.storage_type == b.storage_type
+        and a.__arrow_ext_serialize__() == b.__arrow_ext_serialize__()
+    )
+
+
 class LogicalTypeRegistry:
     """Registry for ``LogicalType`` instances.
 
@@ -311,6 +307,19 @@ class LogicalTypeRegistry:
         existing_by_arrow = self._by_arrow_name.get(arrow_ext_name)
         existing_by_python = self._by_python_type.get(py_type)
 
+        if (
+            existing_by_python is None
+            and existing_by_logical is not None
+            and existing_by_logical is existing_by_arrow
+            and existing_by_logical is not logical_type
+            and getattr(logical_type, "exact_python_type_only", False)
+            and _same_arrow_extension(
+                existing_by_logical.get_arrow_extension_type(), arrow_ext
+            )
+        ):
+            self._rebind(existing_by_logical, logical_type)
+            return
+
         # Triplet conflict check: raise if any key is bound to a different instance.
         for existing, label, key in [
             (existing_by_logical, "logical_type_name", logical_name),
@@ -361,6 +370,56 @@ class LogicalTypeRegistry:
         self._by_arrow_name[arrow_ext_name] = logical_type
         self._by_python_type[py_type] = logical_type
 
+    def _rebind(
+        self, previous: LogicalTypeProtocol, logical_type: LogicalTypeProtocol
+    ) -> None:
+        """Rebind an identity to a logical type built for a new class object.
+
+        Used when a user class with an unchanged identity is defined again (a notebook
+        cell re-run, a module reload, a second structural class with the same name and
+        fields). It makes the newest class the one stored values are read as; it does
+        not make two exact classes one type. The logical-name and Arrow-name bindings move to
+        the new logical type; the previous class object keeps its binding, so instances
+        created before the re-definition still convert. Arrow's and Polars' global
+        registrations are reused: name, storage type and metadata are identical.
+
+        Args:
+            previous: The logical type currently bound to the identity.
+            logical_type: The logical type for the new class object.
+        """
+        self._move_bindings(previous, logical_type)
+
+    def _move_bindings(
+        self, previous: LogicalTypeProtocol, logical_type: LogicalTypeProtocol
+    ) -> None:
+        """Bind an identity's names to ``logical_type`` and rebuild its containers.
+
+        The logical-name and Arrow-name bindings move to ``logical_type`` and its
+        Python type is bound to it; the previous Python type keeps its binding. Each
+        registered list or set logical type whose element is ``previous`` is rebuilt
+        over ``logical_type`` and rebound the same way, at any nesting depth, so
+        ``list[Point]`` names the class ``Point`` is now bound to.
+
+        Args:
+            previous: The logical type the names were bound to.
+            logical_type: The logical type to bind them to, with the same names.
+        """
+        containers = [
+            registered
+            for registered in self._by_logical_name.values()
+            if getattr(registered, "element_logical_type", None) is previous
+        ]
+        name = logical_type.logical_type_name
+        self._by_logical_name[name] = logical_type
+        self._by_arrow_name[logical_type.get_arrow_extension_type().extension_name] = (
+            logical_type
+        )
+        self._by_python_type[logical_type.python_type] = logical_type
+        for container in containers:
+            with_element = getattr(container, "with_element", None)
+            if with_element is not None:
+                self._move_bindings(container, with_element(logical_type))
+
     def get_by_logical_name(self, name: str) -> LogicalTypeProtocol | None:
         """Return the logical type registered under *name*, or ``None``."""
         return self._by_logical_name.get(name)
@@ -371,7 +430,9 @@ class LogicalTypeRegistry:
         The most specific registered type wins: *python_type* itself, then each
         class of its MRO in order, so a subclass registered with its own logical
         type is used for itself and its subclasses whatever the registration
-        order (an ``np.ndarray`` subclass without one is an array). Types that are
+        order (an ``np.ndarray`` subclass without one is an array). A logical type
+        with ``exact_python_type_only`` (a dataclass or pydantic model) is never
+        returned for a subclass. Types that are
         subclasses only through ``__subclasshook__``/ABC registration fall back
         to an ``issubclass`` scan, where the first registered match wins.
         """
@@ -380,9 +441,15 @@ class LogicalTypeRegistry:
             return result
         for base in getattr(python_type, "__mro__", ())[1:]:
             result = self._by_python_type.get(base)
-            if result is not None:
+            # A user class matches exactly: its subclass is a different class with
+            # its own fields and identity, never stored as the base (ITL-881).
+            if result is not None and not getattr(
+                result, "exact_python_type_only", False
+            ):
                 return result
         for registered_type, registered_lt in self._by_python_type.items():
+            if getattr(registered_lt, "exact_python_type_only", False):
+                continue
             try:
                 if issubclass(python_type, registered_type):
                     return registered_lt

@@ -28,6 +28,18 @@ from orcapod.logical_types.dataclass_logical_type_factory import (
 )
 
 
+def _identity(cls: type) -> str:
+    """Return the identity string (logical type name) of a user class (ITL-881)."""
+    from orcapod.contexts import get_default_context
+    from orcapod.types import Schema
+
+    converter = get_default_context().type_converter
+    converter.ensure_types_registered_for_schemas(Schema({"value": cls}))
+    lt = converter.get_logical_type(cls)
+    assert lt is not None
+    return lt.logical_type_name
+
+
 # Module-level dataclass — local classes cannot be reconstructed from FQCN.
 
 
@@ -74,18 +86,19 @@ def test_cache_populated_after_first_read(tmp_path):
     parquet_path = _write_parquet(tmp_path, write_converter)
 
     read_converter = _fresh_converter()
-    fqcn = f"{_CachePoint.__module__}.{_CachePoint.__qualname__}"
+    type_name = _identity(_CachePoint)
 
     # Before read: not registered
     assert (
-        read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn) is None
+        read_converter._logical_type_registry.get_by_arrow_extension_name(type_name)
+        is None
     )
 
     read_converter.load_logical_types(pq.read_table(parquet_path))
 
     # After read: registered (cache populated)
     assert (
-        read_converter._logical_type_registry.get_by_arrow_extension_name(fqcn)
+        read_converter._logical_type_registry.get_by_arrow_extension_name(type_name)
         is not None
     )
 

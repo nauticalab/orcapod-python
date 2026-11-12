@@ -168,6 +168,19 @@ class ListLogicalType(BaseLogicalType):
         """
         return self._element_logical_type
 
+    def with_element(
+        self, element_logical_type: "LogicalTypeProtocol"
+    ) -> "ListLogicalType":
+        """Return this list or set logical type built over another element logical type.
+
+        Args:
+            element_logical_type: The logical type of the elements.
+
+        Returns:
+            A new ``ListLogicalType`` with the same list or set semantics.
+        """
+        return ListLogicalType(element_logical_type, is_set=self._is_set)
+
     @property
     def python_type(self) -> type:
         """The Python generic alias this logical type represents.

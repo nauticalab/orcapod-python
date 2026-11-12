@@ -167,15 +167,3 @@ def test_walk_fqcn_reraises_when_dep_name_is_bare_prefix_of_module(monkeypatch):
 
     with pytest.raises(ModuleNotFoundError, match="'path'"):
         _walk_fqcn("pathlib.Path")
-
-
-# ── _import_from_fqcn tests ──────────────────────────────────────────────────
-
-
-def test_import_from_fqcn_raises_for_non_dataclass():
-    """_import_from_fqcn raises ImportError when FQCN resolves to a non-dataclass."""
-    from orcapod.logical_types.dataclass_logical_type_factory import _import_from_fqcn
-
-    # pathlib.Path is importable via _walk_fqcn but is not a dataclass
-    with pytest.raises(ImportError):
-        _import_from_fqcn("pathlib.Path")

@@ -22,7 +22,6 @@ from orcapod.logical_types.registry import (
     LogicalTypeRegistry,
     make_arrow_extension_type,
     make_polars_extension_type,
-    _canonical_storage,
 )
 
 
@@ -681,43 +680,6 @@ def test_registry_does_not_expose_ensure_methods():
 
 
 # ---------------------------------------------------------------------------
-# _canonical_storage helper
-# ---------------------------------------------------------------------------
-
-
-class TestCanonicalStorage:
-    """Unit tests for the _canonical_storage helper."""
-
-    def test_string_maps_to_large_string(self):
-        assert _canonical_storage(pa.string()) == pa.large_string()
-
-    def test_utf8_maps_to_large_string(self):
-        # pa.utf8() is an alias for pa.string()
-        assert _canonical_storage(pa.utf8()) == pa.large_string()
-
-    def test_string_view_maps_to_large_string(self):
-        assert _canonical_storage(pa.string_view()) == pa.large_string()
-
-    def test_large_string_is_identity(self):
-        assert _canonical_storage(pa.large_string()) == pa.large_string()
-
-    def test_binary_maps_to_large_binary(self):
-        assert _canonical_storage(pa.binary()) == pa.large_binary()
-
-    def test_binary_view_maps_to_large_binary(self):
-        assert _canonical_storage(pa.binary_view()) == pa.large_binary()
-
-    def test_large_binary_is_identity(self):
-        assert _canonical_storage(pa.large_binary()) == pa.large_binary()
-
-    def test_int64_is_identity(self):
-        assert _canonical_storage(pa.int64()) == pa.int64()
-
-    def test_fixed_binary_is_identity(self):
-        assert _canonical_storage(pa.binary(16)) == pa.binary(16)
-
-
-# ---------------------------------------------------------------------------
 # __arrow_ext_deserialize__ storage-family tolerance (ITL-602)
 # ---------------------------------------------------------------------------
 
@@ -803,7 +765,7 @@ class TestDeserializeStorageFamilyTolerance:
         """Extension registered with plain string (non-canonical) still reads its own data.
 
         Regression test for the Copilot review finding: the previous check
-        _canonical_storage(storage_type) != _storage would map string → large_string and
+        normalize_to_large_types(storage_type) != _storage would map string → large_string and
         then compare large_string != string, incorrectly raising for a type that should
         read back cleanly.
         """

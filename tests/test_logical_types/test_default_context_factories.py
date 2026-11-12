@@ -20,6 +20,18 @@ from orcapod.logical_types.pydantic_logical_type_factory import (
 from orcapod.logical_types.registry import LogicalTypeRegistry
 
 
+def _identity(cls: type) -> str:
+    """Return the identity string (logical type name) of a user class (ITL-881)."""
+    from orcapod.contexts import get_default_context
+    from orcapod.types import Schema
+
+    converter = get_default_context().type_converter
+    converter.ensure_types_registered_for_schemas(Schema({"value": cls}))
+    lt = converter.get_logical_type(cls)
+    assert lt is not None
+    return lt.logical_type_name
+
+
 # ── Module-level dataclasses (local classes cannot be registered) ────────────
 
 
@@ -115,8 +127,8 @@ def test_default_context_dataclass_auto_registered_on_use():
     converter = create_registry().get_context().type_converter
     arrow_type = converter.register_python_class(_SimplePoint)
     assert isinstance(arrow_type, pa.ExtensionType)
-    fqcn = f"{_SimplePoint.__module__}.{_SimplePoint.__qualname__}"
-    assert arrow_type.extension_name == fqcn
+    type_name = _identity(_SimplePoint)
+    assert arrow_type.extension_name == type_name
 
 
 def test_default_context_pydantic_auto_registered_on_use():
@@ -124,8 +136,8 @@ def test_default_context_pydantic_auto_registered_on_use():
     converter = create_registry().get_context().type_converter
     arrow_type = converter.register_python_class(_SimpleModel)
     assert isinstance(arrow_type, pa.ExtensionType)
-    fqcn = f"{_SimpleModel.__module__}.{_SimpleModel.__qualname__}"
-    assert arrow_type.extension_name == fqcn
+    type_name = _identity(_SimpleModel)
+    assert arrow_type.extension_name == type_name
 
 
 # ── Parquet round-trip tests ─────────────────────────────────────────────────

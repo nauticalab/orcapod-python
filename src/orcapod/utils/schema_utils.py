@@ -4,7 +4,8 @@ import inspect
 import logging
 import sys
 from collections.abc import Callable, Collection, Mapping, Sequence
-from typing import Any, get_args, get_origin, get_type_hints
+from types import UnionType
+from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from orcapod.types import Schema, SchemaLike
 
@@ -62,6 +63,42 @@ def _type_label(type_info: Any) -> str:
     return str(type_info)
 
 
+def _union_members(hint: Any) -> tuple[Any, ...] | None:
+    """Return the members of a union hint, or ``None`` if ``hint`` is not a union."""
+    if get_origin(hint) in (Union, UnionType):
+        return get_args(hint)
+    return None
+
+
+def _accepts(incoming: Any, receiving: Any) -> bool:
+    """Return True if a value typed ``incoming`` can be passed where ``receiving`` is expected.
+
+    ``incoming`` must be a subhint of ``receiving``, or the same type up to user-class
+    identity (a class and its re-definition are one type). A receiving union accepts
+    what one of its members accepts; an incoming union needs every member accepted.
+
+    Args:
+        incoming: The type hint of the value offered.
+        receiving: The type hint of the parameter.
+
+    Returns:
+        Whether the value can be passed.
+    """
+    from beartype.door import is_subhint
+
+    from orcapod.logical_types.user_class_identity import equivalent_hints
+
+    if is_subhint(incoming, receiving) or equivalent_hints(incoming, receiving):
+        return True
+    incoming_members = _union_members(incoming)
+    if incoming_members is not None:
+        return all(_accepts(member, receiving) for member in incoming_members)
+    receiving_members = _union_members(receiving)
+    if receiving_members is not None:
+        return any(_accepts(incoming, member) for member in receiving_members)
+    return False
+
+
 def schema_incompatibility(
     incoming_types: SchemaLike, receiving_types: Schema
 ) -> str | None:
@@ -79,12 +116,10 @@ def schema_incompatibility(
         ``None`` when the schemas are compatible, otherwise a one-line reason
         naming the first offending column or parameter.
     """
-    from beartype.door import is_subhint
-
     for key, type_info in incoming_types.items():
         if key not in receiving_types:
             return f"column '{key}' is not a parameter of the function"
-        if not is_subhint(type_info, receiving_types[key]):
+        if not _accepts(type_info, receiving_types[key]):
             return (
                 f"column '{key}' has type {_type_label(type_info)}, "
                 f"the function expects {_type_label(receiving_types[key])}"

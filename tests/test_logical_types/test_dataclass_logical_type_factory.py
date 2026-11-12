@@ -9,6 +9,32 @@ import pyarrow as pa
 import pytest
 
 
+def _identity(cls: type) -> str:
+    """Return the identity string (logical type name) of a user class (ITL-881)."""
+    from orcapod.contexts import get_default_context
+    from orcapod.types import Schema
+
+    converter = get_default_context().type_converter
+    converter.ensure_types_registered_for_schemas(Schema({"value": cls}))
+    lt = converter.get_logical_type(cls)
+    assert lt is not None
+    return lt.logical_type_name
+
+
+def _metadata(cls: type) -> dict[str, object]:
+    """Return the parsed Arrow extension metadata of a user class (ITL-881)."""
+    import json
+
+    from orcapod.contexts import get_default_context
+    from orcapod.types import Schema
+
+    converter = get_default_context().type_converter
+    converter.ensure_types_registered_for_schemas(Schema({"value": cls}))
+    lt = converter.get_logical_type(cls)
+    assert lt is not None
+    return json.loads(lt.get_arrow_extension_type().__arrow_ext_serialize__())
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -382,16 +408,18 @@ def test_factory_reconstruct_from_arrow():
     )
 
     storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.int64())])
-    metadata = {"category": "orcapod.dataclass"}
-    fqcn = f"{_RoundTripPoint.__module__}.{_RoundTripPoint.__qualname__}"
+    metadata = _metadata(_RoundTripPoint)
+    type_name = _identity(_RoundTripPoint)
 
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
-    lt = factory.reconstruct_from_arrow(fqcn, storage, metadata, converter=converter)
+    lt = factory.reconstruct_from_arrow(
+        type_name, storage, metadata, converter=converter
+    )
 
     assert isinstance(lt, DataclassLogicalType)
     assert lt.python_type is _RoundTripPoint
-    assert lt.logical_type_name == fqcn
+    assert lt.logical_type_name == type_name
 
 
 def test_factory_reconstruct_from_arrow_invalid_fqcn():
@@ -404,11 +432,16 @@ def test_factory_reconstruct_from_arrow_invalid_fqcn():
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
 
+    import orcapod.logical_types.user_class_identity as uci
+
+    record = uci.identity_record(
+        "dataclass", "nonexistent.module.NoSuchClass", [("x", "int")]
+    )
     with pytest.raises(ImportError):
         factory.reconstruct_from_arrow(
-            "nonexistent.module.NoSuchClass",
+            uci.identity_string(record),
             storage,
-            {"category": "orcapod.dataclass"},
+            {"category": "orcapod.dataclass", "identity": record},
             converter,
         )
 
@@ -429,7 +462,7 @@ def test_reconstruct_from_arrow_registers_nested_types():
             pa.field("label", pa.large_string()),
         ]
     )
-    outer_fqcn = f"{_OuterForRegistrationTest.__module__}.{_OuterForRegistrationTest.__qualname__}"
+    outer_type_name = _identity(_OuterForRegistrationTest)
 
     factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
@@ -442,7 +475,7 @@ def test_reconstruct_from_arrow_registers_nested_types():
 
     # reconstruct_from_arrow for Outer should trigger registration of Inner as a side effect
     factory.reconstruct_from_arrow(
-        outer_fqcn, outer_storage, {"category": "orcapod.dataclass"}, converter
+        outer_type_name, outer_storage, _metadata(_OuterForRegistrationTest), converter
     )
 
     # Inner must now be registered
@@ -499,12 +532,12 @@ def test_dataclass_with_uuid_round_trip():
     assert reconstructed.label == "hello"
 
 
-# ── _import_from_fqcn nested class tests ─────────────────────────────────────
+# ── nested class lookup on read ───────────────────────────────────────────────
 
 
 @dataclasses.dataclass
 class _OuterForNestedTest:
-    """Module-level outer class for testing nested-class FQCN import."""
+    """Module-level outer class for testing the read-side lookup of a nested class."""
 
     @dataclasses.dataclass
     class Inner:
@@ -512,20 +545,27 @@ class _OuterForNestedTest:
         y: str
 
 
-def test_import_from_fqcn_nested_class():
-    """_import_from_fqcn resolves module-level nested dataclasses via attribute walk."""
-    from orcapod.logical_types.dataclass_logical_type_factory import _import_from_fqcn
+def test_reconstruct_finds_class_nested_in_a_class():
+    """The read path imports a class nested in another class by its dotted name."""
+    from orcapod.logical_types.dataclass_logical_type_factory import (
+        DataclassLogicalTypeFactory,
+    )
 
-    # _OuterForNestedTest.Inner lives in this test module; its FQCN uses '.' for nesting
-    module = _OuterForNestedTest.__module__
-    inner_qualname = (
-        _OuterForNestedTest.Inner.__qualname__
-    )  # e.g. "_OuterForNestedTest.Inner"
+    import orcapod.logical_types.user_class_identity as uci
 
-    fqcn = f"{module}.{inner_qualname}"
-    cls = _import_from_fqcn(fqcn)
-    assert cls is _OuterForNestedTest.Inner
-    assert dataclasses.is_dataclass(cls)
+    inner = _OuterForNestedTest.Inner
+    # Build the stored identity by hand, so that the class is not registered and the
+    # read can only find it by importing its dotted name.
+    name = f"{inner.__module__}.{inner.__qualname__}"
+    record = uci.identity_record("dataclass", name, [("x", "int"), ("y", "str")])
+    storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.large_string())])
+    lt = DataclassLogicalTypeFactory().reconstruct_from_arrow(
+        uci.identity_string(record),
+        storage,
+        {"category": "orcapod.dataclass", "identity": record},
+        _make_full_converter(),
+    )
+    assert lt.python_type is inner
 
 
 def test_python_to_storage_raises_when_converter_none():
@@ -674,3 +714,28 @@ def test_list_of_nested_dataclass_parquet_roundtrip(tmp_path):
     assert reconstructed.items[0].x == 1
     assert reconstructed.items[1].y == 4
     assert reconstructed.label == "test"
+
+
+def test_reconstruct_rejects_a_record_that_does_not_match_the_extension_name():
+    """A stored record must hash to the stored extension name (ITL-881)."""
+    from orcapod.errors import TypeIdentityError
+    from orcapod.logical_types.dataclass_logical_type_factory import (
+        DataclassLogicalTypeFactory,
+    )
+
+    # This test is about the factory's read entry point: an inconsistent stored
+    # column cannot be produced through the public interface.
+    metadata = _metadata(_Flat)
+    stored = metadata["identity"]
+    assert isinstance(stored, dict)
+    record = {**stored, "fields": [["name", "str"], ["count", "str"]]}
+    storage = pa.struct(
+        [pa.field("name", pa.large_string()), pa.field("count", pa.int64())]
+    )
+    with pytest.raises(TypeIdentityError, match="invalid identity record"):
+        DataclassLogicalTypeFactory().reconstruct_from_arrow(
+            _identity(_Flat),
+            storage,
+            {"category": metadata["category"], "identity": record},
+            _make_full_converter(),
+        )

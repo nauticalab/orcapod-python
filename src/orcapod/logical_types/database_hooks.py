@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.errors import TypeIdentityError
 from orcapod.logical_types.identifier import LogicalTypeIdentifierError
 from orcapod.logical_types.identifier import require_readable
 from orcapod.logical_types.registry import LogicalTypeRegistry
@@ -42,7 +43,7 @@ def register_discovered_logical_types(
 ) -> None:
     """Register any extension types found in ``schema`` that are not yet known.
 
-    Walks ``schema`` recursively via ``walk_schema`` to discover all Arrow extension
+    Walks each column of ``schema`` recursively via ``walk_field`` to discover all Arrow extension
     types at any nesting depth (both in-memory and field-metadata channels).
     For each discovered type, delegates to ``converter.register_logical_type_from_arrow_metadata``.
 
@@ -61,6 +62,10 @@ def register_discovered_logical_types(
             error names the column.
         ValueError: Propagated from the converter if an extension type's metadata
             has no registered factory or is malformed.
+        TypeIdentityError: If a stored user-class column does not match the class
+            found for it; the message starts with the column name.
+        ImportError: If no class can be found for a stored user-class column; the
+            message starts with the column name.
     """
     if converter is None:
         logger.debug(
@@ -85,6 +90,9 @@ def register_discovered_logical_types(
                 )
             except LogicalTypeIdentifierError as exc:
                 raise exc.for_column(field.name) from exc
+            except (TypeIdentityError, ImportError) as exc:
+                # The factory knows the type, not the column that holds it.
+                raise type(exc)(f"Column {field.name!r}: {exc}") from exc
 
 
 def apply_logical_types(

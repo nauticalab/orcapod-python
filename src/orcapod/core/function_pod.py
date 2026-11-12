@@ -14,7 +14,7 @@ from orcapod.core.base import TraceableBase
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import StoreError
+from orcapod.errors import StoreError, TypeIdentityError
 from orcapod.utils.store_errors import keep_store_error, note_callback_failure
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
@@ -29,6 +29,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
+from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
@@ -329,7 +330,8 @@ class _FunctionPodBase(TraceableBase):
     def _fire_post_run_hooks(self, payload: PostRunPayload) -> None:
         """Fire all registered hooks with payload in registration order.
 
-        When the invocation failed with a ``StoreError``, a fail-loud hook that
+        When the invocation failed with a ``StoreError`` or a ``TypeIdentityError``
+        (both fail the run under every error policy), a fail-loud hook that
         raises does not replace it: its failure is logged and noted on the store
         error, the remaining hooks are skipped as for any fail-loud failure, and the
         caller re-raises the store error.
@@ -338,7 +340,9 @@ class _FunctionPodBase(TraceableBase):
             payload: The post-run payload to pass to each hook.
         """
         error = payload.stats.error
-        store_error = error if isinstance(error, StoreError) else None
+        store_error = (
+            error if isinstance(error, (StoreError, TypeIdentityError)) else None
+        )
         for hook in self._post_run_hooks:
             fn = hook.fn if isinstance(hook, HookConfig) else hook
             on_error = hook.on_error if isinstance(hook, HookConfig) else "raise"
@@ -603,6 +607,12 @@ class _FunctionPodBase(TraceableBase):
                     # A failed store read or write fails the run; only rows whose
                     # function raised are skipped.
                     exc.add_context(tag=tag.as_dict())
+                    with keep_store_error(exc, "Observer on_data_crash"):
+                        obs.on_data_crash(pod_label, tag, data, exc)
+                    raise
+                except TypeIdentityError as exc:
+                    # A stored row that cannot be decoded as its class is never
+                    # skipped as a row failure (ITL-881).
                     with keep_store_error(exc, "Observer on_data_crash"):
                         obs.on_data_crash(pod_label, tag, data, exc)
                     raise
@@ -1040,7 +1050,16 @@ class FunctionPodStream(StreamBase):
             # TODO: re-verify the implemetation of this conversion
             converter = self.data_context.type_converter
 
-            struct_data = converter.python_dicts_to_struct_dicts(all_data)
+            # The data columns have declared types: convert each value as its column's
+            # type, never as the type the value happens to have. A subclass instance
+            # returned for a base-class column is then refused instead of being stored
+            # as the base without its own fields (ITL-972). Only the remaining columns
+            # (meta, source info) are typed from their values.
+            python_schema = dict(infer_python_schema_from_pylist_data(all_data))
+            python_schema.update(self.output_schema()[1])
+            struct_data = converter.python_dicts_to_struct_dicts(
+                all_data, python_schema=python_schema
+            )
             all_tags_as_tables: pa.Table = pa.Table.from_pylist(
                 all_tags, schema=tag_schema
             )

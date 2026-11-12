@@ -10,7 +10,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, Literal
 
-from orcapod.errors import StoreError
+from orcapod.errors import StoreError, TypeIdentityError
 from orcapod.pipeline.result import OrchestratorResult
 from orcapod.utils import arrow_utils
 from orcapod.utils.store_errors import keep_store_error
@@ -79,7 +79,7 @@ class SyncPipelineOrchestrator:
         effective_observer = observer if observer is not None else NoOpObserver()
         effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
-        store_error: StoreError | None = None
+        store_error: StoreError | TypeIdentityError | None = None
         current: Any = None
         try:
             topo_order = list(graph.topological_sort())
@@ -140,6 +140,11 @@ class SyncPipelineOrchestrator:
             # Name the node the failure belongs to, if the raising site did not.
             if current is not None:
                 exc.add_context(node_label=current.label)
+            store_error = exc
+            raise
+        except TypeIdentityError as exc:
+            # A stored row that cannot be decoded as its class stops the run as a
+            # store error does; on_run_end must not replace it (ITL-881).
             store_error = exc
             raise
         finally:

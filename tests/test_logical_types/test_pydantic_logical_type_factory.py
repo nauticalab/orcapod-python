@@ -11,6 +11,32 @@ import pytest
 from pydantic import BaseModel, PrivateAttr, computed_field, field_validator
 
 
+def _identity(cls: type) -> str:
+    """Return the identity string (logical type name) of a user class (ITL-881)."""
+    from orcapod.contexts import get_default_context
+    from orcapod.types import Schema
+
+    converter = get_default_context().type_converter
+    converter.ensure_types_registered_for_schemas(Schema({"value": cls}))
+    lt = converter.get_logical_type(cls)
+    assert lt is not None
+    return lt.logical_type_name
+
+
+def _metadata(cls: type) -> dict[str, object]:
+    """Return the parsed Arrow extension metadata of a user class (ITL-881)."""
+    import json
+
+    from orcapod.contexts import get_default_context
+    from orcapod.types import Schema
+
+    converter = get_default_context().type_converter
+    converter.ensure_types_registered_for_schemas(Schema({"value": cls}))
+    lt = converter.get_logical_type(cls)
+    assert lt is not None
+    return json.loads(lt.get_arrow_extension_type().__arrow_ext_serialize__())
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -410,16 +436,18 @@ def test_factory_reconstruct_from_arrow():
     )
 
     storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.int64())])
-    metadata = {"category": "orcapod.pydantic"}
-    fqcn = f"{_RoundTripPoint.__module__}.{_RoundTripPoint.__qualname__}"
+    metadata = _metadata(_RoundTripPoint)
+    type_name = _identity(_RoundTripPoint)
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
-    lt = factory.reconstruct_from_arrow(fqcn, storage, metadata, converter=converter)
+    lt = factory.reconstruct_from_arrow(
+        type_name, storage, metadata, converter=converter
+    )
 
     assert isinstance(lt, PydanticLogicalType)
     assert lt.python_type is _RoundTripPoint
-    assert lt.logical_type_name == fqcn
+    assert lt.logical_type_name == type_name
 
 
 def test_factory_reconstruct_from_arrow_invalid_fqcn():
@@ -432,11 +460,16 @@ def test_factory_reconstruct_from_arrow_invalid_fqcn():
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
 
+    import orcapod.logical_types.user_class_identity as uci
+
+    record = uci.identity_record(
+        "pydantic", "nonexistent.module.NoSuchClass", [("x", "int")]
+    )
     with pytest.raises(ImportError):
         factory.reconstruct_from_arrow(
-            "nonexistent.module.NoSuchModel",
+            uci.identity_string(record),
             storage,
-            {"category": "orcapod.pydantic"},
+            {"category": "orcapod.pydantic", "identity": record},
             converter,
         )
 
@@ -454,7 +487,7 @@ def test_reconstruct_from_arrow_registers_nested_types():
             pa.field("label", pa.large_string()),
         ]
     )
-    outer_fqcn = f"{_OuterModel.__module__}.{_OuterModel.__qualname__}"
+    outer_type_name = _identity(_OuterModel)
 
     factory = PydanticLogicalTypeFactory()
     converter = _make_full_converter()
@@ -463,7 +496,7 @@ def test_reconstruct_from_arrow_registers_nested_types():
     assert converter._logical_type_registry.get_by_python_type(_InnerModel) is None
 
     factory.reconstruct_from_arrow(
-        outer_fqcn, outer_storage, {"category": "orcapod.pydantic"}, converter
+        outer_type_name, outer_storage, _metadata(_OuterModel), converter
     )
 
     # Inner must now be registered as a side effect
@@ -737,9 +770,9 @@ def test_literal_model_polars_dataframe_round_trip():
     df = pl.from_arrow(table)
 
     # Polars column must carry the correct extension type
-    fqcn = f"{_LiteralRoundTripModel.__module__}.{_LiteralRoundTripModel.__qualname__}"
+    type_name = _identity(_LiteralRoundTripModel)
     assert isinstance(df.dtypes[0], pl.BaseExtension)
-    assert df.dtypes[0].ext_name() == fqcn
+    assert df.dtypes[0].ext_name() == type_name
 
     # Convert back to Arrow and reconstruct Python objects
     table_back = df.to_arrow()

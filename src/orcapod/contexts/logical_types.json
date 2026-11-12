@@ -52,6 +52,13 @@
                 },
                 {
                     "factory": {
+                        "_class": "orcapod.logical_types.structural_logical_type_factory.StructuralLogicalTypeFactory",
+                        "_config": {}
+                    },
+                    "category": "orcapod.structural"
+                },
+                {
+                    "factory": {
                         "_class": "orcapod.logical_types.pydantic_logical_type_factory.PydanticLogicalTypeFactory",
                         "_config": {}
                     },

@@ -284,6 +284,37 @@ A logical type's identifier is its Arrow extension name plus its Arrow extension
   never fall back to the storage type. List an older value in `also_reads` only when the
   current code decodes that layout.
 
+## User classes: exact and structural
+
+A class a user defines is one of two kinds (developer, November 12, 2026, ITL-972; see
+`docs/concepts/your-own-data-types.md`).
+
+- An ordinary `@dataclass` or a pydantic model is an **exact** class: named by module path
+  and qualified name, and one type only with itself. Never make two different exact classes
+  equivalent (no declared names, no equivalence by description). Python subclassing still
+  applies at a pod input: a subclass column is accepted at a base-class parameter, and the
+  subclass keeps its own identity and fields.
+- A class made with `orcapod.dataclass` is **structural**: identified by its name (default
+  the class name) and its fields in declared order. Two structural classes with equal
+  identity records are compatible in the schema check and their instances compare equal.
+  Equality and hashing of a structural class cover exactly its stored fields; never let a
+  per-field `compare=` or `hash=` choice through, because a class rebuilt from metadata
+  cannot know it. Pydantic has no structural kind (ITL-973).
+- **No automatic conversion.** Orcapod checks compatibility and passes a value as it is. A
+  function annotated with a structural class may receive another class of the same
+  identity; a structural class promises its fields, not its methods. `from_instance` is the
+  only conversion, and Orcapod never calls it.
+- A value is stored only as its own class (`UserClassLogicalType.accepts_instance`); never
+  store a subclass instance or a look-alike object in another class's column.
+- The identity record (`logical_types/user_class_identity.py`) is `{kind, name, fields}`
+  with JSON type tokens. The Arrow extension name is `name@<SHA-256 of the record>` and the
+  record is the extension metadata; together they are the logical type identifier. A nested
+  class embeds its whole record and a logical-type field the whole identifier text, so a
+  structural class can be rebuilt from metadata alone. A change to the record or token
+  format moves every user-class identifier: treat it as a hash change.
+- Arrow-backed data carries the identifier, not a class object: the registry binds an
+  identifier to the newest class object with that identity, and data is read as that class.
+
 ## Golden hash values
 
 Hash values must stay identical across releases (developer, November 10, 2026). Every hash

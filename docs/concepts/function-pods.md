@@ -453,3 +453,5 @@ primary user-facing APIs.
 - [Operators](operators.md) handle structural transforms (the complement of function pods)
 - Function pods participate in the [identity chain](identity.md) -- each pod's hash includes
   the function's identity and its upstream pipeline hashes
+- Function pods can take and return dataclasses and pydantic models; see
+  [Your Own Data Types](your-own-data-types.md) for when two classes count as the same type

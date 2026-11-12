@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import linecache
 import re
 import sys
 import textwrap
@@ -216,8 +217,18 @@ def run_blocks(blocks: list[Block], name: str = "<doc>") -> list[dict[str, Any]]
             results.append(result)
             continue
         captured = io.StringIO()
+        filename = f"{name}:{block.lineno}"
+        # Register the block's source so ``inspect.getsource`` (used to hash function
+        # pods) reads the block itself. Without it, ``linecache`` falls back to the
+        # ``__main__`` module's loader, i.e. this runner's own file (seen on 3.13).
+        linecache.cache[filename] = (
+            len(block.source),
+            None,
+            block.source.splitlines(keepends=True),
+            filename,
+        )
         try:
-            code = compile(block.source, f"{name}:{block.lineno}", "exec")
+            code = compile(block.source, filename, "exec")
             with contextlib.redirect_stdout(captured):
                 exec(code, namespace)  # noqa: S102 - running our own documentation
         except BaseException:  # noqa: BLE001 - report SystemExit etc. as failures too

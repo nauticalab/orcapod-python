@@ -11,10 +11,13 @@ Covers:
   anything is written, naming the column and both types; legitimate appends
   (same types in another layout, new or missing columns, unchanged extension
   storage) still succeed.
+- A readable table whose stored user-class shape differs from the registered class
+  raises ``TypeIdentityError``, not ``StoreReadError`` (ITL-881).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import json
 from collections.abc import Callable
@@ -27,7 +30,8 @@ import pytest
 from deltalake.exceptions import DeltaProtocolError
 
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import InputValidationError, StoreReadError
+from orcapod.errors import InputValidationError, StoreReadError, TypeIdentityError
+from orcapod.sources import DictSource
 
 PATH = ("results", "t")
 
@@ -496,3 +500,63 @@ class TestLegitimateAppendsStillPass:
         back = self.read_back(base)
         assert back.num_rows == 2
         assert back.schema.field("x").type == loose
+
+
+# ---------------------------------------------------------------------------
+# A readable table whose class differs is not an unreadable table (ITL-881)
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class _StoredShape:
+    """A registered user class; the table below stores another shape under its name."""
+
+    x: int
+    y: int
+
+
+@pytest.fixture
+def other_shape(base: Path) -> DeltaTableDatabase:
+    """A readable table storing ``_StoredShape``'s type name over another struct."""
+    value: Any = _StoredShape(1, 2)
+    source = DictSource(data=[{"k": "a", "p": value}], tag_columns=["k"])
+    ext = source.as_table().schema.field("p").type
+    wrong = pa.struct([pa.field("x", pa.float64()), pa.field("y", pa.int64())])
+    field = pa.field("x", wrong).with_metadata(
+        {
+            b"ARROW:extension:name": ext.extension_name.encode(),
+            b"ARROW:extension:metadata": ext.__arrow_ext_serialize__(),
+        }
+    )
+    table = pa.table(
+        {
+            "__record_id": pa.array([b"a"], pa.large_binary()),
+            "x": pa.array([{"x": 1.5, "y": 2}], type=wrong),
+        },
+        schema=pa.schema([pa.field("__record_id", pa.large_binary()), field]),
+    )
+    deltalake.write_deltalake(str(table_dir(base)), table)
+    return DeltaTableDatabase(base_path=base)
+
+
+READS_WITHOUT_VALUE_FILTER = {
+    name: read
+    for name, read in READS.items()
+    if name != "get_records_with_column_value"
+}
+
+
+@pytest.mark.parametrize(
+    "read",
+    READS_WITHOUT_VALUE_FILTER.values(),
+    ids=list(READS_WITHOUT_VALUE_FILTER),
+)
+def test_class_mismatch_is_type_identity_error_not_store_read_error(other_shape, read):
+    """A stored shape that differs from the registered class raises ``TypeIdentityError``.
+
+    ``StoreReadError`` means the table cannot be read. Here the table is intact and the
+    class differs, so the identity error is raised as is, never wrapped.
+    """
+    with pytest.raises(TypeIdentityError) as info:
+        read(other_shape)
+    assert not isinstance(info.value, StoreReadError)

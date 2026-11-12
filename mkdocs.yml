@@ -38,6 +38,7 @@ nav:
     - Streams: concepts/streams.md
     - Operators: concepts/operators.md
     - Function Pods: concepts/function-pods.md
+    - Your Own Data Types: concepts/your-own-data-types.md
     - NumPy Arrays: concepts/arrays.md
     - Logical Type Identifiers: concepts/logical-type-identifiers.md
     - Identity & Hashing: concepts/identity.md
