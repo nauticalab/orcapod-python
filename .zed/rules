@@ -317,6 +317,7 @@ src/orcapod/
       column_selection.py     — Select/Drop Tag/Data columns
       mappers.py              — MapTags, MapData (rename columns)
       filters.py              — PolarsFilter
+      drop_nulls.py       — DropNulls (drop rows with a null in named or all columns, T | None → T)
   hashing/
     semantic_hashing/         — BaseSemanticHasher, type handlers
   semantic_types/             — Type conversion (Python ↔ Arrow)
@@ -383,7 +384,8 @@ FunctionNode.
 
 ### Strict operator / function pod boundary
 
-Operators: inspect tags (never data content), can rename columns, cannot synthesize values.
+Operators: inspect tags (never data content, except filters; see below), can rename columns,
+cannot synthesize values.
 Function Pods: inspect data content (never tags), synthesize new values, cached by content.
 
 No data element comes from a tag value (developer, November 11, 2026, ITL-955). An operator
@@ -396,6 +398,11 @@ Two operators reduce row count many→one. Batch groups consecutive rows by coun
 groups by tag values: it collapses the N rows sharing a tag tuple into one row with
 list-valued members. Neither synthesizes new data values, and GroupBy keys only on tags,
 never on data. Its non-key tags stay tags, list-valued, as Batch keeps them.
+
+Filters are the operators that read data columns (ITL-943): PolarsFilter evaluates its
+predicate on values, and DropNulls reads only whether a value is present (its validity),
+never the value. A filter decides which rows exist and never synthesizes a value; no other
+operator reads data content.
 
 Operator or derived source? (developer, November 11, 2026) The test is: does any data
 element come from a tag value, or from anywhere other than the input's data elements? If yes,
@@ -549,6 +556,18 @@ data. The rules:
   (circular — it delegates back to the pod) and NOT against as_table() (legitimately differs:
   output_schema ignores columns.source, so _source_*, _content_hash and _context_key appear in
   the table but never in the schema).
+- DropNulls keeps the rows where every named column (tag or data) is non-null and clears
+  the nullable flag of each named field, so T | None becomes T. Only top-level validity is
+  read (not list items, struct children or NaN). Its identity is the sorted tuple of unique
+  names. Both paths apply one rule, DropNulls._narrow_table: an Arrow validity mask and
+  the same arrays re-wrapped under the new field flags, with no Polars round-trip and no cast
+  other than large normalization. A named column that is already non-nullable is a no-op.
+- DropNulls() with no argument (columns=None) means every user tag and data column of
+  the input (developer, November 12, 2026). The names are resolved from each input
+  (DropNulls._target_columns: stream.keys(), or the row's tag and data keys on the
+  async path) and never stored, so its identity is the fixed ("DropNulls", None),
+  different from any list of names. System-tag, source-info, context and meta columns are
+  never included. An explicitly empty collection is not "no argument": it raises ValueError.
 - GroupBy requires every column in `by` to be a scalar tag column; raises InputValidationError
   for unknown, data, or list-valued columns (list-valued usually means the stream came from
   Batch — group before batching, not after). Members sort by non-key tag values with system

@@ -13,7 +13,7 @@ This separation is a core Orcapod design principle:
 
 |  | Operator | Function Pod |
 |---|---|---|
-| Inspects data content | Never | Yes |
+| Inspects data content | Never, except filters (see below) | Yes |
 | Inspects / uses tags | Yes | No |
 | Can rename columns | Yes | No |
 | Synthesizes new values | No | Yes |
@@ -31,6 +31,10 @@ from an input row -- and it keys only on tags, never on data content.
 One rule holds for every operator: **no data element comes from a tag value**. An operator may
 use tags to join, filter, group or order rows, but it never turns a tag column into a data
 column, so a function pod never receives tag content.
+
+The filters are the operators that read data columns: `PolarsFilter` evaluates its predicate
+on values, and `DropNulls` reads only whether a value is present (its validity), never the
+value. Both decide which rows exist; neither synthesizes a value.
 
 ## Operator categories
 
@@ -370,6 +374,145 @@ except ValueError as exc:
 # Cannot hash the Polars expression 'col("age").python_udf()' for an Orcapod identity
 ```
 
+### DropNulls
+
+`DropNulls(columns)` keeps the rows where every named column is non-null, and narrows
+each named column from `T | None` to `T`. `DropNulls()`, with no names, does this for every
+tag and data column (see [Every column](#every-column) below). Use it when a column is nullable by specification
+but a function needs a value: a pod whose parameter is a plain `int` refuses an `int | None`
+column, and `PolarsFilter` can drop the null rows but leaves the type as it was.
+
+```python
+import pyarrow as pa
+from orcapod import function_pod
+from orcapod.operators import DropNulls
+from orcapod.sources import ArrowTableSource
+
+recordings = ArrowTableSource(
+    pa.table(
+        {
+            "session": pa.array(["s1", "s2", "s3"], pa.large_string()),
+            "start_ms": pa.array([1000, None, 3000], pa.int64()),
+        },
+        schema=pa.schema(
+            [
+                pa.field("session", pa.large_string(), nullable=False),
+                pa.field("start_ms", pa.int64(), nullable=True),
+            ]
+        ),
+    ),
+    tag_columns=["session"],
+)
+print(recordings.output_schema()[1])
+# Schema({'start_ms': int | None})
+
+
+@function_pod(output_keys="start_s")
+def to_seconds(start_ms: int) -> float:
+    return start_ms / 1000
+
+
+try:
+    to_seconds.pod(recordings)
+except ValueError as exc:
+    print(str(exc).rsplit(": ", 1)[1])
+# column 'start_ms' has type int | None, the function expects int
+
+present = DropNulls("start_ms")(recordings)
+print(present.output_schema()[1])
+# Schema({'start_ms': int})
+print(to_seconds.pod(present).as_table().to_pylist())
+# [{'session': 's1', 'start_s': 1.0}, {'session': 's3', 'start_s': 3.0}]
+```
+
+The rules:
+
+- **Columns.** Pass one name or a collection of names; a row survives only if every named
+  column is non-null. The names may be tag columns, data columns, or both. A name that is
+  not a tag or data column of the stream raises `InputValidationError`. With no argument
+  the columns are every tag and data column of the input. An empty collection is not "no
+  argument": it raises `ValueError`, so a list of names that came out empty never drops
+  rows by surprise.
+- **What counts as null.** Only the top-level value: a null list or a null struct is null. An
+  empty list, a list that holds nulls, a struct whose fields are null and a floating-point
+  NaN are not. Nested fields keep their nullability.
+- **Already non-nullable columns** are accepted and left as they are, so applying the
+  operator twice is the same as applying it once.
+- **Everything else is unchanged**: other columns' types and nullability, logical types
+  (a `Path | None` column becomes `Path`), system tags, source info and row order. A result
+  with no rows has the same narrowed schema.
+- **Identity** is the set of names: `DropNulls("a")`, `DropNulls(["a"])` and
+  `DropNulls({"a"})` are one operator, and the order of names does not matter.
+  `DropNulls()` has one fixed identity of its own, whatever stream it is applied to.
+- **Row hashes.** Nullability is part of a row's Arrow schema, so a surviving row's data
+  hash changes when a named data column was nullable (its tag hash, when a named tag column
+  was). The new hash is the one the row has in a stream that declared the column
+  non-nullable from the start.
+
+Tag columns work the same way. A stream whose key column is `str | None` cannot be joined
+with one whose key is `str` (`Join` never reconciles types), so narrow the key first. The
+stream method is `drop_nulls`:
+
+```python
+by_method = recordings.drop_nulls(["session", "start_ms"])
+by_operator = DropNulls(["start_ms", "session"])(recordings)
+print(by_method.pipeline_hash() == by_operator.pipeline_hash())
+# True
+```
+
+#### Every column
+
+`DropNulls()` and `stream.drop_nulls()`, with no names, drop every row that has a null in
+**any** tag or data column, and make every tag and data column non-nullable. System-tag,
+source-info, context and meta columns are never tested or changed.
+
+```python
+visits = ArrowTableSource(
+    pa.table(
+        {
+            "session": pa.array(["s1", "s2", "s3", "s4"], pa.large_string()),
+            "start_ms": pa.array([1000, None, 3000, 4000], pa.int64()),
+            "notes": pa.array([None, "noisy", None, "ok"], pa.large_string()),
+        }
+    ),
+    tag_columns=["session"],
+)
+print(visits.output_schema())
+# (Schema({'session': str | None}), Schema({'start_ms': int | None, 'notes': str | None}))
+
+complete = visits.drop_nulls()
+print(complete.output_schema())
+# (Schema({'session': str}), Schema({'start_ms': int, 'notes': str}))
+print(complete.as_table().to_pylist())
+# [{'session': 's4', 'start_ms': 4000, 'notes': 'ok'}]
+
+timed = visits.drop_nulls("start_ms")
+print(timed.as_table().to_pylist())
+# [{'session': 's1', 'start_ms': 1000, 'notes': None}, {'session': 's3', 'start_ms': 3000, 'notes': None}, {'session': 's4', 'start_ms': 4000, 'notes': 'ok'}]
+```
+
+!!! warning "The no-argument form can drop most of a table"
+
+    A null in any tag or data column drops the row, including a column that is empty for a
+    good reason. Above, `notes` is empty for most sessions, so three of the four rows are
+    gone although only one of them lacks `start_ms`. Sources whose columns are all nullable
+    are common: SpiralDB stores every column as nullable. For such a source, name the columns
+    a downstream step needs (`drop_nulls("start_ms")`); that is the precise form. Use the
+    no-argument form only when every column must be present.
+
+The column names are read from each input stream when the operator is applied, so one
+`DropNulls()` object works on any stream. On the same stream it gives the rows and schema
+of `DropNulls([every tag and data column])`, but the two are different operators: their
+identities, and so the pipeline and content hashes of their output streams, differ.
+
+```python
+by_name = DropNulls(["session", "start_ms", "notes"])(visits)
+print(complete.as_table() == by_name.as_table())
+# True
+print(complete.pipeline_hash() == by_name.pipeline_hash())
+# False
+```
+
 ### Pick and Index
 
 `Pick(column, key)` extracts one entry from a struct- or dict-typed data column, and
@@ -464,8 +607,8 @@ operators or function pods.
 
 Every stream also exposes the operators as methods, which reads well when chaining:
 `join`, `semi_join`, `batch`, `group_by`, `select_tag_columns`, `select_data_columns`,
-`drop_tag_columns`, `drop_data_columns`, `map_tags`, `map_data`, `polars_filter`, `pick` and
-`index`.
+`drop_tag_columns`, `drop_data_columns`, `map_tags`, `map_data`, `polars_filter`,
+`drop_nulls`, `pick` and `index`.
 
 ```python
 import polars as pl

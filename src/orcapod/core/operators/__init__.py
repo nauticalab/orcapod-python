@@ -5,6 +5,7 @@ from .column_selection import (
     SelectDataColumns,
     SelectTagColumns,
 )
+from .drop_nulls import DropNulls
 from .filters import PolarsFilter
 from .group_by import GroupBy
 from .index import Index
@@ -27,6 +28,7 @@ __all__ = [
     "DropTagColumns",
     "DropDataColumns",
     "PolarsFilter",
+    "DropNulls",
     "Pick",
     "Index",
 ]
