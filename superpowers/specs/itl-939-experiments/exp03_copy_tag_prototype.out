@@ -1,0 +1,53 @@
+
+=== 1. CopyTagsToData({'session_start_datetime': 'session_start'})(experiment)
+keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id', 'session_start'))
+output_schema(): (Schema({'subject_id': str, 'session_start_datetime': datetime, 'experiment_index': int}), Schema({'experiment_start_timestamp': int, 'task_id': str, 'session_start': datetime}))
+as_table() columns: ['subject_id', 'session_start_datetime', 'experiment_index', 'experiment_start_timestamp', 'task_id', 'session_start']
+as_table(all_info) source cols: ['_source_experiment_start_timestamp', '_source_task_id', '_source_session_start']
+first iter_data(): {'subject_id': 'm1', 'session_start_datetime': datetime.datetime(2026, 1, 5, 9, 0, tzinfo=<UTC>), 'experiment_index': 0} | {'experiment_start_timestamp': 1767603660000000, 'task_id': 'fv', 'session_start': datetime.datetime(2026, 1, 5, 9, 0, tzinfo=<UTC>)}
+prediction matches static_process: True
+... also with columns={'source': True} (no stream lists _source_ columns): True
+validation {'session_start_datetime': 'x', 'experiment_index': 'x'} -> Copy names given twice: ['x']
+validation {'session_start_datetime': '_tag_x'} -> Copy names use a reserved prefix: ['_tag_x']
+validation {'session_start_datetime': 'task_id'} -> Copy names already used: ['task_id']
+validation {'task_id': 't'} -> Not tag columns: ['task_id']
+
+=== 2. pod on the copy, then Join with session on the shared keys
+subject_id    session_start_datetime  experiment_index  elapsed_s
+        m1 2026-01-05 09:00:00+00:00                 0       60.0
+        m1 2026-01-05 09:00:00+00:00                 1      900.0
+        m1 2026-01-06 09:30:00+00:00                 0      120.0
+        m1 2026-01-06 09:30:00+00:00                 1     1500.0
+        m2 2026-01-05 14:00:00+00:00                 0       30.0
+Join keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('elapsed_s', 'session_end_datetime', 'booth'))
+Join rows: 5 (correct answer is 5)
+
+=== 3. data content hashes: copy operator vs W2 recipe
+W2   : ['0000010a32d6e31d', '0000013cf1b7d4b6', '0000015580845c4e', '000001f61309a9d4', '000001a9540942f5']
+copy : ['0000010a32d6e31d', '0000013cf1b7d4b6', '0000015580845c4e', '000001f61309a9d4', '000001a9540942f5']
+per-row data hashes equal (so pod result caches agree): True
+pipeline_hash experiment (unchanged by the feature): 2f5010529f9699fb
+pipeline_hash after copy: fdfa84ca9228fe58
+pipeline_hash W2 source : 8b20348fe422942c
+
+=== 4. two rows, same data, different tags -> same input data hash
+data hashes: ['00000138a40c4de2', '00000138a40c4de2']
+-> a pod that read session_start_datetime from the TAG would get one cached result
+   for both rows (ResultCache keys on the input data hash only).
+with the copy, data hashes: ['00000162e219798e', '000001ed3ee152c9']
+
+=== 5. nullable tag -> nullable copy
+tag schema : Schema({'subject_id': str | None, 'session_start_datetime': datetime.datetime | None})
+data schema: Schema({'experiment_start_timestamp': int | None, 'session_start': datetime.datetime | None})
+arrow field: pyarrow.Field<session_start: timestamp[us, tz=UTC]>
+
+=== 6. copy, then GroupBy(by=['subject_id', 'session_start_datetime'])
+keys(): (('subject_id', 'session_start_datetime'), ('experiment_index', 'experiment_start_timestamp', 'task_id', 'experiment_idx'))
+output_schema(): (Schema({'subject_id': str, 'session_start_datetime': datetime}), Schema({'experiment_index': list[int], 'experiment_start_timestamp': list[int], 'task_id': list[str], 'experiment_idx': list[int]}))
+subject_id    session_start_datetime experiment_index experiment_idx
+        m1 2026-01-05 09:00:00+00:00           [0, 1]         [0, 1]
+        m1 2026-01-06 09:30:00+00:00           [0, 1]         [0, 1]
+        m2 2026-01-05 14:00:00+00:00              [0]            [0]
+
+=== 7. the copy is ordinary data afterwards
+MapData on the copy leaves the tag alone: (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id', 't0'))

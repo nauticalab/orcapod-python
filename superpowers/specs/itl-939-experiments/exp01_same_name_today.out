@@ -1,0 +1,56 @@
+
+--- 1. ArrowTableSource on a table with a duplicated field name
+RAISES KeyError: 'Field "session_start_datetime" exists 2 times in schema'
+   raised at orcapod/core/sources/stream_builder.py:185 (build)
+
+--- 2. Baseline: a key column is a tag and nothing else
+OK: (('subject_id', 'session_start_datetime'), ('session_end_datetime',))
+
+--- 3. MapData renames data 'session_end_datetime' -> tag name 'session_start_datetime'
+RAISES InputValidationError: Renaming {'session_end_datetime': 'session_start_datetime'} would cause collisions with existing columns: overlapping tag columns: {'session_start_datetime'}.
+   raised at orcapod/core/operators/mappers.py:104 (validate_unary_input)
+
+--- 4. MapTags renames tag 'session_start_datetime' -> data name 'session_end_datetime'
+RAISES InputValidationError: Renaming {'session_start_datetime': 'session_end_datetime'} would cause collisions with existing columns: overlapping data columns: {'session_end_datetime'}.
+   raised at orcapod/core/operators/mappers.py:245 (validate_unary_input)
+
+--- 5. function pod output key == tag name: building the stream
+OK: (('subject_id', 'session_start_datetime'), ('session_start_datetime',))
+
+--- 5b. ... and materialising it (as_table)
+RAISES ValueError: Duplicate column name 'session_start_datetime' found in input tables.
+   raised at orcapod/utils/arrow_utils.py:681 (hstack_tables)
+
+--- 6. Join(A[tag: session_start_datetime], B[data: session_start_datetime]) keys
+OK: (('subject_id', 'session_start_datetime'), ('session_start_datetime', 'weight_g', 'session_end_datetime'))
+
+--- 6b. ... and materialising it
+RAISES KeyError: 'Field "session_start_datetime" exists 2 times in schema'
+   raised at orcapod/utils/arrow_utils.py:794 (split_by_column_groups)
+
+--- 7. MergeJoin(A, B) with the same shapes
+OK: (('subject_id', 'session_start_datetime'), ('session_start_datetime', 'weight_g', 'session_end_datetime'))
+
+--- 7b. ... and materialising it
+RAISES KeyError: 'Field "session_start_datetime" exists 2 times in schema'
+   raised at orcapod/utils/arrow_utils.py:794 (split_by_column_groups)
+
+--- 8. SemiJoin(A, B) with the same shapes
+OK: (('subject_id', 'session_start_datetime'), ('session_end_datetime',))
+
+--- 8b. ... and materialising it
+OK: ['subject_id', 'session_start_datetime', 'session_end_datetime']
+
+--- 9. pod with a parameter named after a TAG column
+RAISES ValueError: Incoming data schema Schema({'session_end_datetime': datetime}) is not compatible with expected input schema Schema({'session_start_datetime': datetime, 'session_end_datetime': datetime}): required parameter 'session_start_datetime' has no matching column
+   raised at orcapod/core/function_pod.py:246 (_validate_input_schema)
+
+--- 10. iter_data() of the pod whose output key == tag name
+OK: [({'subject_id': 'm1', 'session_start_datetime': datetime.datetime(2026, 1, 5, 9, 0, tzinfo=<UTC>)}, {'session_start_datetime': datetime.datetime(2026, 1, 5, 11, 0, tzinfo=<UTC>)}), ({'subject_id': 'm2', 'session_start_datetime': datetime.datetime(2026, 1, 6, 9, 30, tzinfo=<UTC>)}, {'session_start_datetime': datetime.datetime(2026, 1, 6, 10, 30, tzinfo=<UTC>)})]
+
+--- 10b. iter_data() of Join(A[tag], B[data]) sharing the name
+RAISES KeyError: 'Field "session_start_datetime" exists 2 times in schema'
+   raised at orcapod/utils/arrow_utils.py:794 (split_by_column_groups)
+
+--- 10c. output_schema() of that Join (graph-build time, no error)
+OK: (Schema({'subject_id': str, 'session_start_datetime': datetime}), Schema({'session_start_datetime': datetime, 'weight_g': float, 'session_end_datetime': datetime}))

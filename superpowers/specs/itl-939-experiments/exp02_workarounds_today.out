@@ -1,0 +1,69 @@
+
+=== baseline: experiment, primary keys as tags
+keys(): ('subject_id', 'session_start_datetime', 'experiment_index') | ('experiment_start_timestamp', 'task_id')
+system tag columns: ['_tag_source_id::2f5010529f9699fb979a8b8890eac628986aa1b9dfdf28b9e1511e1027b92d9c', '_tag_record_id::2f5010529f9699fb979a8b8890eac628986aa1b9dfdf28b9e1511e1027b92d9c']
+pipeline_hash: 2f5010529f9699fb
+content_hash:  a5433dd4e4bb3e14
+
+=== W1 source: tag_columns without session_start_datetime
+keys(): ('subject_id', 'experiment_index') | ('session_start_datetime', 'experiment_start_timestamp', 'task_id')
+system tag columns: ['_tag_source_id::a7dc658ce5a5561333dfb331a20e3bcad12c5cc09ae67b4924886ed50ac3cd22', '_tag_record_id::a7dc658ce5a5561333dfb331a20e3bcad12c5cc09ae67b4924886ed50ac3cd22']
+pipeline_hash: a7dc658ce5a55613
+content_hash:  1503fb49d0400254
+W1 pod output:
+subject_id  experiment_index  elapsed_s
+        m1                 0       60.0
+        m1                 1      900.0
+        m1                 0      120.0
+        m1                 1     1500.0
+        m2                 0       30.0
+W1 Join keys(): (('subject_id', 'experiment_index', 'session_start_datetime'), ('elapsed_s', 'session_end_datetime', 'booth'))
+W1 Join rows: 9 (5 experiments; correct answer is 5)
+subject_id  experiment_index    session_start_datetime  elapsed_s
+        m1                 0 2026-01-05 09:00:00+00:00       60.0
+        m1                 0 2026-01-06 09:30:00+00:00       60.0
+        m1                 1 2026-01-05 09:00:00+00:00      900.0
+        m1                 1 2026-01-06 09:30:00+00:00      900.0
+        m1                 0 2026-01-05 09:00:00+00:00      120.0
+        m1                 0 2026-01-06 09:30:00+00:00      120.0
+        m1                 1 2026-01-05 09:00:00+00:00     1500.0
+        m1                 1 2026-01-06 09:30:00+00:00     1500.0
+        m2                 0 2026-01-05 14:00:00+00:00       30.0
+
+=== W2 source: column copied to 'session_start' before the source
+keys(): ('subject_id', 'session_start_datetime', 'experiment_index') | ('experiment_start_timestamp', 'task_id', 'session_start')
+system tag columns: ['_tag_source_id::8b20348fe422942ca1556d440478e906f6919d51cbdb1dc72b89ab09ec0659f8', '_tag_record_id::8b20348fe422942ca1556d440478e906f6919d51cbdb1dc72b89ab09ec0659f8']
+pipeline_hash: 8b20348fe422942c
+content_hash:  72a1d858497356fc
+W2 pod output:
+subject_id    session_start_datetime  experiment_index  elapsed_s
+        m1 2026-01-05 09:00:00+00:00                 0       60.0
+        m1 2026-01-05 09:00:00+00:00                 1      900.0
+        m1 2026-01-06 09:30:00+00:00                 0      120.0
+        m1 2026-01-06 09:30:00+00:00                 1     1500.0
+        m2 2026-01-05 14:00:00+00:00                 0       30.0
+W2 Join keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('elapsed_s', 'session_end_datetime', 'booth'))
+W2 Join rows: 5 (correct answer is 5)
+
+=== W2' re-rooted mid-pipeline (lineage to 'experiment'/'session' is cut)
+keys(): ('subject_id', 'session_start_datetime', 'experiment_index') | ('experiment_start_timestamp', 'task_id', 'session_end_datetime', 'booth', 'session_start')
+system tag columns: ['_tag_source_id::d2b9520533cf541c1cb9ed18e896395643694510b9e09757a38d3775af34ddf5', '_tag_record_id::d2b9520533cf541c1cb9ed18e896395643694510b9e09757a38d3775af34ddf5']
+pipeline_hash: d2b9520533cf541c
+content_hash:  a64d488e1ca866a1
+W2' upstreams of the new source: ()
+
+=== W3: Join(keys-as-tags read, column-as-data read)
+W3 Join keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id', 'session_start'))
+W3 Join rows: 9 (5 experiments; >5 means a wrong pairing)
+subject_id    session_start_datetime  experiment_index             session_start
+        m1 2026-01-05 09:00:00+00:00                 0 2026-01-05 09:00:00+00:00
+        m1 2026-01-06 09:30:00+00:00                 0 2026-01-05 09:00:00+00:00
+        m1 2026-01-05 09:00:00+00:00                 1 2026-01-05 09:00:00+00:00
+        m1 2026-01-06 09:30:00+00:00                 1 2026-01-05 09:00:00+00:00
+        m1 2026-01-05 09:00:00+00:00                 0 2026-01-06 09:30:00+00:00
+        m1 2026-01-06 09:30:00+00:00                 0 2026-01-06 09:30:00+00:00
+        m1 2026-01-05 09:00:00+00:00                 1 2026-01-06 09:30:00+00:00
+        m1 2026-01-06 09:30:00+00:00                 1 2026-01-06 09:30:00+00:00
+        m2 2026-01-05 14:00:00+00:00                 0 2026-01-05 14:00:00+00:00
+
+W4 MapTags keys(): (('subject_id', 'session_start', 'experiment_index'), ('experiment_start_timestamp', 'task_id'))

@@ -1,0 +1,13 @@
+=== F1. primary keys only: Join(penetration, probe) shares no tag
+keys(): (('probe_id', 'subject_id', 'session_start_datetime', 'recording_index', 'probe_index'), ('probe_model', 'probe_id', 'probe_plan_chamber_z_um'))
+RAISES KeyError: 'Field "probe_id" exists 2 times in schema'
+
+=== F2. today's recipe: list probe_id among the tag_columns at the source
+keys(): (('probe_id', 'subject_id', 'session_start_datetime', 'recording_index', 'probe_index'), ('probe_model', 'probe_plan_chamber_z_um'))
+rows: 2 (correct answer is 2)
+
+=== F3. after a pod, a data column cannot become a tag (no operator does it)
+pod output keys(): (('subject_id', 'session_start_datetime', 'recording_index', 'probe_index'), ('probe_id', 'depth_mm'))
+Join(pod output, probe) keys(): (('probe_id', 'subject_id', 'session_start_datetime', 'recording_index', 'probe_index'), ('probe_model', 'probe_id', 'depth_mm'))
+-> probe_id stays data; joining on it needs the column as a tag, which only
+   re-rooting (as_table() + a new source) can do today.

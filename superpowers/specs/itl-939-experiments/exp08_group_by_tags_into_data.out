@@ -1,0 +1,17 @@
+input   keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id'))
+
+=== GroupBy(by=['subject_id'])
+grouped keys(): (('subject_id',), ('session_start_datetime', 'experiment_index', 'experiment_start_timestamp', 'task_id'))
+tag schema : {'subject_id': <class 'str'>}
+data schema: {'session_start_datetime': list[datetime.datetime], 'experiment_index': list[int], 'experiment_start_timestamp': list[int], 'task_id': list[str]}
+subject_id: ['m1', 'm2']
+experiment_index: [[0, 1, 0, 1], [0]]
+session_start_datetime: [[datetime.datetime(2026, 1, 5, 9, 0, tzinfo=<UTC>), datetime.datetime(2026, 1, 5, 9, 0, tzinfo=<UTC>), datetime.datetime(2026, 1, 6, 9, 30, tzinfo=<UTC>), datetime.datetime(2026, 1, 6, 9, 30, tzinfo=<UTC>)], [datetime.datetime(2026, 1, 5, 14, 0, tzinfo=<UTC>)]]
+task_id: [['fv', 'fv', 'fv', 'gz'], ['fv']]
+_source_experiment_index: [None, None]
+_source_session_start_datetime: [None, None]
+_source_task_id[0]: ['experiment::row_0::task_id', 'experiment::row_1::task_id', 'experiment::row_2::task_id', 'experiment::row_3::task_id']
+a pod reads the former tag as data: [('m1', 1), ('m2', 0)]
+
+=== Batch(batch_size=2), for contrast
+batched keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id'))

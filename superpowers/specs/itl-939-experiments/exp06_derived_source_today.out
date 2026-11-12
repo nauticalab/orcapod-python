@@ -1,0 +1,46 @@
+Could not reconstruct source 'task_upper/semantic_v0.1:1ff935c50b4cf132006958d4847e0bba396f01c5725c7aca4d06f5456de8c5fe/v0/python.function.v0/schema:semantic_v0.1:401f8c2616b1a4206f0c1278579bb8bd9cbe35549e1a8b88b3ddcd616864fa2d:semantic_v0.1:85ebd3e8bf0e7ba9aab8d86b78d64fae35f513b83fb4106a6476781f13a290b3' from config — skipping.
+Loading pipeline with in-memory database. Cached data from the original run is not available — nodes will have UNAVAILABLE status.
+=== 1. where a DerivedSource comes from
+RootSource.as_source: AttributeError: 'ArrowTableSource' object has no attribute 'as_source' [exp06_derived_source_today.py:67]
+in-memory pod stream .as_source: AttributeError: 'FunctionPodStream' object has no attribute 'as_source' [exp06_derived_source_today.py:70]
+DerivedSource(origin=<a source>): AttributeError: 'ArrowTableSource' object has no attribute 'get_all_records' [derived_source.py:78]
+type: DerivedSource | origin: FunctionJobNode
+
+=== 2. before the origin has run
+rows: 0 | keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('task_upper',))
+after run, same object rows: 0 (cached empty table)
+after run, new as_source() rows: 5
+
+=== 3. tag/data assignment
+origin keys():  (('subject_id', 'session_start_datetime', 'experiment_index'), ('task_upper',))
+derived keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('task_upper',))
+DerivedSource(origin, tag_columns=...): TypeError: RootSource.__init__() got an unexpected keyword argument 'tag_columns' [derived_source.py:52]
+
+=== 4. provenance columns: origin node vs derived source
+origin : ['_tag_source_id::2f5010529f9699fb979a8b8890eac628986aa1b9dfdf28b9e1511e1027b92d9c', '_tag_record_id::2f5010529f9699fb979a8b8890eac628986aa1b9dfdf28b9e1511e1027b92d9c']
+derived: ['_source_task_upper']
+derived.source_id: task_upper/semantic_v0.1:1ff935c50b4cf132006958d4847e0bba396f01c5725c7aca4d06f5456de8c5fe/v0/python.function.v0/schema:semantic_v0.1:401f8c2616b1a4206f0c1278579bb8bd9cbe35549e1a8b88b3ddcd616864fa2d:semantic_v0.1:85ebd3e8bf0e7ba9aab8d86b78d64fae35f513b83fb4106a6476781f13a290b3
+origin all columns : ['subject_id', 'session_start_datetime', 'experiment_index', '_tag_source_id::2f5010529f9699fb979a8b88', '_tag_record_id::2f5010529f9699fb979a8b88', 'task_upper', '_content_hash']
+derived all columns: ['subject_id', 'session_start_datetime', 'experiment_index', 'task_upper', '_content_hash', '_context_key', '_source_task_upper']
+derived _source_task_upper[0]: None
+
+=== 5. identity
+origin  content_hash : 85ebd3e8bf0e7ba9
+derived content_hash : b58441c37d807868
+origin  pipeline_hash: 401f8c2616b1a420
+derived pipeline_hash: 715f63b3fd438b6c
+derived.upstreams: () | producer: None
+
+=== 6. a DerivedSource inside a second PipelineJob
+sync run: OK -> None
+sync rows: OK -> 5
+async run: OK -> None
+async rows: OK -> 5
+to_config: AttributeError: 'DerivedSource' object has no attribute 'to_config' [exp06_derived_source_today.py:136]
+job2.save: OK -> None
+PipelineJob.load: OK -> PipelineJob(sources=0, store=True, compiled=True)
+loaded unbound sources: ['task_upper/semantic_v0.1:1ff935c50b4cf132006958d4847e0bba396f01c5725c7aca4d06f5456de8c5fe/v0/python.function.v0/schema:semantic_v0.1:401f8c2616b1a4206f0c1278579bb8bd9cbe35549e1a8b88b3ddcd616864fa2d:semantic_v0.1:85ebd3e8bf0e7ba9aab8d86b78d64fae35f513b83fb4106a6476781f13a290b3']
+
+=== 7. downstream of today's DerivedSource (it carries no system tags)
+run 1: rows out 5, stored records 5 | input task_upper values: ['FV', 'FV', 'FV', 'FV', 'GZ']
+run 2: rows out 5, stored records 5 | input task_upper values: ['FV', 'FV', 'FV', 'FV', 'GZ']

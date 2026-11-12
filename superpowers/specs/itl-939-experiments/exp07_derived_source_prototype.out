@@ -1,0 +1,58 @@
+Could not reconstruct source 'probe' from config — skipping.
+=== 1. columns
+origin  keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id'))
+derived keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('experiment_start_timestamp', 'task_id', 'session_start'))
+derived output_schema(): (Schema({'subject_id': str, 'session_start_datetime': datetime, 'experiment_index': int}), Schema({'experiment_start_timestamp': int, 'task_id': str, 'session_start': datetime}))
+tag field : pyarrow.Field<session_start_datetime: timestamp[us, tz=UTC] not null>
+copy field: pyarrow.Field<session_start: timestamp[us, tz=UTC] not null>
+copy equals tag: True
+
+=== 2. provenance: a new source
+origin : ['_tag_source_id::2f5010529f9699fb97', '_tag_record_id::2f5010529f9699fb97', '_source_experiment_start_timestamp', '_source_task_id']
+derived: ['_tag_source_id::8b20348fe422942ca1', '_tag_record_id::8b20348fe422942ca1', '_source_experiment_start_timestamp', '_source_task_id', '_source_session_start']
+source_id: experiment -> derived:experiment
+_source_session_start[0]: derived:experiment::row_0::session_start
+_source_task_id[0] origin/derived: experiment::row_0::task_id / derived:experiment::row_0::task_id
+record id values equal the origin's: False
+... with source_id='experiment' passed explicitly: True
+upstreams: ()
+
+=== 3. nullable tag -> nullable copy
+copy field: pyarrow.Field<session_start: timestamp[us, tz=UTC]>
+python type: datetime.datetime | None
+
+=== 4. the elapsed-time pod and the Join with session
+rows: 5 | keys(): (('subject_id', 'session_start_datetime', 'experiment_index'), ('elapsed_s', 'session_end_datetime', 'booth'))
+
+=== 5. Join(derived, original)
+InputValidationError: Input streams are not compatible: Datas should not have overlapping keys, but KeysView(Schema({'experiment_start_timestamp': int, 'task_id': str, 'session_start
+Join(derived[copy only], original) rows: 5
+
+=== 6. hashes
+origin : content a5433dd4e4bb3e14 pipeline 2f5010529f9699fb
+derived: content d91991214aaab55d pipeline 8b20348fe422942c
+recipe : content 72a1d858497356fc pipeline 8b20348fe422942c
+with source_id='experiment', as the recipe passes by hand:
+  system-tag and source-info columns equal the recipe's: True
+  all columns and values equal the recipe's: True
+pod output pipeline_hash equal the recipe's: True
+origin hashes after deriving: a5433dd4e4bb3e14 2f5010529f9699fb
+
+=== 7. PipelineJob over a file-backed DB table source, both orchestrators, save/load
+sync keys: (('probe_id', 'name'), ('n',)) | n: [5, 4, 5]
+async keys: (('probe_id', 'name'), ('n',)) | n: [5, 4, 5]
+loaded unbound sources: []
+loaded sources: {'derived:probe': 'ProtoDerivedSource'}
+reloaded source keys(): (('probe_id', 'name'), ('channels', 'name_copy'))
+reloaded copy: ['alpha', 'beta', 'gamma']
+reloaded content_hash equal: True
+node pipeline_hash equal after reload: True
+
+=== 7b. origin and derived source used in one job
+sources: ['probe', 'derived:probe'] | rows: 3
+with the origin's source_id: InconsistentSourceError: Pipeline 'clash' has 2 source nodes all named 'probe' but with different schemas. Assign distinct source_id values to th
+
+=== 8. the hand-written recipe saved and loaded (for contrast)
+recipe, copy by name   : pyarrow.Field<name_copy: large_string>
+recipe, copy with field: pyarrow.Field<name_copy: large_string not null>
+recipe loaded unbound sources: ['probe']
