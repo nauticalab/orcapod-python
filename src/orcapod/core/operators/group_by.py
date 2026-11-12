@@ -20,6 +20,27 @@ else:
     pa = LazyModule("pyarrow")
 
 
+def _null_last_key(value: Any) -> tuple[Any, ...]:
+    """Build an order key that sorts nulls last, at any list depth.
+
+    The leading integer keeps a null comparable against a real value of any
+    type.  A list is keyed element by element, so a list-valued tag that holds
+    a null (the non-key tag of an already grouped stream) still compares.
+
+    Args:
+        value: A tag or system-tag value: a scalar, ``None``, or a list of
+            these nested to any depth.
+
+    Returns:
+        A tuple that orders values ascending, with nulls after every value.
+    """
+    if value is None:
+        return (1,)
+    if isinstance(value, list):
+        return (0, tuple(_null_last_key(v) for v in value))
+    return (0, value)
+
+
 class GroupBy(UnaryOperator):
     """Reduce rows sharing a tag tuple into one packet with list-valued members.
 
@@ -31,16 +52,21 @@ class GroupBy(UnaryOperator):
     Given tags ``(subject, date, probe)`` and data ``(path)``, grouping by
     ``["subject", "date"]`` emits one row per distinct ``(subject, date)``:
 
-    * ``subject`` and ``date`` stay scalar and remain the output's tag columns
-    * ``probe`` becomes a list-valued **data** column, so a consumer can tell
-      which member each list element came from
+    * ``subject`` and ``date`` stay scalar tag columns
+    * ``probe`` stays a **tag** column and becomes list-valued, one element
+      per member, exactly as ``Batch`` keeps its tags.  The tag columns of the
+      output are the tag columns of the input, in the same order.
     * ``path`` becomes list-valued
-    * the ``_source_*`` column of each original data column becomes
-      list-valued, one element per member.  A promoted tag column such as
-      ``probe`` had no provenance token to begin with, so its ``_source_probe``
-      is the scalar null the stream fills in, not a list.
+    * the ``_source_*`` column of each data column becomes list-valued, one
+      element per member
     * system-tag columns fold to a scalar digest and gain a
       ``::{pipeline_hash}`` name suffix
+
+    No data element ever comes from a tag value: ``GroupBy`` uses tags to form
+    groups, but the data columns of the output are exactly the data columns of
+    the input.  A function pod downstream therefore receives only ``path``; if
+    it needs to know which member each element came from, that value has to
+    be a data column of the input.
 
     Members are sorted by their non-group-key tag values, with ``record_id``
     appended as a final tiebreaker, so the emitted lists are stable across
@@ -56,8 +82,12 @@ class GroupBy(UnaryOperator):
     is materialized -- so their order is stable for a given source table, but
     undefined if the source table itself is permuted.
 
+    A grouped stream can be grouped again on a coarser key: its list-valued
+    tags nest one level deeper (``list[list[T]]``), as source info does.  A
+    list-valued tag can order members but cannot be a grouping key.
+
     Contrast with ``Batch``, which partitions by row count for throughput and
-    keeps its tag columns as list-valued tags.
+    makes every tag column list-valued, having no scalar keys.
 
     Args:
         by: Tag column names to group on.  Must be non-empty, free of
@@ -144,7 +174,9 @@ class GroupBy(UnaryOperator):
             stream: The upstream stream.
 
         Returns:
-            A stream with one row per distinct group-key tuple.
+            A stream with one row per distinct group-key tuple, whose tag
+            columns are the input's tag columns: group keys scalar, every
+            other tag list-valued.
         """
         table = stream.as_table(columns={"source": True, "system_tags": True})
         tag_columns, _ = stream.keys()
@@ -188,13 +220,11 @@ class GroupBy(UnaryOperator):
         # Emit groups in key order rather than first-appearance order, so a
         # reordered input produces a byte-identical output table.
         for key, members in sorted(
-            groups.items(), key=lambda kv: tuple((v is None, v) for v in kv[0])
+            groups.items(), key=lambda kv: tuple(_null_last_key(v) for v in kv[0])
         ):
             if sort_columns:
-                # The leading bool keeps a null comparable against a real
-                # value of any type, and sorts nulls last.
                 members.sort(
-                    key=lambda r: tuple((r[c] is None, r[c]) for c in sort_columns)
+                    key=lambda r: tuple(_null_last_key(r[c]) for c in sort_columns)
                 )
 
             grouped_rows.append(
@@ -222,9 +252,12 @@ class GroupBy(UnaryOperator):
             grouped_table, stream.pipeline_hash().to_hex(n_char)
         )
 
+        # Every input tag stays a tag (ITL-955): the non-key ones are the
+        # list-valued member columns built above.  Declaring only `self.by`
+        # here would let them fall into the data group.
         return ArrowTableStream(
             grouped_table,
-            tag_columns=self.by,
+            tag_columns=tag_columns,
             data_context=stream.data_context,
         )
 
@@ -247,30 +280,25 @@ class GroupBy(UnaryOperator):
             all_info: Include all info columns.
 
         Returns:
-            A ``(tag_schema, data_schema)`` tuple.  Group keys stay scalar in
-            the tag schema; promoted non-key tags and list-wrapped data columns
-            land in the data schema.
+            A ``(tag_schema, data_schema)`` tuple.  The tag schema holds the
+            input's tags in input order: group keys scalar, every other user
+            tag ``list[T]``, system tags scalar under their suffixed names.
+            The data schema holds the input's data columns as ``list[T]``.
         """
         tag_types, data_types = stream.output_schema(columns=columns, all_info=all_info)
         n_char = self.orcapod_config.hashing.system_tag_n_char
         suffix = stream.pipeline_hash().to_hex(n_char)
 
         out_tag_types: dict[str, Any] = {}
-        out_data_types: dict[str, Any] = {}
-
         for name, col_type in tag_types.items():
             if name.startswith(constants.SYSTEM_TAG_PREFIX):
                 out_tag_types[f"{name}{constants.BLOCK_SEPARATOR}{suffix}"] = col_type
             elif name in self.by:
                 out_tag_types[name] = col_type
             else:
-                # Promoted to a list-valued data column.  No `_source_*` entry
-                # is emitted: `ArrowTableStream.output_schema` returns the data
-                # schema unconditionally, so `columns.source` is a no-op at the
-                # schema level even though `as_table` does add those columns.
-                out_data_types[name] = list[col_type]
+                # A non-key tag stays a tag, list-valued (ITL-955).
+                out_tag_types[name] = list[col_type]
 
-        for name, col_type in data_types.items():
-            out_data_types[name] = list[col_type]
+        out_data_types = {name: list[t] for name, t in data_types.items()}
 
         return Schema(out_tag_types), Schema(out_data_types)

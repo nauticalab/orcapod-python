@@ -28,6 +28,10 @@ a tag tuple into a single row with list-valued members. It stays on the operator
 boundary because it synthesizes no new data values -- every element of every emitted list came
 from an input row -- and it keys only on tags, never on data content.
 
+One rule holds for every operator: **no data element comes from a tag value**. An operator may
+use tags to join, filter, group or order rows, but it never turns a tag column into a data
+column, so a function pod never receives tag content.
+
 ## Operator categories
 
 ### `UnaryOperator` -- single input
@@ -209,19 +213,35 @@ source = DictSource(
     tag_columns=["subject_id", "probe"],
 )
 
-grouped = GroupBy(by=["subject_id"]).process(source)
+grouped = GroupBy(by=["subject_id"])(source)
+print(grouped.keys())
+# (('subject_id', 'probe'), ('spike_count',))
 for tag, data in grouped.iter_data():
     print("Tags:", tag.as_dict(), "Data:", data.as_dict())
-    # Tags: {'subject_id': 'mouse_01'} Data: {'probe': ['imec0', 'imec1'], 'spike_count': [1200, 980]}
-    # Tags: {'subject_id': 'mouse_02'} Data: {'probe': ['imec0'], 'spike_count': [1450]}
+    # Tags: {'subject_id': 'mouse_01', 'probe': ['imec0', 'imec1']} Data: {'spike_count': [1200, 980]}
+    # Tags: {'subject_id': 'mouse_02', 'probe': ['imec0']} Data: {'spike_count': [1450]}
 ```
 
 The output schema follows three rules:
 
-- **Group keys stay scalar** and remain the output's tag columns (`subject_id: str`).
-- **Non-key tag columns are promoted to list-valued data columns** (`probe: list[str]`), so a
-  consumer can tell which member each list element came from.
+- **Group keys stay scalar tag columns** (`subject_id: str`).
+- **Non-key tag columns stay tag columns and become list-valued** (`probe: list[str]`), one
+  element per member, in the same order as the data lists. The output's tag columns are the
+  input's tag columns, in the same order. This is what `Batch` does with its tags too.
 - **Data columns become `list[T]`** (`spike_count: list[int]`).
+
+The data columns of the output are exactly the data columns of the input. A function pod that
+follows `GroupBy` receives `spike_count` only; it cannot read `probe`, because a pod never sees
+tags. If the function needs to know which member each element came from, make that value a data
+column of the source. To remove the list-valued tags, use `drop_tag_columns`:
+
+```python
+print(grouped.drop_tag_columns(["probe"]).keys())
+# (('subject_id',), ('spike_count',))
+```
+
+A grouped stream can be grouped again on a coarser key. Its list-valued tags then nest one level
+deeper (`list[list[T]]`), like the data lists.
 
 Ordering is deterministic by construction, because orcapod hashes the emitted lists to build
 cache keys: members are sorted by their non-key tag values (with the internal record id as a
@@ -230,8 +250,8 @@ produces a byte-identical output table.
 
 Every name in `by` must be a **scalar tag column** of the input. `GroupBy` raises
 `InputValidationError` for an unknown column, a data column, or a list-valued tag column --
-the last usually means the stream came from `Batch`, so group *before* batching rather than
-after.
+the last means the stream came from `Batch` or from an earlier `GroupBy` that did not key on
+that column, so group *before* batching rather than after.
 
 Streams also expose this as a fluent method:
 

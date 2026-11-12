@@ -156,7 +156,8 @@ class StreamBase(TraceableBase):
         """Reduce rows sharing a tag tuple into one packet per group.
 
         Group-key columns stay scalar tags; every other column becomes
-        list-valued.  See ``orcapod.core.operators.GroupBy``.
+        list-valued and stays in its group: a non-key tag stays a tag, a data
+        column stays data.  See ``orcapod.core.operators.GroupBy``.
 
         Args:
             by: Tag column names to group on.

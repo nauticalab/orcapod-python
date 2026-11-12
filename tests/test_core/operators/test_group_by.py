@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import get_origin
 
 import pyarrow as pa
 import pytest
@@ -47,15 +48,12 @@ class TestGroupByShape:
     def test_group_keys_are_scalar_tags(self, session_source):
         op = GroupBy(by=["subject", "date"])
         out = op.process(session_source)
-        tag_cols, _ = out.keys()
-        assert set(tag_cols) == {"subject", "date"}
+        in_tag_schema, _ = session_source.output_schema()
+        tag_schema, _ = out.output_schema()
+        assert tag_schema["subject"] == in_tag_schema["subject"]
+        assert tag_schema["date"] == in_tag_schema["date"]
         assert out.as_table().column("subject").to_pylist() == ["G", "G"]
-
-    def test_non_key_tags_promoted_to_list_data(self, session_source):
-        out = GroupBy(by=["subject", "date"]).process(session_source)
-        _, data_cols = out.keys()
-        assert "probe" in data_cols
-        assert out.as_table().column("probe").to_pylist() == [[0, 1], [0, 1]]
+        assert out.as_table().column("date").to_pylist() == ["d1", "d2"]
 
     def test_data_columns_are_lists(self, session_source):
         out = GroupBy(by=["subject", "date"]).process(session_source)
@@ -81,6 +79,136 @@ class TestGroupByShape:
             assert col.count(constants.BLOCK_SEPARATOR) >= 2
 
 
+class TestGroupByTagsStayTags:
+    """No data element may come from a tag value (ITL-955).
+
+    ``GroupBy`` uses tags to form groups, but tag content never becomes data:
+    a non-key tag stays in the tag group as a list-valued tag, as ``Batch``
+    keeps it.
+    """
+
+    def test_non_key_tags_stay_list_valued_tags(self, session_source):
+        """A tag not named in ``by`` stays a tag and holds one value per member."""
+        out = GroupBy(by=["subject", "date"])(session_source)
+        tag_cols, data_cols = out.keys()
+        assert tag_cols == ("subject", "date", "probe")
+        assert data_cols == ("path",)
+        assert out.as_table().column("probe").to_pylist() == [[0, 1], [0, 1]]
+
+    def test_tag_order_is_the_input_tag_order(self, session_source):
+        """A key named last in ``by`` does not reorder the tag columns."""
+        out = GroupBy(by=["date"])(session_source)
+        assert out.keys()[0] == ("subject", "date", "probe")
+
+    def test_no_data_column_is_an_input_tag(self, session_source):
+        """The tag and data column names are the input's: no tag moves to data."""
+        in_tags, in_data = session_source.keys()
+        out = GroupBy(by=["subject"])(session_source)
+        assert out.keys() == (in_tags, in_data)
+
+    def test_non_key_tag_schema_is_a_list_tag(self, session_source):
+        """``output_schema()`` reports a non-key tag as a list in the tag schema."""
+        out = GroupBy(by=["subject", "date"])(session_source)
+        tag_schema, data_schema = out.output_schema()
+        assert "probe" not in data_schema
+        assert get_origin(tag_schema["probe"]) is list
+
+    def test_non_key_tag_keeps_its_arrow_type(self):
+        """The list element is the input tag's type: ``int8`` is not widened."""
+        table = pa.table(
+            {
+                "subject": pa.array(["G", "G"], pa.large_string()),
+                "probe": pa.array([1, 0], pa.int8()),
+                "path": pa.array(["b", "a"], pa.large_string()),
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["subject", "probe"])
+        out = GroupBy(by=["subject"])(source)
+        assert out.as_table().schema.field("probe").type == pa.large_list(pa.int8())
+
+    def test_non_key_tags_get_no_source_info_column(self, session_source):
+        """Source info belongs to data columns; a tag has none."""
+        out = GroupBy(by=["subject", "date"])(session_source)
+        names = out.as_table(columns={"source": True}).column_names
+        assert f"{constants.SOURCE_PREFIX}probe" not in names
+        assert f"{constants.SOURCE_PREFIX}path" in names
+
+    def test_datagrams_carry_non_key_tags_on_the_tag(self, session_source):
+        """Each row's ``Tag`` holds the non-key tags; its ``Data`` holds only data."""
+        out = GroupBy(by=["subject", "date"])(session_source)
+        rows = list(out.iter_data())
+        assert len(rows) == 2
+        for tag, data in rows:
+            assert tag.as_dict()["probe"] == [0, 1]
+            assert set(data.as_dict()) == {"path"}
+
+    def test_a_pod_receives_only_data_columns(self, session_source):
+        """A function pod never sees tag content, so its signature is the data."""
+        pod = FunctionPod(
+            PythonDataFunction(_count_paths, output_keys="n")  # pyright: ignore[reportArgumentType]  # protocol mismatch baselined elsewhere (ITL-844)
+        )
+        out = pod(GroupBy(by=["subject", "date"])(session_source))
+        assert [d.as_dict()["n"] for _, d in out.iter_data()] == [2, 2]
+
+    def test_list_valued_non_key_tag_still_cannot_be_a_key(self, session_source):
+        """A list-valued tag of a grouped stream is refused as a grouping key."""
+        grouped = GroupBy(by=["subject", "date"])(session_source)
+        with pytest.raises(InputValidationError, match="list-valued"):
+            GroupBy(by=["probe"])(grouped)
+
+    def test_regroup_nests_list_tags(self, session_source):
+        """Grouping a grouped stream on a coarser key nests the list tags."""
+        out = GroupBy(by=["subject"])(GroupBy(by=["subject", "date"])(session_source))
+        assert out.keys() == (("subject", "date", "probe"), ("path",))
+        row = out.as_table().to_pylist()[0]
+        assert row["date"] == ["d1", "d2"]
+        assert row["probe"] == [[0, 1], [0, 1]]
+        assert row["path"] == [["a", "b"], ["c", "d"]]
+
+    def test_regroup_orders_list_tags_containing_nulls(self):
+        """A list-valued non-key tag holding a null still orders the members."""
+        table = pa.table(
+            {
+                "a": ["x", "x", "x", "x"],
+                "b": [1, 1, 2, 2],
+                "c": pa.array([None, 1, 2, 1], pa.int64()),
+                "v": [1, 2, 3, 4],
+            }
+        )
+        source = ArrowTableSource(
+            table, tag_columns=["a", "b", "c"], infer_nullable=True
+        )
+        first = GroupBy(by=["a", "b"])(source)
+        # Regrouping on ``a`` alone leaves ``b`` scalar and ``c`` list-valued:
+        # the two members tie on nothing, and are ordered by ``b`` first.
+        out = GroupBy(by=["a"])(first)
+        row = out.as_table().to_pylist()[0]
+        assert row["b"] == [1, 2]
+        assert row["c"] == [[1, None], [1, 2]]
+        assert row["v"] == [[2, 1], [4, 3]]
+
+    def test_members_tied_on_scalar_tags_order_by_list_tag_with_null(self):
+        """``[1, None]`` and ``[1, 2]`` compare without a ``TypeError``."""
+        table = pa.table(
+            {
+                "a": ["x", "x", "x", "x"],
+                "b": ["p", "p", "q", "q"],
+                "c": pa.array([1, None, 1, 2], pa.int64()),
+                "v": [1, 2, 3, 4],
+            }
+        )
+        source = ArrowTableSource(
+            table, tag_columns=["a", "b", "c"], infer_nullable=True
+        )
+        # Drop ``b`` after the first grouping so the two members differ only in
+        # the list-valued tag ``c``: [1, None] against [1, 2].
+        first = GroupBy(by=["a", "b"])(source).drop_tag_columns(["b"])
+        out = GroupBy(by=["a"])(first)
+        row = out.as_table().to_pylist()[0]
+        assert row["c"] == [[1, 2], [1, None]]
+        assert row["v"] == [[3, 4], [1, 2]]
+
+
 class TestGroupByOrdering:
     """Member and group ordering.
 
@@ -103,6 +231,28 @@ class TestGroupByOrdering:
         """probe=[1,0] on input must emit as [0,1]."""
         out = GroupBy(by=["subject", "date"]).process(session_source)
         assert out.as_table().column("probe").to_pylist()[0] == [0, 1]
+
+    def test_scalar_non_key_tags_sort_ascending_with_nulls_last(self):
+        """Pins the member order for scalar tags: ascending, nulls last.
+
+        The sort key is recursive so that list-valued tags compare (ITL-955);
+        for scalar tags it must give exactly the order it always gave.
+        """
+        table = pa.table(
+            {
+                "g": ["x"] * 5,
+                "n": pa.array([3, None, 1, 2, 1], pa.int64()),
+                "s": pa.array(["b", "a", None, "c", "a"], pa.large_string()),
+                "v": [0, 1, 2, 3, 4],
+            }
+        )
+        source = ArrowTableSource(
+            table, tag_columns=["g", "n", "s"], infer_nullable=True
+        )
+        row = GroupBy(by=["g"])(source).as_table().to_pylist()[0]
+        assert row["n"] == [1, 1, 2, 3, None]
+        assert row["s"] == ["a", None, "c", "b", "a"]
+        assert row["v"] == [4, 2, 3, 0, 1]
 
     def test_row_order_does_not_affect_output(self, session_table):
         """Same rows, shuffled, must produce a byte-identical table."""
@@ -331,6 +481,18 @@ class TestGroupByAsyncIsBarrier:
 # annotations stringified with no resolvable scope, and `Path` would fail to
 # resolve.  Module scope keeps `-> Path` resolvable, matching how real pipelines
 # declare pods.
+def _count_paths(path: list[str | None]) -> int:
+    """Return the number of members in a group's ``path`` list.
+
+    Args:
+        path: The grouped ``path`` values, one per member.
+
+    Returns:
+        The member count.
+    """
+    return len(path)
+
+
 def _make_path(seed: str) -> Path:
     return Path(f"/data/sync_{seed}.parquet")
 

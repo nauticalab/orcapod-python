@@ -60,12 +60,12 @@
   ],
   "group_by.content_hash": "semantic_v0.1:ee6478a83847e5e9d6bea916138170139aba8c5b43c6992a22d048a07b9b4526",
   "group_by.pipeline_hash": "semantic_v0.1:5ab1cb5d5ce9b641d19045bae0d94bbb9e15703bebfe37ec57fd13b141d2a0f0",
-  "group_by.row[{\"cohort\":\"a\"}]._tag_record_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "7d212ee5c358519c9e4729f4a0898aad",
-  "group_by.row[{\"cohort\":\"a\"}]._tag_source_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "bab61585da6894512c5947710f0c0d4bb46e3f0fcd511a088a4c76780f1ca5ae",
-  "group_by.row[{\"cohort\":\"a\"}].data_hash": "arrow_v0.1:0000018910e185c56ec7890dcba74a0553f06e355191c27a97a423dbbc32bea2441149",
-  "group_by.row[{\"cohort\":\"b\"}]._tag_record_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "b7f2f8f7412a54fdb03cd96b6b0b1643",
-  "group_by.row[{\"cohort\":\"b\"}]._tag_source_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "90ffe0efe9214e2770ce632ae3146e4bb33e9d28568b55b7dd67f07862836010",
-  "group_by.row[{\"cohort\":\"b\"}].data_hash": "arrow_v0.1:000001ba6adaea3c56bf0be427961819e0491e678c6dc6486999ab5025d9074ec9bbd4",
+  "group_by.row[{\"cohort\":\"a\",\"subject\":[\"s1\",\"s2\"]}]._tag_record_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "7d212ee5c358519c9e4729f4a0898aad",
+  "group_by.row[{\"cohort\":\"a\",\"subject\":[\"s1\",\"s2\"]}]._tag_source_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "bab61585da6894512c5947710f0c0d4bb46e3f0fcd511a088a4c76780f1ca5ae",
+  "group_by.row[{\"cohort\":\"a\",\"subject\":[\"s1\",\"s2\"]}].data_hash": "arrow_v0.1:000001bb0b316000a81629aa9fac996122e39257d9ca5d2dc12608c972e0f8d55f28a3",
+  "group_by.row[{\"cohort\":\"b\",\"subject\":[\"s3\"]}]._tag_record_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "b7f2f8f7412a54fdb03cd96b6b0b1643",
+  "group_by.row[{\"cohort\":\"b\",\"subject\":[\"s3\"]}]._tag_source_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4": "90ffe0efe9214e2770ce632ae3146e4bb33e9d28568b55b7dd67f07862836010",
+  "group_by.row[{\"cohort\":\"b\",\"subject\":[\"s3\"]}].data_hash": "arrow_v0.1:000001d898f5f76e2c9c6c40b91a4accb47bbf833dbdf5100a9aff17e21fd988f36898",
   "group_by.system_tag_columns": [
     "_tag_source_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4",
     "_tag_record_id::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4::13d8efe7433022d8f328bbd9ea2cf66397ef44167932c3b08fb43153bc1be1d4"

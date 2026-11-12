@@ -145,8 +145,8 @@ def test_group_by() -> None:
     out = list(GroupBy(by=["g"])(arrays_source()).iter_data())
     assert sorted(fields(t)["g"] for t, _ in out) == ["g0", "g1", "g2"]
     for tag, data in out:
-        # GroupBy moves the non-key tag ``k`` into the data as a list.
-        names = list(fields(data)["k"])
+        # GroupBy keeps the non-key tag ``k`` as a list-valued tag.
+        names = list(fields(tag)["k"])
         assert sorted(names) == sorted(n for n in NAMES if GROUP[n] == fields(tag)["g"])
         for name, x in zip(names, fields(data)["x"], strict=True):
             assert_arrays_identical(x, expected_x(name))

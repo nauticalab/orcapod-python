@@ -289,8 +289,9 @@ class TestSyncChains:
     ) -> None:
         """Every row's provenance lists its own members' upstream tokens.
 
-        A tag that an upstream ``GroupBy`` promoted to data (``id``) has no
-        token (``None``); it is still aggregated into a list per row.
+        Only data columns carry provenance: a non-key tag that an upstream
+        ``GroupBy`` kept as a list-valued tag (``id``) has no source-info
+        column at all (ITL-955).
         """
         upstream = list(chain.upstream.iter_data())
         rows = list(chain.result.iter_data())

@@ -347,6 +347,26 @@ PROVENANCE_CASES = [
 ]
 
 
+def test_group_by_keeps_non_key_tags_as_tags_on_both_paths() -> None:
+    """Neither path moves a non-key tag into the data (ITL-955).
+
+    ``source_a`` has tags ``k`` and ``ta``; grouping by ``ta`` leaves ``k`` a
+    list-valued tag, and the data of every row holds only the input's data
+    columns.
+    """
+    _, data_keys = source_a().keys()
+    for rows in (
+        sync_rows(GroupBy(["ta"]), source_a()),
+        async_rows(GroupBy(["ta"]), source_a()),
+    ):
+        members = sorted(tuple(cast(list[int], tag.as_dict()["k"])) for tag, _ in rows)
+        assert members == [(1, 2), (3,)]
+        for tag, data in rows:
+            assert set(tag.keys()) == {"k", "ta"}
+            assert set(data.keys()) == set(data_keys)
+            assert tag.as_table().schema.field("k").type == pa.large_list(pa.int16())
+
+
 @pytest.mark.parametrize("case", PROVENANCE_CASES)
 def test_async_provenance_equals_sync(case: Case) -> None:
     """The async path carries the sync path's per-row source info."""

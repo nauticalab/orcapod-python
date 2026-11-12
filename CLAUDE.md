@@ -390,9 +390,16 @@ FunctionNode.
 | Synthesizes new values | No | Yes |
 | Stream arity | Configurable | Single in, single out |
 
+**No data element comes from a tag value** (developer, November 11, 2026, ITL-955). An operator
+may *use* tags (to join, filter, group or order), but tag content never becomes data: every
+element of an output data column came from an input data column, and an operator never turns a
+tag column into a data column. When adding or changing an operator, check `keys()` of the output:
+no input tag name may appear among the data columns.
+
 `GroupBy` is the only operator that reduces row count many→one: it collapses N rows sharing a
 tag tuple into one row with list-valued members. It still synthesizes no new data values —
-every emitted element came from an input row — and it keys only on tags, never on data.
+every emitted element came from an input row — and it keys only on tags, never on data. Its
+non-key tags stay tags, list-valued, as `Batch` keeps them.
 
 ### Two identity chains
 
@@ -441,7 +448,9 @@ Prefixes are computed from `SystemConstant` in `system_constants.py`. The `const
    name gets `::{pipeline_hash}:{canonical_position}` appended. Commutative operators
    canonically order inputs by `pipeline_hash` and sort system tag values per row.
 3. **Reducing** — many→one ops (`Batch`, `GroupBy`). User tag and data columns become
-   `list[T]`, and source-info columns become `list[str]` with one element per member. System
+   `list[T]` and stay in their own group (a tag stays a tag; only the scalar keys of a
+   `GroupBy` are not list-wrapped), and source-info columns become `list[str]` with one element
+   per member. System
    tag columns must stay **scalar**, because `_build_record_id_preimage`
    (`core/nodes/function_node.py`) hashes them directly to derive record identity. They fold
    to a deterministic digest via `arrow_utils.fold_system_tag_values` and their column name
@@ -560,6 +569,10 @@ data. The rules:
   tag values with the system `record_id` as tiebreaker, so the hashed lists are stable across
   runs. Groups themselves are emitted in key order, so a reordered input yields a
   byte-identical table.
+- `GroupBy`'s output tag columns are its input's tag columns, in input order: keys scalar,
+  every other tag `list[T]` (ITL-955). A grouped stream can be grouped again on a coarser key;
+  its list-valued tags then nest (`list[list[T]]`) and still order the members, so the member
+  sort key (`_null_last_key`) is recursive and sorts nulls last at every depth.
 - `Data` source-info values may be `str`, `None`, or `list[...]`, nested to any depth; the
   Arrow and Python types are derived from the value, with `None` mapping to `large_string`.
   That rule has one definition, `arrow_utils.source_info_arrow_type`, and applies only to
