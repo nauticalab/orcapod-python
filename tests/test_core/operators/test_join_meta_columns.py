@@ -40,23 +40,6 @@ from tests.test_core.operators.test_async_sync_equivalence import (
 
 META = constants.META_PREFIX
 
-# The meta columns a cached function pod's output carries on a cache hit: the
-# result cache's function-variation, execution and timestamp columns plus the
-# computed flag.
-CACHE_HIT_META = {
-    f"{META}pf_var_function_name",
-    f"{META}pf_var_function_version",
-    f"{META}pf_var_function_signature_hash",
-    f"{META}pf_var_function_content_hash",
-    f"{META}pf_var_git_hash",
-    f"{META}pf_exec_executor_type",
-    f"{META}pf_exec_executor_info",
-    f"{META}pf_exec_python_version",
-    f"{META}pf_exec_extra_info",
-    f"{META}pod_ts",
-    f"{META}computed",
-}
-
 
 def add_one_a(a: int) -> int:
     return a + 1
@@ -120,7 +103,8 @@ CASES = [
         {f"{META}computed"},
         id="cached_pods_compute",
     ),
-    pytest.param(_cache_hit_streams, CACHE_HIT_META, id="cached_pods_cache_hit"),
+    # A stream served from the cache carries the same meta as a computed one (ITL-988).
+    pytest.param(_cache_hit_streams, {f"{META}computed"}, id="cached_pods_cache_hit"),
     pytest.param(_function_node_streams, {f"{META}computed"}, id="function_nodes"),
     pytest.param(
         lambda: (

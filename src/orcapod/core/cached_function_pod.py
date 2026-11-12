@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
 from orcapod.core.datagrams import Datagram
-from orcapod.core.function_pod import WrappedFunctionPod
+from orcapod.core.function_pod import FunctionPodStream, WrappedFunctionPod
+from orcapod.system_constants import constants
+from orcapod.types import ColumnConfig
 from orcapod.contexts.stored import StaleTables
 from orcapod.core.result_cache import ResultCache
 from orcapod.hooks import InvocationStatus
@@ -399,22 +402,72 @@ class CachedFunctionPod(WrappedFunctionPod):
             include_system_columns=include_system_columns,
         )
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this pod as its inner function pod.
+
+        A saved job describes the function, not where its results are cached, so a
+        pod-cached pod is saved exactly as the uncached pod would be. The pod cache
+        database is not part of the saved job, and a loaded job does not use it.
+
+        Returns:
+            The inner function pod's config.
+        """
+        return self._function_pod.to_config()
+
     def process(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> StreamProtocol:
         """Invoke the inner pod but with pod-level caching on process_data.
 
         The stream returned uses *this* pod's ``process_data`` (which
-        includes caching) rather than the inner pod's.
+        includes caching) rather than the inner pod's. Like ``FunctionPod.process``
+        it joins the inputs once, validates them and records the invocation with the
+        active trackers (so a ``PipelineJob`` records this pod).
         """
-        from orcapod.core.function_pod import FunctionPodStream
-
-        # Validate and prepare the input stream
-        input_stream = self._function_pod.handle_input_streams(*streams)
-        self._function_pod.validate_inputs(*streams)
-
-        return FunctionPodStream(
+        input_stream = self.handle_input_streams(*streams)
+        self._validate_input_schema(input_stream.output_schema()[1])
+        # The pod has no ``from_config`` (it cannot be rebuilt without its cache
+        # database), the one member of FunctionPodProtocol it lacks; the tracker uses
+        # none of it.
+        self.tracker_manager.record_function_pod_invocation(
+            self,  # pyright: ignore[reportArgumentType]
+            input_stream,
+            label=label,
+        )
+        return _CachedFunctionPodStream(
             function_pod=self,
             input_stream=input_stream,
             label=label,
+        )
+
+
+class _CachedFunctionPodStream(FunctionPodStream):
+    """The stream of a ``CachedFunctionPod``, with the same columns in every cache state.
+
+    A row computed in this process carries only the ``__computed`` meta column; a row
+    served from the cache also carries the function variation and execution columns it
+    was stored with. This stream keeps ``__computed`` and drops the others, and its
+    table has no meta columns unless asked for, as an uncached pod's table.
+    """
+
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        keep = CachedFunctionPod.RESULT_COMPUTED_FLAG
+        for tag, data in super().iter_data():
+            stored = [name for name in data.meta_columns if name != keep]
+            if stored:
+                data = data.drop_meta_columns(*stored)
+            yield tag, data
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        table = super().as_table(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.meta or column_config.all_info:
+            return table
+        return table.drop_columns(
+            [n for n in table.column_names if n.startswith(constants.META_PREFIX)]
         )
