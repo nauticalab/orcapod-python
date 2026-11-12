@@ -1,0 +1,129 @@
+{
+  "source_project": "edi-sample-v1-855632",
+  "dataset": "default",
+  "window_us": [
+    5226928854,
+    5370814965
+  ],
+  "unit_ids": [
+    77,
+    92,
+    100,
+    103,
+    105,
+    106,
+    108,
+    109,
+    110,
+    112,
+    113,
+    114,
+    119,
+    123,
+    127,
+    131,
+    135,
+    139,
+    140,
+    148,
+    156,
+    158,
+    159,
+    160,
+    161,
+    162,
+    163,
+    164,
+    167,
+    169,
+    173,
+    175
+  ],
+  "trial_table": "experiment_freeviewing_trial",
+  "notes": {
+    "window": "Half-open, in µs relative to session_start_datetime (one clock for every timestamp column): from trial_start_timestamp of trial 215 to trial_end_timestamp of trial 225 plus 1 µs, i.e. 143.9 s holding 11 consecutive valid trials. The LFP table (600 Hz) bounds the window: 100,000 rows is about 166 s.",
+    "units": "The 32 units with the most spikes inside the window among the units whose labels.bombcell_label is not 'noise'.",
+    "trials": "Trials overlapping the window, plus every trial a kept row references through trial_index.",
+    "sample_info": "Not copied (developer, November 11, 2026): it describes the whole sample (n_units 100, unit_filter, sources_json). copy records its row in the provenance metadata of meta.edi_tutorial_build instead."
+  },
+  "tables": {
+    "atlas": {
+      "mode": "whole"
+    },
+    "atlas_label": {
+      "mode": "whole"
+    },
+    "chamber": {
+      "mode": "whole"
+    },
+    "experiment": {
+      "mode": "whole"
+    },
+    "experiment_display_params": {
+      "mode": "whole"
+    },
+    "experiment_freeviewing_event": {
+      "mode": "window"
+    },
+    "experiment_freeviewing_params": {
+      "mode": "whole"
+    },
+    "experiment_freeviewing_trial": {
+      "mode": "trials"
+    },
+    "experiment_gaze_online_timeseries": {
+      "mode": "window"
+    },
+    "experiment_screen_capture_event": {
+      "mode": "window"
+    },
+    "experiment_screen_capture_frame_270p": {
+      "mode": "window"
+    },
+    "lfp_acquisition": {
+      "mode": "whole"
+    },
+    "lfp_location": {
+      "mode": "whole"
+    },
+    "lfp_timeseries": {
+      "mode": "window"
+    },
+    "penetration": {
+      "mode": "whole"
+    },
+    "probe": {
+      "mode": "whole"
+    },
+    "probe_location": {
+      "mode": "whole"
+    },
+    "probe_map": {
+      "mode": "whole"
+    },
+    "recording": {
+      "mode": "whole"
+    },
+    "sample_unit": {
+      "mode": "units"
+    },
+    "session": {
+      "mode": "whole"
+    },
+    "spike_event": {
+      "mode": "window_units"
+    },
+    "subject": {
+      "mode": "whole"
+    },
+    "task": {
+      "mode": "whole"
+    },
+    "unit": {
+      "mode": "units"
+    },
+    "unit_location": {
+      "mode": "units"
+    }
+  }
+}

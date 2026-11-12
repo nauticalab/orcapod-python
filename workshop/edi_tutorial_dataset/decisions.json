@@ -1,0 +1,9 @@
+{
+  "decided_by": "developer, November 11, 2026 (ITL-933)",
+  "tables_not_in_spec": {
+    "keys": "required",
+    "values": "nullable"
+  },
+  "column_group_structs": "required",
+  "accepted_unresolved": []
+}

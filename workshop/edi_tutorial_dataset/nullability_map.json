@@ -1,0 +1,2955 @@
+{
+  "spec_version": "0.3.0",
+  "source_project": "edi-sample-v1-855632",
+  "mismatches": [],
+  "absent_from_sample": [
+    "atlas_info",
+    "atlas_preference_history",
+    "experiment_dotmapping_event",
+    "experiment_dotmapping_params",
+    "experiment_dotmapping_trial",
+    "experiment_gaze_timeseries",
+    "experiment_hardware",
+    "experiment_preprocessing_run",
+    "experiment_screen_capture",
+    "experiment_sync_event",
+    "eye_tracker_hardware",
+    "ingestion_run",
+    "lfp_extraction_run",
+    "localization_run",
+    "mri_dataset",
+    "neural_hardware",
+    "spike_extraction_run"
+  ],
+  "tables": {
+    "atlas": {
+      "in_spec": true,
+      "keys": [
+        "atlas_id"
+      ],
+      "columns": {
+        "atlas_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_description": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "atlas_name": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": false
+        },
+        "atlas_version": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "source_url": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [],
+      "unchecked_references": []
+    },
+    "atlas_label": {
+      "in_spec": true,
+      "keys": [
+        "atlas_id",
+        "atlas_label_region_short"
+      ],
+      "columns": {
+        "atlas_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_label_region_short": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_label_region_full": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "atlas_label_region_group": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "atlas_label_region_index": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": "i64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "atlas",
+          "columns": [
+            "atlas_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "chamber": {
+      "in_spec": true,
+      "keys": [
+        "subject_id",
+        "chamber_id"
+      ],
+      "columns": {
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "chamber_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "chamber_implant_date": {
+          "arrow_type": "date32[day]",
+          "nullable": true,
+          "spec_type": "date?",
+          "key": false
+        },
+        "chamber_location": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "subject",
+          "columns": [
+            "subject_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "experiment": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "correct_trials": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": "i64?",
+          "key": false
+        },
+        "experiment_start_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": true,
+          "spec_type": "u64?",
+          "key": false
+        },
+        "experiment_stop_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": true,
+          "spec_type": "u64?",
+          "key": false
+        },
+        "incorrect_trials": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": "i64?",
+          "key": false
+        },
+        "task_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": false
+        },
+        "task_version": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": false
+        },
+        "total_trials": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": "i64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "session",
+          "columns": [
+            "subject_id",
+            "session_start_datetime"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "task",
+          "columns": [
+            "task_id",
+            "task_version"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "experiment_preprocessing_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "experiment_display_params": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "monitor_bg_color": {
+          "arrow_type": "fixed_size_list<item: uint8>[3]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(u8?)[3]?",
+          "key": false
+        },
+        "monitor_center_px": {
+          "arrow_type": "fixed_size_list<item: int16>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(i16?)[2]?",
+          "key": false
+        },
+        "monitor_curve_radius_mm": {
+          "arrow_type": "fixed_size_list<item: float>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(f32?)[2]?",
+          "key": false
+        },
+        "monitor_distance_mm": {
+          "arrow_type": "int16",
+          "nullable": true,
+          "spec_type": "i16?",
+          "key": false
+        },
+        "monitor_gamma_table": {
+          "arrow_type": "fixed_size_list<item: float>[256]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(f32?)[256]?",
+          "key": false
+        },
+        "monitor_refresh_rate_hz": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "monitor_resolution_px": {
+          "arrow_type": "fixed_size_list<item: uint16>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(u16?)[2]?",
+          "key": false
+        },
+        "monitor_size_mm": {
+          "arrow_type": "fixed_size_list<item: float>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(f32?)[2]?",
+          "key": false
+        },
+        "monitor_type": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "experiment_freeviewing_event": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index",
+        "timestamp",
+        "name"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": true
+        },
+        "name": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "trial_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "experiment_freeviewing_trial",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index",
+            "trial_index"
+          ],
+          "note": "trial_index; not an FK in the spec"
+        }
+      ],
+      "unchecked_references": []
+    },
+    "experiment_freeviewing_params": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "blank_duration_ms": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "fix_acquire_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "fix_hold_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "fix_spot_color": {
+          "arrow_type": "fixed_size_list<item: uint8>[3]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(u8?)[3]?",
+          "key": false
+        },
+        "fix_spot_location_px": {
+          "arrow_type": "fixed_size_list<item: int16>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(i16?)[2]?",
+          "key": false
+        },
+        "fix_spot_ring_thickness_px": {
+          "arrow_type": "int16",
+          "nullable": true,
+          "spec_type": "i16?",
+          "key": false
+        },
+        "fix_spot_size_px": {
+          "arrow_type": "int16",
+          "nullable": true,
+          "spec_type": "i16?",
+          "key": false
+        },
+        "movie_dir": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "post_stimulus_duration_ms": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "stimulus_height_px": {
+          "arrow_type": "int16",
+          "nullable": true,
+          "spec_type": "i16?",
+          "key": false
+        },
+        "stimulus_location_px": {
+          "arrow_type": "fixed_size_list<item: int16>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(i16?)[2]?",
+          "key": false
+        },
+        "stimulus_selection_hash": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "stimulus_selection_type": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "stimulus_width_px": {
+          "arrow_type": "int16",
+          "nullable": true,
+          "spec_type": "i16?",
+          "key": false
+        },
+        "use_native_frame_rate": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "experiment_freeviewing_trial": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index",
+        "trial_index"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "trial_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "block_frame_num": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "correct_response": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        },
+        "delay_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "delayed_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "dest_rect_px": {
+          "arrow_type": "list<item: int32>",
+          "nullable": true,
+          "spec_type": "list(i32?)?",
+          "key": false
+        },
+        "dropped_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "dropped_prestim_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "eye_params": {
+          "arrow_type": "list<item: float>",
+          "nullable": true,
+          "spec_type": "list(f32?)?",
+          "key": false
+        },
+        "fixation_radius_px": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "free": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        },
+        "has_fixation_nidaq_time": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        },
+        "intertrial_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "pause": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        },
+        "played_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "played_prestim_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "pre_stimulus_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "response_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "reward_amount_ml": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "stim_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "test_block_frame_num": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "test_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "total_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "total_prestim_frames": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "trial_end_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": true,
+          "spec_type": "u64?",
+          "key": false
+        },
+        "trial_id": {
+          "arrow_type": "int32",
+          "nullable": true,
+          "spec_type": "i32?",
+          "key": false
+        },
+        "trial_start_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": false
+        },
+        "trial_type": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "valid_trial": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        },
+        "video_duration_s": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "videos_end_frame": {
+          "arrow_type": "list<item: int32>",
+          "nullable": true,
+          "spec_type": "list(i32?)?",
+          "key": false
+        },
+        "videos_fps": {
+          "arrow_type": "list<item: float>",
+          "nullable": true,
+          "spec_type": "list(f32?)?",
+          "key": false
+        },
+        "videos_frame_rate_hz": {
+          "arrow_type": "list<item: float>",
+          "nullable": true,
+          "spec_type": "list(f32?)?",
+          "key": false
+        },
+        "videos_hash": {
+          "arrow_type": "list<item: string>",
+          "nullable": true,
+          "spec_type": "list(utf8?)?",
+          "key": false
+        },
+        "videos_n_frames": {
+          "arrow_type": "list<item: int32>",
+          "nullable": true,
+          "spec_type": "list(i32?)?",
+          "key": false
+        },
+        "videos_name": {
+          "arrow_type": "list<item: string>",
+          "nullable": true,
+          "spec_type": "list(utf8?)?",
+          "key": false
+        },
+        "videos_start_frame": {
+          "arrow_type": "list<item: int32>",
+          "nullable": true,
+          "spec_type": "list(i32?)?",
+          "key": false
+        },
+        "videos_trial_type": {
+          "arrow_type": "list<item: string>",
+          "nullable": true,
+          "spec_type": "list(utf8?)?",
+          "key": false
+        },
+        "videos_video_path": {
+          "arrow_type": "list<item: string>",
+          "nullable": true,
+          "spec_type": "list(utf8?)?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "experiment_gaze_online_timeseries": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index",
+        "timestamp"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": true
+        },
+        "eye_tracking_software": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "eye_tracking_software_version": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "eye_x_deg": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "eye_x_px": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "eye_y_deg": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "eye_y_px": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "gaze_unreliable": {
+          "arrow_type": "bool",
+          "nullable": true,
+          "spec_type": "bool?",
+          "key": false
+        },
+        "pupil_size_norm": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "experiment_screen_capture_event": {
+      "in_spec": true,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index",
+        "timestamp",
+        "name"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": true
+        },
+        "name": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "collection": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "displayed_movie": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "displayed_movie_frame_number": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "frame_bg_color": {
+          "arrow_type": "fixed_size_list<item: float>[3]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(f32?)[3]?",
+          "key": false
+        },
+        "frame_display": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "frame_fix_spot_color": {
+          "arrow_type": "fixed_size_list<item: float>[3]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(f32?)[3]?",
+          "key": false
+        },
+        "frame_fix_spot_location_px": {
+          "arrow_type": "fixed_size_list<item: float>[2]",
+          "nullable": true,
+          "spec_type": "fixed_size_list(f32?)[2]?",
+          "key": false
+        },
+        "frame_fix_spot_ring_thickness_px": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "frame_fix_spot_size_px": {
+          "arrow_type": "float",
+          "nullable": true,
+          "spec_type": "f32?",
+          "key": false
+        },
+        "frame_index": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "screen_capture_fps": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "source_movie": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "source_movie_frame_number": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "stimulus_type": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "trial_index": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment_freeviewing_trial",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index",
+            "trial_index"
+          ],
+          "note": "trial_index; not an FK in the spec"
+        },
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": "the spec's parent experiment_screen_capture is not in the sample"
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "experiment_screen_capture",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "experiment_screen_capture_frame_270p": {
+      "in_spec": false,
+      "keys": [
+        "experiment_preprocessing_hash",
+        "subject_id",
+        "session_start_datetime",
+        "experiment_index",
+        "screen_capture_import_version_id",
+        "timestamp",
+        "frame_index"
+      ],
+      "columns": {
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "experiment_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "screen_capture_import_version_id": {
+          "arrow_type": "int64",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "timestamp": {
+          "arrow_type": "int64",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "frame_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "frame_jpeg": {
+          "arrow_type": "large_binary",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "experiment",
+          "columns": [
+            "experiment_preprocessing_hash",
+            "subject_id",
+            "session_start_datetime",
+            "experiment_index"
+          ],
+          "note": "table not in the spec"
+        }
+      ],
+      "unchecked_references": []
+    },
+    "lfp_acquisition": {
+      "in_spec": true,
+      "keys": [
+        "lfp_extraction_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index"
+      ],
+      "columns": {
+        "lfp_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "lfp_channel_ids": {
+          "arrow_type": "list<item: string>",
+          "nullable": false,
+          "spec_type": "list(utf8?)",
+          "key": false
+        },
+        "lfp_n_channels": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "lfp_n_samples": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "lfp_sampling_frequency_hz": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "recording_start_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "penetration",
+          "columns": [
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "lfp_extraction_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "lfp_location": {
+      "in_spec": true,
+      "keys": [
+        "lfp_extraction_hash",
+        "localization_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "probe_channel_id",
+        "atlas_id",
+        "atlas_label_region_short"
+      ],
+      "columns": {
+        "lfp_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "localization_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_channel_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_label_region_short": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_label_region_full": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "chamber_id": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "chamber_x_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "chamber_y_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "chamber_z_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "lfp_acquisition",
+          "columns": [
+            "lfp_extraction_hash",
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "atlas",
+          "columns": [
+            "atlas_id"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "atlas_label",
+          "columns": [
+            "atlas_id",
+            "atlas_label_region_short"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "chamber",
+          "columns": [
+            "subject_id",
+            "chamber_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "localization_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "lfp_timeseries": {
+      "in_spec": true,
+      "keys": [
+        "lfp_extraction_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "timestamp"
+      ],
+      "columns": {
+        "lfp_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": true
+        },
+        "lfp_voltage_uv": {
+          "arrow_type": "fixed_size_list<item: float>[384]",
+          "nullable": false,
+          "spec_type": "fixed_size_list(f32?)[384]",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "penetration",
+          "columns": [
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "lfp_extraction_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "penetration": {
+      "in_spec": true,
+      "keys": [
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index"
+      ],
+      "columns": {
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "chamber_id": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "chassis_index": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "port_index": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        },
+        "probe_channel_config": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "probe_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": false
+        },
+        "probe_nominal_chamber_x_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "probe_nominal_chamber_y_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "probe_nominal_chamber_z_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "probe_plan_chamber_x_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "probe_plan_chamber_y_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "probe_plan_chamber_z_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "slot_index": {
+          "arrow_type": "uint32",
+          "nullable": true,
+          "spec_type": "u32?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "recording",
+          "columns": [
+            "subject_id",
+            "session_start_datetime",
+            "recording_index"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "probe",
+          "columns": [
+            "probe_id"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "chamber",
+          "columns": [
+            "subject_id",
+            "chamber_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "probe": {
+      "in_spec": true,
+      "keys": [
+        "probe_id"
+      ],
+      "columns": {
+        "probe_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "probe_model": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "probe_name": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "serial_number": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [],
+      "unchecked_references": []
+    },
+    "probe_location": {
+      "in_spec": true,
+      "keys": [
+        "localization_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "atlas_id"
+      ],
+      "columns": {
+        "localization_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "atlas_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "chamber_id": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "tip_chamber_x_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "tip_chamber_y_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "tip_chamber_z_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "penetration",
+          "columns": [
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "atlas",
+          "columns": [
+            "atlas_id"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "chamber",
+          "columns": [
+            "subject_id",
+            "chamber_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "localization_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "probe_map": {
+      "in_spec": true,
+      "keys": [
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index"
+      ],
+      "columns": {
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "channel_acquisition_index": {
+          "arrow_type": "list<item: uint32>",
+          "nullable": true,
+          "spec_type": "list(u32?)?",
+          "key": false
+        },
+        "probe_channel_ids": {
+          "arrow_type": "list<item: string>",
+          "nullable": true,
+          "spec_type": "list(utf8?)?",
+          "key": false
+        },
+        "sites_physical": {
+          "arrow_type": "list<item: bool>",
+          "nullable": true,
+          "spec_type": "list(bool?)?",
+          "key": false
+        },
+        "sites_shank_ids": {
+          "arrow_type": "list<item: uint8>",
+          "nullable": true,
+          "spec_type": "list(u8?)?",
+          "key": false
+        },
+        "sites_x_um": {
+          "arrow_type": "list<item: double>",
+          "nullable": true,
+          "spec_type": "list(f64?)?",
+          "key": false
+        },
+        "sites_y_um": {
+          "arrow_type": "list<item: double>",
+          "nullable": true,
+          "spec_type": "list(f64?)?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "penetration",
+          "columns": [
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "recording": {
+      "in_spec": true,
+      "keys": [
+        "subject_id",
+        "session_start_datetime",
+        "recording_index"
+      ],
+      "columns": {
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "neural_acquisition_software": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "neural_acquisition_software_version": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "neural_hardware_id": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "recording_end_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": true,
+          "spec_type": "u64?",
+          "key": false
+        },
+        "recording_start_timestamp": {
+          "arrow_type": "uint64",
+          "nullable": true,
+          "spec_type": "u64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "session",
+          "columns": [
+            "subject_id",
+            "session_start_datetime"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "neural_hardware",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "sample_info": {
+      "in_spec": false,
+      "keys": [
+        "region"
+      ],
+      "columns": {
+        "region": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "built_at_utc": {
+          "arrow_type": "timestamp[us]",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "dataset": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "experiment_index": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "experiment_preprocessing_hash": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "git_sha": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "n_units": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "probe_index": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "recording_index": {
+          "arrow_type": "int64",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "sources_json": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "spike_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "unit_filter": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [],
+      "unchecked_references": []
+    },
+    "sample_unit": {
+      "in_spec": false,
+      "keys": [
+        "spike_extraction_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "unit_id"
+      ],
+      "columns": {
+        "spike_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "unit_id": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": null,
+          "key": true
+        },
+        "atlas_label_region_short": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "fano_factor_detrended": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "firing_rate_hz": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        },
+        "presence_ratio": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": null,
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "unit",
+          "columns": [
+            "spike_extraction_hash",
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index",
+            "unit_id"
+          ],
+          "note": "table not in the spec"
+        }
+      ],
+      "unchecked_references": []
+    },
+    "session": {
+      "in_spec": true,
+      "keys": [
+        "subject_id",
+        "session_start_datetime"
+      ],
+      "columns": {
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "booth": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": false
+        },
+        "booth_platform_code": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "session_constants": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "session_end_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": false
+        },
+        "session_notes": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "subject",
+          "columns": [
+            "subject_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "spike_event": {
+      "in_spec": true,
+      "keys": [
+        "spike_extraction_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "timestamp",
+        "unit_id"
+      ],
+      "columns": {
+        "spike_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "timestamp": {
+          "arrow_type": "uint64",
+          "nullable": false,
+          "spec_type": "u64",
+          "key": true
+        },
+        "unit_id": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "spike_amplitude_uv": {
+          "arrow_type": "float",
+          "nullable": false,
+          "spec_type": "f32",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "unit",
+          "columns": [
+            "spike_extraction_hash",
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index",
+            "unit_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": []
+    },
+    "subject": {
+      "in_spec": true,
+      "keys": [
+        "subject_id"
+      ],
+      "columns": {
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "date_of_birth": {
+          "arrow_type": "date32[day]",
+          "nullable": true,
+          "spec_type": "date?",
+          "key": false
+        },
+        "sex": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "species": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [],
+      "unchecked_references": []
+    },
+    "task": {
+      "in_spec": true,
+      "keys": [
+        "task_id",
+        "task_version"
+      ],
+      "columns": {
+        "task_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "task_version": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "task_code_commit": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "task_description": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "task_repository": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [],
+      "unchecked_references": []
+    },
+    "unit": {
+      "in_spec": true,
+      "keys": [
+        "spike_extraction_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "unit_id"
+      ],
+      "columns": {
+        "spike_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "unit_id": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        }
+      },
+      "groups": {
+        "labels": {
+          "arrow_type": "struct<aind_label: bool, bombcell_label: string, brian_label: bool, kilosort_label: bool, rigor_label: bool, tian_label: bool, unitrefine_label: string, unitrefine_monkey_label: bool>",
+          "nullable": false,
+          "fields": {
+            "aind_label": {
+              "arrow_type": "bool",
+              "nullable": true,
+              "spec_type": "bool?",
+              "key": false
+            },
+            "bombcell_label": {
+              "arrow_type": "string",
+              "nullable": true,
+              "spec_type": "utf8?",
+              "key": false
+            },
+            "brian_label": {
+              "arrow_type": "bool",
+              "nullable": true,
+              "spec_type": "bool?",
+              "key": false
+            },
+            "kilosort_label": {
+              "arrow_type": "bool",
+              "nullable": true,
+              "spec_type": "bool?",
+              "key": false
+            },
+            "rigor_label": {
+              "arrow_type": "bool",
+              "nullable": true,
+              "spec_type": "bool?",
+              "key": false
+            },
+            "tian_label": {
+              "arrow_type": "bool",
+              "nullable": true,
+              "spec_type": "bool?",
+              "key": false
+            },
+            "unitrefine_label": {
+              "arrow_type": "string",
+              "nullable": true,
+              "spec_type": "utf8?",
+              "key": false
+            },
+            "unitrefine_monkey_label": {
+              "arrow_type": "bool",
+              "nullable": true,
+              "spec_type": "bool?",
+              "key": false
+            }
+          }
+        },
+        "quality_metrics": {
+          "arrow_type": "struct<amplitude_cutoff: float, amplitude_cv_median: float, amplitude_cv_range: float, amplitude_median_uv: float, d_prime: float, drift_mad_um: float, drift_ptp_um: float, drift_std_um: float, firing_range_hz: float, firing_rate_hz: float, isi_violations_count: uint32, isi_violations_ratio: float, isolation_distance: float, l_ratio: float, max_waveform_channel_id: string, nn_hit_rate: float, nn_miss_rate: float, noise_cutoff: float, noise_ratio: float, num_spikes: uint32, presence_ratio: float, rp_contamination: float, rp_violations: uint32, sd_ratio: float, silhouette: float, sliding_rp_violation: float, snr: float, sync_spike_2: float, sync_spike_4: float, sync_spike_8: float, unit_depth_um: float>",
+          "nullable": false,
+          "fields": {
+            "amplitude_cutoff": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "amplitude_cv_median": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "amplitude_cv_range": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "amplitude_median_uv": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "d_prime": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "drift_mad_um": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "drift_ptp_um": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "drift_std_um": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "firing_range_hz": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "firing_rate_hz": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "isi_violations_count": {
+              "arrow_type": "uint32",
+              "nullable": true,
+              "spec_type": "u32?",
+              "key": false
+            },
+            "isi_violations_ratio": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "isolation_distance": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "l_ratio": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "max_waveform_channel_id": {
+              "arrow_type": "string",
+              "nullable": true,
+              "spec_type": "utf8?",
+              "key": false
+            },
+            "nn_hit_rate": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "nn_miss_rate": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "noise_cutoff": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "noise_ratio": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "num_spikes": {
+              "arrow_type": "uint32",
+              "nullable": true,
+              "spec_type": "u32?",
+              "key": false
+            },
+            "presence_ratio": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "rp_contamination": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "rp_violations": {
+              "arrow_type": "uint32",
+              "nullable": true,
+              "spec_type": "u32?",
+              "key": false
+            },
+            "sd_ratio": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "silhouette": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "sliding_rp_violation": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "snr": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "sync_spike_2": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "sync_spike_4": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "sync_spike_8": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "unit_depth_um": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            }
+          }
+        },
+        "rolling_quality_metrics": {
+          "arrow_type": "struct<rolling_amplitude_median_uv: list<item: float>, rolling_firing_rate_hz: list<item: float>, rolling_isi_violations_ratio: list<item: float>, rolling_nn_hit_rate: list<item: float>, rolling_nn_miss_rate: list<item: float>, rolling_quality_metrics_timestamps: list<item: uint64>, rolling_snr: list<item: float>>",
+          "nullable": false,
+          "fields": {
+            "rolling_amplitude_median_uv": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            },
+            "rolling_firing_rate_hz": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            },
+            "rolling_isi_violations_ratio": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            },
+            "rolling_nn_hit_rate": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            },
+            "rolling_nn_miss_rate": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            },
+            "rolling_quality_metrics_timestamps": {
+              "arrow_type": "list<item: uint64>",
+              "nullable": true,
+              "spec_type": "list(u64?)?",
+              "key": false
+            },
+            "rolling_snr": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            }
+          }
+        },
+        "waveform_metrics": {
+          "arrow_type": "struct<exp_decay_per_um: float, main_peak_to_trough_ratio: float, main_to_next_extremum_duration_s: float, num_negative_peaks: uint8, num_positive_peaks: uint8, peak_half_width_s: float, spread_um: float, template_waveform_uv: list<item: float>, trough_half_width_s: float, waveform_baseline_flatness: float>",
+          "nullable": false,
+          "fields": {
+            "exp_decay_per_um": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "main_peak_to_trough_ratio": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "main_to_next_extremum_duration_s": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "num_negative_peaks": {
+              "arrow_type": "uint8",
+              "nullable": true,
+              "spec_type": "u8?",
+              "key": false
+            },
+            "num_positive_peaks": {
+              "arrow_type": "uint8",
+              "nullable": true,
+              "spec_type": "u8?",
+              "key": false
+            },
+            "peak_half_width_s": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "spread_um": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "template_waveform_uv": {
+              "arrow_type": "list<item: float>",
+              "nullable": true,
+              "spec_type": "list(f32?)?",
+              "key": false
+            },
+            "trough_half_width_s": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            },
+            "waveform_baseline_flatness": {
+              "arrow_type": "float",
+              "nullable": true,
+              "spec_type": "f32?",
+              "key": false
+            }
+          }
+        }
+      },
+      "foreign_keys": [
+        {
+          "parent": "penetration",
+          "columns": [
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "spike_extraction_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    },
+    "unit_location": {
+      "in_spec": true,
+      "keys": [
+        "spike_extraction_hash",
+        "localization_hash",
+        "subject_id",
+        "session_start_datetime",
+        "recording_index",
+        "probe_index",
+        "unit_id",
+        "atlas_id",
+        "atlas_label_region_short"
+      ],
+      "columns": {
+        "spike_extraction_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "localization_hash": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "subject_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "session_start_datetime": {
+          "arrow_type": "timestamp[us]",
+          "nullable": false,
+          "spec_type": "datetime",
+          "key": true
+        },
+        "recording_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "probe_index": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "unit_id": {
+          "arrow_type": "uint32",
+          "nullable": false,
+          "spec_type": "u32",
+          "key": true
+        },
+        "atlas_id": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_label_region_short": {
+          "arrow_type": "string",
+          "nullable": false,
+          "spec_type": "utf8",
+          "key": true
+        },
+        "atlas_label_region_full": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "chamber_id": {
+          "arrow_type": "string",
+          "nullable": true,
+          "spec_type": "utf8?",
+          "key": false
+        },
+        "chamber_x_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "chamber_y_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        },
+        "chamber_z_um": {
+          "arrow_type": "double",
+          "nullable": true,
+          "spec_type": "f64?",
+          "key": false
+        }
+      },
+      "groups": {},
+      "foreign_keys": [
+        {
+          "parent": "unit",
+          "columns": [
+            "spike_extraction_hash",
+            "subject_id",
+            "session_start_datetime",
+            "recording_index",
+            "probe_index",
+            "unit_id"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "atlas",
+          "columns": [
+            "atlas_id"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "atlas_label",
+          "columns": [
+            "atlas_id",
+            "atlas_label_region_short"
+          ],
+          "note": ""
+        },
+        {
+          "parent": "chamber",
+          "columns": [
+            "subject_id",
+            "chamber_id"
+          ],
+          "note": ""
+        }
+      ],
+      "unchecked_references": [
+        {
+          "parent": "localization_run",
+          "columns": [],
+          "note": "parent table not in the sample; not checked"
+        }
+      ]
+    }
+  },
+  "decisions": {
+    "decided_by": "developer, November 11, 2026 (ITL-933)",
+    "tables_not_in_spec": {
+      "keys": "required",
+      "values": "nullable"
+    },
+    "column_group_structs": "required",
+    "accepted_unresolved": []
+  }
+}
