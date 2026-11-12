@@ -9,7 +9,7 @@ tag columns, and wrapping the result in an ``ArrowTableStream``.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
     from orcapod.config import OrcapodConfig
     from orcapod.contexts import DataContext
+    from orcapod.protocols.hashing_protocols import ArrowHasherProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -41,7 +42,7 @@ _SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
 
 
 def _make_provenance_token(
-    record_id_column: str | None, row_index: int, row: dict
+    record_id_column: str | None, row_index: int, value: object
 ) -> str:
     """Build the human-readable provenance token for a single row.
 
@@ -62,8 +63,34 @@ def _make_provenance_token(
     not guaranteed to be identical between runs.
     """
     if record_id_column is not None:
-        return f"{record_id_column}={row[record_id_column]}"
+        return f"{record_id_column}={value}"
     return f"row_{row_index}"
+
+
+def _unhashable_columns(
+    hasher: ArrowHasherProtocol, table: pa.Table
+) -> list[tuple[str, pa.DataType]]:
+    """Return the columns of ``table`` that ``hasher`` cannot hash, with their types.
+
+    Each column is hashed on its own. A zero-row slice is not enough, because the hasher
+    rejects a type only when it visits a value, so the whole column is probed. This runs
+    only after hashing the whole table has failed.
+
+    Args:
+        hasher: The data context's Arrow hasher.
+        table: The table whose hash failed.
+
+    Returns:
+        ``(column name, Arrow type)`` for every column whose hash raises
+        ``NotImplementedError``, in column order.
+    """
+    failing: list[tuple[str, pa.DataType]] = []
+    for name in table.column_names:
+        try:
+            hasher.hash_table(table.select([name]))
+        except NotImplementedError:
+            failing.append((name, table.schema.field(name).type))
+    return failing
 
 
 def _make_record_id(source_id: str, provenance_token: str) -> uuid.UUID:
@@ -198,17 +225,40 @@ class SourceStreamBuilder:
         )
 
         # 5. Compute table hash for data identity.
-        table_hash = self._data_context.arrow_hasher.hash_table(table)
+        hasher = self._data_context.arrow_hasher
+        try:
+            table_hash = hasher.hash_table(table)
+        except NotImplementedError as exc:
+            # The hasher names only the Arrow type; find the columns that carry it.
+            unhashable = _unhashable_columns(hasher, table)
+            if not unhashable:
+                raise
+            described = ", ".join(
+                f"{name!r} of type {kind}" for name, kind in unhashable
+            )
+            raise NotImplementedError(
+                f"cannot hash column {described}: the Arrow hasher does not support "
+                "this type. Drop or convert the column before building the source."
+                if len(unhashable) == 1
+                else f"cannot hash columns {described}: the Arrow hasher does not "
+                "support these types. Drop or convert them before building the source."
+            ) from exc
 
         # 6. Default source_id to table hash.
         if source_id is None:
             source_id = table_hash.to_hex(char_count=self._config.hashing.path_n_char)
 
         # 7. Build per-row source-info strings and deterministic UUID record IDs.
-        rows_as_dicts = table.to_pylist()
+        # Only the record-ID column's values are needed (none for positional
+        # tokens), so convert that one column to Python, never the whole table.
+        record_values: Sequence[object] = (
+            table.column(record_id_column).to_pylist()
+            if record_id_column is not None
+            else [None] * table.num_rows
+        )
         provenance_tokens = [
-            _make_provenance_token(record_id_column, i, row)
-            for i, row in enumerate(rows_as_dicts)
+            _make_provenance_token(record_id_column, i, value)
+            for i, value in enumerate(record_values)
         ]
         source_info = [
             f"{source_id}{constants.BLOCK_SEPARATOR}{token}"

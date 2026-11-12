@@ -178,6 +178,7 @@ class TestGetColumnInfo:
         )
         mock_table = MagicMock()
         mock_table.schema.return_value.to_arrow.return_value = arrow_schema
+        mock_table.get_metadata.return_value = {}  # no nullability record
         mock_project.table.return_value = mock_table
         result = connector.get_column_info("my_table")
         assert result == [
@@ -205,6 +206,7 @@ class TestIterBatches:
     def _wire_scan(self, mock_sp, mock_project, batches: list) -> None:
         """Wire mock_sp so that scan().to_record_batches() returns ``batches``."""
         mock_project.table.return_value.select.return_value = MagicMock()
+        mock_project.table.return_value.get_metadata.return_value = {}
         mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = (
             iter(batches)
         )
@@ -354,6 +356,13 @@ class TestUpsertRecords:
     def _make_mock_table(self, mock_project, pk_cols: list[str]) -> MagicMock:
         mock_table = MagicMock()
         mock_table.key_schema.names = pk_cols
+        # A table that already holds rows and has no nullability record (ITL-936), so
+        # the connector writes no record and these tests see only their own calls.
+        mock_table.get_metadata.return_value = {}
+        mock_table.schema.return_value.to_arrow.return_value = pa.schema(
+            [pa.field(c, pa.string()) for c in pk_cols]
+            + [pa.field("existing_value", pa.int64())]
+        )
         mock_project.table.return_value = mock_table
         return mock_table
 
@@ -562,6 +571,13 @@ class TestUpsertRecordsMetadata:
     def _make_mock_table(self, mock_project, pk_cols: list[str]) -> MagicMock:
         mock_table = MagicMock()
         mock_table.key_schema.names = pk_cols
+        # A table that already holds rows and has no nullability record (ITL-936), so
+        # the connector writes no record and these tests see only their own calls.
+        mock_table.get_metadata.return_value = {}
+        mock_table.schema.return_value.to_arrow.return_value = pa.schema(
+            [pa.field(c, pa.string()) for c in pk_cols]
+            + [pa.field("existing_value", pa.int64())]
+        )
         mock_project.table.return_value = mock_table
         return mock_table
 

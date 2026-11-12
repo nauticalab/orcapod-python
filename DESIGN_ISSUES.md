@@ -1700,6 +1700,14 @@ was bumped from `>=0.11.0` to `>=0.14.0` to document the effective floor.
 No connector code changes were needed — the public API is fully compatible
 across this version range.
 
+**Update (ITL-926, November 11, 2026):** the floor is now `>=0.16.33`, and the lock pins
+pyspiral 0.16.33 and substrait 0.30.0. pyspiral 0.14.9 did not use the login saved by the
+0.16.33 `spiral login` CLI: it started a fresh device sign-in. Every call the connector makes
+has the same signature in 0.16.33 (`Table.key_schema` now returns a Spiral `Schema`; only
+`.names` is used). pyspiral appears frozen at 0.16.33; its successor `spiral-sdk` (same import
+name `spiral`) has a new table model and reads keyed (legacy) tables only through a private,
+windowed call, so moving to it is a separate issue.
+
 **Ongoing:** pyspiral releases frequently. See PLT-1785 for the tracking issue
 covering routine version bumps.
 
@@ -2605,3 +2613,100 @@ results.
 Known compromise: the struct's children are nullable at the Arrow level, because Polars drops
 nested non-null flags on its way back to Arrow (ITL-842). The logical type enforces non-null
 instead. Tighten under a new storage version once nested nullability survives Polars.
+
+## `src/orcapod/core/sources/spiraldb_table_source.py` — Spiral tables as a workshop source (ITL-926)
+
+### SP2 — A Spiral table source was unverified on v0.3, and is limited for large or unusual tables
+**Status:** in progress
+**Severity:** high
+**Issue:** ITL-926 (follow-ups: ITL-186 streaming source)
+
+Re-verified against the EDI sample project (`edi-sample-v1-855632`, read-only) and a
+disk-backed pyspiral fake (`tests/test_databases/fake_pyspiral.py`). The workshop path works:
+a `SpiralDBTableSource` with a composite key, a `Join` of two Spiral sources, a function pod,
+a Delta store, a re-run with no function calls, save and load, and the same hashes in a fresh
+process. Findings, with repro scripts, are in `superpowers/specs/itl-926-live/FINDINGS.md`.
+
+**Fixed:**
+
+* Nested string, binary and list types are normalized to large variants on both read paths
+  (ITL-40).
+* Errors name the project and dataset.
+* pyspiral is raised to 0.16.33.
+* The default `source_id` is `<project id>/<dataset>/<table>` (approved hash change).
+* Source building no longer calls `to_pylist()` on the whole table (byte-identical).
+* Non-nullable columns stay non-nullable end to end: true only on the original pyspiral
+  fake. SpiralDB keeps no non-null flag except on list items; fixed by the nullability record
+  (SP3, ITL-936).
+
+**Open (developer decisions pending):**
+
+* Every column of the EDI sample tables is nullable, so a function pod over them must
+  annotate `T | None`; recorded columns arrive as `T` (SP3, ITL-936).
+* `fixed_size_list` columns cannot be hashed: not supported until Orcapod adopts starfix
+  0.5.0 (ITL-910; starfix support is ITL-927). `map` columns fail the same way in starfix
+  0.4.0 (none in the EDI tables).
+* The whole table is read at construction, which rules out tables such as `spike_event`
+  (8.1M rows); the streaming design is in
+  `superpowers/specs/2026-11-11-itl-186-spiral-streaming-source-design.md`.
+* Record IDs are positional; key-based IDs are approved for the streaming source work
+  (ITL-186).
+* `unit` (100 rows) takes about 35 s to build live, and the Spiral scan itself is slow
+  (14.5 s for 3 rows); Orcapod's share is about 0.4 s. `scan_cost_probe.py` measures it.
+* `PostgreSQLTableSource` and `SQLiteTableSource` still default `source_id` to the bare table
+  name (to be filed separately).
+
+## `src/orcapod/databases/spiraldb_connector.py` — SpiralDB stores every column nullable (ITL-936)
+
+### SP3 — Non-nullable columns arrive as `T | None` from SpiralDB; a null in a non-null struct field is stored as 0
+**Status:** in progress
+**Severity:** high
+**Issue:** ITL-936
+
+Live, pyspiral 0.16.33, scratch table in `edi-tutorial-v1-841226` (November 11, 2026): a
+table written with `k`, `v`, struct `g` and its field `g.x`, and list `l` with its items all
+declared non-null reports `Schema({k=i64?, l=fixed_size_list(f32)[2]?, v=i32?, w=i32?,
+g={x=i32?, y=i32?}?})`: every top-level column and struct field nullable; only list items keep
+`not null`. Writing a null to top-level `v` declared non-null is refused by Arrow on the
+client. Writing `{k: 4, v: 40, g: {x: null, y: null}}` with `g.x` declared non-null is
+**accepted and reads back as `g.x = 0`**: silent data corruption on SpiralDB's side.
+
+**Fix:** Orcapod records each table's non-nullable paths in the table's key-value metadata
+(`__orcapod_nullability__`, format `orcapod.nullability` v1; `orcapod.databases.
+write_nullability_record` / `read_nullability_record`). `SpiralDBConnector` writes the record
+before the first rows of a table, checks every non-nullable path for nulls before any write,
+refuses a write that disagrees with the record, and on read restores the record in
+`get_column_info` and checks and restores every batch in `iter_batches`
+(`NullInNonNullableColumnError` / `NullabilityRecordError`, naming the table). Tables without
+a record are unchanged. The pyspiral fake now reports nullability as the server does. Open:
+the corruption itself is SpiralDB's (to raise with Spiral).
+
+Live check (coordinator, `superpowers/specs/itl-936-live/live_nullability.py write`): the
+connector's nullability record, refusals, a Join and save/load pass. Also found, for a
+top-level struct column (nested structs not tested): SpiralDB cannot store a null struct.
+Written without `push_down_nulls`, pyspiral refuses it (`Spiral does not support null column
+groups. Found a null in the column named "g".`); with `push_down_nulls=True`, `g = null` reads
+back as `g = {x: null, y: null}` with the struct valid (value and hash change). Null lists,
+null list items and null struct fields survive. The connector now refuses a null struct at any depth
+with `UnsupportedValueError` before writing, and never passes `push_down_nulls`.
+
+If the rows of a table's first write fail, the connector removes the nullability record it
+wrote just before them (a record naming columns the table lacks would make every read, and
+every result-store flush, raise). A record whose chunks were written but whose header was not
+is no record.
+
+Writers are not coordinated (SpiralDB has no lock; metadata writes are not versioned). The
+rollback removes the record only while the table still has no value columns, but if another
+writer's first rows land between that check and the removal, the table is left without a
+record: it reads as `T | None` (never a hidden null) and is repaired with
+`write_nullability_record` after checking the data.
+
+Known limitation: the connector treats "the table has no value columns yet" as "the table has
+no rows yet", to avoid a scan on every first write (a live Spiral scan costs seconds even for a
+few rows). A table whose columns are all key columns, already holding rows without a record,
+is recorded by the next write; if that write adds value columns declared non-nullable, the
+earlier rows hold nulls there and every read raises `NullInNonNullableColumnError` (a null is
+never hidden). Follow-up idea, unverified: a manifest-only row count
+(`spiral.core.manifest_stats(snapshot).key_space_stats.total_rows`, see the ITL-186 design)
+could replace the shortcut cheaply once confirmed live.
+

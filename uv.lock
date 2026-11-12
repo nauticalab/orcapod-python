@@ -1,15 +1,15 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11.0"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'darwin'",
-    "python_full_version == '3.13.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
     "python_full_version >= '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version == '3.13.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(python_full_version >= '3.14' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.13.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.13.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(python_full_version == '3.13.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
     "python_full_version < '3.12' and sys_platform == 'darwin'",
     "python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
@@ -214,7 +214,7 @@ resolution-markers = [
     "(python_full_version >= '3.14' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.14' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
-    { name = "cffi", marker = "python_full_version >= '3.14'" },
+    { name = "cffi" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b9/e9/184b8ccce6683b0aa2fbb7ba5683ea4b9c5763f1356347f1312c32e3c66e/argon2-cffi-bindings-21.2.0.tar.gz", hash = "sha256:bb89ceffa6c791807d1305ceb77dbfacc5aa499891d2c55661c6459651fc39e3", size = 1779911, upload-time = "2021-12-01T08:52:55.68Z" }
 wheels = [
@@ -236,17 +236,17 @@ version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version == '3.13.*' and sys_platform == 'darwin'",
-    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
     "python_full_version == '3.13.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(python_full_version == '3.13.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.13.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.12.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
     "python_full_version < '3.12' and sys_platform == 'darwin'",
     "python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "(python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
-    { name = "cffi", marker = "python_full_version < '3.14'" },
+    { name = "cffi" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5c/2d/db8af0df73c1cf454f71b2bbe5e356b8c1f8041c979f505b3d3186e520a9/argon2_cffi_bindings-25.1.0.tar.gz", hash = "sha256:b957f3e6ea4d55d820e40ff76f450952807013d361a65d7f28acc0acbf29229d", size = 1783441, upload-time = "2025-07-30T10:02:05.147Z" }
 wheels = [
@@ -2381,8 +2381,8 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgresql'", specifier = ">=3.0" },
     { name = "pyarrow", specifier = ">=20.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
-    { name = "pyspiral", marker = "extra == 'all'", specifier = ">=0.14.0" },
-    { name = "pyspiral", marker = "extra == 'spiraldb'", specifier = ">=0.14.0" },
+    { name = "pyspiral", marker = "extra == 'all'", specifier = ">=0.16.33" },
+    { name = "pyspiral", marker = "extra == 'spiraldb'", specifier = ">=0.16.33" },
     { name = "ray", extras = ["default"], marker = "extra == 'all'", specifier = "==2.48.0" },
     { name = "ray", extras = ["default"], marker = "extra == 'ray'", specifier = "==2.48.0" },
     { name = "redis", marker = "extra == 'all'", specifier = ">=6.2.0" },
@@ -3351,7 +3351,7 @@ wheels = [
 
 [[package]]
 name = "pyspiral"
-version = "0.14.9"
+version = "0.16.33"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "betterproto2" },
@@ -3370,9 +3370,9 @@ dependencies = [
     { name = "zstandard" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/d7/5564dedeabfcc375ebbe94519f0a1295846910425190c4e3b40bfbadd414/pyspiral-0.14.9-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:760567fe158f63593820d2db20beb0aae40ecb2b58a0bcf545ffeaf44c937acc", size = 32477054, upload-time = "2026-06-22T13:53:43.46Z" },
-    { url = "https://files.pythonhosted.org/packages/81/0a/83af2ad962ef4f1bb9cec3c135ecf85a87041ab4941973c98d8c846059c4/pyspiral-0.14.9-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:0c21edbfe049ed34437b9813bed60797ef05f6b85c6d3ddf40f62103aa6c7052", size = 38816257, upload-time = "2026-06-22T13:53:48.751Z" },
-    { url = "https://files.pythonhosted.org/packages/c2/dd/a2a5c55fca9f0a0409c6d769c097acaec0c28556bb0727b3b7ec478936ac/pyspiral-0.14.9-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:ddacfe68881716b3dc578167cd675b3fd0e0981b9dfcd139654bbc1574d9895c", size = 36150376, upload-time = "2026-06-22T13:53:53.477Z" },
+    { url = "https://files.pythonhosted.org/packages/99/fe/4dfe30304cd10ecd49b52e6a3b217e25e82c4646ab2dc0f2150c749fbdb0/pyspiral-0.16.33-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:2dc394bbe2f9d57b2bb12ce829602db333cbeb77ceb1a87992226e6fd236fd27", size = 38610323, upload-time = "2026-10-21T12:29:58.326Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/53/9f0cbe798684d4177b92a6e156ffb7377afc9210e4001635cfa14440271d/pyspiral-0.16.33-cp311-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b88378adedc2db9c42d66f3e39e1fe0a95377f8c0fd492dca1f5a949f22f9bc3", size = 46341849, upload-time = "2026-10-21T12:30:01.633Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/99/cc2976bdb3a1c7aee7dee220882248beee8dd37625e48861c951596aae7b/pyspiral-0.16.33-cp311-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:19f05646d2fcac06c3f6c0ea654ff27bc02fd515f848e9e3e2d583db4a2239f7", size = 45783449, upload-time = "2026-10-21T12:30:04.678Z" },
 ]
 
 [[package]]
@@ -3956,14 +3956,37 @@ wheels = [
 
 [[package]]
 name = "substrait"
-version = "0.26.0"
+version = "0.30.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf" },
+    { name = "substrait-extensions" },
+    { name = "substrait-protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7c/38/86cd5a2d856d5e837d358ed71bd07abd27791c522844aa1cfb0875ac7622/substrait-0.30.0.tar.gz", hash = "sha256:3ec97768ef5685fc47e89e0b5f152282a01594086e70586f48efcd6ac5bd6567", size = 225857, upload-time = "2026-07-29T13:23:26.789Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/3f/8892a5ca5891e965ab0566db4e66358ebe36188b8cba185cbdd314131746/substrait-0.30.0-py3-none-any.whl", hash = "sha256:7961c84d54da92526d11a7c346c511e5410823a6ef6c71282d72c615b41341e7", size = 95635, upload-time = "2026-07-29T13:23:25.265Z" },
+]
+
+[[package]]
+name = "substrait-extensions"
+version = "0.99.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d5/f4/86c5b06b3bdd33b6fbed3cd51dd94ef875887865583dc46e48ddcd032c6a/substrait_extensions-0.99.0.tar.gz", hash = "sha256:aff47c9e5b02af5dd4909109eb8eb64b035d625cf22d79951ac5a31b2dba3986", size = 57027, upload-time = "2026-07-26T05:28:14.73Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/c2/6494244aafe28da69e671ba8c0d3fa644d7c411f0d353c78c6c1c2374462/substrait_extensions-0.99.0-py3-none-any.whl", hash = "sha256:762c25bebd84af6dfee26ec7f0c18615457e773c4b45324ff8a8082dc527f2b4", size = 112906, upload-time = "2026-07-26T05:28:15.504Z" },
+]
+
+[[package]]
+name = "substrait-protobuf"
+version = "0.99.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/85/a50d1a433d19ec66217eb0a9d7e5bafbc9d298f791a19c0c9f0aacc440c4/substrait-0.26.0.tar.gz", hash = "sha256:d96070a1e5ba52ced9fb7e4f35a1b2968160dbe54b24e6dca9db035252aa059d", size = 245777, upload-time = "2026-01-15T09:46:09.966Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/c1/74612fbf902bb65240b05990b6dcdbe9424550309fae11a67678ec8cc081/substrait_protobuf-0.99.0.tar.gz", hash = "sha256:79f5f422dd4089c5538017cb0955df098e68f9709e543e991956ddfa3b9ae210", size = 65077, upload-time = "2026-07-26T05:28:31.907Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/df/de1ef7b0a8c56ffcb6a73fb8665a8ce3804b8800a73eee10221c70569a80/substrait-0.26.0-py3-none-any.whl", hash = "sha256:97415da1a5bde53e4dea340f1c1ba6b8577622ead26059ecb7c1463f6f656d6d", size = 173811, upload-time = "2026-01-15T09:46:08.547Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/21/84474cbe254b10533f0a79c4a20dcd13cf65bb7012f9c85062ab89066eaa/substrait_protobuf-0.99.0-py3-none-any.whl", hash = "sha256:6d00c8a4f6d5d822a2358f870d642f8fda0350e110025c978daf624ae2491f16", size = 70932, upload-time = "2026-07-26T05:28:32.7Z" },
 ]
 
 [[package]]

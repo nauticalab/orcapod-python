@@ -97,6 +97,83 @@ class InconsistentSourceError(ValueError):
     """
 
 
+def _in_table(message: str, table: str | None) -> str:
+    """Prefix ``message`` with the table it concerns, when known."""
+    return message if table is None else f"table {table}: {message}"
+
+
+class NullabilityRecordError(ValueError):
+    """A table's nullability record cannot be read, or a schema cannot be recorded.
+
+    The record is the list of non-nullable column paths Orcapod keeps in a SpiralDB
+    table's key-value metadata (ITL-936). An unknown format or version, a missing chunk, a
+    digest mismatch or a path the table does not have is an error, never ignored.
+
+    Attributes:
+        reason: What is wrong with the record.
+        table: The table, as ``"<project>/<dataset>/<table>"``, added by the caller that
+            knows it; ``None`` otherwise.
+    """
+
+    def __init__(self, reason: str, *, table: str | None = None) -> None:
+        self.reason = reason
+        self.table = table
+        super().__init__(_in_table(f"nullability record: {reason}", table))
+
+
+class NullabilityRecordMismatchError(ValueError):
+    """A write declares different non-nullable columns than the table's record.
+
+    The record is never widened, narrowed or rewritten by a write.
+
+    Attributes:
+        only_in_record: Paths the record lists that the write declares nullable.
+        only_in_write: Paths the write declares non-nullable that the record does not list.
+        table: The table, added by the caller; ``None`` otherwise.
+    """
+
+    def __init__(
+        self,
+        only_in_record: list[str],
+        only_in_write: list[str],
+        *,
+        table: str | None = None,
+    ) -> None:
+        self.only_in_record = list(only_in_record)
+        self.only_in_write = list(only_in_write)
+        self.table = table
+        parts = []
+        if only_in_record:
+            parts.append(
+                f"recorded non-nullable but nullable in the write: {only_in_record}"
+            )
+        if only_in_write:
+            parts.append(f"non-nullable in the write but not recorded: {only_in_write}")
+        super().__init__(
+            _in_table(
+                "the write's nullability differs from the table's nullability "
+                "record (" + "; ".join(parts) + ")",
+                table,
+            )
+        )
+
+
+class NullInNonNullableColumnError(ValueError):
+    """A column declared or recorded non-nullable holds a null.
+
+    Attributes:
+        column: The column path, e.g. ``"quality.snr"`` or ``"spikes[]"``.
+        table: The table, added by the caller; ``None`` otherwise.
+    """
+
+    def __init__(self, column: str, *, table: str | None = None) -> None:
+        self.column = column
+        self.table = table
+        super().__init__(
+            _in_table(f"column {column!r} is non-nullable but holds nulls", table)
+        )
+
+
 class CursorInvalidatedError(Exception):
     """Raised by a ``DynamicSourceProtocol`` implementation when the previous
     cursor is no longer valid and the source state must be rebuilt from scratch.

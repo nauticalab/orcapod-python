@@ -233,13 +233,13 @@ class TestPKAsDefaultTags:
         _, data_schema = src.output_schema()
         assert "neuron_count" in data_schema
 
-    def test_default_source_id_is_table_name(self):
+    def test_default_source_id_is_fully_qualified(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.source_id == _TABLE_NAME
+        assert src.source_id == f"{_PROJECT_ID}/{_DATASET}/{_TABLE_NAME}"
 
     def test_explicit_source_id_overrides_default(self):
         from orcapod.core.sources import SpiralDBTableSource

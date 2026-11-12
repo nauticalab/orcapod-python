@@ -4,8 +4,9 @@ Wraps a SpiralDB table as an OrcaPod Source. The table's primary-key
 (key-schema) columns are used as tag columns by default.
 
 Requires the ``spiraldb`` optional extra: ``pip install orcapod[spiraldb]``.
-Authentication is handled externally — run ``spiral login`` once to store
-credentials in ``~/.config/pyspiral/auth.json``.
+Authentication is handled externally — run ``spiral login`` once; pyspiral keeps
+the credentials in its per-user application directory
+(``~/Library/Application Support/pyspiral/`` on macOS, ``~/.config/pyspiral/`` on Linux).
 
 Example::
 
@@ -40,6 +41,12 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.db_table_source import DBTableSource
 from orcapod.databases.spiraldb_connector import SpiralDBConnector
+from orcapod.errors import (
+    NullabilityRecordError,
+    NullabilityRecordMismatchError,
+    NullInNonNullableColumnError,
+    UnsupportedValueError,
+)
 from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
@@ -77,7 +84,11 @@ class SpiralDBTableSource(DBTableSource):
         system_tag_columns: Additional system-level tag columns.
         record_id_column: Column for stable per-row record IDs in provenance.
         source_id: Canonical source name for the registry and provenance
-            tokens. Defaults to *table_name*.
+            tokens. Defaults to ``"<project_id>/<dataset>/<table_name>"``.
+            The project id is Spiral's project identifier (for example
+            ``"edi-sample-v1-855632"``: the API's resource id, unique across
+            Spiral, not a display name), so tables with the same name in
+            different projects or datasets never share record ids.
         label: Human-readable label for this source node.
         data_context: Data context governing type conversion and hashing.
         config: OrcaPod configuration.
@@ -107,6 +118,8 @@ class SpiralDBTableSource(DBTableSource):
         self._project_id = project_id
         self._dataset = dataset
         self._overrides = overrides
+        if source_id is None:
+            source_id = f"{project_id}/{dataset}/{table_name}"
 
         connector = SpiralDBConnector(
             project_id=project_id,
@@ -121,17 +134,31 @@ class SpiralDBTableSource(DBTableSource):
 
             # DBTableSource handles PK resolution and raises ValueError when
             # the table has no key schema and no explicit tag_columns are given.
-            super().__init__(
-                connector,
-                table_name,
-                tag_columns=resolved_tags,
-                system_tag_columns=system_tag_columns,
-                record_id_column=record_id_column,
-                source_id=source_id,
-                label=label,
-                data_context=data_context,
-                config=config,
-            )
+            try:
+                super().__init__(
+                    connector,
+                    table_name,
+                    tag_columns=resolved_tags,
+                    system_tag_columns=system_tag_columns,
+                    record_id_column=record_id_column,
+                    source_id=source_id,
+                    label=label,
+                    data_context=data_context,
+                    config=config,
+                )
+            except (
+                NullabilityRecordError,
+                NullabilityRecordMismatchError,
+                NullInNonNullableColumnError,
+                UnsupportedValueError,
+            ):
+                # The connector's own errors already name the table: keep their types.
+                raise
+            except ValueError as exc:
+                # DBTableSource knows only the table name; say where it looked.
+                raise ValueError(
+                    f"SpiralDB project {project_id!r}, dataset {dataset!r}: {exc}"
+                ) from exc
         finally:
             try:
                 connector.close()
