@@ -236,19 +236,14 @@ def test_subclass_and_base_are_different_types() -> None:
     assert base.pipeline_hash() != child.pipeline_hash()
 
 
-def test_a_value_is_stored_only_as_its_own_class() -> None:
-    """A subclass instance returned for a base-class column is not stored as the base."""
-    with pytest.raises(TypeError, match="Child"):
-        _ = child_as_base.pod(_numbers()).as_table()
+def test_subclass_output_uses_declared_base_storage() -> None:
+    """The declared logical type stores only base fields for a subclass output."""
+    table = child_as_base.pod(_numbers()).as_table()
+    assert table.schema.field("q").type.storage_type.names == ["x"]
 
 
 def test_in_memory_iteration_hands_over_the_returned_object() -> None:
-    """Before any conversion, a pod's own ``iter_data`` gives the function's return value.
-
-    Known behaviour: the datagram holds what the function returned, so iterating the pod's
-    output in memory shows the ``Child`` object. It is refused as soon as the output
-    becomes Arrow (``as_table``, an operator, a store); see the test above.
-    """
+    """A compatible subclass remains its own class in memory."""
     values = [
         data.as_dict()["q"] for _, data in child_as_base.pod(_numbers()).iter_data()
     ]

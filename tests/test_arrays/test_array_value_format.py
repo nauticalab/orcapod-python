@@ -557,7 +557,7 @@ def test_scalar_returned_for_declared_ndarray_is_refused_at_the_pod() -> None:
     source = DictSource(
         data=[{"k": "a", "x": np.array(7.5, np.float32)}], tag_columns=["k"]
     )
-    with pytest.raises(TypeError, match="'y'.*ndarray.*float32"):
+    with pytest.raises(TypeError, match="float32.*'y'.*ndarray"):
         list(double.pod(source).iter_data())
 
 
@@ -668,7 +668,7 @@ def test_declared_ndarray_check_recognizes_parameterized_aliases() -> None:
     # today (ITL-869), so the check is exercised directly for when they are allowed.
     import numpy.typing as npt_
 
-    from orcapod.core.data_function import _declared_ndarray_type  # pyright: ignore[reportPrivateUsage]
+    from orcapod.semantic_types.output_conformance import _declared_ndarray_type  # pyright: ignore[reportPrivateUsage]
 
     assert _declared_ndarray_type(np.ndarray) is np.ndarray
     assert _declared_ndarray_type(npt_.NDArray[np.float32]) is np.ndarray

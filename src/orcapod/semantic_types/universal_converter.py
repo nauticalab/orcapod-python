@@ -1684,6 +1684,11 @@ class UniversalTypeConverter:
         origin = get_origin(python_type)
         args = get_args(python_type)
 
+        if python_type is int:
+            # bool is an int subclass, but Arrow refuses it for an integer field.
+            # Preserve the Python object in memory; encode its declared base here.
+            return lambda value: int(value) if isinstance(value, bool) else value
+
         if python_type in {int, float, str, bool, bytes} or origin is None:
             # Basic types - no conversion needed
             return lambda value: value

@@ -293,8 +293,8 @@ A class a user defines is one of two kinds (developer, November 12, 2026, ITL-97
   function annotated with a structural class may receive another class of the same
   identity; a structural class promises its fields, not its methods. `from_instance` is the
   only conversion, and Orcapod never calls it.
-- A value is stored only as its own class (`UserClassLogicalType.accepts_instance`); never
-  store a subclass instance or a look-alike object in another class's column.
+- A declared class stores its own instances and subclasses (`UserClassLogicalType.accepts_instance`);
+  only the declared class fields enter storage. Unrelated look-alike classes are refused.
 - The identity record (`logical_types/user_class_identity.py`) is `{kind, name, fields}`
   with JSON type tokens. The Arrow extension name is `name@<SHA-256 of the record>` and the
   record is the extension metadata; together they are the logical type identifier. A nested
@@ -632,6 +632,11 @@ data. The rules:
   expands or converts a type implicitly; the only exception is normalization to large variants.
   Inputs that disagree on a column's type are an error naming the column and both types, on
   every execution path (sync and async).
+  Function-output rule (developer, November 12, 2026): the returned value must be an instance of the declared type, or an exact numeric equivalent; a subclass stands in for its base and is stored as the base.
+  Structural classes additionally accept equivalent structural identities. Numeric
+  narrowing and unrelated container types require explicit conversion. Base storage
+  omits subclass-only fields, and those fields do not enter the stored row hash.
+
 - Every output column takes the large-normalized form of its input type
   (arrow_utils.normalize_to_large_types: string to large_string, binary to large_binary, list
   to large_list, recursively). Width, nullability and logical (extension) types are never

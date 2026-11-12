@@ -195,7 +195,7 @@ class UserClassLogicalType(BaseLogicalType):
     #: What ``accepts_instance`` requires, for the error message.
     instance_requirement: str = (
         "an ordinary dataclass or pydantic model is stored only from instances of "
-        "that exact class. Build an instance of the class, or annotate the value "
+        "that class or a subclass. Build an instance of the class, or annotate the value "
         "with its own class."
     )
 
@@ -207,10 +207,10 @@ class UserClassLogicalType(BaseLogicalType):
             converter: The active converter.
 
         Returns:
-            For an exact class: whether ``type(value)`` is the class object. A subclass
-            instance is refused, because its own fields would be lost.
+            Whether the value is an instance of the declared class or a subclass.
+            Storage uses the declared class's fields, excluding subclass-only fields.
         """
-        return type(value) is self._python_type
+        return isinstance(value, self._python_type)
 
     def storage_to_python(
         self, storage_value: Any, converter: TypeConverterProtocol | None

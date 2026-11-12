@@ -10,6 +10,7 @@ import pytest
 from orcapod.core.datagrams.tag_data import Data
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.errors import OutputTypeError
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +30,11 @@ def to_upper(name: str) -> str:
     return name.upper()
 
 
-def return_none(x: int) -> int:
+def return_none(x: int) -> int | None:
+    return None
+
+
+def return_none_for_int(x: int) -> int:
     return None  # type: ignore[return-value]
 
 
@@ -126,6 +131,12 @@ class TestPythonDataFunctionExecution:
         result = pf.call(data)
         # When function returns None, it's wrapped: {"result": None}
         assert result["result"] is None
+
+    def test_call_returns_none_for_non_optional_output_raises(self):
+        """None for an output not declared ``T | None`` is rejected (ITL-895)."""
+        pf = PythonDataFunction(return_none_for_int, output_keys="result")
+        with pytest.raises(OutputTypeError):
+            pf.call(Data({"x": 5}))
 
     def test_direct_call_bypasses_executor(self):
         pf = PythonDataFunction(double, output_keys="result")

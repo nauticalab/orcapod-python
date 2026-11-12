@@ -142,6 +142,107 @@ The same step is available as a stream method: `wide.select_data_columns(["weigh
 Tag columns are never affected by this rule -- a function pod passes all tags through
 untouched.
 
+## Return values must match the declared type
+
+Each value the function returns is checked against its declared output type before it is
+stored or hashed. A `float` returned for an output declared `int` is rejected; it is not
+truncated. The `OutputTypeError` names the function, the output, the declared type and the
+type of the value (never the value itself, which stays on the error's `value` attribute),
+and says what to return instead:
+
+```python
+from orcapod.errors import OutputTypeError
+
+@function_pod(output_keys="half_weight")
+def halve(weight: float) -> int:
+    return weight / 2  # a float, although the function says it returns an int
+
+weights = DictSource(data=[{"subject_id": "mouse_01", "weight": 25.3}], tag_columns=["subject_id"])
+
+try:
+    list(halve.pod(weights).iter_data())
+except OutputTypeError as err:
+    print(err)
+# Function 'halve' returned float for output 'half_weight', which is declared int. The output does not conform. Return an int instead: round(value), or int(value) to truncate.
+```
+
+Fix the function (`return round(weight / 2)`), or declare the type it really returns
+(`-> float`).
+
+`OutputTypeError` is a `TypeError` (and a `ValueError`). Inside a `PipelineJob` it counts as
+a failure of the function for that row, like an exception the function raises itself. With
+the default `error_policy="continue"` the row is skipped and reported to the observer, and
+the other rows are computed and stored. With `error_policy="fail_fast"` the synchronous
+orchestrator stops the run; the asynchronous orchestrator does not stop for row failures yet
+(ITL-879, see below).
+
+The function-output rule is: the returned value must be an instance of the declared type, or an exact numeric equivalent; a subclass stands in for its base and is stored as the base.
+
+| Declared | Returned | Result |
+|---|---|---|
+| `int` / `float` / `bool` | same-kind NumPy scalar, represented exactly | accepted silently |
+| NumPy integer type | Python or NumPy integer within range | accepted silently; out of range rejected |
+| `int` / `float` | value-preserving numeric subclass such as `IntEnum` | accepted silently |
+| `float` | `numpy.float32`, including `numpy.float32(0.1)` | accepted: widening preserves the original float32 value exactly |
+| `numpy.float32` | Python `float` or `numpy.float64`, even `0.5` | rejected: explicitly return `numpy.float32(value)` |
+| `float` | NumPy floating scalar wider than 64 bits | rejected: explicitly return `float(value)` |
+| `list[T]` | tuple, NumPy array, range, deque, dict view, or iterator | rejected: return `list(value)` |
+| `list[T]` | set or frozenset | rejected: return `sorted(value)` for deterministic order |
+| `dict[K, V]` | another mapping, such as `MappingProxyType` or `UserDict` | rejected: return `dict(value)` |
+| `Literal[...]` | a value that is not a member, or equals one with another type (`True`, `1.0` or `numpy.int64(1)` for `Literal[1]`) | rejected: a `Literal` names exact values, so no numeric exception applies |
+| `date` | `datetime` | accepted as a Python subclass; storage keeps the date only |
+| `int` | `bool` | accepted as a Python subclass; stored as an integer |
+| `int` | float, Decimal, Fraction | rejected; choose an explicit conversion |
+| `bool` | `int` | rejected: return `bool(value)` explicitly |
+| floating type | integer or bool | rejected: return a floating value explicitly |
+| non-optional type | `None` | rejected; declare `T \| None` if null is intended |
+| ordinary dataclass or pydantic model | subclass | accepted; storage keeps only declared base fields |
+| ordinary dataclass or pydantic model | unrelated class | rejected |
+| structural class | another structural class with the same identity | accepted; fields follow the same recursive checks |
+
+Python subclassing takes precedence: `bool` for `int` is accepted, while `int` for
+`bool` is rejected. Numeric exceptions otherwise require the same kind.
+Nested list elements, dictionary keys and values, and stored user-class fields follow the
+same policy. A mismatch raises `OutputTypeError` at the common function-output boundary,
+before standalone iteration, table materialization, or sync/async storage can diverge.
+Errors name the function, output, declared type and returned type; nested locations show
+structure without including returned dictionary keys or converter messages.
+
+Outputs are validated against the declared storage schema immediately, and accepted numeric
+exceptions are normalized so downstream pods, hashes and stored rows see the same value.
+Eager validation never replaces a compatible user-class object; stored reads keep their
+existing registry binding. A `Sub` returned for `Base` reaches the next in-memory pod
+as that same `Sub` object. The stored column is `Base`: subclass-only fields are not
+stored and do not enter the row hash. Two such values differing only in those extra
+fields therefore have the same stored row hash. Likewise, a `datetime` declared as
+`date` is passed on unchanged in memory, but storage contains only its date.
+
+A consequence to know: the declared type's logical type decides what is stored, so a
+function should read only what its declared parameter type has. A function that reads a
+field its declared parameter type does not have (a subclass-only field, or the time of a
+`datetime` declared as `date`) gets results that depend on the execution path: standalone
+streams and the asynchronous orchestrator pass the in-memory object, while the synchronous
+orchestrator and any later read pass the stored base value. Such results can also be reused
+across values, because two values that differ only in what is not stored have the same row
+hash and the second is served the first one's stored result. This follows from Python
+subclassing and is left as it is (ITL-978).
+
+No warning-and-convert path remains for function outputs. Make container conversions
+explicit:
+
+```python
+@function_pod(output_keys="weights")
+def twice(weight: float) -> list[float]:
+    return list((weight, weight * 2))
+
+for tag, data in twice.pod(weights).iter_data():
+    print(data.as_dict())
+# {'weights': [25.3, 50.6]}
+```
+
+Previously stored rows are served unchanged; this check does not repair or recompute them.
+Input-source conformance remains outside this change.
+
 ## `PipelineJob` -- database-backed, cached execution
 
 Applying a pod directly, as above, computes in memory and keeps nothing. To store results and

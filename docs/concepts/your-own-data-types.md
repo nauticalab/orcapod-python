@@ -252,11 +252,11 @@ module path, the name and the fields are unchanged.
 Python's subclass rule holds: a pod annotated with a class accepts a column of a
 subclass. The subclass remains its own type, with its own fields and tables.
 
-A column holds one class. To return a subclass from a pod, declare it: a pod annotated
+A column has its declared logical type. A pod annotated
 `-> Child` produces a `Child` column with all of `Child`'s fields, and a downstream
 parameter `p: Base` accepts that column. A pod annotated `-> Base` that returns a `Child`
-instance is an error (`TypeError`) when its output is turned into a table or stored: the
-value is refused, never stored as a `Base` without its own fields.
+instance is accepted: in memory it remains a `Child`, while the declared `Base` logical
+type stores only the base fields. Subclass-only fields do not enter the stored row hash.
 
 A dataclass and a pydantic model are never the same type, and neither is ever the same
 type as an `op.dataclass`.
@@ -298,9 +298,8 @@ Neither case is reported as missing data, and nothing stored is changed.
 
 - An ordinary dataclass or pydantic model defined inside a function cannot be stored: it
   has no module path to be found by. An `op.dataclass` may be defined anywhere.
-- Each subclass is its own type with its own fields; it is never stored as its parent. A
-  value is stored only as its own class: a pod annotated `-> Base` that returns a `Child`
-  instance fails when the result is stored, instead of losing the child's fields.
+- Each subclass has its own identity. Declaring a base-class output accepts subclass
+  instances but stores only base fields; declare the subclass to store its extra fields.
 - There is no structural pydantic model: a pydantic model is always identified by its
   exact class.
 - Results stored by Orcapod versions before 0.3 identified classes by module and class
@@ -312,3 +311,11 @@ Neither case is reported as missing data, and nothing stored is changed.
 - [Function Pods](function-pods.md): the pods that take and return these classes.
 - [Identity & Hashing](identity.md): how a type's identity enters pipeline and content
   hashes.
+
+Function outputs accept instances of their declared class and subclasses (ITL-895).
+A subclass object is passed unchanged to the next pod in memory. When returned for a
+base-class output, only the base fields are stored and read back; extra subclass fields
+are not included in the row hash. Two subclass instances differing only in extra fields
+therefore have the same stored row hash. Declare the subclass to retain all its fields.
+Compatible structural objects also pass unchanged in memory; stored reads use the registry
+binding for their structural identity.

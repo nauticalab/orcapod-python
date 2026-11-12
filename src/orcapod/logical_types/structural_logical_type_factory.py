@@ -48,7 +48,7 @@ class StructuralLogicalType(UserClassLogicalType):
             class with the same identity record.
         """
         cls = type(value)
-        if cls is self._python_type:
+        if isinstance(value, self._python_type):
             return True
         if not uci.is_structural(cls):
             return False

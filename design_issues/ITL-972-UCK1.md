@@ -23,7 +23,7 @@ own class.
 
 - An ordinary dataclass or pydantic model is an **exact** class: named by module path and
   qualified name, never equivalent to another class. Python subclassing still applies at a
-  pod input. A value is stored only as its own class.
+  pod input. An output accepts a subclass, but the declared logical type controls its stored fields (ITL-895).
 - `orcapod.dataclass` makes a **structural** class: named by its declared name (default the
   class name); two structural classes with equal identity records are compatible in the
   schema check and their instances compare equal. Orcapod converts nothing: a value is
@@ -55,3 +55,9 @@ converts the data) but not over Arrow IPC or the C stream interface, where Arrow
 ITL-602; nested struct fields since this fix. Orcapod's own writers and Polars round trips
 never produce non-large storage. Pinned by a strict xfail in
 `tests/test_user_types/test_read_path.py`.
+
+**Output-boundary follow-up (ITL-895):** a subclass returned for a base-class output is
+accepted on every path. It passes unchanged in memory, while the declared base logical type
+stores only base fields; extra fields are omitted from storage and row hashes. Compatible
+structural objects are validated without replacing them; stored reads retain their registry
+binding. Unrelated classes are rejected with `OutputTypeError` at the shared output boundary.
