@@ -60,6 +60,16 @@ class DataFunctionProtocol(
         ...
 
     @property
+    def accepts_arbitrary_keywords(self) -> bool:
+        """Whether the function takes input columns beyond ``input_data_schema``.
+
+        ``True`` means every data column of the input is passed to the function
+        (a ``**kwargs`` function), so no column is unused. A function pod never
+        drops a column for such a function.
+        """
+        ...
+
+    @property
     def output_data_schema(self) -> Schema:
         """Schema describing the output data this function produces."""
         ...

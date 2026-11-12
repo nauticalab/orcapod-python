@@ -111,16 +111,16 @@ A few things to note about function pods:
 
 - **Parameter names match data column names.** The function's parameter names
   (`temperature`, `pressure`) must match the data column names from the input stream
-  exactly -- one parameter per data column. A stream with extra data columns is rejected;
-  narrow it first with `source.select_data_columns([...])`
-  (see [Function Pods](concepts/function-pods.md#input-columns-must-match-exactly)).
+  exactly -- one parameter per data column. Data columns the function does not take are
+  dropped when you call the pod; `pod(stream, strict=True)` and `pod.process(stream)`
+  reject them instead (see [Function Pods](concepts/function-pods.md#input-columns)).
 - **Type annotations define the schemas.** Orcapod uses them to build the output schema and
   to validate compatibility when the pod is applied. A parameter without an annotation needs
   its type in the decorator's `input_schema` mapping instead.
 - **`output_keys` names the output columns.** Since the function returns a tuple of two
   values, `output_keys` must be a list of two names. For a function returning a single
   value, pass a single string (e.g., `output_keys="result"`).
-- **The decorator creates a `.pod` attribute.** You call `.pod.process()` to apply
+- **The decorator creates a `.pod` attribute.** You call `.pod(stream)` to apply
   the function to a stream.
 
 Now apply it:
@@ -130,8 +130,9 @@ result = analyze_conditions.pod(source)
 ```
 
 !!! tip
-    All standard pods support `__call__` as a shorthand for `.process()`, so
-    `pod(stream)` is equivalent to `pod.process(stream)`.
+    For an operator, `op(stream)` is a shorthand for `op.process(stream)`. For a function
+    pod, `pod(stream)` also drops the data columns the function does not take, while
+    `pod.process(stream)` is exact and rejects them.
 
 The `result` is a new stream. Tags are preserved from the input; the data columns
 are replaced with the function's outputs.

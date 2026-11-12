@@ -238,6 +238,17 @@ class DataFunctionBase(TraceableBase, Generic[E]):
         ...
 
     @property
+    def accepts_arbitrary_keywords(self) -> bool:
+        """Whether the function takes input columns beyond ``input_data_schema``.
+
+        ``False`` for every data function kind today: the parameters are a fixed
+        set (``PythonDataFunction`` rejects ``**kwargs``). A kind that passes every
+        input column to its function overrides this to return ``True``; a function
+        pod then never drops a column for it (ITL-807).
+        """
+        return False
+
+    @property
     @abstractmethod
     def output_data_schema(self) -> Schema:
         """Schema describing the output data this function produces."""
@@ -957,6 +968,10 @@ class DataFunctionWrapper(DataFunctionBase[E]):
     @property
     def input_data_schema(self) -> Schema:
         return self._data_function.input_data_schema
+
+    @property
+    def accepts_arbitrary_keywords(self) -> bool:
+        return self._data_function.accepts_arbitrary_keywords
 
     @property
     def output_data_schema(self) -> Schema:

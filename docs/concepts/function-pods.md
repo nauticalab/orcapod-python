@@ -24,9 +24,10 @@ Key points:
 
 - **`output_keys`** names the output data column(s). A single string means one output
   column; a list of strings means the function returns multiple values.
-- **Function parameters** must match the input stream's data columns exactly: one data
-  column per parameter, with the same names. A parameter with a default value may be left out
-  of the stream, and the default is used. See [Input columns must match exactly](#input-columns-must-match-exactly).
+- **Function parameters** are matched to the input stream's data columns by name: one data
+  column per parameter. A parameter with a default value may be left out of the stream, and
+  the default is used. Data columns the function does not take are dropped when the pod is
+  called. See [Input columns](#input-columns).
 - **Default values** are part of the function's signature hash, so a default must be a value
   Orcapod can hash: `None`, numbers, strings, `bytes`, and lists, tuples, sets and dicts of
   them. A default of another type, such as a `Path`, an `Enum` member, a `datetime` or a
@@ -71,7 +72,7 @@ source = DictSource(
 )
 
 # Apply the function pod to the source stream
-result = compute_bmi.pod(source)  # shorthand for compute_bmi.pod.process(source)
+result = compute_bmi.pod(source)
 
 # Inspect the output schema -- tags pass through, data are replaced
 tag_schema, data_schema = result.output_schema()
@@ -90,18 +91,16 @@ for tag, data in result.iter_data():
 The function pod preserves tags and replaces data columns with the function's output.
 
 !!! tip
-    All standard pods support `__call__` as a shorthand for `.process()`, so
-    `compute_bmi.pod(source)` is equivalent to `compute_bmi.pod.process(source)`.
+    Calling a function pod, `compute_bmi.pod(source)`, is the convenient form of
+    `compute_bmi.pod.process(source)`: it first drops the data columns the function does not
+    take (see [Input columns](#input-columns)). When the stream has exactly the function's
+    columns, as here, the two are the same call.
 
-## Input columns must match exactly
+## Input columns
 
-A function pod is strict about its input: the stream's data columns must be exactly the
-function's parameters. Orcapod does **not** pick the columns it needs out of a wider stream.
-A stream with an extra data column, a missing column for a parameter without a default, or a
-column whose type is incompatible with its parameter is rejected with `ValueError` as soon as
-the pod is applied. Types need to be compatible, not identical: a `str` column is accepted for
-a `str | Path` parameter but rejected for an `int` one. (A parameter that has a default value
-may be left out of the stream; the function then uses the default.)
+A function takes one data column per parameter, matched by name. Calling the pod,
+`compute_bmi.pod(stream)`, is the convenient form: data columns that are not parameters of
+the function are dropped, and the function receives the rest. Tag columns are never dropped.
 
 ```python
 wide = DictSource(
@@ -112,8 +111,51 @@ wide = DictSource(
     tag_columns=["subject_id"],
 )
 
+result = compute_bmi.pod(wide)  # 'age' is not a parameter: it is dropped
+for tag, data in result.iter_data():
+    print(f"{tag.as_dict()} -> {data.as_dict()}")
+# {'subject_id': 'mouse_01'} -> {'bmi': 1756.9444444444446}
+# {'subject_id': 'mouse_02'} -> {'bmi': 2209.9999999999995}
+```
+
+The drop is not hidden. Orcapod places one `SelectDataColumns` [operator](operators.md)
+between the stream and the pod, exactly as if you had written it yourself with the stream's
+`select_data_columns` method, so the two pipelines below are the same pipeline: same hashes,
+same graph, same stored tables. `SelectDataColumns` is the name that appears in the graph.
+
+```python
+narrow = wide.select_data_columns(["weight", "height"])
+by_hand = compute_bmi.pod(narrow)
+
+print(result.pipeline_hash() == by_hand.pipeline_hash())
+# True
+print(result.content_hash() == by_hand.content_hash())
+# True
+```
+
+Because the unused columns are cut before the function's input is hashed, a change in an
+unused column does not cause a recomputation. When the stream already has exactly the
+function's columns, no step is added.
+
+Each call that drops columns logs one message at `INFO` level (logger
+`orcapod.core.function_pod`) naming them. It is worth reading when a parameter has a default
+value: a misspelt column (`Height` for a parameter `height=1.0`) is dropped like any other
+unused column and the default is used, and that message is the only trace.
+
+### Exact calls: `strict=True` and `.process()`
+
+To have an extra column rejected instead of dropped, pass `strict=True`, or call
+`.process()`, which is the exact primitive and never drops a column:
+
+```python
 try:
-    compute_bmi.pod(wide)
+    compute_bmi.pod(wide, strict=True)
+except ValueError as err:
+    print(type(err).__name__)
+# ValueError
+
+try:
+    compute_bmi.pod.process(wide)
 except ValueError as err:
     print(type(err).__name__)
 # ValueError
@@ -124,19 +166,20 @@ The error message names both schemas and the first column that does not fit, for
 compatible with expected input schema Schema({'weight': float, 'height': float}): column
 'age' is not a parameter of the function`.
 
-Narrow the stream first with the `SelectDataColumns` [operator](operators.md) (or drop the
-extras with `DropDataColumns`):
+`strict` decides only whether an extra column is an error. It is not part of any hash: when
+there is nothing to drop, `pod(stream)`, `pod(stream, strict=True)` and `pod.process(stream)`
+build the same pipeline.
 
-```python
-from orcapod.operators import SelectDataColumns
+### What is an error in every form
 
-narrow = SelectDataColumns(columns=["weight", "height"])(wide)
-result = compute_bmi.pod(narrow)
-for tag, data in result.iter_data():
-    print(f"{tag.as_dict()} -> {data.as_dict()}")
-# {'subject_id': 'mouse_01'} -> {'bmi': 1756.9444444444446}
-# {'subject_id': 'mouse_02'} -> {'bmi': 2209.9999999999995}
-```
+A missing column for a parameter without a default, or a column whose type is incompatible
+with its parameter, is rejected with `ValueError` as soon as the pod is applied, however it
+is applied. Types need to be compatible, not identical: a `str` column is accepted for a
+`str | Path` parameter but rejected for an `int` one. (A parameter that has a default value
+may be left out of the stream; the function then uses the default.)
+
+A stream must keep at least one data column, so a stream none of whose data columns is a
+parameter is rejected as well.
 
 The same step is available as a stream method: `wide.select_data_columns(["weight", "height"])`.
 Tag columns are never affected by this rule -- a function pod passes all tags through
@@ -615,7 +658,27 @@ for tag, data in result.iter_data():
 ```
 
 The join happens on shared tag columns, and the merged data columns are fed to the function.
-The [exact-match rule](#input-columns-must-match-exactly) applies to the joined stream.
+The [input column rules](#input-columns) apply to the joined stream: the join comes first,
+then one automatic `SelectDataColumns` drops the joined columns the function does not take.
+Written by hand, that is `a.join(b).select_data_columns([...])` passed to the pod.
+Two consequences:
+
+- Two inputs that carry the same data column are rejected by the join, whether or not the
+  function takes that column. Drop it from one input yourself.
+- A stream can be passed to restrict the rows by its tags: it is joined, and its data
+  columns, which the function does not take, are then dropped.
+
+```python
+chosen = DictSource(
+    data=[{"subject_id": "mouse_02", "cohort": "b"}],
+    tag_columns=["subject_id"],
+)
+
+result = compute_bmi.pod(weights, heights, chosen)
+for tag, data in result.iter_data():
+    print(f"{tag.as_dict()} -> {data.as_dict()}")
+# {'subject_id': 'mouse_02'} -> {'bmi': 2209.9999999999995}
+```
 
 ## DataFunction internals
 

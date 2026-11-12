@@ -456,6 +456,26 @@ data. Never inspects tags. Two execution models:
 - FunctionPod → FunctionPodStream: lazy, in-memory
 - FunctionNode: DB-backed, two-phase (yield cached results first, then compute missing)
 
+Calling a function pod (developer, November 12, 2026, ITL-807). pod(a, b) is the
+convenient call and pod.process(a, b) the exact primitive:
+
+- pod(a, b) joins the inputs as process does and, when the joined stream carries data
+  columns that are not parameters of the function, places one automatic SelectDataColumns
+  after the automatic join and before the pod (_FunctionPodBase.__call__, the one place
+  that decides it). The select is an ordinary operator step: graph, hashes and stored tables
+  must equal those of a pipeline with that select written by hand (the stream's
+  `select_data_columns` method builds the same operator, and `a.join(b)` the same `Join`).
+  Nothing to drop means no step. One info log names the dropped columns; it is not a warning.
+- pod(a, b, strict=True) and pod.process(a, b) reject an extra column. strict is part of
+  no identity. process never takes a strict argument and never drops a column.
+- A missing required column is an error in every form. Tags are never dropped. A data column
+  shared by two inputs fails at the join, used or not: no special handling.
+- No select is added when the data function's accepts_arbitrary_keywords is true (no kind
+  today; PythonDataFunction rejects variadic keyword arguments).
+- Function pods only. An operator's and a SideEffectPod's __call__ stay aliases of
+  process with no strict argument. There is no global setting.
+- A test of the exact input contract uses process or strict=True.
+
 Operator (core/operators/) — structural pod transforming streams without synthesizing new
 data values. All subclass StaticOutputPod:
 - UnaryOperator — 1 input (Batch, Select/Drop columns, Map, Filter)
