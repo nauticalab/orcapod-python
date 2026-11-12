@@ -21,7 +21,7 @@ import contextlib
 import logging
 import uuid
 from abc import abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from orcapod import contexts
@@ -2103,22 +2103,34 @@ class FunctionJobNode(FunctionNodeBase):
 
         return joined if joined.num_rows > 0 else None
 
-    def as_source(self):
+    def as_source(self, tags_as_data: "Mapping[str, str] | None" = None):
         """Return a DerivedSource backed by the DB records of this node.
+
+        Args:
+            tags_as_data: Maps a tag column of this node to the name of a data
+                column that receives a copy of it. When given, the result is a
+                new root source with its own provenance and a ``source_id``
+                derived from this node's content hash and the mapping; see
+                ``DerivedSource``.
 
         Raises:
             RuntimeError: If no database is attached.
+            InputValidationError: If ``tags_as_data`` is not valid for this
+                node's columns.
         """
         if self._pipeline_database is None:
             raise RuntimeError("Cannot create a DerivedSource without a database")
 
         from orcapod.core.sources.derived_source import DerivedSource
 
-        path_str = "/".join(self.node_identity_path)
-        source_id = f"{path_str}:{self.content_hash().to_string()}"
+        source_id: str | None = None
+        if tags_as_data is None:
+            path_str = "/".join(self.node_identity_path)
+            source_id = f"{path_str}:{self.content_hash().to_string()}"
         return DerivedSource(
             origin=self,
             source_id=source_id,
+            tags_as_data=tags_as_data,
             data_context=self.data_context_key,
             config=self.orcapod_config,
         )

@@ -211,6 +211,7 @@ The table below shows what each class returns from `identity_structure()`.
 | `ArrowTableStream` | `(producer, argument_symmetry(upstreams))` | Falls back to `(class_name, as_table(all_info=True), tag_columns)` when no producer or producer is not a `PipelineElementProtocol` |
 | `RootSource` (`ArrowTableSource`) | `(class_name, (tag_schema, data_schema), source_id)` | `source_id` is the explicit user-supplied value; when not provided it defaults to the Arrow hash of the raw table (site 4). Data-inclusive base case of the Merkle chain. |
 | `DerivedSource` | Origin node's `content_hash` | Inherits its generating node's identity |
+| `DerivedSource` with `tags_as_data` | `(class_name, output_schema, source_id)`; the default `source_id` is `tags_as_data:<label>:<hex>` of the hash of `(("DerivedSource", sorted tags_as_data items), (origin,))`, the origin entering through its `content_hash`; a `record_id_column`, when set, is appended to the parameters as `("record_id_column", name)` | The rule of every root source; the origin and the mapping enter through the default `source_id`, which is the content hash an operator node doing the derivation would have |
 | Operators (unary) | `(operator_class_name, upstream_stream)` | Stream reference resolved via `content_resolver` |
 | Operators (binary/N-ary) | `(operator_class_name, argument_symmetry(streams))` | `frozenset` for commutative (Join, MergeJoin); `tuple` for ordered (SemiJoin) |
 

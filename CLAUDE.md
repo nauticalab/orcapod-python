@@ -401,6 +401,18 @@ tag tuple into one row with list-valued members. It still synthesizes no new dat
 every emitted element came from an input row — and it keys only on tags, never on data. Its
 non-key tags stay tags, list-valued, as `Batch` keeps them.
 
+**Operator or derived source?** (developer, November 11, 2026) The test is: does any data
+element come from a tag value, or from anywhere other than the input's data elements? If yes,
+the step is not an operator: it is a derived source. So a tag's value is offered as data only
+by a source, `DerivedSource(origin, tags_as_data={tag: data_name})` (ITL-939), never by an
+operator. That form is a new root: fresh provenance through `SourceStreamBuilder`, schema-only
+`pipeline_hash`, and a default `source_id` of the form
+`tags_as_data:<algorithm label>:<hex>` (the kind names the operation; the config type key stays
+`derived`), the labelled content hash an operator node doing the
+derivation would have (`DerivedSource._default_source_id`, the one place that defines it;
+the string is used as-is in system-tag values and source-info tokens). `DerivedSource` without `tags_as_data` (a job node's stored records)
+keeps its old identity; do not change it (ITL-956).
+
 ### Two identity chains
 
 Every pipeline element has two parallel hashes:
@@ -550,7 +562,8 @@ data. The rules:
   DB table (not filtered to current inputs). Phase 2 skips inputs whose hash is already
   in the DB.
 - Empty data → `ArrowTableSource` raises `ValueError("Table is empty")`.
-- `DerivedSource` before `run()` → raises `ValueError` (no computed records).
+- `DerivedSource` over a job node before `run()` → presents zero rows with the origin's columns
+  (no computed records; no error), in the plain form and with `tags_as_data`.
 - Join requires non-overlapping data columns; raises `InputValidationError` on collision.
 - MergeJoin requires colliding data columns to have identical Python types; merges into sorted
   `large_list<T>` with source columns reordered to match, where `T` is the large-normalized input
