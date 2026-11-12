@@ -407,20 +407,20 @@ class TestDerivedSourceId:
         # Should not raise
         assert isinstance(src.source_id, str)
 
-    def test_source_id_contains_pipeline_path(self):
+    def test_source_id_has_no_pipeline_path(self):
         node = _make_node(n=3)
         src = node.as_source()
-        # source_id from as_source() includes pipeline path segments
-        sid = src.source_id
-        assert "/" in sid  # path separator from pipeline_path
+        # The default is derived:<label>:<hex>; the node path is not part of it
+        # (ITL-957).
+        assert "/" not in src.source_id
+        assert src.source_id == f"derived:{node.content_hash().to_string()}"
 
     def test_source_id_contains_full_content_hash(self):
         node = _make_node(n=3)
         src = node.as_source()
         full_hash = node.content_hash().to_string()
         # A default source id built from a hash keeps the hash's label.
-        path_str = "/".join(node.node_identity_path)
-        assert src.source_id == f"{path_str}:{full_hash}"
+        assert src.source_id.endswith(f":{full_hash}")
 
     def test_different_nodes_different_source_ids(self):
         node_a = _make_node(n=3)

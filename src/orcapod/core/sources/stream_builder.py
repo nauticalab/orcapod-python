@@ -13,6 +13,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from orcapod.core.sources.source_ids import hash_source_id
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
@@ -146,6 +147,7 @@ class SourceStreamBuilder:
         source_id: str | None = None,
         record_id_column: str | None = None,
         system_tag_columns: Collection[str] = (),
+        source_kind: str | None = None,
     ) -> SourceStreamResult:
         """Run the full enrichment pipeline.
 
@@ -159,22 +161,27 @@ class SourceStreamBuilder:
         Args:
             table: Arrow table with nullable flags already set correctly.
             tag_columns: Column names forming the tag for each row.
-            source_id: Canonical source name. Defaults to the table hash,
-                which changes when rows are reordered; pass an explicit value
-                when record IDs must survive reordering.
+            source_id: Canonical source name. When not given, the default is
+                ``<source_kind>:<algorithm label>:<hex>`` of the table hash
+                (``hash_source_id``), which changes when rows are reordered;
+                pass an explicit value when record IDs must survive reordering.
             record_id_column: Column whose value identifies a row, giving
                 record IDs that follow the row regardless of its position
                 (given a stable ``source_id``). When ``None`` the record ID is
                 derived from the row's position (``row_{index}``), so it is
                 stable only while row order is.
             system_tag_columns: Additional system-level tag columns.
+            source_kind: Kind prefix of the default source id, for example
+                ``dict``. Required when ``source_id`` is not given; not used
+                otherwise.
 
         Returns:
             SourceStreamResult with enriched stream and metadata.
 
         Raises:
-            ValueError: If the table has no columns ("Table is empty"), or if
-                tag_columns or record_id_column are not in the table.
+            ValueError: If the table has no columns ("Table is empty"), if
+                tag_columns or record_id_column are not in the table, or if
+                neither ``source_id`` nor ``source_kind`` is given.
         """
         tag_columns_tuple = tuple(tag_columns)
         system_tag_columns_tuple = tuple(system_tag_columns)
@@ -243,9 +250,19 @@ class SourceStreamBuilder:
                 f"({exc}). Drop or convert before building the source."
             ) from exc
 
-        # 6. Default source_id to table hash.
+        # 6. Default source_id: the source kind and the labelled table hash. A
+        # source id is the source's name, so a default built from a hash says
+        # what kind of source it is and which algorithm made the hash. Only the
+        # hex is shortened by ``hashing.path_n_char``.
         if source_id is None:
-            source_id = table_hash.to_hex(char_count=self._config.hashing.path_n_char)
+            if source_kind is None:
+                raise ValueError(
+                    "build() needs a source_id or a source_kind to make a default "
+                    "source id from."
+                )
+            source_id = hash_source_id(
+                source_kind, table_hash, hexdigits=self._config.hashing.path_n_char
+            )
 
         # 7. Build per-row source-info strings and deterministic UUID record IDs.
         # Only the record-ID column's values are needed (none for positional

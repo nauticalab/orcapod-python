@@ -1274,6 +1274,10 @@ class OperatorJobNode(OperatorNodeBase):
     def as_source(self, tags_as_data: "Mapping[str, str] | None" = None):
         """Return a DerivedSource backed by the DB records of this node.
 
+        Its ``source_id`` is the ``DerivedSource`` default: without
+        ``tags_as_data``, ``derived:<algorithm label>:<hex>`` of this node's
+        content hash.
+
         Args:
             tags_as_data: Maps a tag column of this node to the name of a data
                 column that receives a copy of it. When given, the result is a
@@ -1291,15 +1295,11 @@ class OperatorJobNode(OperatorNodeBase):
 
         from orcapod.core.sources.derived_source import DerivedSource
 
-        source_id: str | None = None
-        if tags_as_data is None:
-            path_str = "/".join(self.node_identity_path)
-            # A source id is the source's name: a default built from a hash keeps
-            # the hash's label (developer, November 11, 2026).
-            source_id = f"{path_str}:{self.content_hash().to_string()}"
+        # No source_id is given: the source takes the DerivedSource default
+        # (``derived:<algorithm label>:<hex>`` of this node's content hash, or the
+        # ``tags_as_data`` id when a mapping is given).
         return DerivedSource(
             origin=self,
-            source_id=source_id,
             tags_as_data=tags_as_data,
             data_context=self.data_context_key,
             config=self.orcapod_config,

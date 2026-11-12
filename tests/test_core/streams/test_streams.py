@@ -528,6 +528,6 @@ class TestArrowTableStreamNullablePreservation:
 
         # Caller infers nullable before handing off to builder
         table = table.cast(arrow_utils.infer_schema_nullable(table))
-        result = builder.build(table, tag_columns=["tag"])
+        result = builder.build(table, tag_columns=["tag"], source_kind="arrow_table")
         _, data_schema = result.stream.output_schema()
         assert data_schema["val"] is int

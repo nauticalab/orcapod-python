@@ -718,9 +718,9 @@ class TestNodeOrigin:
         plain = node.as_source()
         assert plain.keys() == node.keys()
         assert plain.identity_structure() == (node.content_hash(),)
-        assert plain.source_id == (
-            "/".join(node.node_identity_path) + f":{node.content_hash().to_string()}"
-        )
+        # No source_id is passed: the plain form takes the DerivedSource default,
+        # ``derived:<algorithm label>:<hex>`` of the node's content hash (ITL-957).
+        assert plain.source_id == f"derived:{node.content_hash().to_string()}"
         assert _prefixed(plain.as_table(all_info=True), "_tag_") == []
 
 

@@ -579,7 +579,7 @@ def schema_source_stream_builder() -> dict[str, Any]:
     builder = SourceStreamBuilder(_ctx(), DEFAULT_CONFIG)
     out: dict[str, Any] = {}
     for variant, kwargs in {
-        "default_source_id": {},
+        "default_source_id": {"source_kind": "arrow_table"},
         "named_source_id": {"source_id": "golden_source"},
         "record_id_column": {
             "source_id": "golden_source",
@@ -1428,4 +1428,51 @@ def pipeline_drop_nulls_job() -> dict[str, Any]:
             out[f"table[{name}].record_ids"] = sorted(
                 _jsonable(v) for v in records.column("__golden_record_id").to_pylist()
             )
+    return out
+
+
+@case("pipeline", "default_source_ids")
+def pipeline_default_source_ids() -> dict[str, Any]:
+    """Pin the default source ids built from a hash (ITL-957).
+
+    A source built with no ``source_id`` is named ``<source kind>:<algorithm
+    label>:<hex>``; a source made with ``node.as_source()`` is named
+    ``derived:<algorithm label>:<hex>``.
+    """
+    import polars as pl
+
+    from orcapod import PipelineJob
+    from orcapod.databases import InMemoryArrowDatabase
+    from orcapod.operators import Join
+    from orcapod.sources import (
+        ArrowTableSource,
+        DataFrameSource,
+        DictSource,
+        ListSource,
+    )
+
+    sources: dict[str, Any] = {
+        "arrow_table": ArrowTableSource(_builder_table(), tag_columns=["subject"]),
+        "dict": DictSource(data=SUBJECT_ROWS, tag_columns=["subject"]),
+        "list": ListSource("weight", [20.5, 22.25, 19.0]),
+        "data_frame": DataFrameSource(
+            pl.DataFrame(SUBJECT_ROWS), tag_columns=["subject"]
+        ),
+    }
+    out: dict[str, Any] = {}
+    for name, source in sources.items():
+        out[f"{name}.source_id"] = source.source_id
+        out[f"{name}.content_hash"] = source.content_hash().to_string()
+
+    job = PipelineJob(name="golden_default_source_ids", store=InMemoryArrowDatabase())
+    with job:
+        joined = Join(label="joined")(_subjects(), _scans())
+        golden_adjust.pod(joined, label="adjust")
+    job.run()
+    out["as_source[operator_node].source_id"] = (
+        job.nodes["joined"].as_source().source_id
+    )
+    out["as_source[function_node].source_id"] = (
+        job.nodes["adjust"].as_source().source_id
+    )
     return out

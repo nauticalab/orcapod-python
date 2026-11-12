@@ -326,8 +326,10 @@ data, no result is ever paired with the wrong row; a function's stored result fo
 is reused rather than recomputed.
 
 Sources that accept `record_id_column` use that column's value instead, so the record ID
-follows the row. Both halves of the record ID must be stable: when you omit `source_id` it
-defaults to a hash of the table, which changes when the rows are reordered. Whenever row
+follows the row. Both halves of the record ID must be stable: when you omit `source_id` an
+in-memory source is named after a hash of its table, as
+`<source kind>:<algorithm label>:<hex>` (for example `dict:arrow_v1:000002fe…`), which changes
+when the rows are reordered. Whenever row
 order can vary between runs, pass an explicit, stable `source_id` **and** set
 `record_id_column` to a column that is unique per row; this avoids both the duplicate entries
 and the repeated deliveries.

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
@@ -25,6 +25,9 @@ class ListSource(RootSource):
     @staticmethod
     def _default_tag(element: Any, idx: int) -> dict[str, Any]:
         return {"element_index": idx}
+
+    # The config type key; also the kind prefix of the default source id.
+    SOURCE_KIND: ClassVar[str] = "list"
 
     def __init__(
         self,
@@ -89,6 +92,7 @@ class ListSource(RootSource):
             arrow_table,
             tag_columns=tag_columns,
             source_id=self._source_id,
+            source_kind=self.SOURCE_KIND,
         )
 
         self._stream = result.stream
@@ -135,7 +139,7 @@ class ListSource(RootSource):
     def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (data is not serializable)."""
         return {
-            "source_type": "list",
+            "source_type": self.SOURCE_KIND,
             "name": self.name,
             "source_id": self.source_id,
             **self._identity_config(),

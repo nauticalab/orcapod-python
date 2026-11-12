@@ -529,8 +529,8 @@ Every pipeline element has two parallel hashes:
    necessarily going to reflect the very data content"). A root source hashes
    `(class name, output schema, source_id)`; given a `source_id`, changed, added or reordered
    rows leave it unchanged. Row content enters only where a source puts it into its own
-   identity: the default `source_id` of the in-memory sources (a hash of the table, used when
-   none is given) and the elements of a `ListSource`. A downstream stream or node hashes its
+   identity: the default `source_id` of the in-memory sources
+   (`<source kind>:<algorithm label>:<hex>` of the table hash, used when none is given) and the elements of a `ListSource`. A downstream stream or node hashes its
    pod's identity plus its upstreams' content hashes; a function pod's identity is its uri,
    not its body. Only a datagram (one row's tags or data) has a `content_hash()` that is a
    digest of its values; that row hash, not the node's content hash, is what results are
@@ -716,6 +716,15 @@ data. The rules:
 ### Important implementation details
 
 - `ArrowTableSource.__init__` raises `ValueError` if any `tag_columns` are not in the table.
+- A source id is the source's name (developer, November 11, 2026; ITL-957). A default id
+  built from a hash is `<source kind>:<algorithm label>:<hex>` and is built only by
+  `core/sources/source_ids.hash_source_id`: never format one by hand, and never write a label
+  as a literal. The kind is the class's `SOURCE_KIND` (its config type key: `arrow_table`,
+  `dict`, `list`, `data_frame`, `derived`), or names the operation that derives the source
+  (`tags_as_data`). `node.as_source()` gives no id of its own; it takes the `DerivedSource`
+  default. The origin's source id is never written into a default id, and a `source_id` given
+  by the user is never changed. `SourceStreamBuilder.build` has no bare-hash default: it
+  needs a `source_id` or a `source_kind`.
 - `ArrowTableStream` requires at least one data column; raises `ValueError` otherwise.
 - `FunctionNode.iter_data()` Phase 1 returns ALL records in the shared `pipeline_path`
   DB table (not filtered to current inputs). Phase 2 skips inputs whose hash is already

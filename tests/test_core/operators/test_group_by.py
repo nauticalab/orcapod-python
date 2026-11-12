@@ -273,13 +273,14 @@ class TestGroupByOrdering:
         human-predictable but IS stable across processes.  Asserted exactly --
         sorting the result before comparing would make this blind to the very
         ordering it exists to pin down.  The default source_id is an Arrow table
-        hash, so this order moved with starfix hash format 2 (ITL-910).
+        hash, so this order moved with starfix hash format 2 (ITL-910), and again
+        when the default became ``arrow_table:<label>:<hex>`` (ITL-957).
         """
         table = pa.table({"subject": ["G", "G"], "path": ["b", "a"]})
         src = ArrowTableSource(table, tag_columns=["subject"], infer_nullable=True)
         out = GroupBy(by=["subject"]).process(src)
         assert len(out.as_table()) == 1
-        assert out.as_table().column("path").to_pylist()[0] == ["b", "a"]
+        assert out.as_table().column("path").to_pylist()[0] == ["a", "b"]
 
     def test_record_id_breaks_ties_between_duplicate_tags(self):
         """Duplicate tag tuples must not fall back to raw emission order."""

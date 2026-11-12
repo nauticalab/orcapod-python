@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.source_ids import hash_source_id
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import InputValidationError
@@ -174,7 +175,8 @@ class DerivedSource(RootSource):
         )
     """
 
-    # The config type key: names the class a saved config is rebuilt with.
+    # The config type key (names the class a saved config is rebuilt with) and
+    # the kind prefix of the plain form's default source id.
     SOURCE_KIND: ClassVar[str] = "derived"
     # The kind prefix of a hash-based default source id names the operation that
     # derives the source. One constant per operation.
@@ -238,9 +240,10 @@ class DerivedSource(RootSource):
         if source_id is None:
             # A source id is the source's name, used as-is in system tags and
             # source-info values. A default built from a hash keeps a source-kind
-            # prefix and the hash's label (developer, November 11, 2026).
+            # prefix and the hash's label (developer, November 11, 2026):
+            # ``derived:<algorithm label>:<hex>`` of the origin's content hash.
             if self._tags_as_data is None:
-                source_id = f"derived:{origin.content_hash().to_string()}"
+                source_id = hash_source_id(self.SOURCE_KIND, origin.content_hash())
             else:
                 source_id = self._default_source_id(
                     origin, self._tags_as_data, record_id_column

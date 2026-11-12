@@ -17,7 +17,7 @@ appended, because it is a variant of the same system tag mechanism.)
 | 1 | `content_hash()` | `SemanticAwarePythonHasher` → JSON + SHA-256 | `ContentHash` | Unique per semantic content of the object; data-inclusive |
 | 2 | `pipeline_hash()` | `SemanticAwarePythonHasher` → JSON + SHA-256 | `ContentHash` | Unique per pipeline topology + schema; data-exclusive |
 | 3 | Schema hash (system tag column naming) | `SemanticAwarePythonHasher.hash_object((tag_schema, data_schema)).to_hex(n)` | Truncated hex `str` | Unique per `(tag_schema, data_schema)` pair; embedded in system tag column names |
-| 4 | Default `source_id` | `StarfixArrowHasher.hash_table(table).to_hex(n)` | Truncated hex `str` | Unique per raw table content; used as source identifier when none is provided |
+| 4 | Default `source_id` of an in-memory source | `"<source kind>:" + StarfixArrowHasher.hash_table(table).to_string()` | `str`, `<source kind>:<algorithm label>:<hex>` | Unique per source kind and raw table content; used as the source's name when none is given |
 | 5 | Per-row `record_id` (system tag value) | `uuid.uuid5(NAMESPACE, f"{source_id}::{provenance_token}")` | `bytes` (16, UUID v5) | Deterministic per `(source_id, row_identity)`; stable across re-runs of the same source |
 | 6 | Join system tag suffix | `stream.pipeline_hash().to_hex(n)` + `:{idx}` appended to column name | Column name suffix | Unique per `(input topology, canonical join position)`; encodes full join lineage in column name |
 | 6b | Aggregating operator system tag fold | `uuid.uuid5(NAMESPACE, joined_member_hex)` for `record_id`; SHA-256 of the canonical JSON list of member values otherwise | `bytes` (16) / hex `str`, plus a column name suffix | Deterministic per ordered member set; keeps system tags scalar through a many-to-one reduction |
@@ -65,8 +65,8 @@ Where a hash appears, and in which form:
 | Form | Where |
 |---|---|
 | Labelled value | `__input_data_hash`, `__output_data_hash`, `__node_content_hash`, `__pipeline_base_entry_id`, the pipeline table's record id, the side-effect log's `record_id` and `record_id_hash`, the record id (`_record_hash`) of operator-node and cached-source tables, the `_content_hash` column, the hashes in a saved job file, `InvocationContext.invocation_hash` |
-| Bare digest in a name | the function `uri` (its second component), the path components `schema:<pipeline digest>`, `instance:<content digest>` and `node:<content digest>`, system-tag column names, the operator `uri`, the default source id built from a table hash, the function `uri` at the start of a function output's source-info token |
-| Labelled hash inside a source id | the default source id of a `DerivedSource` (`derived:<label>:<hex>`) and of `node.as_source()` (`<node path>:<label>:<hex>`) |
+| Bare digest in a name | the function `uri` (its second component), the path components `schema:<pipeline digest>`, `instance:<content digest>` and `node:<content digest>`, system-tag column names, the operator `uri`, the function `uri` at the start of a function output's source-info token |
+| Labelled hash inside a source id | every default source id built from a hash, `<source kind>:<label>:<hex>`: an in-memory source (`arrow_table:`, `dict:`, `list:`, `data_frame:`, then the labelled table hash), and a `DerivedSource`, which is also what `node.as_source()` returns (`derived:`, then the node's labelled content hash). `hash_source_id` in `core/sources/source_ids.py` is the single definition of that form. A `DerivedSource` built with `tags_as_data` has its own kind, `tags_as_data:<label>:<hex>` of its derivation hash (`DerivedSource._default_source_id`) |
 | Digest only, inside a hash input | a nested hash in a structure: `{"__type__": "hash", "digest": "<hex>"}`; an extension-typed cell in a table: `b"<extension name>;<hex of the extension metadata>::" + digest` (the logical type's whole identifier, which the hashed field also keeps as its extension name and metadata, so the type is part of the hash of a column with no value too); the input data hash in the entry-id preimage (§3); the node content hash in the operator-node record hash; the leaf digests of the run snapshot hash (site 13) |
 
 A function node's table in v0.3, with the values it stores:
@@ -320,7 +320,7 @@ The table below shows what each class returns from `identity_structure()`.
 | `DataFunctionBase` | `self.uri` — `(canonical_function_name, output_schema_hash, major_version, data_function_type_id)` | `output_schema_hash` is site 11; see §5 |
 | `FunctionPod` | `self.data_function` (bare object) when no ctx arg; `(self.data_function, self._ctx_arg_name)` when ctx arg present | `ctx_arg_name` is included when present so a ctx-aware pod has a distinct `content_hash` from a plain pod using the same data function |
 | `ArrowTableStream` | `(producer, argument_symmetry(upstreams))` | Falls back to `(class_name, as_table(all_info=True), tag_columns)` when no producer or producer is not a `PipelineElementProtocol` |
-| `RootSource` (`ArrowTableSource`) | `(class_name, (tag_schema, data_schema), source_id)` | `source_id` is the explicit user-supplied value; when not provided it defaults to the Arrow hash of the raw table (site 4). Data-inclusive base case of the Merkle chain. |
+| `RootSource` (`ArrowTableSource`) | `(class_name, (tag_schema, data_schema), source_id)` | `source_id` is the explicit user-supplied value; when not provided it defaults to `<source kind>:<algorithm label>:<hex>` of the Arrow hash of the raw table (site 4). Data-inclusive base case of the Merkle chain. |
 | `DerivedSource` | Origin node's `content_hash` | Inherits its generating node's identity |
 | `DerivedSource` with `tags_as_data` | `(class_name, output_schema, source_id)`; the default `source_id` is `tags_as_data:<label>:<hex>` of the hash of `(("DerivedSource", sorted tags_as_data items), (origin,))`, the origin entering through its `content_hash`; a `record_id_column`, when set, is appended to the parameters as `("record_id_column", name)` | The rule of every root source; the origin and the mapping enter through the default `source_id`, which is the content hash an operator node doing the derivation would have |
 | Operators (unary) | `(operator_class_name, upstream_stream)` | Stream reference resolved via `content_resolver` |
@@ -486,7 +486,7 @@ When a source is built by `SourceStreamBuilder`, four hash-related operations ha
 sequence before the stream is returned:
 
 1. **Site 3 — Schema hash:** computed from `(tag_schema, data_schema)`; embedded in system tag column names.
-2. **Site 4 — Default `source_id`:** derived from the raw table hash if no explicit `source_id` is given.
+2. **Site 4 — Default `source_id`:** `<source kind>:<algorithm label>:<hex>` of the raw table hash if no explicit `source_id` is given.
 3. **Site 5 — Per-row `record_id`:** a UUID v5 computed from `(source_id, row_provenance_token)` and stored per row.
 4. Two system tag columns, `_tag_source_id::{schema_hash}` and `_tag_record_id::{schema_hash}`, are appended to every row.
 
@@ -512,9 +512,9 @@ topology suffix, encoding the full join lineage into each column name.
 | Field | Value |
 |---|---|
 | **Inputs** | Full raw Arrow table (all columns, before any system tag injection) |
-| **Algorithm** | `StarfixArrowHasher.hash_table(table).to_hex(path_n_char)` — starfix hash format 2: the 3-byte format number `00 00 02` followed by a SHA-256 digest (`starfix` 0.5, byte-identical to the Rust crate) |
-| **Output format** | Truncated hex `str` (length = `path_n_char`) |
-| **Uniqueness guarantee** | Unique per raw table content; changes if any cell value changes |
+| **Algorithm** | `hash_source_id(<source kind>, StarfixArrowHasher.hash_table(table), hexdigits=path_n_char)` — the table hash is starfix hash format 2: the 3-byte format number `00 00 02` followed by a SHA-256 digest (`starfix` 0.5, byte-identical to the Rust crate) |
+| **Output format** | `str`: `<source kind>:<algorithm label>:<hex>`, for example `dict:arrow_v1:000002fe…`. The source kind is the class's config type key (`SOURCE_KIND`: `arrow_table`, `dict`, `list`, `data_frame`); the label is the one the hash carries. The kind and the label are never shortened; `hashing.path_n_char`, when set, shortens the hex only. The parts hold no `:`, so the id never contains the `::` that separates the parts of a source-info value |
+| **Uniqueness guarantee** | Unique per source kind and raw table content; changes if any cell value changes or the rows are reordered |
 | **Known exclusions** | Used **only** as a fallback when no explicit `source_id` is provided. A user-supplied `source_id` bypasses this computation entirely. |
 
 ---

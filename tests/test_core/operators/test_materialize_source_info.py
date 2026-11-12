@@ -569,6 +569,10 @@ class TestIdentityPinned:
     Re-recorded under starfix hash format 2 (``arrow_v1``, ITL-910): the node content
     hash and the record hashes are Arrow-derived; the pipeline hash is not.
 
+    Re-recorded for ITL-957: the pinned source has no given ``source_id``, so its default
+    id (now ``arrow_table:<label>:<hex>``) moved, and with it the node content hash and
+    the record hashes; the pipeline hash did not.
+
     The node's identity, the output data and the row-0 record hash (whose
     source-info token was already right) are unchanged; only rows whose stored
     source-info token was wrong get a new record hash.
@@ -589,7 +593,7 @@ class TestIdentityPinned:
             "semantic_v1:62bd560f1fa945b5cac83f3eb99b6f8bb0fea607ce7e9503c987df4c36134da4"
         )
         assert node.content_hash().to_string() == (
-            "semantic_v1:4560867b554ece10a4be5ad2f85b5ec9c74b923a98bfae067796ca63e746983f"
+            "semantic_v1:2a73f6156d2ad32c6daa75c400ed265df967d2a8fdddb825a383320b2a0ee7a8"
         )
         ids = _record_ids(node)
         assert ids["a"] == ROW_ZERO_RECORD_ID
@@ -614,20 +618,22 @@ class TestIdentityPinned:
 # Row a's source-info token was already right, so the fix leaves its record hash.
 # Re-recorded in starfix hash format 2 (ITL-910) and again as labelled digests
 # (``b"arrow_v1:" + digest``, ITL-945) by reproducing the pre-fix broadcast with
-# ``_broadcast_row_zero``.
+# ``_broadcast_row_zero``. Re-recorded once more for ITL-957: the pinned source has no
+# given ``source_id``, and its default id (now ``arrow_table:<label>:<hex>``) is part of
+# every source-info token these record hashes cover.
 ROW_ZERO_RECORD_ID = b"arrow_v1:" + bytes.fromhex(
-    "000002f3a7e7119b3d11ec89f0d46a708da003c1c3c96cfc0612063dc6337014e3c045"
+    "000002a5cac2713a6f95bb9fc0ffbc253dd6889a4b57584653be52c1c374f92516c047"
 )
 PRE_FIX_RECORD_IDS = frozenset(
     {
         ROW_ZERO_RECORD_ID,
         b"arrow_v1:"
         + bytes.fromhex(
-            "000002cfa40faafdbd4ccb9a91199be62f481af307060e1a37d47f2f4190567985ce24"
+            "000002a8e0ed9f26c79c30b169b8084f771d183b5de166128dd360ce58e996fd68f49a"
         ),
         b"arrow_v1:"
         + bytes.fromhex(
-            "000002f0889561abdea82e996a2ffcde43cdff54ee89ef8f6c461f0a43334c38ffb605"
+            "000002ca41256b75c5e733eb7488bd8a71eca066db16103796ec7463cd4227dda4f2ce"
         ),
     }
 )

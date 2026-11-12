@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
@@ -23,6 +23,9 @@ class DictSource(RootSource):
     converted to an Arrow table via the data-context type converter, then
     enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
     """
+
+    # The config type key; also the kind prefix of the default source id.
+    SOURCE_KIND: ClassVar[str] = "dict"
 
     def __init__(
         self,
@@ -61,6 +64,7 @@ class DictSource(RootSource):
             arrow_table,
             tag_columns=tag_columns,
             source_id=self._source_id,
+            source_kind=self.SOURCE_KIND,
             system_tag_columns=system_tag_columns,
         )
 
@@ -72,7 +76,7 @@ class DictSource(RootSource):
     def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (data is not serializable)."""
         return {
-            "source_type": "dict",
+            "source_type": self.SOURCE_KIND,
             "tag_columns": list(self._tag_columns),
             "source_id": self.source_id,
             **self._identity_config(),
