@@ -910,7 +910,16 @@ class UniversalTypeConverter:
 
         This is the main entry point for Arrow → Python type conversion.
         Results are cached for performance.
+
+        Raises:
+            LogicalTypeIdentifierError: If the type, or a member nested in it, has
+                the extension name of a registered logical type with metadata that
+                type does not read.
         """
+        # Before the cache: Arrow compares two instances of one extension class
+        # without their metadata, so a container remembered for a readable
+        # identifier is equal to one whose member carries an unreadable identifier.
+        self._require_readable_members(arrow_type)
         try:
             if arrow_type in self._arrow_to_python_types:
                 return self._arrow_to_python_types[arrow_type]
@@ -924,6 +933,43 @@ class UniversalTypeConverter:
         except TypeError:
             pass  # Unhashable type — skip caching.
         return python_type
+
+    def _require_readable_members(self, arrow_type: pa.DataType) -> None:
+        """Raise unless every registered extension type in ``arrow_type`` is readable.
+
+        Walks the type itself and every type nested in it: the storage of an
+        extension type, the fields of a struct or a union, the values of a list, the
+        keys and items of a map, and the values of a dictionary type.
+
+        This runs before every lookup in a cache keyed by an Arrow type
+        (``_arrow_to_python_types``, ``_arrow_to_python_converters`` and, behind the
+        first, ``_struct_signature_to_typeddict``): Arrow compares two instances of
+        one extension class without their metadata, so such a key does not tell a
+        readable identifier from an unreadable one.
+
+        Args:
+            arrow_type: The Arrow type to check.
+
+        Raises:
+            LogicalTypeIdentifierError: If an extension type whose name is registered
+                carries metadata the registered logical type does not read.
+        """
+        if isinstance(arrow_type, pa.ExtensionType):
+            if self._logical_type_registry is not None:
+                lt = self._logical_type_registry.get_by_arrow_extension_name(
+                    arrow_type.extension_name
+                )
+                if lt is not None:
+                    from orcapod.logical_types.identifier import require_readable
+
+                    require_readable(lt, arrow_type.__arrow_ext_serialize__())
+            self._require_readable_members(arrow_type.storage_type)
+        elif pa.types.is_dictionary(arrow_type):
+            self._require_readable_members(arrow_type.value_type)
+        else:
+            # Struct and union fields, a list's value field, a map's entries field.
+            for index in range(arrow_type.num_fields):
+                self._require_readable_members(arrow_type.field(index).type)
 
     def get_logical_type_by_arrow_extension_name(
         self, arrow_extension_name: str
@@ -989,10 +1035,20 @@ class UniversalTypeConverter:
         Round-trip guarantee:
             - ``int``       → ``nullable=False`` → ``int``
             - ``int | None`` → ``nullable=True``  → ``int | None``
+
+        Raises:
+            LogicalTypeIdentifierError: If a column (or a member of one) has the
+                extension name of a registered logical type with metadata that type
+                does not read; the error names the column.
         """
+        from orcapod.logical_types.identifier import LogicalTypeIdentifierError
+
         fields = {}
         for field in arrow_schema:
-            python_type = self.arrow_type_to_python_type(field.type)
+            try:
+                python_type = self.arrow_type_to_python_type(field.type)
+            except LogicalTypeIdentifierError as exc:
+                raise exc.for_column(field.name) from exc
             if field.nullable and python_type is not Any:
                 python_type = python_type | None
             fields[field.name] = python_type
@@ -1179,7 +1235,16 @@ class UniversalTypeConverter:
 
         This creates and caches conversion functions for optimal performance
         during data conversion operations.
+
+        Raises:
+            LogicalTypeIdentifierError: If the type, or a member nested in it, has
+                the extension name of a registered logical type with metadata that
+                type does not read.
         """
+        # Before the cache, as in ``arrow_type_to_python_type``: a converter
+        # remembered for a readable identifier must not decode values stored under
+        # an unreadable one.
+        self._require_readable_members(arrow_type)
         try:
             if arrow_type in self._arrow_to_python_converters:
                 return self._arrow_to_python_converters[arrow_type]
@@ -1353,6 +1418,11 @@ class UniversalTypeConverter:
                 arrow_type.extension_name
             )
             if lt is not None:
+                # The registered class is named only for a column whose values that
+                # class reads: never by extension name alone.
+                from orcapod.logical_types.identifier import require_readable
+
+                require_readable(lt, arrow_type.__arrow_ext_serialize__())
                 return lt.python_type
 
         # Handle basic types

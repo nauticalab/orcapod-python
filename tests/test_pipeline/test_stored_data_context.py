@@ -48,7 +48,7 @@ from orcapod.errors import (
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 from orcapod.side_effects import SideEffectPod, sink_pod
 from orcapod.sources import ArrowTableSource, DictSource
-from orcapod.types import CacheMode
+from orcapod.types import CacheMode, NodeConfig
 
 Orchestrator = SyncPipelineOrchestrator | AsyncPipelineOrchestrator
 Store = InMemoryArrowDatabase | DeltaTableDatabase
@@ -1134,6 +1134,39 @@ class TestSideEffectFunctionNodes:
 
         assert delivered == []
 
+    @pytest.mark.parametrize("read_first", [False, True], ids=["unread", "read_first"])
+    def test_a_late_attached_ephemeral_store_is_checked_again(
+        self, new_store: Callable[[], Store], read_first: bool
+    ):
+        """An ephemeral store attached after the node checked its stores is checked too
+        (ITL-975): completions of ``OTHER`` in it raise and nothing is delivered.
+        """
+        relabelled = reopened(_notify_store(new_store, copy_as_other_context))
+        ephemeral = new_store()
+        for path in relabelled.list_sources():
+            if path[-1] == "rdb_v2":
+                rows = relabelled.get_all_records(path, record_id_column=RID)
+                assert rows is not None
+                # An ephemeral store holds the result table at the path relative to
+                # the job's result database.
+                assert path[:2] == (JOB_NAME, "_result")
+                ephemeral.add_records(path[2:], rows, record_id_column=RID)
+        ephemeral.flush()
+        assert [path[-1] for path in reopened(ephemeral).list_sources()] == ["rdb_v2"]
+        job = _notify_job(new_store())
+        if read_first:
+            # The node checks its (clean) stores when it first reads them.
+            assert job.nodes["notify"].get_all_records() is None
+
+        job.set_ephemeral_store(ephemeral)
+        job.apply_node_config(NodeConfig(is_result_ephemeral=True))
+        with pytest.raises(SideEffectLogDataContextError) as info:
+            _ = job.run()
+
+        assert delivered == []
+        assert info.value.found_context == OTHER
+        assert [path[-1] for path in info.value.record_paths] == ["rdb_v2"]
+
     def test_plain_function_node_in_the_same_store_is_only_reported(
         self, new_store: Callable[[], Store]
     ):
@@ -1327,6 +1360,47 @@ class TestInputOfAnotherDataContext:
             _ = cached.call(Data({"x": 1}))
 
         _assert_names_both_contexts(info.value)
+        assert reopened(store).list_sources() == []
+
+    @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+    @pytest.mark.parametrize(
+        ("skip_lookup", "skip_insert"),
+        [(False, False), (True, False), (True, True)],
+        ids=["default", "no_lookup", "no_lookup_no_insert"],
+    )
+    def test_cached_function_refuses_an_input_of_another_data_context(
+        self,
+        store: Store,
+        other_context: contexts.DataContext,
+        skip_lookup: bool,
+        skip_insert: bool,
+        asynchronous: bool,
+    ):
+        """The input's data context is checked before the function is called (ITL-975).
+
+        Also when the cache lookup, which checks it too, is skipped.
+        """
+        import asyncio
+
+        cached = CachedDataFunction(double.pod.data_function, result_database=store)
+        data = Data({"x": 1}, data_context=other_context)
+
+        with pytest.raises(InputValidationError) as info:
+            if asynchronous:
+                _ = asyncio.run(
+                    cached.async_call(
+                        data,
+                        skip_cache_lookup=skip_lookup,
+                        skip_cache_insert=skip_insert,
+                    )
+                )
+            else:
+                _ = cached.call(
+                    data, skip_cache_lookup=skip_lookup, skip_cache_insert=skip_insert
+                )
+
+        _assert_names_both_contexts(info.value)
+        assert calls == []
         assert reopened(store).list_sources() == []
 
     def test_cached_source_keeps_its_data_context_on_cached_rows(self, store: Store):

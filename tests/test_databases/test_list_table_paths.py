@@ -208,6 +208,10 @@ class TestDeltaOnCloudStorage:
             return DirFileSystem(path=str(tmp_path), fs=LocalFileSystem())
 
         monkeypatch.setattr(fsspec, "filesystem", filesystem)
+        # The endpoint is also read from the environment: these tests must not depend
+        # on what the machine running them has set (ITL-975).
+        monkeypatch.delenv("FSSPEC_S3_ENDPOINT_URL", raising=False)
+        monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
         _fill(DeltaTableDatabase(tmp_path / "bucket" / "root"))
         return calls
 

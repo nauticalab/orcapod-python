@@ -15,6 +15,7 @@ from uuid_utils import uuid7
 
 from orcapod.config import OrcapodConfig
 from orcapod.contexts import DataContext
+from orcapod.contexts.stored import require_same_data_context
 from orcapod.core.base import TraceableBase
 from orcapod.core.datagrams import Datagram, Data
 from orcapod.hashing.hash_utils import (
@@ -1073,7 +1074,15 @@ class CachedDataFunction(DataFunctionWrapper):
         the underlying function.  They are intentionally excluded from the
         cache key — such arguments are deterministic per row and pod, so the
         same input data always produces the same output.
+
+        Raises:
+            InputValidationError: If ``data`` is of another data context than this
+                function's; the wrapped function has not been called then, whatever
+                ``skip_cache_lookup`` and ``skip_cache_insert`` are.
         """
+        # Checked before anything else: with ``skip_cache_lookup`` the lookup, which
+        # checks it too, does not run, and the function must not be called.
+        require_same_data_context(data.data_context_key, self.data_context_key)
         output_data = None
         if not skip_cache_lookup:
             module_logger.info("Checking for cache...")
@@ -1108,7 +1117,15 @@ class CachedDataFunction(DataFunctionWrapper):
         skip_cache_insert: bool = False,
         **kwargs: Any,
     ) -> DataProtocol | None:
-        """Async counterpart of ``call`` with cache check and recording."""
+        """Async counterpart of ``call`` with cache check and recording.
+
+        Raises:
+            InputValidationError: If ``data`` is of another data context than this
+                function's; the wrapped function has not been called then.
+        """
+        # Checked before anything else: with ``skip_cache_lookup`` the lookup, which
+        # checks it too, does not run, and the function must not be called.
+        require_same_data_context(data.data_context_key, self.data_context_key)
         output_data = None
         if not skip_cache_lookup:
             module_logger.info("Checking for cache...")

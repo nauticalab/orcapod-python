@@ -705,7 +705,11 @@ class TestRecordIdType:
             return db, node
 
         async_db, async_node = asyncio.run(run_async())
-        assert stored_keys(sync_db, sync_node) == stored_keys(async_db, async_node)
+        sync_keys = stored_keys(sync_db, sync_node)
+        async_keys = stored_keys(async_db, async_node)
+        # One key per input row on each path: two equal empty lists must not pass.
+        assert len(sync_keys) == len(async_keys) == 2
+        assert sync_keys == async_keys
 
 
 # ---------------------------------------------------------------------------

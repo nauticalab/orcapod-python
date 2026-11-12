@@ -14,6 +14,7 @@ import json
 import pathlib
 import typing
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -553,6 +554,173 @@ def test_values_of_an_unreadable_identifier_are_not_decoded() -> None:
 
     with pytest.raises(LogicalTypeIdentifierError):
         strict.arrow_table_to_python_dicts(table)
+
+
+def test_python_type_of_an_unreadable_identifier_is_refused() -> None:
+    """Mapping an Arrow type to a Python type checks the identifier (ITL-975).
+
+    The registered class is never named by extension name alone: a schema must not
+    promise ``Thing`` for a column whose values will be refused.
+    """
+    current = _thing_logical_type(b'{"v":2}')
+    strict = _converter(_fresh_context(current))
+    table = _typed_thing_column(b'{"v":1}')
+    column_type = table.schema.field("c").type
+    # The current identifier maps to the class; having mapped it changes nothing below.
+    assert strict.arrow_type_to_python_type(current.get_arrow_extension_type()) is Thing
+
+    with pytest.raises(LogicalTypeIdentifierError):
+        _ = strict.arrow_type_to_python_type(column_type)
+    with pytest.raises(LogicalTypeIdentifierError) as excinfo:
+        _ = strict.arrow_schema_to_python_schema(table.schema)
+    assert "'c'" in str(excinfo.value)
+    # A member of a struct column is checked like a top-level column.
+    with pytest.raises(LogicalTypeIdentifierError):
+        _ = strict.arrow_type_to_python_type(pa.struct([pa.field("t", column_type)]))
+    with pytest.raises(LogicalTypeIdentifierError) as excinfo:
+        _ = strict.arrow_schema_to_python_schema(
+            pa.schema([pa.field("s", pa.struct([pa.field("t", column_type)]))])
+        )
+    assert "'s'" in str(excinfo.value)
+
+
+class _ParameterizedThingType(pa.ExtensionType):
+    """One extension class for ``thirdparty.thing`` whose metadata is a parameter.
+
+    Arrow compares two instances of one extension class without their metadata, so
+    they are equal whatever identifiers they carry.
+    """
+
+    def __init__(self, metadata: bytes) -> None:
+        """Store ``metadata`` as the serialized extension metadata."""
+        self._metadata = metadata
+        super().__init__(pa.large_string(), "thirdparty.thing")
+
+    def __arrow_ext_serialize__(self) -> bytes:
+        """Return the metadata given at construction."""
+        return self._metadata
+
+    @classmethod
+    def __arrow_ext_deserialize__(
+        cls, storage_type: pa.DataType, serialized: bytes
+    ) -> _ParameterizedThingType:
+        """Rebuild the type from its serialized metadata."""
+        return cls(serialized)
+
+
+@pytest.mark.parametrize(
+    "container",
+    [
+        lambda member: pa.struct([pa.field("t", member)]),
+        lambda member: pa.large_list(pa.struct([pa.field("t", member)])),
+        lambda member: pa.map_(pa.large_string(), pa.struct([pa.field("t", member)])),
+        lambda member: pa.dense_union(
+            [pa.field("i", pa.int64()), pa.field("t", member)]
+        ),
+        lambda member: pa.sparse_union(
+            [pa.field("i", pa.int64()), pa.field("t", member)]
+        ),
+    ],
+    ids=["struct", "list_of_struct", "map_of_struct", "dense_union", "sparse_union"],
+)
+def test_python_type_of_an_unreadable_member_is_refused_after_a_readable_one(
+    container: Callable[[pa.DataType], pa.DataType],
+) -> None:
+    """A mapping remembered for a readable identifier never answers for an unreadable
+    one (ITL-975): two containers that differ only in a member's metadata are equal
+    to Arrow, and the identifier is still checked for each.
+    """
+    strict = _converter(_fresh_context(_thing_logical_type(b'{"v":2}')))
+    readable = container(_ParameterizedThingType(b'{"v":2}'))
+    unreadable = container(_ParameterizedThingType(b'{"v":1}'))
+    assert readable == unreadable  # what makes a lookup by Arrow type alone unsafe
+
+    # The readable container is mapped first, through both entry points.
+    _ = strict.arrow_type_to_python_type(readable)
+    _ = strict.arrow_schema_to_python_schema(pa.schema([pa.field("c", readable)]))
+
+    with pytest.raises(LogicalTypeIdentifierError):
+        _ = strict.arrow_type_to_python_type(unreadable)
+    with pytest.raises(LogicalTypeIdentifierError) as excinfo:
+        _ = strict.arrow_schema_to_python_schema(pa.schema([pa.field("c", unreadable)]))
+    assert "'c'" in str(excinfo.value)
+
+
+def _parameterized_thing_column(metadata: bytes) -> "pa.Array[Any]":
+    """One ``thirdparty.thing`` value typed by ``_ParameterizedThingType(metadata)``."""
+    return pa.ExtensionArray.from_storage(
+        _ParameterizedThingType(metadata), pa.array(["a"], pa.large_string())
+    )
+
+
+def _struct_column(member: "pa.Array[Any]") -> "pa.Array[Any]":
+    """A struct column with ``member`` as its field ``t``."""
+    return pa.StructArray.from_arrays([member], fields=[pa.field("t", member.type)])
+
+
+def _list_of_struct_column(member: "pa.Array[Any]") -> "pa.Array[Any]":
+    """A one-row list column whose element is a struct with ``member`` as field ``t``."""
+    return pa.LargeListArray.from_arrays(
+        pa.array([0, 1], pa.int64()), _struct_column(member)
+    )
+
+
+@pytest.mark.parametrize(
+    "column",
+    [_struct_column, _list_of_struct_column],
+    ids=["struct", "list_of_struct"],
+)
+def test_values_of_an_unreadable_member_are_not_decoded_after_a_readable_one(
+    column: Callable[["pa.Array[Any]"], "pa.Array[Any]"],
+) -> None:
+    """A value converter remembered for a readable identifier never decodes values
+    stored under an unreadable one (ITL-975): the two columns' types are equal to Arrow.
+    """
+    strict = _converter(_fresh_context(_thing_logical_type(b'{"v":2}')))
+    readable = pa.table({"c": column(_parameterized_thing_column(b'{"v":2}'))})
+    unreadable = pa.table({"c": column(_parameterized_thing_column(b'{"v":1}'))})
+    assert readable.schema.field("c").type == unreadable.schema.field("c").type
+
+    # The readable table is converted first, so its converter is remembered.
+    assert len(strict.arrow_table_to_python_dicts(readable)) == 1
+
+    with pytest.raises(LogicalTypeIdentifierError):
+        _ = strict.arrow_table_to_python_dicts(unreadable)
+    with pytest.raises(LogicalTypeIdentifierError):
+        _ = strict.get_arrow_to_python_converter(unreadable.schema.field("c").type)
+
+
+@pytest.mark.parametrize("mode", ["dense", "sparse"])
+def test_value_converter_of_an_unreadable_union_member_is_refused_after_a_readable_one(
+    mode: str,
+) -> None:
+    """The same holds for a member of a union type (ITL-975)."""
+    strict = _converter(_fresh_context(_thing_logical_type(b'{"v":2}')))
+
+    def union(metadata: bytes) -> pa.DataType:
+        """A union of ``int64`` and a ``thirdparty.thing`` carrying ``metadata``."""
+        fields = [
+            pa.field("i", pa.int64()),
+            pa.field("t", _ParameterizedThingType(metadata)),
+        ]
+        return pa.dense_union(fields) if mode == "dense" else pa.sparse_union(fields)
+
+    _ = strict.get_arrow_to_python_converter(union(b'{"v":2}'))
+
+    with pytest.raises(LogicalTypeIdentifierError):
+        _ = strict.get_arrow_to_python_converter(union(b'{"v":1}'))
+
+
+def test_python_type_of_a_readable_older_identifier_is_the_current_class() -> None:
+    """An older identifier the type declares readable maps to the registered class."""
+    lenient = _converter(
+        _fresh_context(_thing_logical_type(b'{"v":2}', also_reads=(b'{"v":1}',)))
+    )
+    table = _typed_thing_column(b'{"v":1}')
+
+    assert lenient.arrow_type_to_python_type(table.schema.field("c").type) is Thing
+    schema = lenient.arrow_schema_to_python_schema(table.schema)
+    assert schema["c"] == Thing | None
 
 
 def test_list_wrapper_written_before_identifiers_is_read() -> None:

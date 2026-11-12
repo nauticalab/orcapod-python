@@ -1284,6 +1284,11 @@ class FunctionJobNode(FunctionNodeBase):
             store: The ``ArrowDatabaseProtocol`` to use for ephemeral result
                 storage, or ``None`` to detach and revert to persistent-only writes.
         """
+        # Another store has its own tables of other generations to account for,
+        # as in ``attach_databases``.
+        self._stale_tables_checked = False
+        self._current_tables_checked = False
+        self._unlisted_store_reported = False
         self.ephemeral_result_store = store
         if store is not None and self._function_pod is not None:
             self._ephemeral_cached_pod = CachedFunctionPod(
