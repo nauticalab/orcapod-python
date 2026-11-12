@@ -89,6 +89,17 @@ class NoOpArrowDatabase:
     def flush(self) -> None:
         pass
 
+    def list_table_paths(self, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+        """Return no path: this no-op implementation never stores a table.
+
+        Args:
+            prefix: Leading path components, relative to ``self.base_path``.
+
+        Returns:
+            Always an empty list.
+        """
+        return []
+
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
         """Return ``False`` — no tables are ever persisted by this no-op implementation.
 

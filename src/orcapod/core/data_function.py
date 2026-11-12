@@ -218,18 +218,20 @@ class DataFunctionBase(TraceableBase, Generic[E]):
 
     @property
     def output_data_schema_hash(self) -> str:
-        """Return the hash of the output data schema as a string.
+        """Return the hash of the output data schema as a bare hex digest.
 
-        The hash is computed lazily on first access and cached for subsequent calls.
+        The digest is part of the function ``uri`` and so of table paths and source-info
+        tokens: a hash inside a name carries no label. It is computed lazily on first
+        access and cached for subsequent calls.
 
         Returns:
-            The hash string of the output data schema.
+            The hex digest of the output data schema hash, without a label.
         """
         if self._output_data_schema_hash is None:
             self._output_data_schema_hash = (
                 self.data_context.semantic_hasher.hash_object(
                     self.output_data_schema
-                ).to_string()
+                ).to_hex()
             )
         return self._output_data_schema_hash
 
@@ -529,9 +531,14 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         return self._function_name
 
     def get_function_variation_data(self) -> dict[str, Any]:
-        """Raw data defining function variation - system computes hash"""
+        """Raw data defining function variation, stored with every result row.
+
+        ``function_version`` is the full version string the function was declared
+        with (``"v3.7"``); only its major part is in the table path.
+        """
         return {
             "function_name": self._function_name,
+            "function_version": self._version,
             "function_signature_hash": self._function_signature_hash,
             "function_content_hash": self._function_content_hash,
             "git_hash": self._git_hash,
@@ -542,6 +549,7 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         return Schema(
             {
                 "function_name": str,
+                "function_version": str,
                 "function_signature_hash": bytes,
                 "function_content_hash": bytes,
                 "git_hash": str,
@@ -864,7 +872,17 @@ class DataFunctionWrapper(DataFunctionBase[E]):
     """
 
     def __init__(self, data_function: DataFunctionProtocol, **kwargs) -> None:
+        """Wrap ``data_function``.
+
+        Args:
+            data_function: The data function to wrap.
+            **kwargs: Passed on to ``DataFunctionBase``. Without a ``data_context``
+                the wrapper works under the wrapped function's data context, so
+                that what it hashes and stores agrees with the function's data.
+        """
         self._data_function = data_function
+        if kwargs.get("data_context") is None:
+            kwargs["data_context"] = getattr(data_function, "data_context", None)
         super().__init__(**kwargs)
 
     def computed_label(self) -> str | None:
@@ -1009,6 +1027,8 @@ class CachedDataFunction(DataFunctionWrapper):
             result_database=result_database,
             record_path=record_path_prefix + self.uri,
             auto_flush=True,
+            # The first uri component is the function's name; no hash before it.
+            name_path=record_path_prefix + self.uri[:1],
         )
 
     def _build_metadata_datagrams(self) -> tuple[Datagram, Datagram]:
@@ -1054,7 +1074,9 @@ class CachedDataFunction(DataFunctionWrapper):
         output_data = None
         if not skip_cache_lookup:
             module_logger.info("Checking for cache...")
-            output_data = self._cache.lookup(data)
+            output_data = self._cache.lookup(
+                data, data_context_key=self.data_context_key
+            )
             if output_data is not None:
                 module_logger.info(f"Cache hit for {data}!")
                 return output_data
@@ -1062,7 +1084,13 @@ class CachedDataFunction(DataFunctionWrapper):
         if output_data is not None:
             if not skip_cache_insert:
                 var_dg, exec_dg = self._build_metadata_datagrams()
-                self._cache.store(data, output_data, var_dg, exec_dg)
+                self._cache.store(
+                    data,
+                    output_data,
+                    var_dg,
+                    exec_dg,
+                    data_context_key=self.data_context_key,
+                )
             output_data = output_data.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
@@ -1081,7 +1109,9 @@ class CachedDataFunction(DataFunctionWrapper):
         output_data = None
         if not skip_cache_lookup:
             module_logger.info("Checking for cache...")
-            output_data = self._cache.lookup(data)
+            output_data = self._cache.lookup(
+                data, data_context_key=self.data_context_key
+            )
             if output_data is not None:
                 module_logger.info(f"Cache hit for {data}!")
                 return output_data
@@ -1091,7 +1121,13 @@ class CachedDataFunction(DataFunctionWrapper):
         if output_data is not None:
             if not skip_cache_insert:
                 var_dg, exec_dg = self._build_metadata_datagrams()
-                self._cache.store(data, output_data, var_dg, exec_dg)
+                self._cache.store(
+                    data,
+                    output_data,
+                    var_dg,
+                    exec_dg,
+                    data_context_key=self.data_context_key,
+                )
             output_data = output_data.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
@@ -1107,7 +1143,7 @@ class CachedDataFunction(DataFunctionWrapper):
         Returns:
             The cached output data, or ``None`` if no entry was found.
         """
-        return self._cache.lookup(input_data)
+        return self._cache.lookup(input_data, data_context_key=self.data_context_key)
 
     def record_data(
         self,
@@ -1123,6 +1159,7 @@ class CachedDataFunction(DataFunctionWrapper):
             var_dg,
             exec_dg,
             skip_duplicates=skip_duplicates,
+            data_context_key=self.data_context_key,
         )
         return output_data
 
@@ -1139,5 +1176,6 @@ class CachedDataFunction(DataFunctionWrapper):
             A PyArrow table of cached results, or ``None`` if empty.
         """
         return self._cache.get_all_records(
-            include_system_columns=include_system_columns
+            self.data_context_key,
+            include_system_columns=include_system_columns,
         )

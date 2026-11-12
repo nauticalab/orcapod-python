@@ -4,7 +4,7 @@ This subpackage provides the registry and protocol for logical types that bind
 Python classes to their Arrow/Polars extension type representation.
 
 Built-in registrations (``LogicalPath``, ``LogicalUPath``, ``LogicalUUID``) are
-wired into ``DataContext`` via ``contexts/data/v0.1.json``. Use
+wired into ``DataContext`` via ``contexts/logical_types.json``. Use
 ``get_default_context().type_converter.register_python_class()`` to register new
 types, ``register_logical_type_factory()`` to add factories, and
 ``apply_logical_types()`` to re-wrap Arrow tables with their registered extension types.
@@ -19,6 +19,13 @@ will be auto-registered on pod declaration.
 
 from __future__ import annotations
 
+from .identifier import (
+    LogicalTypeIdentifier,
+    LogicalTypeIdentifierError,
+    arrow_type_identifier,
+    logical_type_identifier,
+    version_metadata,
+)
 from .protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from .registry import (
     LogicalTypeRegistry,
@@ -54,6 +61,12 @@ __all__ = [
     "LogicalTypeRegistry",
     "make_arrow_extension_type",
     "make_polars_extension_type",
+    # ITL-935
+    "LogicalTypeIdentifier",
+    "LogicalTypeIdentifierError",
+    "arrow_type_identifier",
+    "logical_type_identifier",
+    "version_metadata",
     # PLT-1654
     "ExtensionTypeInfo",
     "walk_schema",

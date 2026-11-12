@@ -7,10 +7,11 @@
 #### NumPy arrays: new storage format and new hashes, no automatic migration (ITL-888, ITL-883)
 
 **The array format and every array hash changed in v0.3.** A store written by v0.2 that holds
-`numpy.ndarray` columns is **not migrated**. Under v0.3, every node that handles arrays
-computes again into new tables, and its v0.2 results are no longer returned. Nothing written by
-v0.2 is changed or deleted, and those tables stay readable with v0.2. Use a fresh store for
-v0.3, or keep using v0.2 for an existing store. A migration is planned after v0.3 (ITL-889).
+`numpy.ndarray` columns is **not migrated**. Every node that handles arrays gets new tables,
+so its v0.2 results are no longer found; and since every Arrow-derived hash changed too
+(ITL-910, below), no v0.2 result is reused at all: v0.3 ignores the rows a v0.2 store holds and
+computes every input again. Nothing written by v0.2 is changed or deleted, and those tables stay
+readable with v0.2. A migration is planned after v0.3 (ITL-889).
 
 - **Storage.** An array column is now the Arrow extension type `orcapod.ndarray` (metadata
   `{"version":1}`) over `struct<dtype: large_string, shape: large_list<int64>,
@@ -29,8 +30,10 @@ v0.3, or keep using v0.2 for an existing store. A migration is planned after v0.
   change too, and so do the table paths of those nodes. Pipeline hashes are chained, so the
   pipeline and operator tables of every node downstream of an array column move as well,
   even when it has no array column itself. A pod whose inputs and outputs hold no array
-  keeps its function result table, so it reuses its v0.2 results without computing again.
-  Nodes with no array column upstream do not move.
+  keeps its function result table, and nodes with no array column upstream keep their tables;
+  but an array-free pod does **not** reuse its v0.2 results: every Arrow-derived hash changed
+  as well (ITL-910, below) and every table moved to a new layout (ITL-944, below), so the
+  v0.2 tables are not read and the inputs are computed again.
 - **Refused at write time** with `orcapod.errors.UnsupportedValueError` (a `ValueError`), naming
   the column and dtype: masked arrays (the mask used to be dropped silently), object dtypes,
   NumPy 2 `StringDType` (used to fail with a misleading pickle error), `longdouble` and

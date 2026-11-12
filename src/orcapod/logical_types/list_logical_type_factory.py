@@ -11,6 +11,25 @@ Design decisions:
 - Storage type: ``pa.large_list(element_storage)`` — NO extension type inside list value
 - Metadata JSON: ``{"category": "list"|"set", "element_ext_name": "...", "element_ext_metadata": null_or_string}``
 - ``python_type`` returns the full generic alias ``list[uuid.UUID]`` (not bare ``list``)
+
+Native containers (developer, November 11, 2026, ITL-935). ``list[T]`` and ``set[T]``
+of a logical type ``T`` are the *native containers*, and the only ones. They are
+logical types only because Arrow cannot hold an extension type inside a list value
+field; conceptually they are an ordinary list or set of ``T``. Therefore:
+
+- A native container has **no version of its own**: its extension metadata carries no
+  ``"version"`` key. Its identifier is the container kind (``list`` / ``set``) plus the
+  element's identifier (extension name and metadata), so it changes exactly when the
+  element's identifier does.
+- In the type and schema hash a native container is hashed like any generic alias, as
+  its origin and arguments (``GenericAliasHandler``); the element's identifier enters
+  through the argument.
+- A change to how native containers are stored or hashed is a change of the core
+  hashing, that is of the data context (the global hash version), never a logical
+  type change.
+
+A container type supplied by a third party is not a native container: it is an
+ordinary logical type with its own identifier.
 """
 
 from __future__ import annotations
@@ -87,17 +106,42 @@ class ListLogicalType(BaseLogicalType):
         element_ext_type = element_logical_type.get_arrow_extension_type()
         element_ext_name = element_ext_type.extension_name
         raw_meta_bytes: bytes = element_ext_type.__arrow_ext_serialize__()
-        element_ext_metadata: str | None = (
-            raw_meta_bytes.decode("utf-8") if raw_meta_bytes else None
-        )
 
         category = SET_CATEGORY if is_set else LIST_CATEGORY
-        meta_dict = {
-            "category": category,
-            "element_ext_name": element_ext_name,
-            "element_ext_metadata": element_ext_metadata,
-        }
-        self._metadata_bytes: bytes = json.dumps(meta_dict).encode("utf-8")
+
+        def _container_metadata(element_metadata: bytes) -> bytes:
+            """Return the container's extension metadata for one element metadata.
+
+            The result is UTF-8 JSON with the keys ``category`` (list or set),
+            ``element_ext_name`` and ``element_ext_metadata``.
+
+            Args:
+                element_metadata: The element type's extension metadata bytes,
+                    which must be UTF-8 text. Empty bytes are written as JSON
+                    ``null``.
+
+            Returns:
+                The JSON document, encoded as UTF-8.
+            """
+            # No "version" key, by design: see "Native containers" in the module
+            # docstring. The identifier is the container kind plus the element's
+            # identifier, so it changes exactly when the element's does.
+            meta_dict: dict[str, Any] = {
+                "category": category,
+                "element_ext_name": element_ext_name,
+                "element_ext_metadata": (
+                    element_metadata.decode("utf-8") if element_metadata else None
+                ),
+            }
+            return json.dumps(meta_dict).encode("utf-8")
+
+        self._metadata_bytes: bytes = _container_metadata(raw_meta_bytes)
+        # A stored container is readable exactly when its element is: one
+        # readable container metadata value per readable element metadata value.
+        self._also_reads: tuple[bytes, ...] = tuple(
+            _container_metadata(element_metadata)
+            for element_metadata in element_logical_type.readable_extension_metadata()
+        )
 
         # Derive storage type: large_list of the element's storage type (not extension type).
         element_storage = element_ext_type.storage_type
@@ -152,6 +196,7 @@ class ListLogicalType(BaseLogicalType):
                 self._logical_type_name,
                 self._storage_type,
                 metadata=self._metadata_bytes,
+                also_reads=self._also_reads,
             )
             self._arrow_ext = arrow_ext_class()
         return self._arrow_ext

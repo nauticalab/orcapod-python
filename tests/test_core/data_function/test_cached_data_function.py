@@ -565,3 +565,41 @@ class TestResultComputedFlag:
         assert result is not None
         flag = result.get_meta_value(CachedDataFunction.RESULT_COMPUTED_FLAG)
         assert flag is True
+
+
+class TestWrapperDataContext:
+    """A wrapper works under the data context of the function it wraps (ITL-967)."""
+
+    def test_wrapper_inherits_the_wrapped_functions_data_context(self):
+        """Without a ``data_context`` of its own, the wrapper takes the function's."""
+        from orcapod.contexts import create_registry, get_default_context
+
+        def add(x: int, y: int) -> int:
+            """Add two integers."""
+            return x + y
+
+        other = create_registry().get_context()
+        assert other is not get_default_context()
+        inner = PythonDataFunction(add, output_keys="result", data_context=other)
+        wrapper = CachedDataFunction(
+            inner,  # pyright: ignore[reportArgumentType]  # PythonDataFunction does not match DataFunctionProtocol for the checker
+            result_database=InMemoryArrowDatabase(),
+        )
+        assert wrapper.data_context is other
+
+    def test_an_explicit_data_context_wins(self):
+        """A ``data_context`` given to the wrapper is kept."""
+        from orcapod.contexts import create_registry, get_default_context
+
+        def add(x: int, y: int) -> int:
+            """Add two integers."""
+            return x + y
+
+        other = create_registry().get_context()
+        inner = PythonDataFunction(add, output_keys="result", data_context=other)
+        wrapper = CachedDataFunction(
+            inner,  # pyright: ignore[reportArgumentType]  # PythonDataFunction does not match DataFunctionProtocol for the checker
+            result_database=InMemoryArrowDatabase(),
+            data_context=get_default_context(),
+        )
+        assert wrapper.data_context is get_default_context()

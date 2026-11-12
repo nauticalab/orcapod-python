@@ -361,10 +361,22 @@ class TestGetFunctionVariationData:
         data = add_pf.get_function_variation_data()
         assert set(data.keys()) == {
             "function_name",
+            "function_version",
             "function_signature_hash",
             "function_content_hash",
             "git_hash",
         }
+
+    def test_function_version_is_the_full_declared_version(self):
+        """The variation data holds the declared ``v3.7`` whole, typed ``str``."""
+
+        def add(x: int, y: int) -> int:
+            """Return ``x + y``."""
+            return x + y
+
+        pf = PythonDataFunction(add, output_keys="result", version="v3.7")
+        assert pf.get_function_variation_data()["function_version"] == "v3.7"
+        assert pf.get_function_variation_data_schema()["function_version"] is str
 
     def test_non_hash_values_are_strings(self, add_pf):
         data = add_pf.get_function_variation_data()

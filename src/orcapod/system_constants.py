@@ -20,9 +20,24 @@ FIELD_SEPARATOR = ":"
 BLOCK_SEPARATOR = "::"
 ENV_INFO = "env_info"
 IS_EPHEMERAL_COL = "is_ephemeral"
-PIPELINE_DB_SCHEMA_VERSION = "pdb_v1"
-RESULT_DB_SCHEMA_VERSION = "rdb_v1"
-TRACKING_DB_SCHEMA_VERSION = "tdb_v1"
+# Table layout versions: the last component of every stored table's path. A layout
+# version moves whenever the bookkeeping columns of that table kind change. v0.3 moved
+# all of them, because every table gained the ``__data_context`` column (ITL-944).
+PIPELINE_DB_SCHEMA_VERSION = "pdb_v2"
+RESULT_DB_SCHEMA_VERSION = "rdb_v2"
+TRACKING_DB_SCHEMA_VERSION = "tdb_v2"
+OPERATOR_DB_SCHEMA_VERSION = "odb_v1"
+SOURCE_DB_SCHEMA_VERSION = "sdb_v1"
+# Layout components earlier versions of Orcapod wrote, newest first. A table found at
+# one of them (or at the path without a layout component) is an old-layout table.
+OLD_PIPELINE_DB_SCHEMA_VERSIONS = ("pdb_v1",)
+OLD_RESULT_DB_SCHEMA_VERSIONS = ("rdb_v1",)
+OLD_TRACKING_DB_SCHEMA_VERSIONS = ("tdb_v1",)
+STORED_DATA_CONTEXT = "data_context"
+# The data context of everything Orcapod wrote before v0.3. Its manifest is not shipped:
+# stored rows that carry this key, and tables without a data context column, belong to it.
+PRE_V1_DATA_CONTEXT_VERSION = "v0.1"
+PRE_V1_DATA_CONTEXT_KEY = "std:v0.1:default"
 
 
 class SystemConstant:
@@ -52,6 +67,11 @@ class SystemConstant:
     @property
     def CONTEXT_KEY(self) -> str:
         return f"{self._global_prefix}{DATAGRAM_PREFIX}{DATA_CONTEXT_KEY}"
+
+    @property
+    def DATA_CONTEXT_COL(self) -> str:
+        """Column of every stored table naming the data context that wrote the row."""
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{STORED_DATA_CONTEXT}"
 
     @property
     def POD_ID_PREFIX(self) -> str:

@@ -178,7 +178,7 @@ class TestOperatorNodeFromDescriptor:
             "label": "my_join",
             "content_hash": "fake_hash",
             "pipeline_hash": "fake_pipeline_hash",
-            "data_context_key": "std:v0.1:default",
+            "data_context_key": "std:v1:default",
             "table_scope": "pipeline_hash",
             "output_schema": {
                 "tag": {"a": "int64"},
@@ -206,6 +206,33 @@ class TestOperatorNodeFromDescriptor:
         )
         assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
         assert loaded.label == "my_join"
+        assert loaded.data_context_key == "std:v1:default"
+
+    def test_from_descriptor_saved_before_v03_loads_under_the_current_context(self):
+        """A descriptor saved with ``std:v0.1:default`` falls back to the current context."""
+        descriptor = {
+            "node_type": "operator",
+            "label": "my_join",
+            "content_hash": "fake_hash",
+            "pipeline_hash": "fake_pipeline_hash",
+            "data_context_key": "std:v0.1:default",
+            "table_scope": "pipeline_hash",
+            "output_schema": {"tag": {"a": "int64"}, "data": {"b": "int64"}},
+            "operator": {
+                "class_name": "Join",
+                "module_path": "orcapod.core.operators.join",
+                "config": {},
+            },
+            "cache_mode": "OFF",
+        }
+        loaded = OperatorJobNode.from_descriptor(
+            descriptor=descriptor,
+            operator=None,
+            input_streams=(),
+            databases={"pipeline": InMemoryArrowDatabase()},
+        )
+        assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
+        assert loaded.data_context_key == "std:v1:default"
 
     def test_from_descriptor_full_mode(self):
         db = InMemoryArrowDatabase()

@@ -28,6 +28,7 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, CachedSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
+from orcapod.system_constants import OPERATOR_DB_SCHEMA_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +439,15 @@ class TestOperatorPodCaching:
         )
         node.run()
         assert node.as_table().num_rows == 3
-        assert operator_db.get_all_records(node.node_identity_path) is None
+        assert (
+            operator_db.get_all_records(
+                node.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,)
+            )
+            is None
+        )
+        # Nothing was written anywhere else either (for example at the path
+        # without the layout component).
+        assert operator_db.list_table_paths() == []
 
     def test_log_computes_and_writes(self, clinic_a, source_db, operator_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
@@ -450,7 +459,9 @@ class TestOperatorPodCaching:
         )
         node.run()
         assert node.as_table().num_rows == 3
-        records = operator_db.get_all_records(node.node_identity_path)
+        records = operator_db.get_all_records(
+            node.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,)
+        )
         assert records is not None
         assert records.num_rows == 3
 
@@ -580,7 +591,12 @@ class TestEndToEndPipeline:
             cache_mode=CacheMode.LOG,
         )
         op_node.run()
-        assert operator_db.get_all_records(op_node.node_identity_path).num_rows == 3
+        assert (
+            operator_db.get_all_records(
+                op_node.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,)
+            ).num_rows
+            == 3
+        )
 
         # Step 4: REPLAY from operator cache
         op_replay = OperatorJobNode(

@@ -1,7 +1,7 @@
 """Built-in LogicalType implementations for orcapod.
 
 Provides three built-in logical types registered into the default
-``DataContext.logical_type_registry`` via ``contexts/data/v0.1.json``:
+``DataContext.logical_type_registry`` via ``contexts/logical_types.json``:
 
 - ``LogicalPath``: maps ``pathlib.Path`` ↔ Arrow large_string extension ``"orcapod.path"``
 - ``LogicalUPath``: maps ``upath.UPath`` ↔ Arrow large_string extension ``"orcapod.upath"``
@@ -30,6 +30,7 @@ import pyarrow as pa
 from upath import UPath
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.identifier import version_metadata
 from orcapod.logical_types.registry import (
     make_arrow_extension_type,
     make_polars_extension_type,
@@ -37,6 +38,14 @@ from orcapod.logical_types.registry import (
 
 if TYPE_CHECKING:
     from orcapod.logical_types.protocols import TypeConverterProtocol
+
+
+_IDENTIFIER_METADATA = version_metadata(1)
+"""Extension metadata of the types in this module: version 1 of their stored layout."""
+
+_LEGACY_METADATA = (b"",)
+"""Metadata written before identifiers existed (ITL-935). The layout was already
+version 1, so data stored with empty metadata is read as version 1."""
 
 
 class LogicalPath(BaseLogicalType):
@@ -57,9 +66,16 @@ class LogicalPath(BaseLogicalType):
         PosixPath('/tmp/foo')
     """
 
-    _arrow_ext_class = make_arrow_extension_type("orcapod.path", pa.large_string())
+    _arrow_ext_class = make_arrow_extension_type(
+        "orcapod.path",
+        pa.large_string(),
+        _IDENTIFIER_METADATA,
+        also_reads=_LEGACY_METADATA,
+    )
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("orcapod.path", pa.large_string())
+    _polars_ext_class = make_polars_extension_type(
+        "orcapod.path", pa.large_string(), _IDENTIFIER_METADATA.decode()
+    )
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "orcapod.path"
@@ -134,9 +150,16 @@ class LogicalUPath(BaseLogicalType):
         UPath('s3://bucket/key')
     """
 
-    _arrow_ext_class = make_arrow_extension_type("orcapod.upath", pa.large_string())
+    _arrow_ext_class = make_arrow_extension_type(
+        "orcapod.upath",
+        pa.large_string(),
+        _IDENTIFIER_METADATA,
+        also_reads=_LEGACY_METADATA,
+    )
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("orcapod.upath", pa.large_string())
+    _polars_ext_class = make_polars_extension_type(
+        "orcapod.upath", pa.large_string(), _IDENTIFIER_METADATA.decode()
+    )
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "orcapod.upath"
@@ -219,9 +242,16 @@ class LogicalUUID(BaseLogicalType):
         True
     """
 
-    _arrow_ext_class = make_arrow_extension_type("orcapod.uuid", pa.large_binary())
+    _arrow_ext_class = make_arrow_extension_type(
+        "orcapod.uuid",
+        pa.large_binary(),
+        _IDENTIFIER_METADATA,
+        also_reads=_LEGACY_METADATA,
+    )
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("orcapod.uuid", pa.large_binary())
+    _polars_ext_class = make_polars_extension_type(
+        "orcapod.uuid", pa.large_binary(), _IDENTIFIER_METADATA.decode()
+    )
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "orcapod.uuid"

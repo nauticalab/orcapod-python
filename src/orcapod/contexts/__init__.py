@@ -15,7 +15,7 @@ Example usage:
     context = resolve_context()
 
     # Get specific version
-    context = resolve_context("v0.1")
+    context = resolve_context("v1")
 
     # Use context components
     registry = context.semantic_type_registry
@@ -32,7 +32,10 @@ from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols import semantic_types_protocols as sp
 
 from .core import ContextResolutionError, ContextValidationError, DataContext
+from orcapod.system_constants import PRE_V1_DATA_CONTEXT_KEY
+
 from .registry import JSONDataContextRegistry
+from .stored import stored_data_contexts
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,7 +65,7 @@ def resolve_context(context_info: str | DataContext | None = None) -> DataContex
     Args:
         context_info: One of:
             - None: Use default context
-            - str: Version string ("v0.1") or full key ("std:v0.1:default")
+            - str: Version string ("v1") or full key ("std:v1:default")
             - DataContext: Return as-is
 
     Returns:
@@ -73,8 +76,8 @@ def resolve_context(context_info: str | DataContext | None = None) -> DataContex
 
     Examples:
         >>> context = resolve_context()  # Default
-        >>> context = resolve_context("v0.1")  # Specific version
-        >>> context = resolve_context("std:v0.1:default")  # Full key
+        >>> context = resolve_context("v1")  # Specific version
+        >>> context = resolve_context("std:v1:default")  # Full key
         >>> context = resolve_context("latest")  # Latest version
     """
     # If already a DataContext, return as-is
@@ -84,6 +87,37 @@ def resolve_context(context_info: str | DataContext | None = None) -> DataContex
     # Use registry to resolve string/None to DataContext
     registry = _get_registry()
     return registry.get_context(context_info)
+
+
+def resolve_saved_context(context_key: str | None) -> DataContext:
+    """Resolve the data context named by a saved pipeline or job file.
+
+    A file saved by Orcapod before v0.3 names ``std:v0.1:default``, which this
+    version cannot hash under. Such a node is loaded under the current default data
+    context, with a warning: results the earlier version stored for it are at an
+    older table layout and are not read.
+
+    Args:
+        context_key: The ``data_context_key`` of a saved node, or ``None``.
+
+    Returns:
+        The data context to load the node under.
+
+    Raises:
+        ContextResolutionError: If the key names any other unknown data context.
+    """
+    if context_key == PRE_V1_DATA_CONTEXT_KEY:
+        current = get_default_context()
+        logger.warning(
+            "A node was saved under the data context %r (Orcapod before v0.3). It is "
+            "loaded under the current data context %r; results stored under %r are "
+            "not read.",
+            context_key,
+            current.context_key,
+            context_key,
+        )
+        return current
+    return resolve_context(context_key)
 
 
 def get_available_contexts() -> list[str]:
@@ -112,9 +146,9 @@ def get_context_info(version: str) -> dict[str, Any]:
         Dictionary with context metadata
 
     Example:
-        >>> info = get_context_info("v0.1")
+        >>> info = get_context_info("v1")
         >>> print(info['description'])
-        'Initial stable release with basic Path semantic type support'
+        'Data context of Orcapod v0.3: the hashing generation H1. Frozen when v0.3.0 is released; editable in place while that release is prepared.'
     """
     registry = _get_registry()
     return registry.get_context_info(version)
@@ -208,7 +242,8 @@ def get_default_type_converter() -> "sp.TypeConverterProtocol":
 def create_registry(
     contexts_dir: str | None = None,
     schema_file: str | None = None,
-    default_version: str = "v0.1",
+    default_version: str = "v1",
+    logical_types_file: str | None = None,
 ) -> JSONDataContextRegistry:
     """
     Create a custom context registry.
@@ -219,6 +254,8 @@ def create_registry(
         contexts_dir: Directory containing context JSON files
         schema_file: JSON schema file for validation
         default_version: Default version to use
+        logical_types_file: The logical type registration file; defaults to the
+            one shipped in ``orcapod.contexts``
 
     Returns:
         JSONDataContextRegistry instance
@@ -228,7 +265,9 @@ def create_registry(
         >>> test_registry = create_registry("/path/to/test/contexts")
         >>> test_context = test_registry.get_context("test")
     """
-    return JSONDataContextRegistry(contexts_dir, schema_file, default_version)
+    return JSONDataContextRegistry(
+        contexts_dir, schema_file, default_version, logical_types_file
+    )
 
 
 def enable_file_hash_caching(
@@ -311,7 +350,7 @@ def enable_file_hash_caching(
         raise RuntimeError(
             "enable_file_hash_caching(): no FileHandler registered for "
             "orcapod.File in the default context. This should not happen "
-            "with the standard v0.1 context."
+            "with the standard v1 context."
         )
 
     base_hasher = existing_handler.file_hasher
@@ -364,7 +403,7 @@ def enable_file_hash_caching(
         raise RuntimeError(
             "enable_file_hash_caching(): no DirectoryHandler registered for "
             "orcapod.Directory in the default context. This should not happen "
-            "with the standard v0.1 context."
+            "with the standard v1 context."
         )
     existing_dir_hasher = existing_dir_handler.directory_hasher
     registry.register(
@@ -387,6 +426,7 @@ __all__ = [
     "ContextResolutionError",
     # Main functions
     "resolve_context",
+    "resolve_saved_context",
     "get_available_contexts",
     "get_context_info",
     "get_default_context",
@@ -399,4 +439,6 @@ __all__ = [
     # Advanced usage
     "create_registry",
     "JSONDataContextRegistry",
+    # Stored rows
+    "stored_data_contexts",
 ]

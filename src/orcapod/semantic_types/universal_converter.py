@@ -553,6 +553,11 @@ class UniversalTypeConverter:
             if self._logical_type_registry is not None:
                 lt = self._logical_type_registry.get_by_arrow_extension_name(ext_name)
                 if lt is not None:
+                    # The name is known: the incoming metadata must be one the
+                    # registered type reads, as on the registry-miss path.
+                    from orcapod.logical_types.identifier import require_readable
+
+                    require_readable(lt, arrow_type.__arrow_ext_serialize__())
                     return lt.get_arrow_extension_type()
             # Registry miss — extract info and register
             raw_meta = arrow_type.__arrow_ext_serialize__()
@@ -705,10 +710,15 @@ class UniversalTypeConverter:
             The Arrow extension type after registration.
 
         Raises:
+            LogicalTypeIdentifierError: If the extension name is known (or was
+                reconstructed by a factory) and ``extension_metadata`` is not one
+                of the values the logical type declares readable.
             ValueError: If metadata is missing, malformed, lacks ``"category"``, or
                 no factory is registered for the category.
         """
         import json as _json
+
+        from orcapod.logical_types.identifier import require_readable
 
         if self._logical_type_registry is None:
             raise ValueError(
@@ -721,6 +731,8 @@ class UniversalTypeConverter:
             arrow_extension_name
         )
         if lt is not None:
+            # The name is known: the stored metadata must be one the type reads.
+            require_readable(lt, extension_metadata or b"")
             return lt.get_arrow_extension_type()
 
         # Missing metadata — cannot auto-register
@@ -771,6 +783,7 @@ class UniversalTypeConverter:
         logical_type = factory.reconstruct_from_arrow(
             arrow_extension_name, storage_type, metadata_dict, converter=self
         )
+        require_readable(logical_type, extension_metadata)
         self._logical_type_registry.register_logical_type(logical_type)
         return logical_type.get_arrow_extension_type()
 
@@ -1657,6 +1670,11 @@ class UniversalTypeConverter:
                 arrow_type.extension_name
             )
             if lt is not None:
+                # Values are decoded by the registered type: only when it declares
+                # that it reads data stored under this column's metadata.
+                from orcapod.logical_types.identifier import require_readable
+
+                require_readable(lt, arrow_type.__arrow_ext_serialize__())
                 _lt = lt
                 _self = self
                 return lambda storage_value: _lt.storage_to_python(storage_value, _self)

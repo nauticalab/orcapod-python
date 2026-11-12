@@ -45,6 +45,7 @@ META = constants.META_PREFIX
 # computed flag.
 CACHE_HIT_META = {
     f"{META}pf_var_function_name",
+    f"{META}pf_var_function_version",
     f"{META}pf_var_function_signature_hash",
     f"{META}pf_var_function_content_hash",
     f"{META}pf_var_git_hash",

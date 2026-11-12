@@ -695,7 +695,7 @@ class FunctionPod(_FunctionPodBase):
         *,
         ctx_arg_name: str | None = None,
         name: str | None = None,
-        version: str = "v1.0",
+        version: str = "v0.0",
         pod_config: PodConfig | None = None,
         label: str | None = None,
         **kwargs: Any,
@@ -714,7 +714,7 @@ class FunctionPod(_FunctionPodBase):
             ctx_arg_name: If set, exclude this parameter from the exposed input
                 schema and inject an ``InvocationContext`` per row under this name.
             name: Optional canonical function name override.
-            version: Version string (default ``"v1.0"``).
+            version: Version string (default ``"v0.0"``, as for every entry point).
             pod_config: Optional per-pod config.
             label: Optional display label.
             **kwargs: Forwarded to ``_FunctionPodBase.__init__``.
@@ -1275,7 +1275,7 @@ def side_effect_function_pod(
     output_keys: list[str] | str,
     ctx_arg_name: str = "ctx",
     name: str | None = None,
-    version: str = "v1.0",
+    version: str = "v0.0",
     pod_config: PodConfig | None = None,
 ) -> "FunctionPod | Callable":
     """Decorator wrapping a callable as a ctx-aware ``FunctionPod``.
@@ -1316,7 +1316,7 @@ def side_effect_function_pod(
         output_keys: Output column key(s).
         ctx_arg_name: Name of the ``InvocationContext`` parameter (default ``"ctx"``).
         name: Optional canonical function name override.
-        version: Version string for the data function (default ``"v1.0"``).
+        version: Version string for the data function (default ``"v0.0"``, as for every entry point).
         pod_config: Optional per-pod configuration.
 
     Returns:

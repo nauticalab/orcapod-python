@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.ipc
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
+from orcapod.logical_types.identifier import version_metadata
 from orcapod.logical_types.registry import (
     make_arrow_extension_type,
     make_polars_extension_type,
@@ -32,6 +33,14 @@ if TYPE_CHECKING:
 
 
 _SERIES_UNNAMED_SENTINEL = "__pandas_series_unnamed__"
+
+
+_IDENTIFIER_METADATA = version_metadata(1)
+"""Extension metadata of the types in this module: version 1 of their stored layout."""
+
+_LEGACY_METADATA = (b"",)
+"""Metadata written before identifiers existed (ITL-935). The layout was already
+version 1, so data stored with empty metadata is read as version 1."""
 
 
 def _table_to_ipc_bytes(table: pa.Table) -> bytes:
@@ -83,10 +92,15 @@ class LogicalPandasDataFrame(BaseLogicalType):
         True
     """
 
-    _arrow_ext_class = make_arrow_extension_type("pandas.dataframe", pa.large_binary())
+    _arrow_ext_class = make_arrow_extension_type(
+        "pandas.dataframe",
+        pa.large_binary(),
+        _IDENTIFIER_METADATA,
+        also_reads=_LEGACY_METADATA,
+    )
     _arrow_ext: pa.ExtensionType | None = None
     _polars_ext_class = make_polars_extension_type(
-        "pandas.dataframe", pa.large_binary()
+        "pandas.dataframe", pa.large_binary(), _IDENTIFIER_METADATA.decode()
     )
     _polars_ext: pl.BaseExtension | None = None
 
@@ -183,9 +197,16 @@ class LogicalPandasSeries(BaseLogicalType):
         True
     """
 
-    _arrow_ext_class = make_arrow_extension_type("pandas.series", pa.large_binary())
+    _arrow_ext_class = make_arrow_extension_type(
+        "pandas.series",
+        pa.large_binary(),
+        _IDENTIFIER_METADATA,
+        also_reads=_LEGACY_METADATA,
+    )
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("pandas.series", pa.large_binary())
+    _polars_ext_class = make_polars_extension_type(
+        "pandas.series", pa.large_binary(), _IDENTIFIER_METADATA.decode()
+    )
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "pandas.series"

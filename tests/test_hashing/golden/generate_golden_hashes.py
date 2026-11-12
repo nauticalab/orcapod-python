@@ -29,9 +29,10 @@ Values must be identical on every supported Python version (3.11, 3.12, 3.13) an
 process, whatever ``PYTHONHASHSEED`` is. A value that differs by interpreter is a defect to
 fix, never something to pin per version.
 
-Known gaps (ITL-848), not pinned until fixed: ``hash_schema`` on a schema with an extension
-type, ``null``-typed columns, the ``arrow.uuid`` canonical extension type, and map and
-fixed-size-list values.
+Not pinned, because starfix rejects their data (ITL-848): ``null``-typed and map columns.
+Since starfix 0.5 (hash format 2, label ``arrow_v1``, ITL-910), ``hash_schema`` on extension
+columns, the canonical ``arrow.uuid`` and ``arrow.fixed_shape_tensor`` types, and
+fixed-size-list values are hashable and pinned.
 
 Comparing releases
 ------------------

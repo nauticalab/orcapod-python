@@ -20,7 +20,7 @@ import asyncio
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod import contexts
 from orcapod.channels import Channel, ReadableChannel, WritableChannel
@@ -34,6 +34,14 @@ from orcapod.errors import (
     StoreReadError,
     StoreWriteError,
 )
+from orcapod.contexts.stored import (
+    keep_rows_of_data_context,
+    require_same_data_context,
+    account_for_stale_tables,
+    find_stale_tables,
+    report_rows_of_other_data_contexts,
+    with_data_context,
+)
 from orcapod.protocols.core_protocols import (
     DataProtocol,
     StreamProtocol,
@@ -42,7 +50,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.system_constants import constants
+from orcapod.system_constants import OPERATOR_DB_SCHEMA_VERSION, constants
 from orcapod.types import CacheMode, ColumnConfig, ContentHash, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -190,6 +198,13 @@ class OperatorNodeBase(StreamBase):
 
     @property
     def data_context_key(self) -> str:
+        """Key of the node's data context.
+
+        A node loaded from a saved job without its operator (read-only) has the data
+        context saved in its descriptor.
+        """
+        if self._operator is None:
+            return self._data_context.context_key
         return self._operator.data_context_key
 
     @property
@@ -253,9 +268,10 @@ class OperatorNodeBase(StreamBase):
             return self._stored_pipeline_path
         if self._node_identity_path_cache is not None:
             return self._node_identity_path_cache
-        path = self.node_uri + (f"schema:{self.pipeline_hash().to_string()}",)
+        # Hashes inside a path are bare hex digests: a label never enters a name.
+        path = self.node_uri + (f"schema:{self.pipeline_hash().to_hex()}",)
         if self._table_scope != "pipeline_hash":
-            path += (f"instance:{self.content_hash().to_string()}",)
+            path += (f"instance:{self.content_hash().to_hex()}",)
         self._node_identity_path_cache = path
         return path
 
@@ -429,7 +445,7 @@ class OperatorNode(OperatorNodeBase):
         # From DataContextMixin
         from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
 
-        node._data_context = contexts.resolve_context(
+        node._data_context = contexts.resolve_saved_context(
             descriptor.get("data_context_key")
         )
         config_dict = descriptor.get("config")
@@ -536,6 +552,37 @@ class OperatorJobNode(OperatorNodeBase):
         - **REPLAY**: skip computation, flow cached results downstream.
     """
 
+    # Set once a read has reported the stored rows it skipped (rows of another data
+    # context); a class default so nodes rebuilt from a saved descriptor start unset.
+    _skipped_rows_reported: bool = False
+    # Set once a table found at the older layout has been accounted for.
+    _stale_tables_checked: bool = False
+
+    @property
+    def _stored_table_path(self) -> tuple[str, ...]:
+        """Path of this node's stored table: the identity path plus the layout version.
+
+        Every read and write of the operator-cache table uses this path. The identity
+        path itself is where Orcapod up to v0.2 stored the table (the old layout).
+        """
+        return self.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,)
+
+    def _account_for_stale_tables(self) -> None:
+        """Report, once per node object, a table found at the older layout.
+
+        A table written by an earlier version of Orcapod holds no ``__data_context``
+        column. Its rows are not read as results and are left unchanged; their number
+        is reported (ITL-944).
+        """
+        if self._stale_tables_checked or self._pipeline_database is None:
+            return
+        self._stale_tables_checked = True
+        account_for_stale_tables(
+            find_stale_tables(self._pipeline_database, (self.node_identity_path,)),
+            delivers_side_effects=False,
+            current_context=self.data_context_key,
+        )
+
     def __init__(
         self,
         operator: OperatorPodProtocol,
@@ -619,6 +666,9 @@ class OperatorJobNode(OperatorNodeBase):
             pipeline_database: Database for pipeline records.
             cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
         """
+        # Another store has its own tables of other generations to account for.
+        self._stale_tables_checked = False
+        self._skipped_rows_reported = False
         self._pipeline_database = pipeline_database
         self._cache_mode = cache_mode
 
@@ -709,7 +759,7 @@ class OperatorJobNode(OperatorNodeBase):
         # From DataContextMixin
         from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
 
-        node._data_context = contexts.resolve_context(
+        node._data_context = contexts.resolve_saved_context(
             descriptor.get("data_context_key")
         )
         config_dict = descriptor.get("config")
@@ -808,8 +858,20 @@ class OperatorJobNode(OperatorNodeBase):
                 f"OperatorJobNode {self.label!r} has no pipeline database attached."
             )
         output_table = stream.as_table(
-            columns={"source": True, "system_tags": True},
+            columns={"source": True, "system_tags": True, "context": True},
         )
+        # The inputs and the rows name their data context; all must be this node's.
+        for input_stream in self._input_streams:
+            require_same_data_context(
+                input_stream.data_context_key, self.data_context_key
+            )
+        row_context_keys = cast(
+            "list[str]",
+            pc.unique(output_table.column(constants.CONTEXT_KEY)).to_pylist(),
+        )
+        for row_context_key in row_context_keys:
+            require_same_data_context(row_context_key, self.data_context_key)
+        output_table = output_table.drop([constants.CONTEXT_KEY])
 
         # Always append the node content hash column first so that it is included
         # in the per-row HASH_COLUMN_NAME computation below.  This makes record IDs
@@ -821,10 +883,17 @@ class OperatorJobNode(OperatorNodeBase):
         # In content_hash scope each run has its own isolated table so the column
         # is present in storage but filtering is never applied on reads.
         n_rows = output_table.num_rows
+        node_content_hash = self.content_hash()
+        # The row that is hashed carries the node content hash as its raw digest:
+        # a hash label is never part of a hash input. The stored column is labelled.
+        hashed_table = output_table.append_column(
+            constants.NODE_CONTENT_HASH_COL,
+            pa.array([node_content_hash.digest] * n_rows, type=pa.large_binary()),
+        )
         output_table = output_table.append_column(
             constants.NODE_CONTENT_HASH_COL,
             pa.array(
-                [self.content_hash().to_prefixed_digest()] * n_rows,
+                [node_content_hash.to_prefixed_digest()] * n_rows,
                 type=pa.large_binary(),
             ),
         )
@@ -832,26 +901,30 @@ class OperatorJobNode(OperatorNodeBase):
         # Per-row record hashes for dedup: hash(tag + data + system_tags + node_content_hash).
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
-        for batch in output_table.to_batches():
+        for batch in hashed_table.to_batches():
             for i in range(len(batch)):
+                # A hash stored as a value carries its label: b"<label>:<digest>".
                 record_hashes.append(
-                    arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
+                    arrow_hasher.hash_table(batch.slice(i, 1)).to_prefixed_digest()
                 )
 
         output_table = output_table.add_column(
             0,
             self.HASH_COLUMN_NAME,
-            pa.array([h.encode() for h in record_hashes], type=pa.large_binary()),
+            pa.array(record_hashes, type=pa.large_binary()),
         )
 
         # Store — record IDs are run-scoped (NODE_CONTENT_HASH_COL is included in
         # the hash), so rows from different runs with identical output will have
         # distinct record IDs and both be stored.  skip_duplicates=True still
         # deduplicates exact re-runs of the same node within a single run.
+        # The data context column is appended after the record hashes are computed:
+        # it names the generation of hashing that produced them and is not hashed.
+        self._account_for_stale_tables()
         try:
             pipeline_database.add_records(
-                self.node_identity_path,
-                output_table,
+                self._stored_table_path,
+                with_data_context(output_table, self.data_context_key),
                 record_id_column=self.HASH_COLUMN_NAME,
                 skip_duplicates=True,
             )
@@ -860,12 +933,42 @@ class OperatorJobNode(OperatorNodeBase):
             raise
         except Exception as exc:
             raise StoreWriteError(
-                self.node_identity_path, node_label=self.label
+                self._stored_table_path, node_label=self.label
             ) from exc
 
         self._cached_output_table = output_table.drop(
             [self.HASH_COLUMN_NAME, constants.NODE_CONTENT_HASH_COL]
         )
+
+    def _read_stored_records(self) -> "pa.Table | None":
+        """Read this node's stored rows written under the current data context.
+
+        Every read of the whole stored table goes through here. Rows are narrowed to
+        the current data context (``__data_context``) and then to this node's content
+        hash (``_filter_by_content_hash``). Rows of another data context stay in the
+        table untouched, and a table at the older layout is not read (ITL-944).
+
+        Returns:
+            The stored rows, with ``HASH_COLUMN_NAME`` and ``NODE_CONTENT_HASH_COL``
+            still present and without the ``__data_context`` column, or ``None``
+            when the table does not exist.
+        """
+        assert self._pipeline_database is not None
+        self._account_for_stale_tables()
+        records = self._pipeline_database.get_all_records(
+            self._stored_table_path, record_id_column=self.HASH_COLUMN_NAME
+        )
+        if records is None:
+            return None
+        stored_rows = records.num_rows
+        records = keep_rows_of_data_context(records, self.data_context_key)
+        if records.num_rows < stored_rows and not self._skipped_rows_reported:
+            self._skipped_rows_reported = True
+            report_rows_of_other_data_contexts(
+                self._pipeline_database.base_path + self._stored_table_path,
+                stored_rows - records.num_rows,
+            )
+        return self._filter_by_content_hash(records.drop([constants.DATA_CONTEXT_COL]))
 
     def _make_empty_table(self) -> "pa.Table":
         """Build a zero-row PyArrow table matching this node's full output schema.
@@ -904,7 +1007,7 @@ class OperatorJobNode(OperatorNodeBase):
             return None
         if self._cache_mode != CacheMode.REPLAY:
             return None
-        records = self._pipeline_database.get_all_records(self.node_identity_path)
+        records = self._read_stored_records()
         if records is None:
             if self._operator is None:
                 # Read-only (deserialized) node with no operator: cannot derive
@@ -913,7 +1016,7 @@ class OperatorJobNode(OperatorNodeBase):
                 return None
             records_table = self._make_empty_table()
         else:
-            records_table = self._filter_by_content_hash(records)
+            records_table = records
             # Drop internal columns that must not surface to stream consumers.
             cols_to_drop = [
                 c
@@ -923,7 +1026,10 @@ class OperatorJobNode(OperatorNodeBase):
             if cols_to_drop:
                 records_table = records_table.drop(cols_to_drop)
         tag_keys = self.keys()[0]
-        return ArrowTableStream(records_table, tag_columns=tag_keys)
+        # Stored rows are this node's: give them its data context, not the default.
+        return ArrowTableStream(
+            records_table, tag_columns=tag_keys, data_context=self.data_context
+        )
 
     def get_cached_output(self) -> StreamProtocol | None:
         """Return cached output stream in REPLAY mode, else None.
@@ -1016,11 +1122,10 @@ class OperatorJobNode(OperatorNodeBase):
         If no cached records exist yet, produces an empty stream with
         the correct schema (zero rows, correct columns).
         """
-        records = self._pipeline_database.get_all_records(self.node_identity_path)
+        records = self._read_stored_records()
         if records is None:
             records = self._make_empty_table()
         else:
-            records = self._filter_by_content_hash(records)
             # Drop internal columns that must not surface to stream consumers.
             cols_to_drop = [
                 c
@@ -1031,7 +1136,9 @@ class OperatorJobNode(OperatorNodeBase):
                 records = records.drop(cols_to_drop)
 
         tag_keys = self.keys()[0]
-        self._cached_output_stream = ArrowTableStream(records, tag_columns=tag_keys)
+        self._cached_output_stream = ArrowTableStream(
+            records, tag_columns=tag_keys, data_context=self.data_context
+        )
         self._update_modified_time()
 
     def run(self) -> None:
@@ -1123,11 +1230,9 @@ class OperatorJobNode(OperatorNodeBase):
         if self._pipeline_database is None:
             return None
 
-        results = self._pipeline_database.get_all_records(self.node_identity_path)
+        results = self._read_stored_records()
         if results is None:
             return None
-
-        results = self._filter_by_content_hash(results)
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
@@ -1189,6 +1294,8 @@ class OperatorJobNode(OperatorNodeBase):
         source_id: str | None = None
         if tags_as_data is None:
             path_str = "/".join(self.node_identity_path)
+            # A source id is the source's name: a default built from a hash keeps
+            # the hash's label (developer, November 11, 2026).
             source_id = f"{path_str}:{self.content_hash().to_string()}"
         return DerivedSource(
             origin=self,
@@ -1255,6 +1362,13 @@ class OperatorJobNode(OperatorNodeBase):
             # OFF or LOG: delegate to operator, forward results downstream
             intermediate: Channel[tuple[TagProtocol, DataProtocol]] = Channel()
             should_collect = self._cache_mode == CacheMode.LOG
+            if should_collect:
+                # Rows are forwarded while the operator runs, so an input this node
+                # will refuse to store must be refused before the first row leaves.
+                for input_stream in self._input_streams:
+                    require_same_data_context(
+                        input_stream.data_context_key, self.data_context_key
+                    )
             collected: list[tuple[TagProtocol, DataProtocol]] = []
 
             async def forward() -> None:

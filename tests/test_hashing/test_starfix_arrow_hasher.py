@@ -16,8 +16,8 @@ Coverage
 - Empty table: hash_table handles a table with zero rows
 - Schema-only vs data hash: hash_schema and hash_table differ for the same schema
 - versioned_hashers factory: get_versioned_semantic_arrow_hasher returns a
-  StarfixArrowHasher with hasher_id == _CURRENT_ARROW_HASHER_ID
-- Context integration: the v0.1 context wires up StarfixArrowHasher
+  StarfixArrowHasher with hasher_id == ARROW_HASH_LABEL
+- Context integration: the v1 context wires up StarfixArrowHasher
 - Stability (golden values): fully-pinned 35-byte digests catch accidental
   algorithm changes in both schema and table hashing
 """
@@ -26,9 +26,8 @@ from __future__ import annotations
 
 import pyarrow as pa
 
-from orcapod.hashing.arrow_hashers import StarfixArrowHasher
+from orcapod.hashing.arrow_hashers import ARROW_HASH_LABEL, StarfixArrowHasher
 from orcapod.hashing.versioned_hashers import (
-    _CURRENT_ARROW_HASHER_ID,
     get_versioned_semantic_arrow_hasher,
 )
 from orcapod.types import ContentHash
@@ -38,7 +37,7 @@ from orcapod.types import ContentHash
 # Helpers
 # ---------------------------------------------------------------------------
 
-HASHER_ID = "arrow_v0.1"
+HASHER_ID = "arrow_v1"
 
 _DIGEST_LEN = 35  # 3 version bytes + 32 SHA-256 bytes
 
@@ -107,7 +106,7 @@ class TestHashSchema:
         h = _make_hasher().hash_schema(schema)
         assert (
             h.digest.hex()
-            == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c"
+            == "000002e9eb1c825a8a882b565ef45a2ec832c10e31ad067736d2a6cb8a9403ff91c33f"
         ), (
             f"Schema golden digest changed — was the starfix algorithm updated? "
             f"Got: {h.digest.hex()}"
@@ -126,10 +125,10 @@ class TestHashSchema:
         s_nullable = pa.schema([pa.field("x", pa.int32(), nullable=True)])
         s_non_nullable = pa.schema([pa.field("x", pa.int32(), nullable=False)])
         assert _make_hasher().hash_schema(s_nullable).digest.hex() == (
-            "000001b8005339e69df64cda60f9ff9c98caa264092a7b666c3f7f85a2bfed20bae3db"
+            "000002fa30e1a356fea8d3a5602a6fa1d49a43349a840f65ead55463f5ead55ea64e9a"
         )
         assert _make_hasher().hash_schema(s_non_nullable).digest.hex() == (
-            "00000179353568a71430411e8108ee02d425800f6d5054d9b2baa871cad90f3e06422a"
+            "0000022571a7dcd462c26761f5b5353ccbd0c8d80655b462c3bb622560ec0d590a5662"
         )
 
 
@@ -254,7 +253,7 @@ class TestHashTable:
         h = _make_hasher().hash_table(table)
         assert (
             h.digest.hex()
-            == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791"
+            == "00000277215cd88b3019240dec61d8c4bed8bf6fd05e48d5684e1e7d3acc957f54102c"
         ), (
             f"Table golden digest changed — was the starfix algorithm updated? "
             f"Got: {h.digest.hex()}"
@@ -304,11 +303,11 @@ class TestVersionedHashersFactory:
 
     def test_hasher_id_matches_current_constant(self):
         hasher = get_versioned_semantic_arrow_hasher()
-        assert hasher.hasher_id == _CURRENT_ARROW_HASHER_ID
+        assert hasher.hasher_id == ARROW_HASH_LABEL
 
-    def test_current_hasher_id_is_arrow_v0_1(self):
+    def test_current_hasher_id_is_arrow_v0_2(self):
         """Pin the current version constant to detect accidental version drifts."""
-        assert _CURRENT_ARROW_HASHER_ID == "arrow_v0.1"
+        assert ARROW_HASH_LABEL == "arrow_v1"
 
 
 # ---------------------------------------------------------------------------
@@ -320,19 +319,19 @@ class TestContextIntegration:
     def test_v01_context_uses_starfix_hasher(self):
         from orcapod.contexts import resolve_context
 
-        ctx = resolve_context("v0.1")
+        ctx = resolve_context("v1")
         assert isinstance(ctx.arrow_hasher, StarfixArrowHasher)
 
     def test_v01_context_hasher_id(self):
         from orcapod.contexts import resolve_context
 
-        ctx = resolve_context("v0.1")
-        assert ctx.arrow_hasher.hasher_id == "arrow_v0.1"
+        ctx = resolve_context("v1")
+        assert ctx.arrow_hasher.hasher_id == "arrow_v1"
 
     def test_context_hash_table_functional(self):
         from orcapod.contexts import resolve_context
 
-        ctx = resolve_context("v0.1")
+        ctx = resolve_context("v1")
         table = pa.table({"key": [1, 2, 3], "val": [0.1, 0.2, 0.3]})
         h = ctx.arrow_hasher.hash_table(table)
         assert isinstance(h, ContentHash)
@@ -350,7 +349,7 @@ _COMMENT_KEY = b"comment"
 class TestHashSchemaExtensionAware:
     def test_extension_free_golden_value_unchanged(self):
         """Stability invariant: extension-free schema hash is byte-identical to
-        the pre-v0.3.0 golden value (include_metadata=False is the default)."""
+        the starfix format-2 (arrow_v1) golden value (include_metadata=False is the default)."""
         schema = pa.schema(
             [
                 pa.field("id", pa.int32(), nullable=False),
@@ -360,7 +359,7 @@ class TestHashSchemaExtensionAware:
         h = _make_hasher().hash_schema(schema)
         assert (
             h.digest.hex()
-            == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c"
+            == "000002e9eb1c825a8a882b565ef45a2ec832c10e31ad067736d2a6cb8a9403ff91c33f"
         ), (
             f"Stability invariant broken — extension-free golden digest changed. Got: {h.digest.hex()}"
         )
@@ -442,7 +441,7 @@ class TestHashSchemaExtensionAware:
 class TestHashTableExtensionAware:
     def test_extension_free_table_golden_value_unchanged(self):
         """Stability invariant: extension-free table hash is byte-identical to
-        the pre-v0.3.0 golden value."""
+        the starfix format-2 (arrow_v1) golden value."""
         table = pa.table(
             {
                 "id": pa.array([1, 2, 3], type=pa.int32()),
@@ -453,7 +452,7 @@ class TestHashTableExtensionAware:
         h = _make_hasher().hash_table(table)
         assert (
             h.digest.hex()
-            == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791"
+            == "00000277215cd88b3019240dec61d8c4bed8bf6fd05e48d5684e1e7d3acc957f54102c"
         ), (
             f"Stability invariant broken — extension-free table golden digest changed. Got: {h.digest.hex()}"
         )

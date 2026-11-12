@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from collections import defaultdict
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -15,7 +17,11 @@ from orcapod.databases._row_index import (
     rows_at,
 )
 from orcapod.databases.utils import coerce_record_id
-from orcapod.errors import InputValidationError, StoreReadError
+from orcapod.errors import (
+    InputValidationError,
+    StoreReadError,
+    TableListingNotSupportedError,
+)
 from orcapod.databases.storage_utils import (
     delta_to_pyarrow_dataset,
     is_cloud_uri,
@@ -39,6 +45,84 @@ else:
 
 # Module-level logger
 logger = logging.getLogger(__name__)
+
+
+# Directory that marks its parent directory as a Delta table.
+_DELTA_LOG_DIRECTORY = "_delta_log"
+
+# deltalake storage option -> where s3fs takes the same setting.
+_S3FS_OPTION_OF: dict[str, tuple[str, ...]] = {
+    "aws_access_key_id": ("key",),
+    "aws_secret_access_key": ("secret",),
+    "aws_session_token": ("token",),
+    "aws_endpoint_url": ("client_kwargs", "endpoint_url"),
+    "aws_endpoint": ("client_kwargs", "endpoint_url"),
+    "aws_region": ("client_kwargs", "region_name"),
+    "aws_default_region": ("client_kwargs", "region_name"),
+}
+
+
+def _s3fs_options(storage_options: Mapping[str, str]) -> dict[str, Any]:
+    """Translate deltalake storage options into ``s3fs`` constructor arguments.
+
+    Covers the credentials, the endpoint and the region. Other options are not
+    translated; ``s3fs`` then falls back on its default credential chain.
+
+    Args:
+        storage_options: Options in deltalake's form (``AWS_*`` keys, any case).
+
+    Returns:
+        Keyword arguments for ``s3fs.S3FileSystem``.
+    """
+    options: dict[str, Any] = {}
+    for key, value in storage_options.items():
+        target = _S3FS_OPTION_OF.get(key.lower())
+        if target is None:
+            continue
+        if len(target) == 1:
+            options[target[0]] = value
+        else:
+            options.setdefault(target[0], {})[target[1]] = value
+    return options
+
+
+def _list_local_directory(directory: str) -> list[str]:
+    """Return the names of the subdirectories of a local directory.
+
+    A symbolic link to a directory is not a subdirectory here: following one that
+    points at an ancestor would send the table walk in circles.
+    """
+    with os.scandir(directory) as entries:
+        return [entry.name for entry in entries if entry.is_dir(follow_symlinks=False)]
+
+
+def _join_local_path(directory: str, name: str) -> str:
+    """Return the path of the entry ``name`` of a local directory."""
+    return os.path.join(directory, name)
+
+
+def _join_cloud_path(directory: str, name: str) -> str:
+    """Return the path of the entry ``name`` of a cloud directory."""
+    return f"{directory}/{name}"
+
+
+def _stored_component(directory_name: str) -> str:
+    """Return the path component a local directory name stands for.
+
+    The inverse of ``DeltaTableDatabase._sanitize_path_component``: on Windows a
+    ``:`` is stored as ``!``. Cloud paths are stored unchanged and need no inverse.
+    """
+    if sys.platform == "win32":
+        return directory_name.replace("!", ":")
+    return directory_name
+
+
+def _allows_http(storage_options: Mapping[str, str]) -> bool:
+    """Return whether deltalake's ``AWS_ALLOW_HTTP`` option is switched on."""
+    for key, value in storage_options.items():
+        if key.lower() in ("aws_allow_http", "allow_http"):
+            return str(value).strip().lower() in ("true", "1", "yes", "on")
+    return False
 
 
 def _comparable_storage_type(arrow_type: pa.DataType) -> pa.DataType:
@@ -473,7 +557,7 @@ class DeltaTableDatabase:
 
             # Check for filesystem-unsafe characters.
             # Note: ':' is handled by _sanitize_path_component (replaced with '!' on Windows)
-            # and is allowed here so that semantic-version hash paths (e.g. "semantic_v0.1:abc123")
+            # and is allowed here so that prefixed path components (e.g. "schema:<hex digest>")
             # can be stored cross-platform.
             unsafe_chars = ["/", "\\", "*", "?", '"', "<", ">", "|", "\0"]
             if any(char in component for char in unsafe_chars):
@@ -529,6 +613,128 @@ class DeltaTableDatabase:
         return StoreReadError(
             self._get_table_uri(record_path), self._path_prefix + record_path
         )
+
+    def list_table_paths(self, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+        """List the paths of the Delta tables stored under ``prefix``.
+
+        Walks the directories below ``prefix``: a directory that holds a
+        ``_delta_log`` directory is a table. The walk goes on below a table, because
+        tables can be nested (Orcapod v0.3 stores a table one level below where
+        v0.2 stored it), and never enters ``_delta_log``. No table is opened. Only
+        flushed tables are listed, as with ``table_exists``.
+
+        A local store is listed exactly. A cloud store is listed through ``fsspec``
+        with one list request per directory: ``s3://`` and ``s3a://`` through
+        ``s3fs`` with the credentials, endpoint and region of this database's
+        storage options; ``gs://``, ``az://`` and ``abfs://`` only when the matching
+        ``fsspec`` package is installed and reaches the store with its default
+        credentials.
+
+        Args:
+            prefix: Leading path components, relative to ``self.base_path``.
+
+        Returns:
+            The table paths, relative to ``self.base_path``, sorted.
+
+        Raises:
+            TableListingNotSupportedError: If the store is on cloud storage and
+                could not be listed; the reason is chained.
+            StoreReadError: If a local directory could not be listed.
+        """
+        full_prefix = self._path_prefix + prefix
+        if self._is_cloud:
+            list_directory = self._cloud_directory_lister()
+            start = self._root_uri.split("://", 1)[1].rstrip("/")
+            start = "/".join((start,) + full_prefix)
+            join = _join_cloud_path
+            component = str
+        else:
+            list_directory = _list_local_directory
+            start = str(
+                self._local_root.joinpath(
+                    *(self._sanitize_path_component(part) for part in full_prefix)
+                )
+            )
+            join = _join_local_path
+            component = _stored_component
+
+        found: list[tuple[str, ...]] = []
+        # Directories still to visit, each with its path below ``prefix``.
+        to_visit: list[tuple[str, tuple[str, ...]]] = [(start, ())]
+        while to_visit:
+            directory, below = to_visit.pop()
+            try:
+                children = list_directory(directory)
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                if self._is_cloud:
+                    raise TableListingNotSupportedError(
+                        f"Could not list the tables of the Delta store at "
+                        f"{self._root_uri!r}: {type(exc).__name__}: {exc}"
+                    ) from exc
+                raise StoreReadError(directory, full_prefix + below) from exc
+            for name in children:
+                if name == _DELTA_LOG_DIRECTORY:
+                    found.append(prefix + below)
+                else:
+                    to_visit.append((join(directory, name), below + (component(name),)))
+        return sorted(found)
+
+    def _cloud_directory_lister(self) -> "Callable[[str], list[str]]":
+        """Return a function listing the subdirectories of a cloud directory.
+
+        Returns:
+            A function from a directory (bucket and key, no scheme) to the names of
+            its subdirectories.
+
+        Raises:
+            TableListingNotSupportedError: If no ``fsspec`` file system is available
+                for this store's scheme.
+        """
+        import fsspec
+
+        scheme = self._root_uri.split("://", 1)[0].lower()
+        protocol = "s3" if scheme == "s3a" else scheme
+        options = _s3fs_options(self._storage_options) if protocol == "s3" else {}
+        endpoint = str(options.get("client_kwargs", {}).get("endpoint_url", ""))
+        if protocol == "s3" and not endpoint:
+            # Without an endpoint in the storage options the file system takes it
+            # from the environment: fsspec's setting first, then the AWS one.
+            endpoint = os.environ.get("FSSPEC_S3_ENDPOINT_URL") or os.environ.get(
+                "AWS_ENDPOINT_URL", ""
+            )
+        if endpoint.lower().startswith("http://") and not _allows_http(
+            self._storage_options
+        ):
+            # deltalake refuses a plain-HTTP endpoint unless AWS_ALLOW_HTTP is set;
+            # the listing follows the same rule and sends no credentials over it.
+            raise TableListingNotSupportedError(
+                f"The Delta store at {self._root_uri!r} cannot list its tables: its "
+                "endpoint uses plain HTTP and AWS_ALLOW_HTTP is not set."
+            )
+        try:
+            # No listing cache: tables written since the last call must be seen.
+            file_system = fsspec.filesystem(
+                protocol, use_listings_cache=False, skip_instance_cache=True, **options
+            )
+        except Exception as exc:
+            raise TableListingNotSupportedError(
+                f"The Delta store at {self._root_uri!r} cannot list its tables: no "
+                f"usable fsspec file system for {scheme!r} "
+                f"({type(exc).__name__}: {exc})."
+            ) from exc
+
+        def list_directory(directory: str) -> list[str]:
+            """Return the names of the subdirectories of a cloud directory."""
+            entries = file_system.ls(directory, detail=True)
+            return [
+                str(entry["name"]).rstrip("/").rsplit("/", 1)[-1]
+                for entry in entries
+                if entry["type"] == "directory"
+            ]
+
+        return list_directory
 
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
         """Return ``True`` if a Delta table exists at ``record_path``.

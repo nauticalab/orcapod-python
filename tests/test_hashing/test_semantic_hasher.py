@@ -1010,7 +1010,7 @@ class TestGlobalSingletons:
         assert isinstance(get_default_semantic_hasher(), SemanticAwarePythonHasher)
 
     def test_get_default_semantic_hasher_has_versioned_id(self):
-        assert get_default_semantic_hasher().hasher_id == "semantic_v0.1"
+        assert get_default_semantic_hasher().hasher_id == "semantic_v1"
 
     def test_get_default_type_handler_registry_is_singleton(self):
         r1 = get_default_python_type_handler_registry()
@@ -1123,10 +1123,11 @@ class TestJsonNormalizationConsistency:
         return {"__type__": "tuple", "items": items}
 
     def _namedtuple_tree(self, name: str, fields: dict) -> dict:
+        # Fields in declared order (the dict's insertion order), ITL-942 T.
         return {
             "__type__": "namedtuple",
             "name": name,
-            "fields": dict(sorted(fields.items())),
+            "fields": [[k, v] for k, v in fields.items()],
         }
 
     # ------------------------------------------------------------------
@@ -1158,7 +1159,7 @@ class TestJsonNormalizationConsistency:
         assert h.hash_object(structure) == _sha256_json(expected_tree, self.HASHER_ID)
 
     def test_namedtuple(self, h):
-        """A namedtuple -- fields sorted alphabetically, name preserved."""
+        """A namedtuple -- fields in declared order, name preserved."""
         Coord = namedtuple("Coord", ["y", "x"])
         structure = Coord(y=4, x=3)
         expected_tree = self._namedtuple_tree("Coord", {"y": 4, "x": 3})
@@ -1293,15 +1294,29 @@ class TestResolver:
         assert no_resolver_result == expected_no_resolver
 
         # With a resolver that uses calling_hasher for inner, the token differs
+        resolved: list[object] = []
+
         def resolver(obj):
+            resolved.append(obj)
             return calling_hasher.hash_object(obj.identity_structure())
 
         resolver_result = calling_hasher.hash_object([inner], resolver=resolver)
+        # The resolver, not inner's own hasher, produced the nested hash.
+        assert resolved == [inner]
         inner_via_calling = calling_hasher.hash_object(inner.identity_structure())
         expected_resolver = calling_hasher.hash_object([inner_via_calling])
         assert resolver_result == expected_resolver
 
-        assert no_resolver_result != resolver_result
+        # The two inner hashes differ only in their label, and a label never enters
+        # a hash input (ITL-945), so the enclosing hashes are equal.
+        assert no_resolver_result == resolver_result
+
+        # A resolver that gives the nested object another digest changes the
+        # enclosing hash: what the resolver returns is what gets embedded.
+        other_digest_result = calling_hasher.hash_object(
+            [inner], resolver=lambda obj: calling_hasher.hash_object("not inner")
+        )
+        assert other_digest_result != no_resolver_result
 
     def test_resolver_propagates_through_tuple(self):
         """Resolver is applied to CI objects nested inside a tuple."""
@@ -1410,10 +1425,23 @@ class TestUniformHasherPropagation:
         inner = SimpleRecord("inner", 1, semantic_hasher=hasher_a)
         outer = NestedRecord("outer", inner, semantic_hasher=hasher_b)
 
+        # Record the hasher inner is asked to hash itself with: the two hashers
+        # differ only in their label, which no digest shows (ITL-945).
+        asked_with: list[object] = []
+        inner_content_hash = inner.content_hash
+
+        def recording_content_hash(hasher=None):
+            asked_with.append(hasher)
+            return inner_content_hash(hasher)
+
+        inner.content_hash = recording_content_hash  # type: ignore[method-assign]
+
         result = outer.content_hash()
 
         # Entry point is outer (hasher_b), so the top-level result tag is hasher_b
         assert result.method == "hasher_b"
+        # ... and inner was resolved with the entry point's hasher, not its own.
+        assert asked_with == [hasher_b]
 
         # Verify: result equals computing everything with hasher_b uniformly
         expected_uniform = hasher_b.hash_object(
@@ -1422,13 +1450,15 @@ class TestUniformHasherPropagation:
         )
         assert result == expected_uniform
 
-        # Verify: result differs from a mixed computation (inner uses its own hasher_a)
+        # A mixed computation (inner uses its own hasher_a) differs from the uniform
+        # one only in the label of the inner hash. A label never enters a hash input
+        # (ITL-945), so both give the same digest.
         inner_with_own_hasher = inner.content_hash()  # uses hasher_a
         assert inner_with_own_hasher.method == "hasher_a"
         mixed_result = hasher_b.hash_object(
             {"label": "outer", "inner": inner_with_own_hasher}
         )
-        assert result != mixed_result
+        assert result == mixed_result
 
     def test_three_level_chain_uses_entry_hasher_throughout(self):
         """In a three-level chain A→B→C, calling C.content_hash() uses C's hasher
@@ -1518,27 +1548,27 @@ class TestTypeObjectHandlerWithRegistry:
         import orcapod as op
 
         result = handler.handle(op.File, hasher)
-        assert result == "type:orcapod.file"
+        assert result == "type:orcapod.file;7b2276657273696f6e223a317d"
 
     def test_registered_directory_returns_canonical_name(self, handler, hasher):
         import orcapod as op
 
         result = handler.handle(op.Directory, hasher)
-        assert result == "type:orcapod.directory"
+        assert result == "type:orcapod.directory;7b2276657273696f6e223a317d"
 
     def test_registered_path_returns_canonical_name(self, handler, hasher):
         """pathlib.Path (op.Path) resolves to 'type:orcapod.path', not 'type:pathlib.Path'."""
         from pathlib import Path
 
         result = handler.handle(Path, hasher)
-        assert result == "type:orcapod.path"
+        assert result == "type:orcapod.path;7b2276657273696f6e223a317d"
 
     def test_registered_uuid_returns_canonical_name(self, handler, hasher):
         """uuid.UUID (op.UUID) resolves to 'type:orcapod.uuid', not 'type:uuid.UUID'."""
         import uuid
 
         result = handler.handle(uuid.UUID, hasher)
-        assert result == "type:orcapod.uuid"
+        assert result == "type:orcapod.uuid;7b2276657273696f6e223a317d"
 
     def test_unregistered_type_falls_back_to_module_qualname(self, handler, hasher):
         result = handler.handle(int, hasher)

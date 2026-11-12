@@ -838,7 +838,8 @@ class TestFoldSystemTagValues:
         bytes.fromhex("1112131415161718191a1b1c1d1e1f20"),
     ]
     EXPECTED_RID = bytes.fromhex("853be16a3f38565f8ced039f84fdbea6")
-    EXPECTED_SID = "7916442d59841140bedf6c1f5dcc1304ae9fce0ba885765c06e511086b85da2e"
+    # sha256 of the canonical JSON member list (ITL-942 H; was the bare concatenation 7916442d...)
+    EXPECTED_SID = "45a8bc201b275f241aeba79d5225d475d91d80e12a58adffb2e46393eb8c5482"
 
     def test_record_id_folds_to_16_bytes(self):
         from orcapod.utils.arrow_utils import fold_system_tag_values

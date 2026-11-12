@@ -2388,7 +2388,7 @@ requires-dist = [
     { name = "redis", marker = "extra == 'all'", specifier = ">=6.2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=6.2.0" },
     { name = "s3fs", specifier = ">=2025.12.0" },
-    { name = "starfix", specifier = "~=0.4.0" },
+    { name = "starfix", specifier = ">=0.5.0,<0.6" },
     { name = "typer", specifier = ">=0.12" },
     { name = "tzdata", specifier = ">=2024.1" },
     { name = "universal-pathlib", specifier = ">=0.3.8" },
@@ -3932,14 +3932,14 @@ wheels = [
 
 [[package]]
 name = "starfix"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyarrow" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/c1/f3269cca708e13d47bf86c5459f9575e436e99d88cd29fec9e5cfd1d6003/starfix-0.4.0.tar.gz", hash = "sha256:e63711756640d4618d34c58f9d80ed7de9722f50ff806ec0ceecdcf151f26e48", size = 71807, upload-time = "2026-06-29T00:14:18.687Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/15/f431d84042cab83680b3e857455c133bc0493c629b93fc23f28cd85b07ee/starfix-0.5.0.tar.gz", hash = "sha256:677f001fae5f0173c52ffaaf761fb96becf856ff679ab5d201208f453396a9fb", size = 225505, upload-time = "2026-11-11T23:21:04.713Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/a2/b08c4c9e3e95e6e4224ad1fe857a2eaef1e473d9db6063d8151f5e8ac21f/starfix-0.4.0-py3-none-any.whl", hash = "sha256:3ec6c423eb131bfde1471a03219eea46389603753c30d90bdf3bfbe2bf8863c3", size = 10809, upload-time = "2026-06-29T00:14:17.748Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/f6/8b9042044b9bf520c5bac38d0630c411e66ccc47635e8c0293bd9a7d5038/starfix-0.5.0-py3-none-any.whl", hash = "sha256:6982fa4598f99e20428b76041378e3203f2894e6542f6e3ba75746bdbfea0ad2", size = 28736, upload-time = "2026-11-11T23:21:03.711Z" },
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ import pytest
 from pathlib import Path
 
 from orcapod.logical_types.file_type import File
+from orcapod.logical_types.identifier import arrow_type_identifier
 from orcapod.logical_types.builtin_logical_types import LogicalPath
 from orcapod.logical_types.list_logical_type_factory import ListLogicalType
 from orcapod.hashing.visitors import SemanticHashingVisitor
@@ -117,7 +118,7 @@ class TestSemanticHashingVisitorExtension:
         assert hash1 != hash2
 
     def test_binary_encoding_format(self, ctx, tmp_path):
-        """Hash bytes have format b'<type_name>::<method>:<digest>'."""
+        """Hash bytes have format b'<type_name>::<digest>', with no hash label."""
         file = tmp_path / "test.txt"
         file.write_text("test")
 
@@ -129,10 +130,10 @@ class TestSemanticHashingVisitorExtension:
 
         assert b"::" in hash_bytes
         type_prefix, hash_part = hash_bytes.split(b"::", 1)
-        # Extension name "orcapod.file" → dots replaced with colons
-        assert type_prefix == b"orcapod:file"
-        # hash_part should be "method:digest" — at least one colon
-        assert b":" in hash_part
+        # Extension name "orcapod.file" → then ';' and the extension metadata in hex
+        assert type_prefix == b"orcapod.file;7b2276657273696f6e223a317d"
+        # hash_part is the raw digest of the value hash; its label is not included
+        assert hash_part == ctx.semantic_hasher.hash_object(File(file)).digest
 
     def test_null_value_passthrough(self, ctx):
         """Null storage values pass through as-is."""
@@ -198,10 +199,10 @@ class TestCrossPathConsistency:
     structural guarantee explicit and regression-proof.
 
     Hash encoding:
-    - Arrow path produces: b"<type_name>::<method>:<raw_digest>"
-    - Python path produces: ContentHash with to_prefixed_digest() → b"<method>:<raw_digest>"
-    Stripping the type-name prefix from the Arrow encoding yields an identical
-    b"<method>:<raw_digest>" byte string.
+    - Arrow path produces: b"<type_name>::<raw_digest>" (no hash label)
+    - Python path produces: ContentHash, whose ``digest`` is the same raw digest
+    Stripping the type-name prefix from the Arrow encoding yields the digest of the
+    Python path's ContentHash.
     """
 
     def test_arrow_and_semantic_hash_same_file_content(self, ctx, tmp_path):
@@ -212,17 +213,16 @@ class TestCrossPathConsistency:
         arrow_type = ctx.type_converter.register_python_class(File)
         storage_val = ctx.type_converter.python_to_storage(File(file), File)
 
-        # Arrow path: visit_extension encodes as b"<type_name>::<method>:<digest>"
+        # Arrow path: visit_extension encodes as b"<type_name>::<digest>"
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         _, arrow_hash_bytes = visitor.visit(arrow_type, storage_val)
-        # Strip the "orcapod:file::" type prefix to get b"<method>:<digest>"
-        prefixed_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
+        # Strip the "orcapod:file::" type prefix to get the raw digest
+        digest_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
 
         # Python path: hash_object returns ContentHash directly
         python_content_hash = ctx.semantic_hasher.hash_object(File(file))
-        prefixed_from_python = python_content_hash.to_prefixed_digest()
 
-        assert prefixed_from_arrow == prefixed_from_python
+        assert digest_from_arrow == python_content_hash.digest
 
     def test_same_content_two_files_cross_path(self, ctx, tmp_path):
         """Two files with identical content: Arrow path and Python path agree."""
@@ -237,12 +237,11 @@ class TestCrossPathConsistency:
 
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         _, arrow_hash_bytes = visitor.visit(arrow_type, storage_val)
-        prefixed_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
+        digest_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
 
         python_content_hash = ctx.semantic_hasher.hash_object(File(file_python))
-        prefixed_from_python = python_content_hash.to_prefixed_digest()
 
-        assert prefixed_from_arrow == prefixed_from_python
+        assert digest_from_arrow == python_content_hash.digest
 
 
 class TestListExtensionHashing:
@@ -305,14 +304,18 @@ class TestListExtensionHashing:
         # Combined format: b"<outer_type_name>::<elem_hashes>"
         assert b"::" in new_data
         type_prefix, _ = new_data.split(b"::", 1)
-        assert type_prefix == b"list[orcapod:file]"
+        # The outer prefix is the wrapper's whole identifier (name and metadata).
+        assert type_prefix == arrow_type_identifier(list_ext_type).text.encode()
+        assert type_prefix.startswith(b"list[orcapod.file];")
 
     def test_list_file_extension_embeds_per_element_scalar_hashes(self, ctx, tmp_path):
         """The combined list hash embeds each element's scalar hash.
 
-        Combined format: b"<outer_type_name>::<h0>\\x00<h1>"
-        where h0 and h1 are the scalar visit results for the same files.
-        Splitting the suffix by \\x00 recovers individual element hashes.
+        Combined format: the outer type's identifier text, ``::``, the element
+        count as an 8-byte little-endian integer, then per element the byte
+        ``01``, the token length (8 bytes, little-endian) and the token, where
+        the tokens are the scalar visit results for the same files (a null
+        element is the single byte ``00``).
         """
         f0 = tmp_path / "contract0.txt"
         f0.write_text("content zero")
@@ -326,16 +329,24 @@ class TestListExtensionHashing:
 
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
 
-        # Scalar hashes — b"orcapod:file::<method>:<digest>" each
+        # Scalar hashes — b"<identifier text of orcapod.file>::<method>:<digest>" each
         _, h0_bytes = visitor.visit(scalar_ext_type, s0)
         _, h1_bytes = visitor.visit(scalar_ext_type, s1)
 
-        # List hash — b"list[orcapod:file]::<h0>\x00<h1>"
         _, combined = visitor.visit(list_ext_type, [s0, s1])
 
-        # Strip outer type prefix and split to recover per-element hashes
-        suffix = combined.split(b"::", 1)[1]  # b"<h0>\x00<h1>"
-        elem_hashes = suffix.split(b"\x00")
+        # Strip the outer type prefix and decode the counted, length-prefixed elements.
+        suffix = combined.split(b"::", 1)[1]
+        count = int.from_bytes(suffix[:8], "little")
+        assert count == 2
+        elem_hashes = []
+        offset = 8
+        for _ in range(count):
+            assert suffix[offset : offset + 1] == b"\x01"
+            length = int.from_bytes(suffix[offset + 1 : offset + 9], "little")
+            elem_hashes.append(suffix[offset + 9 : offset + 9 + length])
+            offset += 9 + length
+        assert offset == len(suffix)
         assert elem_hashes[0] == h0_bytes, (
             "Embedded element 0 must equal the scalar hash of file 0"
         )
@@ -437,8 +448,11 @@ class TestListExtensionHashing:
 
         assert new_type == pa.large_binary()
         assert isinstance(new_data, bytes)
-        # Outer type name is "set[orcapod:file]" (dots replaced with colons)
-        assert new_data.startswith(b"set[orcapod:file]::")
+        # The outer prefix is the wrapper's whole identifier (name and metadata).
+        assert new_data.startswith(
+            arrow_type_identifier(set_ext_type).text.encode() + b"::"
+        )
+        assert new_data.startswith(b"set[orcapod.file];")
 
     def test_list_and_set_file_extension_produce_distinct_hashes(self, ctx, tmp_path):
         """list[File] and set[File] with identical contents must hash differently.
@@ -556,4 +570,4 @@ class TestListExtensionHashing:
         )
         files_combined = new_data["files"]
         assert isinstance(files_combined, bytes)
-        assert files_combined.startswith(b"list[orcapod:file]::")
+        assert files_combined.startswith(b"list[orcapod.file];")

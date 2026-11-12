@@ -1,11 +1,10 @@
 """
 Versioned hasher factories for OrcaPod.
 
-This module is the single source of truth for which concrete hasher
-implementations correspond to each versioned context.  All code that
-needs a "current" or "versioned" hasher should go through these factory
-functions rather than constructing hashers directly, so that version
-bumps happen in exactly one place.
+Factories for the current structure hasher and Arrow hasher. Each hash label is
+defined once, beside its algorithm (``SEMANTIC_HASH_LABEL`` in
+``semantic_hashing/semantic_hasher.py``, ``ARROW_HASH_LABEL`` in
+``arrow_hashers.py``); these factories take their defaults from there.
 
 Functions
 ---------
@@ -22,23 +21,11 @@ from __future__ import annotations
 
 import logging
 
+from orcapod.hashing.arrow_hashers import ARROW_HASH_LABEL
+from orcapod.hashing.semantic_hashing.semantic_hasher import SEMANTIC_HASH_LABEL
 from orcapod.protocols import hashing_protocols as hp
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Version constants
-# ---------------------------------------------------------------------------
-
-# The hasher_id embedded in every ContentHash produced by the current
-# semantic hasher.  Bump this string when the resolution/serialisation
-# algorithm changes in a way that would alter hash outputs so that stored
-# hashes can be distinguished from newly-computed ones.
-_CURRENT_SEMANTIC_HASHER_ID = "semantic_v0.1"
-
-# The hasher_id for the Arrow hasher.
-_CURRENT_ARROW_HASHER_ID = "arrow_v0.1"
-
 
 # ---------------------------------------------------------------------------
 # SemanticHasherProtocol factory
@@ -46,7 +33,7 @@ _CURRENT_ARROW_HASHER_ID = "arrow_v0.1"
 
 
 def get_versioned_semantic_hasher(
-    hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
+    hasher_id: str = SEMANTIC_HASH_LABEL,
     strict: bool = True,
     type_handler_registry: "hp.HandlerRegistryProtocol | None" = None,
 ) -> hp.SemanticHasherProtocol:
@@ -93,7 +80,7 @@ def get_versioned_semantic_hasher(
 
 
 def get_versioned_semantic_arrow_hasher(
-    hasher_id: str = _CURRENT_ARROW_HASHER_ID,
+    hasher_id: str = ARROW_HASH_LABEL,
 ) -> hp.ArrowHasherProtocol:
     """Return a StarfixArrowHasher configured for the current version.
 

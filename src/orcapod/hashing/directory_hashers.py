@@ -15,6 +15,17 @@ from orcapod.types import ContentHash, PathLike
 
 logger = logging.getLogger(__name__)
 
+DIRECTORY_HASH_LABEL = "directory_v1"
+"""``ContentHash.method`` of a directory hash: the single definition of the label.
+
+It names the whole procedure of this module: a Merkle tree over the directory's
+entries with SHA-256 entry and node digests, file leaves taken from the file hasher's
+digest, symlinks recorded by target. A change that gives an existing directory a
+different digest takes a new label (``directory_v2``).
+"""
+
+_DIRECTORY_V1_ALGORITHM = "sha256"
+
 
 def _compile_ignore(
     ignore: Callable[[UPath], bool] | Iterable[str] | None,
@@ -131,16 +142,20 @@ class BasicDirectoryHasher:
         file_hasher: Hasher used to compute the ``ContentHash`` for each file leaf in
             the tree. Any object with a ``hash_file(path) -> ContentHash`` method.
         algorithm: Hash algorithm for structural (Merkle entry and node) hashing.
-            Defaults to ``"sha256"``.
+            Only ``"sha256"`` (the default) is accepted: the label ``directory_v1``
+            names the SHA-256 procedure and nothing else.
         buffer_size: Retained for context round-trip use. File content buffer sizing
             is owned by ``file_hasher``. Defaults to 65536.
+
+    Raises:
+        ValueError: If ``algorithm`` is not ``"sha256"``.
 
     Example:
         >>> from orcapod.hashing.file_hashers import FileHasher
         >>> hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         >>> result = hasher.hash_directory("/tmp/mydir")
         >>> result.method
-        'merkle_sha256'
+        'directory_v1'
     """
 
     def __init__(
@@ -149,6 +164,11 @@ class BasicDirectoryHasher:
         algorithm: str = "sha256",
         buffer_size: int = 65536,
     ) -> None:
+        if algorithm != _DIRECTORY_V1_ALGORITHM:
+            raise ValueError(
+                f"{DIRECTORY_HASH_LABEL} is defined over {_DIRECTORY_V1_ALGORITHM} "
+                f"entry and node digests; got algorithm {algorithm!r}"
+            )
         self.file_hasher = file_hasher
         self.algorithm = algorithm
         self.buffer_size = buffer_size
@@ -177,7 +197,7 @@ class BasicDirectoryHasher:
                 entire subtree.
 
         Returns:
-            A ``ContentHash`` with ``method="merkle_{algorithm}"``.
+            A ``ContentHash`` with ``method="directory_v1"`` (``DIRECTORY_HASH_LABEL``).
 
         Raises:
             FileNotFoundError: If ``directory_path`` does not exist.
@@ -189,7 +209,7 @@ class BasicDirectoryHasher:
             >>> hasher = BasicDirectoryHasher(file_hasher=FileHasher())
             >>> result = hasher.hash_directory("/tmp/mydir")
             >>> result.method
-            'merkle_sha256'
+            'directory_v1'
             >>> # Exclude all .pyc files at any depth
             >>> result = hasher.hash_directory("/tmp/mydir", ignore=["*.pyc"])
             >>> # Exclude .pyc only inside build/
@@ -200,4 +220,4 @@ class BasicDirectoryHasher:
         path = UPath(directory_path)
         filter_fn = _compile_ignore(ignore)
         digest = _hash_dir(path, path, filter_fn, self.algorithm, self.file_hasher)
-        return ContentHash(method=f"merkle_{self.algorithm}", digest=digest)
+        return ContentHash(method=DIRECTORY_HASH_LABEL, digest=digest)

@@ -15,9 +15,10 @@
     "properties": {
         "context_key": {
             "type": "string",
-            "pattern": "^[a-zA-Z0-9_-]+:v[0-9]+\\.[0-9]+:[a-zA-Z0-9_-]+$",
-            "description": "Unique identifier for this context (e.g., 'std:v0.1:default')",
+            "pattern": "^[a-zA-Z0-9_-]+:v[0-9]+(\\.[0-9]+)?:[a-zA-Z0-9_-]+$",
+            "description": "Unique identifier for this context (e.g., 'std:v1:default')",
             "examples": [
+                "std:v1:default",
                 "std:v0.1:default",
                 "std:v0.2:fast",
                 "custom:v1.0:production"
@@ -25,9 +26,10 @@
         },
         "version": {
             "type": "string",
-            "pattern": "^v[0-9]+\\.[0-9]+$",
+            "pattern": "^v[0-9]+(\\.[0-9]+)?$",
             "description": "Version identifier matching the filename",
             "examples": [
+                "v1",
                 "v0.1",
                 "v1.0",
                 "v2.3"
@@ -40,6 +42,20 @@
                 "Initial stable release with basic Path semantic type support",
                 "Enhanced version with timestamp support and improved hashing"
             ]
+        },
+        "released_in": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Library version whose release froze this file; null while that release is being prepared. A file whose released_in is set must not be edited"
+        },
+        "previous": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Key of the data context this one follows (e.g. 'std:v0.1:default')"
         },
         "type_converter": {
             "$ref": "#/$defs/objectspec",
@@ -68,6 +84,60 @@
         "function_semantic_hasher": {
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the function semantic hasher (used by FunctionHandler)"
+        },
+        "definitions": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "string"
+            },
+            "description": "A name for each definition that lives in code and not in a swappable component: identity compositions, record-id, entry-id and fold recipes, naming grammars, type conversion rules"
+        },
+        "libraries": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "string"
+            },
+            "description": "Critical libraries the core hashes depend on, with their version"
+        },
+        "golden": {
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "string"
+                },
+                "algorithm": {
+                    "type": "string"
+                },
+                "digest": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "digest"
+            ],
+            "description": "Digest of the golden hash files this data context stands for; null while the manifest is open"
+        },
+        "changes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "definition": {
+                        "type": "string"
+                    },
+                    "change": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "definition",
+                    "change"
+                ]
+            },
+            "description": "Which definitions differ from the previous data context"
         },
         "metadata": {
             "type": "object",
@@ -118,7 +188,9 @@
             "oneOf": [
                 {
                     "type": "object",
-                    "required": ["_class"],
+                    "required": [
+                        "_class"
+                    ],
                     "properties": {
                         "_class": {
                             "type": "string",
@@ -135,17 +207,27 @@
                 },
                 {
                     "type": "object",
-                    "required": ["_ref"],
+                    "required": [
+                        "_ref"
+                    ],
                     "properties": {
-                        "_ref": {"type": "string", "description": "Reference to a named component"}
+                        "_ref": {
+                            "type": "string",
+                            "description": "Reference to a named component"
+                        }
                     },
                     "additionalProperties": false
                 },
                 {
                     "type": "object",
-                    "required": ["_type"],
+                    "required": [
+                        "_type"
+                    ],
                     "properties": {
-                        "_type": {"type": "string", "description": "Dotted Python type string, e.g. 'pathlib.Path'"}
+                        "_type": {
+                            "type": "string",
+                            "description": "Dotted Python type string, e.g. 'pathlib.Path'"
+                        }
                     },
                     "additionalProperties": false
                 },
@@ -157,7 +239,12 @@
                     }
                 },
                 {
-                    "type": ["string", "number", "boolean", "null"],
+                    "type": [
+                        "string",
+                        "number",
+                        "boolean",
+                        "null"
+                    ],
                     "description": "Primitive values"
                 }
             ]
@@ -165,9 +252,9 @@
     },
     "examples": [
         {
-            "context_key": "std:v0.1:default",
-            "version": "v0.1",
-            "description": "Initial stable release with extension type hashing support",
+            "context_key": "std:v1:default",
+            "version": "v1",
+            "description": "Data context of Orcapod v0.3",
             "type_converter": {
                 "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
                 "_config": {}
@@ -175,7 +262,6 @@
             "arrow_hasher": {
                 "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
                 "_config": {
-                    "hasher_id": "arrow_v0.1",
                     "type_converter": {"_ref": "type_converter"},
                     "semantic_hasher": {"_ref": "semantic_hasher"}
                 }
@@ -183,7 +269,6 @@
             "semantic_hasher": {
                 "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.SemanticAwarePythonHasher",
                 "_config": {
-                    "hasher_id": "semantic_v0.1",
                     "type_handler_registry": {"_ref": "python_type_handler_registry"}
                 }
             },

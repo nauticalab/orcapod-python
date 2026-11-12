@@ -8,6 +8,7 @@ from uuid import UUID
 import orcapod as op
 import pytest
 
+
 from orcapod.hashing.hash_utils import (
     canonical_annotation_str,
     get_function_signature,
@@ -160,48 +161,6 @@ class TestGetFunctionSignatureUnionCanonical:
             return b.encode()
 
         assert get_function_signature(bar) == get_function_signature(bar)
-
-
-class TestCombineHashes:
-    def test_basic_produces_64_char_hex(self):
-        from orcapod.hashing.hash_utils import combine_hashes
-
-        result = combine_hashes("abc", "def")
-        assert len(result) == 64
-
-    def test_order_false_preserves_insertion_order(self):
-        from orcapod.hashing.hash_utils import combine_hashes
-
-        r1 = combine_hashes("aaa", "bbb")
-        r2 = combine_hashes("bbb", "aaa")
-        assert r1 != r2
-
-    def test_order_true_is_commutative(self):
-        from orcapod.hashing.hash_utils import combine_hashes
-
-        r1 = combine_hashes("aaa", "bbb", order=True)
-        r2 = combine_hashes("bbb", "aaa", order=True)
-        assert r1 == r2
-
-    def test_hex_char_count_truncates(self):
-        from orcapod.hashing.hash_utils import combine_hashes
-
-        result = combine_hashes("abc", "def", hex_char_count=16)
-        assert len(result) == 16
-
-    def test_prefix_hasher_id(self):
-        from orcapod.hashing.hash_utils import combine_hashes
-
-        result = combine_hashes("abc", prefix_hasher_id=True)
-        assert result.startswith("sha256@")
-        assert len(result) == len("sha256@") + 64
-
-    def test_prefix_and_truncation_combined(self):
-        from orcapod.hashing.hash_utils import combine_hashes
-
-        result = combine_hashes("abc", prefix_hasher_id=True, hex_char_count=8)
-        assert result.startswith("sha256@")
-        assert len(result) == len("sha256@") + 8
 
 
 class TestHashFile:
@@ -438,38 +397,38 @@ class TestCanonicalAnnotationStrWithRegistry:
 
     def test_registered_file_uses_logical_name(self, type_converter):
         result = canonical_annotation_str(op.File, type_converter)
-        assert result == "orcapod.file"
+        assert result == "orcapod.file;7b2276657273696f6e223a317d"
 
     def test_registered_directory_uses_logical_name(self, type_converter):
         result = canonical_annotation_str(op.Directory, type_converter)
-        assert result == "orcapod.directory"
+        assert result == "orcapod.directory;7b2276657273696f6e223a317d"
 
     def test_registered_path_uses_logical_name(self, type_converter):
         import pathlib
 
         result = canonical_annotation_str(pathlib.Path, type_converter)
-        assert result == "orcapod.path"
+        assert result == "orcapod.path;7b2276657273696f6e223a317d"
 
     def test_registered_uuid_uses_logical_name(self, type_converter):
         result = canonical_annotation_str(UUID, type_converter)
-        assert result == "orcapod.uuid"
+        assert result == "orcapod.uuid;7b2276657273696f6e223a317d"
 
     def test_generic_list_of_registered_type(self, type_converter):
         result = canonical_annotation_str(list[op.File], type_converter)
-        assert result == "list[orcapod.file]"
+        assert result == "list[orcapod.file;7b2276657273696f6e223a317d]"
 
     def test_generic_dict_with_registered_value(self, type_converter):
         result = canonical_annotation_str(dict[str, op.File], type_converter)
-        assert result == "dict[str, orcapod.file]"
+        assert result == "dict[str, orcapod.file;7b2276657273696f6e223a317d]"
 
     def test_union_with_registered_type(self, type_converter):
         result = canonical_annotation_str(op.File | None, type_converter)
         # Members sorted; NoneType sorts before orcapod.file
-        assert result == "NoneType | orcapod.file"
+        assert result == "NoneType | orcapod.file;7b2276657273696f6e223a317d"
 
     def test_optional_registered_type(self, type_converter):
         result = canonical_annotation_str(typing.Optional[op.File], type_converter)
-        assert result == "NoneType | orcapod.file"
+        assert result == "NoneType | orcapod.file;7b2276657273696f6e223a317d"
 
     def test_no_type_converter_fallback(self):
         """Without type_converter, falls back to inspect.formatannotation."""

@@ -5,9 +5,11 @@ Generic visitor pattern for traversing Arrow types and data simultaneously.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import struct
 import typing
 from typing import TYPE_CHECKING, Any
 
+from orcapod.logical_types.identifier import arrow_type_identifier
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -160,6 +162,36 @@ class SemanticHashingError(Exception):
     pass
 
 
+_U64 = struct.Struct("<Q")
+_NULL_ELEMENT = b"\x00"
+_PRESENT_ELEMENT = b"\x01"
+
+
+def _encode_container_elements(elements: "list[Any]") -> bytes:
+    """Encode the hashed elements of a list/set cell without ambiguity.
+
+    Layout: ``u64le(element count)``, then for each element either the byte
+    ``00`` (a null element) or the byte ``01``, ``u64le(token length)`` and
+    the token. Every field is counted or length-prefixed, so two different
+    element lists never encode to the same bytes; in particular an empty
+    list, ``[None]`` and ``[None, None]`` differ.
+
+    Args:
+        elements: The per-element hash tokens (``bytes``), with ``None`` for a
+            null element.
+
+    Returns:
+        The encoded bytes.
+    """
+    parts = [_U64.pack(len(elements))]
+    for element in elements:
+        if element is None:
+            parts.append(_NULL_ELEMENT)
+        else:
+            parts.append(_PRESENT_ELEMENT + _U64.pack(len(element)) + element)
+    return b"".join(parts)
+
+
 class SemanticHashingVisitor(ArrowTypeDataVisitor):
     """Visitor that replaces extension-typed columns with their content hashes.
 
@@ -170,11 +202,12 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
        convert the storage value to a Python object and hash it, replacing the
        column with a ``pa.large_binary()`` value of the form::
 
-           <type_name_bytes> + b"::" + content_hash.to_prefixed_digest()
+           <identifier_text_bytes> + b"::" + content_hash.digest
 
-       where ``type_name`` is the extension name with dots replaced by colons
-       (e.g. ``"orcapod.path"`` → ``"orcapod:path"``), and
-       ``to_prefixed_digest()`` = ``method_bytes + b":" + digest``.
+       where the identifier text is the logical type's whole identifier,
+       ``"<extension name>;<lowercase hex of the extension metadata>"``
+       (``LogicalTypeIdentifier.text``). The label of the value hash is not
+       part of the bytes.
     3. If no hasher is registered (or the converter doesn't know the type),
        return the extension type and storage value unchanged. The downstream
        ``StarfixArrowHasher`` / ``ArrowDigester`` will see the full extension
@@ -195,6 +228,95 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         self._type_converter = type_converter
         self._python_hasher = python_hasher
         self._current_field_path: list[str] = []
+
+    def hashed_field(self, field: "pa.Field[Any]") -> "pa.Field[Any]":
+        """Return the field a column or nested field is hashed under.
+
+        The result depends on the declared field only, never on the data, so one
+        schema always hashes one way (ITL-942 I). A field whose extension type this
+        visitor hashes by value (``visit_extension`` returns ``large_binary``)
+        becomes a ``large_binary`` field that keeps the logical type's whole
+        identifier, as the ``ARROW:extension:name`` and ``ARROW:extension:metadata``
+        keys of its field metadata. The Arrow hasher hashes those keys, so two
+        logical types never share a hash, also when a column holds no value (zero
+        rows, or nulls only) and so has no cell token to carry the identifier
+        (ITL-967). Struct and list types are rebuilt around their fields, each of
+        which keeps its name, nullability and metadata; everything else is
+        returned unchanged.
+
+        Args:
+            field: The declared Arrow field of a column or of a nested member.
+
+        Returns:
+            The Arrow field of the values ``visit`` produces for ``field.type``.
+        """
+        arrow_type = field.type
+        if isinstance(arrow_type, pa.ExtensionType):
+            if not self._hashes_extension(arrow_type):
+                return field
+            identifier = arrow_type_identifier(arrow_type)
+            metadata: dict[bytes | str, bytes | str] = {
+                key: value for key, value in (field.metadata or {}).items()
+            }
+            metadata[b"ARROW:extension:name"] = identifier.name.encode("utf-8")
+            metadata[b"ARROW:extension:metadata"] = identifier.metadata
+            return field.with_type(pa.large_binary()).with_metadata(metadata)
+        return field.with_type(self.hashed_type(arrow_type))
+
+    def hashed_type(self, arrow_type: "pa.DataType") -> "pa.DataType":
+        """Return the type the members of ``arrow_type`` are hashed under.
+
+        Struct and list types are rebuilt around ``hashed_field`` of each of their
+        fields. A value-hashed extension type becomes ``large_binary``; its
+        identifier is kept by the enclosing field, see ``hashed_field``.
+
+        Args:
+            arrow_type: The declared Arrow type of a column or nested field.
+
+        Returns:
+            The Arrow type of the values ``visit`` produces for ``arrow_type``.
+        """
+        if isinstance(arrow_type, pa.ExtensionType):
+            return (
+                pa.large_binary() if self._hashes_extension(arrow_type) else arrow_type
+            )
+        if pa.types.is_struct(arrow_type):
+            return pa.struct([self.hashed_field(field) for field in arrow_type])
+        if pa.types.is_large_list(arrow_type):
+            return pa.large_list(self.hashed_field(arrow_type.value_field))
+        if pa.types.is_list(arrow_type):
+            return pa.list_(self.hashed_field(arrow_type.value_field))
+        if pa.types.is_fixed_size_list(arrow_type):
+            return pa.list_(
+                self.hashed_field(arrow_type.value_field), arrow_type.list_size
+            )
+        return arrow_type
+
+    def _hashes_extension(self, extension_type: "pa.ExtensionType") -> bool:
+        """Return True if ``visit_extension`` hashes values of ``extension_type``.
+
+        The same type-level decision ``visit_extension`` takes for a non-null
+        value: a registered value hasher for the Python type, or for the innermost
+        element of a list- or set-backed extension type.
+        """
+        python_type = self._type_converter.arrow_type_to_python_type(extension_type)
+        if typing.get_origin(python_type) in (list, set) and pa.types.is_large_list(
+            extension_type.storage_type
+        ):
+            args = typing.get_args(python_type)
+            if args:
+                inner = args[0]
+                while typing.get_origin(inner) in (list, set):
+                    inner_args = typing.get_args(inner)
+                    if not inner_args:
+                        break
+                    inner = inner_args[0]
+                return isinstance(
+                    inner, type
+                ) and self._python_hasher.type_handler_registry.has_handler(inner)
+        if python_type is typing.Any or not isinstance(python_type, type):
+            return False
+        return self._python_hasher.type_handler_registry.has_handler(python_type)
 
     def visit_extension(
         self,
@@ -276,17 +398,17 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
                     virtual_list_type, storage_value
                 )
 
-                # Fold the outer extension name into the result, the same way the
-                # scalar path does.  This ensures list[T] and set[T] with identical
-                # contents produce distinct hashes.
-                type_name = extension_type.extension_name.replace(".", ":")
+                # Fold the outer type's identifier (extension name and metadata)
+                # into the result, the same way the scalar path does, so list[T]
+                # and set[T] with identical contents produce distinct hashes.
+                # The elements follow as a count and, per element, a null marker
+                # or a length-prefixed token, so [] and [None] and [None, None]
+                # (and any two different element lists) never share an encoding.
+                type_name = arrow_type_identifier(extension_type).text
                 combined = (
                     type_name.encode("utf-8")
                     + b"::"
-                    + b"\x00".join(
-                        elem if isinstance(elem, bytes) else b""
-                        for elem in (list_data or [])
-                    )
+                    + _encode_container_elements(list_data or [])
                 )
                 return pa.large_binary(), combined
 
@@ -302,13 +424,14 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         python_obj = self._type_converter.storage_to_python(storage_value, python_type)
         content_hash = self._python_hasher.hash_object(python_obj)
 
-        # Encode as binary: "<type_name>::<method>:<digest>"
-        # Dots in the extension name → colons (e.g. "orcapod.path" → "orcapod:path").
-        # The "::" separator is unambiguous because to_prefixed_digest() uses only ":".
-        type_name = extension_type.extension_name.replace(".", ":")
-        hash_bytes = (
-            type_name.encode("utf-8") + b"::" + content_hash.to_prefixed_digest()
-        )
+        # Encode as binary: "<identifier text>::<digest>", where the identifier text
+        # is "<extension name>;<hex of extension metadata>"
+        # (``LogicalTypeIdentifier.text``): the cell commits to the whole identifier
+        # of its logical type, so a changed identifier moves the row hash. Only the
+        # digest of the value hash is fed in, never its label: a label names the
+        # algorithm and is not part of any hash input.
+        type_name = arrow_type_identifier(extension_type).text
+        hash_bytes = type_name.encode("utf-8") + b"::" + content_hash.digest
         return pa.large_binary(), hash_bytes
 
     def visit_struct(

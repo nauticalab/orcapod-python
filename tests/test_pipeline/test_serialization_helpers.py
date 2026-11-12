@@ -695,15 +695,15 @@ def test_source_proxy_from_node_descriptor_fields():
 
     source_config = {"source_type": "dict", "source_id": "my_src"}
     node_descriptor = {
-        "content_hash": "semantic_v0.1:abc123",
-        "pipeline_hash": "semantic_v0.1:def456",
+        "content_hash": "semantic_v1:abc123",
+        "pipeline_hash": "semantic_v1:def456",
         "output_schema": {
             "tag": {"x": "int64"},
             "data": {"result": "int64"},
         },
     }
     proxy = _source_proxy_from_config(source_config, node_descriptor=node_descriptor)
-    assert proxy.content_hash().to_string() == "semantic_v0.1:abc123"
+    assert proxy.content_hash().to_string() == "semantic_v1:abc123"
 
 
 def test_source_proxy_from_config_backward_compat():
@@ -713,13 +713,13 @@ def test_source_proxy_from_config_backward_compat():
     source_config = {
         "source_type": "dict",
         "source_id": "my_src",
-        "content_hash": "semantic_v0.1:abc123",
-        "pipeline_hash": "semantic_v0.1:def456",
+        "content_hash": "semantic_v1:abc123",
+        "pipeline_hash": "semantic_v1:def456",
         "tag_schema": {"x": "int64"},
         "data_schema": {"result": "int64"},
     }
     proxy = _source_proxy_from_config(source_config)
-    assert proxy.content_hash().to_string() == "semantic_v0.1:abc123"
+    assert proxy.content_hash().to_string() == "semantic_v1:abc123"
 
 
 # ---------------------------------------------------------------------------
@@ -762,12 +762,12 @@ def test_function_node_stored_node_uri_from_descriptor():
     descriptor = {
         "node_type": "function",
         "label": "fn",
-        "content_hash": "semantic_v0.1:abc",
-        "pipeline_hash": "semantic_v0.1:def",
+        "content_hash": "semantic_v1:abc",
+        "pipeline_hash": "semantic_v1:def",
         "table_scope": "pipeline_hash",
         "node_uri": ["add_one", "v0", "python.function.v0", "schema_repr"],
         "output_schema": {"tag": {"x": "int64"}, "data": {"result": "int64"}},
-        "data_context_key": "std:v0.1:default",
+        "data_context_key": "std:v1:default",
     }
     node = FunctionNode.from_descriptor(
         descriptor, function_pod=None, input_stream=None, databases={}

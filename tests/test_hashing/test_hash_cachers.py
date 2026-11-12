@@ -249,7 +249,7 @@ class TestEnableFileHashCaching:
         context = get_default_context()
         registry = context.semantic_hasher.type_handler_registry
         handler = registry.get_handler_for_type(File)
-        # The base FileHasher should still use sha256 (from v0.1.json)
+        # The base FileHasher should still use sha256 (from the default data context)
         assert handler.file_hasher.file_hasher.algorithm == "sha256"
 
     def test_directory_handler_uses_cached_file_hasher(

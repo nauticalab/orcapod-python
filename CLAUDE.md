@@ -260,6 +260,30 @@ uv run pytest tests/
 - The Graphviz `dot` binary is optional. The tests that render a graph to an image skip
   when `dot` is not on `PATH` and run when it is.
 
+## Logical type identifiers
+
+A logical type's identifier is its Arrow extension name plus its Arrow extension metadata
+(developer, November 11, 2026, ITL-935/ITL-938); see `docs/concepts/logical-type-identifiers.md`.
+
+- The identifier is declared in one place, the extension type returned by
+  `get_arrow_extension_type()`, and read through `logical_types/identifier.py`
+  (`logical_type_identifier`, `LogicalTypeIdentifier.text`). Never put a logical type's bare
+  name into a hash input: use the identifier text.
+- Change a type's identifier when, and only when, an existing value would be stored or hashed
+  differently. It is not a package version. Built-in types use `version_metadata(N)`
+  (`{"version":N}`); a new built-in type must write one, never empty metadata.
+- A changed identifier is a schema change: it moves stored paths and golden values of that
+  type. Treat it like any other hash change (developer approval, migration assessment).
+- The native containers `list[T]` / `set[T]` of a logical type (`ListLogicalType`) have no
+  version of their own, by design: never add a `"version"` key to their metadata. Their
+  identifier is the container kind plus the element's identifier; the type hash treats them
+  like any generic alias (origin and arguments). A change to how they are stored or hashed is
+  a data context (global hash version) change, not a logical type change.
+- On read, stored metadata must be one of the type's `readable_extension_metadata()`;
+  otherwise raise `LogicalTypeIdentifierError`. Never wrap a stored column by name alone and
+  never fall back to the storage type. List an older value in `also_reads` only when the
+  current code decodes that layout.
+
 ## Golden hash values
 
 Hash values must stay identical across releases (developer, November 10, 2026). Every hash
@@ -273,6 +297,34 @@ checked by `tests/test_hashing/golden/test_golden_hashes.py`.
   approved together with a migration assessment.
 - Never move or rename the fixtures in `tests/test_hashing/golden/cases.py`: function pods,
   dataclasses and pydantic models hash with their module path.
+
+## Hash labels
+
+One rule holds for every hash label (developer, November 11, 2026; ITL-945; stated with
+examples in `docs/reference/hashing.md`, "The hash label rule").
+
+- A label names the algorithm that produced a digest (the whole procedure: canonical form,
+  preparation, encoding, digest function) and nothing else. Format `<algorithm>_v<N>`,
+  integer `N`: `semantic_v1`, `arrow_v1`, `directory_v1`, `ndarray_v1`, `polars_expr_v1`. The
+  file content hash keeps `sha256`, the only exception. A logical type's implementer picks
+  its label.
+- Change a label only when its algorithm would give an existing input a different digest.
+- Define each label in exactly one place, as a constant beside its algorithm. Never write a
+  label literal anywhere else in code, and never in a data context file.
+- Never feed a label into a hash computation. Feed a nested hash's digest only: never put
+  `to_string()`, `str(hash)` or `to_prefixed_digest()` into an identity structure, a preimage
+  table or a digest input. Inside a structure, return the `ContentHash` object and let the
+  structure hasher embed it.
+- A hash inside a name (path component, column name, `uri`) is the bare hex digest:
+  `to_hex()`. Exception (developer, November 11, 2026): a source id is the source's name. A
+  default source id built from a hash keeps a source-kind prefix and the hash's label
+  (`derived:<label>:<hex>`, via `to_string()`, never a label literal) and is used as it is in
+  the `source_id` system tag and in source-info values.
+- A hash stored as a value in its own column or field carries its label: `to_string()` as
+  text, `to_prefixed_digest()` in a binary column.
+- A record id is an identifier built by a recipe, not a hash, and carries no label.
+- `tests/test_hashing/test_hash_label_rule.py` recomputes every golden value under renamed
+  labels; a value that moves there means a label reached a hash input.
 
 ## Testing conventions
 
@@ -475,6 +527,59 @@ The pipeline hash uses a **resolver pattern** — `PipelineElementProtocol` obje
 Prefixes are computed from `SystemConstant` in `system_constants.py`. The `constants` singleton
 (with no global prefix) is used throughout.
 
+### Stored tables: data context and layout versions
+
+Every row Orcapod stores carries `__data_context` (`constants.DATA_CONTEXT_COL`,
+`large_string`): the key of the data context that wrote it (`std:v1:default` since v0.3;
+developer, November 11, 2026, ITL-944). The key names one generation of hashing; rows of the
+current data context are the current entries.
+
+| Table | Layout (last path component) | Constant |
+|---|---|---|
+| Function pipeline | `pdb_v2` | `PIPELINE_DB_SCHEMA_VERSION` |
+| Function result | `rdb_v2` | `RESULT_DB_SCHEMA_VERSION` |
+| Side-effect log | `tdb_v2` | `TRACKING_DB_SCHEMA_VERSION` |
+| Operator cache | `odb_v1` | `OPERATOR_DB_SCHEMA_VERSION` |
+| Cached source | `sdb_v1` | `SOURCE_DB_SCHEMA_VERSION` |
+
+- A change to the bookkeeping columns of a table kind moves its layout version, so the table
+  gets a new path. Never add, rename or retype a stored column without it.
+- Every new stored table kind writes `__data_context` (`contexts/stored.with_data_context`),
+  and every read or lookup keeps rows of the current data context only
+  (`keep_rows_of_data_context`, or a lookup constraint on the column).
+- A table at an older layout is never read as current and never modified. What a node does
+  about such tables, and about rows of another data context, is decided in one place,
+  `contexts/stored.account_for_stale_tables`: count and report, or, for a node that delivers
+  side effects (a `SideEffectPod` node, or a function node whose pod takes the invocation
+  context, `ctx_arg`), raise `SideEffectLogDataContextError` before any delivery. A new kind
+  of node goes through that function; never decide it locally.
+- A table written before v0.3 is found by NAME, never by a computed hash (ITL-954): the
+  hashes in a path differ between versions. `find_stale_tables(..., name_path=...)` lists the
+  store under the hash-free beginning of the node's path (`ArrowDatabaseProtocol.list_table_paths`;
+  `<function>`, `side_effect_function/<function>`, `side_effects/<pod>`, relative to the
+  node's database) and every table there whose last component is not in
+  `contexts/stored.CURRENT_LAYOUTS` is pre-v0.3. A new layout constant must be added to
+  `CURRENT_LAYOUTS`, and a superseded one to the `OLD_*_SCHEMA_VERSIONS` tuples. A store that
+  cannot list raises `TableListingNotSupportedError`: side-effecting nodes then warn and
+  proceed (developer, November 11, 2026). Operator caches and cached sources have no stable
+  name; `PipelineJob.run()` reports one total for them. Every database class implements
+  `list_table_paths`.
+- A released data context manifest (`contexts/data/<version>.json`) is frozen: its sha256 is
+  pinned in `contexts/released_manifests.json`. A change that moves an existing golden hash
+  value for a reason other than a logical type's own change needs a new data context version
+  with its own manifest file, never an edit of a released one.
+- In memory the data context column is still `_context_key` (`ColumnConfig(context=True)`).
+- A writer refuses an input of another data context than its own
+  (`contexts/stored.require_same_data_context`, `InputValidationError` naming both keys)
+  before anything is written; a whole-input condition is checked outside the row error
+  policy. The eventual behaviour is ITL-951.
+- `std:v0.1:default` is not shipped; saved files that name it load through
+  `contexts.resolve_saved_context`. There is no `SchemaVersionError`, `ignore_schema` or
+  `orcapod.migrations`: do not reintroduce a per-layout migration path without a decision.
+- Logical types and the value handlers that hash their Python values are registered in
+  `contexts/logical_types.json`, never in a data context manifest: a logical type is
+  versioned by its own identifier, and that file is not frozen.
+
 ### System tag evolution rules
 
 1. **Name-preserving** — single-stream ops (filter, select, map). Column name and value pass
@@ -491,8 +596,8 @@ Prefixes are computed from `SystemConstant` in `system_constants.py`. The `const
    to a deterministic digest via `arrow_utils.fold_system_tag_values` and their column name
    gains `::{pipeline_hash}` — a blend of rules 2 and 3.
 
-   The fold is SHA-based (`uuid5` for `record_id`, `combine_hashes` for `source_id`) and so is
-   stable across processes. Never use `hash()` or a set-based construction there: the digest
+   The fold is SHA-based (`uuid5` for `record_id`, SHA-256 of the canonical JSON member list
+   for `source_id`) and so is stable across processes. Never use `hash()` or a set-based construction there: the digest
    becomes a cache key, so a per-process value would look correct in a single-process test and
    miss the cache on every new driver run.
 

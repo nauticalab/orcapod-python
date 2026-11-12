@@ -268,7 +268,7 @@ def test_builtin_ndarray_round_trip(
     Tests both a simple 1-D float64 array and a structured (record) array with
     named fields, since structured arrays are a primary motivation for this type.
     The read-side converter already knows about ``orcapod.ndarray`` because it is
-    registered in the default context (``v0.1.json``).
+    registered in the default context (``contexts/logical_types.json``).
     """
     import numpy as np
 

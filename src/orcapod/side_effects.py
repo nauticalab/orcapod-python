@@ -19,12 +19,26 @@ from orcapod.core.base import TraceableBase
 from orcapod.core.nodes.function_node import _build_record_id_preimage
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import StoreError, StoreReadError, StoreWriteError
+from orcapod.errors import (
+    StoreError,
+    StoreReadError,
+    StoreWriteError,
+)
+from orcapod.contexts.stored import (
+    StaleTables,
+    account_for_stale_tables,
+    find_stale_tables,
+    require_same_data_context,
+    with_data_context,
+)
 from orcapod.invocation import (
     InvocationContext,
     InvocationHashConfig,
 )
-from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
+from orcapod.system_constants import (
+    OLD_TRACKING_DB_SCHEMA_VERSIONS,
+    TRACKING_DB_SCHEMA_VERSION,
+)
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -145,6 +159,7 @@ class SideEffectPodStream(StreamBase):
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
+                data_context_key=self._pod.data_context_key,
                 ctx_arg_name=self._pod.ctx_arg_name,
             )
             if result is not None:
@@ -189,6 +204,7 @@ def _execute_side_effect_row(
     pod_name: str,
     run_id: str | None,
     arrow_hasher: Any,
+    data_context_key: str,
     ctx_arg_name: str = "ctx",
     pipeline_database: ArrowDatabaseProtocol | None = None,
     table_path: tuple[str, ...] | None = None,
@@ -200,7 +216,7 @@ def _execute_side_effect_row(
     of ``0``.  The preimage covers:
 
     * tag system-tag columns,
-    * ``INPUT_DATA_HASH_COL`` (binary ``data.content_hash().to_prefixed_digest()``), and
+    * ``INPUT_DATA_HASH_COL`` (the raw digest of ``data.content_hash()``, no label), and
     * ``_SIDE_EFFECT_RECOMPUTATION_INDEX_COL`` fixed at ``0`` (side effects
       never recompute).
 
@@ -217,12 +233,15 @@ def _execute_side_effect_row(
         pod_name: Label of the pod.
         run_id: Pipeline run identifier (or ``None`` in standalone mode).
         arrow_hasher: The ``arrow_hasher`` from the pod's data context.
+        data_context_key: Key of the pod's data context, stored on the log row.
         pipeline_database: Attached DB (or ``None`` for standalone mode).
         table_path: Path tuple for the invocation log table.
 
     Returns:
         ``(tag, data)`` to emit downstream, or ``None`` to drop the row.
     """
+    require_same_data_context(data.data_context_key, data_context_key)
+
     # 1. Build the preimage — delegates to the shared helper used by FunctionJobNode.
     #    Appends the recomputation index (fixed at 0; side effects never recompute).
     preimage = _build_record_id_preimage(tag, data).append_column(
@@ -273,6 +292,7 @@ def _execute_side_effect_row(
                 record_id=record_id,
                 record_id_hash_bytes=record_id_hash.to_prefixed_digest(),
                 run_id=run_id,
+                data_context_key=data_context_key,
             )
         return (tag, data)
     except StoreError as exc:
@@ -297,6 +317,7 @@ def _write_invocation_row(
     record_id: bytes,
     record_id_hash_bytes: bytes,
     run_id: str | None,
+    data_context_key: str,
 ) -> None:
     """Write one success row to the side-effect invocation log table.
 
@@ -312,6 +333,8 @@ def _write_invocation_row(
         record_id_hash_bytes: Binary prefixed digest of the record-ID hash
             (stored for human inspection via ``ContentHash.from_prefixed_digest``).
         run_id: Pipeline run identifier (or ``None`` for standalone mode).
+        data_context_key: Key of the data context whose hasher produced
+            ``record_id``; stored on the row as ``__data_context``.
     """
     executed_at = datetime.datetime.now(datetime.timezone.utc)
     record = pa.table(
@@ -328,7 +351,7 @@ def _write_invocation_row(
         pipeline_database.add_record(
             table_path,
             record_id,
-            record,
+            with_data_context(record, data_context_key),
             skip_duplicates=True,
         )
     except StoreReadError:
@@ -719,6 +742,7 @@ class SideEffectNode(StreamBase):
                 pod_name=self._pod.label,
                 run_id=None,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
+                data_context_key=self._pod.data_context_key,
                 ctx_arg_name=self._pod.ctx_arg_name,
                 pipeline_database=None,
                 table_path=None,
@@ -793,6 +817,54 @@ class SideEffectJobNode(SideEffectNode):
         )
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._table_path: tuple[str, ...] | None = None
+        self._unlisted_store_reported = False
+        self._current_log_checked = False
+
+    def _refuse_log_of_another_data_context(self) -> None:
+        """Refuse an invocation log holding deliveries of another data context.
+
+        A delivery already made is found by a record id hashed under this node's
+        data context, so deliveries logged under another one would not be found and
+        every side effect would be delivered again (ITL-944). Two cases: a log at an
+        older table layout (written by Orcapod up to v0.2), and rows of another data
+        context in the current log. An older log is looked for at this node's own
+        path and, because the hash in the path can differ between versions, anywhere
+        under the pod's name in the store (ITL-954). Checked at the start of every
+        run, so a log that appears between two runs of one node object is found too.
+        The current log is read and counted by data context the first time only;
+        the later runs list the store, which reads no table.
+
+        Raises:
+            SideEffectLogDataContextError: If such deliveries are found; nothing has
+                been delivered or written then.
+        """
+        if self._pipeline_database is None or self._table_path is None:
+            return
+        current = self._pod.data_context_key
+        found = find_stale_tables(
+            self._pipeline_database,
+            tuple(
+                self._table_path[:-1] + (layout,)
+                for layout in OLD_TRACKING_DB_SCHEMA_VERSIONS
+            ),
+            current=None if self._current_log_checked else (self._table_path, current),
+            # ("side_effects", <pod name>): the part of the path that holds no hash.
+            name_path=self.node_uri,
+        )
+        if found.unlisted:
+            # The check runs before every run; that the store cannot list its tables
+            # is reported once per node object and attached database.
+            if self._unlisted_store_reported:
+                found = StaleTables(tables=found.tables)
+            self._unlisted_store_reported = True
+        try:
+            account_for_stale_tables(
+                found, delivers_side_effects=True, current_context=current
+            )
+        except StoreError as exc:
+            exc.add_context(node_label=self.label)
+            raise
+        self._current_log_checked = True
 
     # ------------------------------------------------------------------
     # DB attachment
@@ -805,7 +877,7 @@ class SideEffectJobNode(SideEffectNode):
         """Attach or detach the pipeline database.
 
         Called by ``PipelineJob._distribute_databases()``. The table path is
-        ``self.node_uri + (f"schema:{self.pipeline_hash().to_string()}", TRACKING_DB_SCHEMA_VERSION)``
+        ``self.node_uri + (f"schema:{self.pipeline_hash().to_hex()}", TRACKING_DB_SCHEMA_VERSION)``
         — scoped by pipeline hash and tdb schema version.
 
         Args:
@@ -813,9 +885,11 @@ class SideEffectJobNode(SideEffectNode):
                 or ``None`` to detach.
         """
         self._pipeline_database = pipeline_database
+        self._unlisted_store_reported = False
+        self._current_log_checked = False
         if pipeline_database is not None:
             self._table_path = self.node_uri + (
-                f"schema:{self.pipeline_hash().to_string()}",
+                f"schema:{self.pipeline_hash().to_hex()}",
                 TRACKING_DB_SCHEMA_VERSION,
             )
         else:
@@ -841,7 +915,12 @@ class SideEffectJobNode(SideEffectNode):
 
         Returns:
             List of ``(tag, data)`` tuples — the pass-through rows.
+
+        Raises:
+            SideEffectLogDataContextError: If the invocation log holds deliveries
+                logged under another data context; nothing is delivered then.
         """
+        self._refuse_log_of_another_data_context()
         results = []
         for tag, data in input_stream.iter_data():
             result = _execute_side_effect_row(
@@ -853,6 +932,7 @@ class SideEffectJobNode(SideEffectNode):
                 pod_name=self._pod.label,
                 run_id=run_id,
                 arrow_hasher=self._pod.data_context.arrow_hasher,
+                data_context_key=self._pod.data_context_key,
                 ctx_arg_name=self._pod.ctx_arg_name,
                 pipeline_database=self._pipeline_database,
                 table_path=self._table_path,
@@ -903,6 +983,7 @@ class SideEffectJobNode(SideEffectNode):
         )
 
         try:
+            self._refuse_log_of_another_data_context()
 
             async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
                 try:
@@ -915,6 +996,7 @@ class SideEffectJobNode(SideEffectNode):
                         pod_name=self._pod.label,
                         run_id=run_id,
                         arrow_hasher=self._pod.data_context.arrow_hasher,
+                        data_context_key=self._pod.data_context_key,
                         ctx_arg_name=self._pod.ctx_arg_name,
                         pipeline_database=self._pipeline_database,
                         table_path=self._table_path,

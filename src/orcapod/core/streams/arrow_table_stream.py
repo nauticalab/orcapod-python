@@ -140,9 +140,20 @@ class ArrowTableStream(StreamBase):
     def identity_structure(self) -> Any:
         if self._producer is not None:
             return super().identity_structure()
+        # Every column group except the per-row content hash: that column is derived
+        # from the data columns already in the table, and its values carry the Arrow
+        # hash label, which must never enter a hash input.
         return (
             self.__class__.__name__,
-            self.as_table(all_info=True),
+            self.as_table(
+                columns=ColumnConfig(
+                    meta=True,
+                    context=True,
+                    source=True,
+                    system_tags=True,
+                    sort_by_tags=True,
+                )
+            ),
             self._tag_columns,
         )
 

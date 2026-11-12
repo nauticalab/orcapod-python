@@ -39,6 +39,7 @@ nav:
     - Operators: concepts/operators.md
     - Function Pods: concepts/function-pods.md
     - NumPy Arrays: concepts/arrays.md
+    - Logical Type Identifiers: concepts/logical-type-identifiers.md
     - Identity & Hashing: concepts/identity.md
     - File Hash Caching: concepts/file-hash-caching.md
   - API Reference:

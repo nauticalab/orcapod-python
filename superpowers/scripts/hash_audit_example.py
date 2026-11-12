@@ -253,7 +253,7 @@ def main() -> None:
     # Leaf = node whose hash does NOT appear as the upstream (u) in any edge.
     upstream_set = {u_hash for u_hash, _ in job._graph_edges}
     leaf_hashes = sorted(
-        n.content_hash().to_string()
+        n.content_hash().to_hex()
         for h, n in job._persistent_node_map.items()
         if h not in upstream_set and hasattr(n, "content_hash")
     )

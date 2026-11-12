@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from orcapod.contexts import resolve_saved_context
 from orcapod.core.nodes import (
     FunctionNode,
     GraphNode,
@@ -315,7 +316,9 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
                         name=node_name,
                         tag_schema=tag_schema,
                         data_schema=data_schema,
-                        data_context=descriptor.get("data_context_key"),
+                        data_context=resolve_saved_context(
+                            descriptor.get("data_context_key")
+                        ),
                     )
                     # Restore label from descriptor if set explicitly
                     stored_label = descriptor.get("label")

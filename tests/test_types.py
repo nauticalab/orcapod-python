@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.types import ContentHash, NodeConfig, Schema
+from orcapod.types import ContentHash, Schema
 
 
 class TestSchemaAdd:
@@ -87,48 +87,3 @@ class TestContentHashPrefixedDigest:
         ]:
             h = ContentHash(method, digest)
             assert ContentHash.from_prefixed_digest(h.to_prefixed_digest()) == h
-
-
-class TestNodeConfig:
-    """Tests for NodeConfig dataclass and merge()."""
-
-    def test_ignore_schema_defaults_to_none(self):
-        config = NodeConfig()
-        assert config.ignore_schema is None
-
-    def test_ignore_schema_set(self):
-        config = NodeConfig(ignore_schema=("v0",))
-        assert config.ignore_schema == ("v0",)
-
-    def test_merge_ignore_schema_none_in_other_self_wins(self):
-        base = NodeConfig(ignore_schema=("v0",))
-        other = NodeConfig()  # ignore_schema=None
-        result = base.merge(other)
-        assert result.ignore_schema == ("v0",)
-
-    def test_merge_ignore_schema_other_overrides(self):
-        base = NodeConfig(ignore_schema=("v0",))
-        other = NodeConfig(ignore_schema=("v0", "v1"))
-        result = base.merge(other)
-        assert result.ignore_schema == ("v0", "v1")
-
-    def test_merge_ignore_schema_empty_tuple_overrides(self):
-        """Empty tuple () is a valid explicit value that overrides None."""
-        base = NodeConfig(ignore_schema=("v0",))
-        other = NodeConfig(ignore_schema=())
-        result = base.merge(other)
-        assert result.ignore_schema == ()
-
-
-class TestSchemaVersionError:
-    def test_is_exception(self):
-        from orcapod.errors import SchemaVersionError
-
-        err = SchemaVersionError("test message")
-        assert isinstance(err, Exception)
-
-    def test_message_preserved(self):
-        from orcapod.errors import SchemaVersionError
-
-        err = SchemaVersionError("Pipeline DB at v0 path")
-        assert "v0" in str(err)

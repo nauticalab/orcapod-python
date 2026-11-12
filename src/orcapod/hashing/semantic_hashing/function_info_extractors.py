@@ -86,10 +86,12 @@ class FunctionSignatureExtractor:
     """Extractor that uses the function signature for information extraction.
 
     When a ``type_converter`` is provided, orcapod logical types in annotations
-    are replaced with their stable ``logical_type_name``
-    (e.g. ``"orcapod.file"``) rather than the full import path (e.g.
-    ``"orcapod.logical_types.file_type.File"``).  This prevents internal
-    module reorganisations from invalidating cached function-pod signatures.
+    are replaced with their logical type identifier text
+    (``"orcapod.file;7b2276657273696f6e223a317d"``: Arrow extension name,
+    ``;``, extension metadata in hex) rather than the full import path (e.g.
+    ``"orcapod.logical_types.file_type.File"``).  Internal module
+    reorganisations therefore do not invalidate cached function-pod signatures;
+    a change of the type's identifier does.
 
     For **parameter** annotations each parameter string is reconstructed from
     its structured components (name, kind, canonical annotation, default) via
@@ -165,8 +167,8 @@ class FunctionSignatureExtractor:
         # Add return annotation if present.
         # The raw annotation object is stored here and hashed by the type
         # handler registry — TypeObjectHandler (configured with a type_converter)
-        # canonicalises registered logical types to their stable
-        # ``logical_type_name`` (e.g. ``"type:orcapod.file"``), so no special
+        # canonicalises registered logical types to their identifier
+        # (``"type:<extension name>;<hex metadata>"``), so no special
         # casing is required here.
         ret_ann = sig.return_annotation
         if ret_ann is not inspect.Signature.empty:

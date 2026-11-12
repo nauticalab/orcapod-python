@@ -427,9 +427,9 @@ def test_dtype_shape_and_bits_change_the_hash(
     assert data_hash(left) != data_hash(right)
 
 
-def test_table_token_carries_extension_name_and_label() -> None:
-    """A table token carries the extension name and the ``ndarray_v1`` label."""
-    # The Arrow hasher folds the extension name in front of the handler's label.
+def test_table_token_carries_extension_name_and_digest() -> None:
+    """A table token carries the extension name and the value digest, no label."""
+    # The Arrow hasher folds the extension name in front of the handler's digest.
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
 
     hasher = get_default_context().arrow_hasher
@@ -439,7 +439,10 @@ def test_table_token_carries_extension_name_and_label() -> None:
     # Non-public helper: this test is about the token the hasher builds for a cell.
     processed = hasher._process_table_columns(table.select(["x"]))  # pyright: ignore[reportPrivateUsage]
     token = processed.column("x")[0].as_py()
-    assert token == b"orcapod:ndarray::ndarray_v1:" + semantic_hash(array).digest
+    assert (
+        token
+        == b"orcapod.ndarray;7b2276657273696f6e223a317d::" + semantic_hash(array).digest
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -34,8 +34,8 @@ from orcapod.types import CacheMode
 JOB_NAME = "itl878"
 
 # Markers that select a table by its stored path.
-RESULT_TABLE = "rdb_v1"  # a function node's result table
-PIPELINE_TABLE = "pdb_v1"  # a function node's pipeline (tag) table
+RESULT_TABLE = "rdb_v2"  # a function node's result table
+PIPELINE_TABLE = "pdb_v2"  # a function node's pipeline (tag) table
 OPERATOR_TABLE = "SelectDataColumns"  # the operator node's LOG table
 
 

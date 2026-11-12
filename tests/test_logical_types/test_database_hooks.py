@@ -85,8 +85,15 @@ def _make_stub_factory():
 
             self.calls.append((arrow_extension_name, storage_type, metadata))
 
+            import json
+
             _name = arrow_extension_name
-            _arrow_cls = make_arrow_extension_type(_name, storage_type)
+            # The reconstructed type carries the identifier that was stored
+            # (extension name and metadata); a type with other metadata would
+            # not be allowed to read the column.
+            _arrow_cls = make_arrow_extension_type(
+                _name, storage_type, json.dumps(metadata).encode("utf-8")
+            )
             _pl_storage = pl.from_arrow(pa.array([], type=storage_type)).dtype
 
             class _PolarsExt(pl.BaseExtension):
@@ -105,6 +112,12 @@ def _make_stub_factory():
                 @property
                 def python_type(self):
                     return str
+
+                def readable_extension_metadata(self):
+                    """Return the metadata this type writes as the only metadata it can
+                    read.
+                    """
+                    return (self.get_arrow_extension_type().__arrow_ext_serialize__(),)
 
                 def get_arrow_extension_type(self):
                     return _arrow_cls()
@@ -206,8 +219,14 @@ def test_already_registered_is_skipped():
     assert len(factory.calls) == 1  # factory invoked exactly once
 
 
-def test_none_metadata_already_registered_noop():
-    """Extension type with None metadata that IS already in the registry — silent no-op."""
+def test_none_metadata_for_a_registered_type_that_does_not_read_it_raises():
+    """A registered type whose identifier has metadata does not read a column stored without.
+
+    Before logical type identifiers (ITL-935) the name alone was enough and this was a
+    silent no-op. The stored metadata is half of the identifier, so a column stored
+    without it is read only by a type that declares empty metadata readable.
+    """
+    from orcapod.logical_types.identifier import LogicalTypeIdentifierError
     from orcapod.logical_types.database_hooks import register_discovered_logical_types
 
     arrow_name = _unique_name()
@@ -219,10 +238,12 @@ def test_none_metadata_already_registered_noop():
     schema_with_meta = _make_ext_schema(arrow_name, metadata=metadata_bytes)
     register_discovered_logical_types(converter, schema_with_meta)
 
-    # Now: same arrow name but with no metadata (simulates reading the schema without
-    # metadata — e.g. after an IPC round-trip where the type is now registered in-process).
+    # Now: same arrow name but stored with no metadata: a different identifier.
     schema_no_meta = _make_ext_schema(arrow_name, metadata=None)
-    register_discovered_logical_types(converter, schema_no_meta)  # should NOT raise
+    with pytest.raises(LogicalTypeIdentifierError) as excinfo:
+        register_discovered_logical_types(converter, schema_no_meta)
+    assert excinfo.value.stored.metadata == b""
+    assert excinfo.value.readable == (metadata_bytes,)
 
 
 def test_none_metadata_not_registered_raises():

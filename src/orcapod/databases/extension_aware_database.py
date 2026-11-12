@@ -200,6 +200,24 @@ class ExtensionAwareDatabase:
             converter=self._converter,
         )
 
+    def list_table_paths(self, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+        """List the paths of the tables stored under ``prefix``.
+
+        Delegates to the wrapped database: what can be listed, and how exactly, is
+        what that database can list.
+
+        Args:
+            prefix: Leading path components, relative to ``self.base_path``.
+
+        Returns:
+            The table paths, relative to ``self.base_path``, sorted.
+
+        Raises:
+            TableListingNotSupportedError: If the wrapped store cannot enumerate
+                its tables.
+        """
+        return self._db.list_table_paths(prefix)
+
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
         """Return ``True`` if a table exists at ``record_path``.
 

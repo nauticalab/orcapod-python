@@ -61,6 +61,10 @@ def _make_logical_type(py_type: type) -> LogicalTypeProtocol:
         logical_type_name = arrow_name
         python_type = py_type
 
+        def readable_extension_metadata(self):
+            """Read only the metadata the type's own Arrow extension type writes."""
+            return (self.get_arrow_extension_type().__arrow_ext_serialize__(),)
+
         def get_arrow_extension_type(self):
             return ArrowExt()
 

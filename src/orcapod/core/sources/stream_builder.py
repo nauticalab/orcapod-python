@@ -82,13 +82,13 @@ def _unhashable_columns(
 
     Returns:
         ``(column name, Arrow type)`` for every column whose hash raises
-        ``NotImplementedError``, in column order.
+        ``ValueError``, in column order.
     """
     failing: list[tuple[str, pa.DataType]] = []
     for name in table.column_names:
         try:
             hasher.hash_table(table.select([name]))
-        except NotImplementedError:
+        except ValueError:
             failing.append((name, table.schema.field(name).type))
     return failing
 
@@ -228,20 +228,19 @@ class SourceStreamBuilder:
         hasher = self._data_context.arrow_hasher
         try:
             table_hash = hasher.hash_table(table)
-        except NotImplementedError as exc:
-            # The hasher names only the Arrow type; find the columns that carry it.
+        except ValueError as exc:
+            # The hasher (starfix 0.5) raises ValueError for a type it does not hash
+            # and names the first such column only; name every column it refuses.
             unhashable = _unhashable_columns(hasher, table)
             if not unhashable:
                 raise
             described = ", ".join(
                 f"{name!r} of type {kind}" for name, kind in unhashable
             )
-            raise NotImplementedError(
-                f"cannot hash column {described}: the Arrow hasher does not support "
-                "this type. Drop or convert the column before building the source."
-                if len(unhashable) == 1
-                else f"cannot hash columns {described}: the Arrow hasher does not "
-                "support these types. Drop or convert them before building the source."
+            noun = "column" if len(unhashable) == 1 else "columns"
+            raise ValueError(
+                f"cannot hash {noun} {described}: the Arrow hasher refused "
+                f"({exc}). Drop or convert before building the source."
             ) from exc
 
         # 6. Default source_id to table hash.

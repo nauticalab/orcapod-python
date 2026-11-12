@@ -418,7 +418,9 @@ class TestDerivedSourceId:
         node = _make_node(n=3)
         src = node.as_source()
         full_hash = node.content_hash().to_string()
-        assert full_hash in src.source_id
+        # A default source id built from a hash keeps the hash's label.
+        path_str = "/".join(node.node_identity_path)
+        assert src.source_id == f"{path_str}:{full_hash}"
 
     def test_different_nodes_different_source_ids(self):
         node_a = _make_node(n=3)

@@ -1,0 +1,252 @@
+{
+    "context_key": "std:v1:default",
+    "version": "v1",
+    "description": "Data context of Orcapod v0.3: the hashing generation H1. Frozen when v0.3.0 is released; editable in place while that release is prepared.",
+    "released_in": null,
+    "previous": "std:v0.1:default",
+    "file_hasher": {
+        "_class": "orcapod.hashing.file_hashers.FileHasher",
+        "_config": {
+            "algorithm": "sha256"
+        }
+    },
+    "directory_hasher": {
+        "_class": "orcapod.hashing.directory_hashers.BasicDirectoryHasher",
+        "_config": {
+            "file_hasher": {
+                "_ref": "file_hasher"
+            },
+            "algorithm": "sha256"
+        }
+    },
+    "type_converter": {
+        "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
+        "_config": {
+            "logical_type_registry": {
+                "_ref": "logical_type_registry"
+            }
+        }
+    },
+    "function_semantic_hasher": {
+        "_class": "orcapod.hashing.semantic_hashing.function_info_extractors.FunctionSignatureExtractor",
+        "_config": {
+            "include_module": true,
+            "include_defaults": true,
+            "type_converter": {
+                "_ref": "type_converter"
+            }
+        }
+    },
+    "python_type_handler_registry": {
+        "_class": "orcapod.hashing.semantic_hashing.type_handler_registry.PythonTypeHandlerRegistry",
+        "_config": {
+            "handlers": [
+                [
+                    {
+                        "_type": "builtins.bytes"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "builtins.bytearray"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "types.FunctionType"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",
+                        "_config": {
+                            "function_info_extractor": {
+                                "_ref": "function_semantic_hasher"
+                            }
+                        }
+                    }
+                ],
+                [
+                    {
+                        "_type": "types.BuiltinFunctionType"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",
+                        "_config": {
+                            "function_info_extractor": {
+                                "_ref": "function_semantic_hasher"
+                            }
+                        }
+                    }
+                ],
+                [
+                    {
+                        "_type": "types.MethodType"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler",
+                        "_config": {
+                            "function_info_extractor": {
+                                "_ref": "function_semantic_hasher"
+                            }
+                        }
+                    }
+                ],
+                [
+                    {
+                        "_type": "builtins.type"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",
+                        "_config": {
+                            "type_converter": {
+                                "_ref": "type_converter"
+                            }
+                        }
+                    }
+                ],
+                [
+                    {
+                        "_type": "types.GenericAlias"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "types.UnionType"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "typing._GenericAlias"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "typing._SpecialForm"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "pyarrow.Table"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "pyarrow.RecordBatch"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "polars.Expr"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PolarsExprHandler",
+                        "_config": {}
+                    }
+                ],
+                [
+                    {
+                        "_type": "orcapod.types.Schema"
+                    },
+                    {
+                        "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SchemaHandler",
+                        "_config": {
+                            "type_converter": {
+                                "_ref": "type_converter"
+                            }
+                        }
+                    }
+                ]
+            ]
+        }
+    },
+    "semantic_hasher": {
+        "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.SemanticAwarePythonHasher",
+        "_config": {
+            "type_handler_registry": {
+                "_ref": "python_type_handler_registry"
+            }
+        }
+    },
+    "arrow_hasher": {
+        "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
+        "_config": {
+            "type_converter": {
+                "_ref": "type_converter"
+            },
+            "semantic_hasher": {
+                "_ref": "semantic_hasher"
+            }
+        }
+    },
+    "definitions": {
+        "source_identity": "source_identity_v1",
+        "function_identity": "function_identity_v1",
+        "operator_identity": "operator_identity_v1",
+        "node_identity": "node_identity_v1",
+        "record_id": "record_id_v1",
+        "entry_id": "entry_id_v1",
+        "system_tag_fold": "system_tag_fold_v1",
+        "system_tag_naming": "system_tag_naming_v1",
+        "source_info_naming": "source_info_naming_v1",
+        "type_conversion": "type_conversion_v1"
+    },
+    "libraries": {
+        "starfix": "0.5.0 (hash format 2, digest prefix 000002): Arrow table and schema hashes",
+        "pyarrow": "23.0.1: conversion of Python values to Arrow types, which are hashed",
+        "polars": "1.41.2: serialisation of filter expressions, which is hashed"
+    },
+    "golden": {
+        "files": "tests/test_hashing/golden/data/*.json",
+        "algorithm": "sha256 over the files in name order; each contributes its name, a NUL byte, its bytes and a NUL byte",
+        "digest": null
+    },
+    "changes": [
+        {
+            "definition": "arrow_hasher",
+            "change": "starfix hash format 1 (starfix 0.4) to hash format 2 (starfix 0.5): every Arrow-derived hash value (ITL-910)"
+        },
+        {
+            "definition": "semantic_hasher",
+            "change": "hash label rule: a nested hash enters its parent as its digest only, never with its label, so every structure hash that contains a nested hash moves; labels are <algorithm>_v1 (semantic_v1, arrow_v1, directory_v1, ndarray_v1, polars_expr_v1; the file hash keeps sha256), each defined once in code beside its algorithm and not in this file (ITL-945)"
+        },
+        {
+            "definition": "arrow_hasher",
+            "change": "hash label rule: the token of a value-hashed extension cell holds the extension name and the raw digest, no label (ITL-945)"
+        },
+        {
+            "definition": "entry_id",
+            "change": "hash label rule: the input data hash enters the entry-id table, and the node content hash enters the operator-cache row key, as raw digests without a label; names (function uri, path components) hold bare hex digests (ITL-945)"
+        }
+    ]
+}

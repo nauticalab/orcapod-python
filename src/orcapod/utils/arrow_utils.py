@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from collections import defaultdict
 from collections.abc import Mapping, Collection, Sequence
 from typing import Any, TYPE_CHECKING, cast
 
-from orcapod.hashing.hash_utils import combine_hashes
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, SourceInfoValue
 from orcapod.utils.lazy_module import LazyModule
@@ -1278,8 +1279,9 @@ def system_tag_column_names(schema_hash: str) -> tuple[str, str]:
     Returns:
         Tuple of ``(source_id_column_name, record_id_column_name)``.
         Both start with ``constants.SYSTEM_TAG_PREFIX``. The source_id column
-        has ``large_string`` type; the record_id column has ``binary(16)``
-        (fixed-size 16-byte binary) type in the Arrow table.
+        has ``large_string`` type; the record_id column has ``large_binary``
+        type (16 bytes per value), the type it keeps everywhere: through a
+        ``Tag``, through every operator and in every stored table (ITL-942).
     """
     source_id_col = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
     record_id_col = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
@@ -1313,7 +1315,10 @@ def add_system_tag_columns(
     source_id_col_name, record_id_col_name = system_tag_column_names(schema_hash)
 
     source_id_array = pa.array(source_ids, type=pa.large_string())
-    record_id_array = pa.array(record_ids, type=pa.binary(16))
+    # large_binary, not fixed_size_binary(16): a Tag rebuilds its system tags as
+    # large_binary, stored tables hold large_binary, and one record id must hash
+    # the same on every path (ITL-942 G).
+    record_id_array = pa.array(record_ids, type=pa.large_binary())
 
     # System tag columns are always computed, never null — declare nullable=False
     # explicitly so the schema intent is not lost in Polars round-trips.
@@ -1321,7 +1326,8 @@ def add_system_tag_columns(
         pa.field(source_id_col_name, pa.large_string(), nullable=False), source_id_array
     )
     table = table.append_column(
-        pa.field(record_id_col_name, pa.binary(16), nullable=False), record_id_array
+        pa.field(record_id_col_name, pa.large_binary(), nullable=False),
+        record_id_array,
     )
     return table
 
@@ -1357,7 +1363,9 @@ def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | byt
     those columns directly to derive a record's identity.  Each column folds
     independently over its own ordered member values.
 
-    Both digests are SHA-based and therefore stable across processes.  Never
+    Both digests are SHA-based and therefore stable across processes, and both
+    preimages decode back to the ordered member list (no two member lists share
+    a fold).  Never
     substitute ``hash()`` or a set-based construction: orcapod uses the result
     as a cache key, so a per-process digest would miss the cache on every new
     driver run while looking correct in a single-process test.
@@ -1368,7 +1376,8 @@ def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | byt
     Args:
         column_name: The system-tag column name, used to select the fold.
             Names starting with ``constants.SYSTEM_TAG_RECORD_ID_PREFIX`` fold
-            to ``binary(16)``; everything else folds to a hex string.
+            to 16 bytes (stored as ``large_binary``); everything else folds to a
+            hex string.
         values: The group's member values, in emission order.
 
     Returns:
@@ -1376,11 +1385,20 @@ def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | byt
         otherwise.
     """
     if column_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
+        # Hex never contains the separator or "null", so the joined name decodes
+        # back to the member list.
         name = constants.BLOCK_SEPARATOR.join(
-            "" if v is None else v.hex() for v in values
+            "null" if v is None else v.hex() for v in values
         )
         return uuid.uuid5(_AGGREGATED_RECORD_ID_NAMESPACE, name).bytes
-    return combine_hashes(*["" if v is None else str(v) for v in values], order=False)
+    # The canonical JSON array of the members: where one member ends and the next
+    # begins is part of the preimage, and a null member differs from "" (ITL-942 H).
+    members = json.dumps(
+        [None if v is None else str(v) for v in values],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(members.encode("utf-8")).hexdigest()
 
 
 def aggregated_list_type(

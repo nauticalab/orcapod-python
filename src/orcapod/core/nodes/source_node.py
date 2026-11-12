@@ -449,7 +449,7 @@ class SourceNode(SourceNodeBase):
             if isinstance(stream, RootSource):
                 slot_name = stream.source_id
             else:
-                slot_name = f"{stream.label}:{stream.content_hash().to_string()}"
+                slot_name = f"{stream.label}:{stream.content_hash().to_hex()}"
         return cls(
             name=slot_name,
             tag_schema=tag_schema,
@@ -707,9 +707,7 @@ class SourceJobNode(SourceNodeBase):
                     if isinstance(stream, RootSource):
                         slot_name = stream.source_id
                     else:
-                        slot_name = (
-                            f"{stream.label}:{stream.content_hash().to_string()}"
-                        )
+                        slot_name = f"{stream.label}:{stream.content_hash().to_hex()}"
                 return cls(
                     name=slot_name,
                     tag_schema=tag_schema,

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import xxhash
 from upath import UPath
 
+from orcapod.logical_types.identifier import logical_type_identifier
 from orcapod.types import ContentHash, PathLike
 from orcapod.utils.canonical_type_names import stabilize_type_names
 
@@ -44,9 +45,11 @@ def canonical_annotation_str(
     """Return a stable, canonical string for a type annotation.
 
     Resolves types registered in *type_converter* (e.g. ``orcapod.File``) to
-    their stable ``logical_type_name`` (e.g. ``"orcapod.file"``) via
-    ``type_converter.get_logical_type()``, so that internal module relocations
-    do not change the string representation.
+    their logical type identifier text (``LogicalTypeIdentifier.text``: the Arrow
+    extension name, ``;``, then the extension metadata in hex, e.g.
+    ``"orcapod.file;7b2276657273696f6e223a317d"``) via
+    ``type_converter.get_logical_type()``. Internal module relocations do not
+    change the string; a change of the type's identifier does.
 
     For union types (both PEP 604 ``X | Y`` and ``typing.Union[X, Y]``),
     members are sorted byte-wise so that ``str | Path`` and ``Path | str``
@@ -64,17 +67,17 @@ def canonical_annotation_str(
     Args:
         annotation: A type annotation object.
         type_converter: Optional ``TypeConverterProtocol``. When provided,
-            registered logical types resolve to their stable
-            ``logical_type_name`` via ``get_logical_type()``.
+            registered logical types resolve to their identifier text via
+            ``get_logical_type()``.
 
     Returns:
         A canonical string representation.
     """
-    # Registered logical type: use stable canonical name (e.g. "orcapod.file")
+    # Registered logical type: use its identifier (extension name and metadata)
     if type_converter is not None and isinstance(annotation, type):
         lt = type_converter.get_logical_type(annotation)
         if lt is not None:
-            return lt.logical_type_name
+            return logical_type_identifier(lt).text
 
     # Union types (PEP 604 X | Y and typing.Union): sort members for order-independence
     if is_union_annotation(annotation):
@@ -95,37 +98,6 @@ def canonical_annotation_str(
         return origin_str
 
     return stabilize_type_names(inspect.formatannotation(annotation), annotation)
-
-
-def combine_hashes(
-    *hashes: str,
-    order: bool = False,
-    prefix_hasher_id: bool = False,
-    hex_char_count: int | None = None,
-) -> str:
-    """
-    Combine multiple hash strings into a single SHA-256 hash string.
-
-    Args:
-        *hashes: Hash strings to combine.
-        order: If True, sort inputs before combining so the result is
-               order-independent.  If False (default), insertion order
-               is preserved.
-        prefix_hasher_id: If True, prefix the result with ``"sha256@"``.
-        hex_char_count: Number of hex characters to return.  None (default)
-                        returns the full 64-character SHA-256 hex digest.
-
-    Returns:
-        A hex string (optionally truncated / prefixed).
-    """
-    prepared_hashes = sorted(hashes) if order else list(hashes)
-    combined = "".join(prepared_hashes)
-    combined_hash = hashlib.sha256(combined.encode()).hexdigest()
-    if hex_char_count is not None:
-        combined_hash = combined_hash[:hex_char_count]
-    if prefix_hasher_id:
-        return "sha256@" + combined_hash
-    return combined_hash
 
 
 def _to_path(file_path: PathLike) -> Path | UPath:

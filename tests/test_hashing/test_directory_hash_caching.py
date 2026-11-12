@@ -82,7 +82,7 @@ class TestDirectoryHashCaching:
         result = hasher.hash_directory(dir_with_files)
 
         assert isinstance(result, ContentHash)
-        assert result.method == "merkle_sha256"
+        assert result.method == "directory_v1"
         assert counting.call_count == 3  # one per file; none cached yet
 
     def test_cache_hit_on_second_hash(self, dir_with_files):

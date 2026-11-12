@@ -14,8 +14,8 @@ class DataContext:
     """Data context containing all versioned components needed for data interpretation.
 
     Attributes:
-        context_key: Unique identifier (e.g., "std:v0.1:default")
-        version: Version string (e.g., "v0.1")
+        context_key: Unique identifier (e.g., "std:v1:default")
+        version: Version string (e.g., "v1")
         description: Human-readable description
         type_converter: Type converter for Python ↔ Arrow conversion and
             registration. This is the single public API for all type operations.

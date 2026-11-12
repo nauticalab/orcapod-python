@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import WrappedFunctionPod
+from orcapod.contexts.stored import StaleTables
 from orcapod.core.result_cache import ResultCache
 from orcapod.hooks import InvocationStatus
 from orcapod.protocols.core_protocols import (
@@ -54,6 +55,11 @@ class CachedFunctionPod(WrappedFunctionPod):
             result_database=result_database,
             record_path=self.uri,  # no prefix; db is pre-scoped
             auto_flush=auto_flush,
+            # A pod that takes the invocation context performs an external action.
+            delivers_side_effects=function_pod.ctx_arg_name is not None,
+            # The uri holds no hash up to the function's name, which comes after
+            # "side_effect_function" for a pod that takes the invocation context.
+            name_path=self.uri[: 2 if function_pod.ctx_arg_name is not None else 1],
         )
 
     @property
@@ -66,15 +72,22 @@ class CachedFunctionPod(WrappedFunctionPod):
         """Return the path to the cached records in the result store (versioned)."""
         return self._cache.record_path
 
-    def set_ignore_schema(self, ignore_schema: tuple[str, ...] | None) -> None:
-        """Propagate ``ignore_schema`` setting to the underlying ``ResultCache``.
+    def stale_result_tables(self, include_current: bool = True) -> StaleTables:
+        """Find stored results of other generations that this pod will not use.
 
         Args:
-            ignore_schema: Tuple of schema version strings to tolerate (e.g.
-                ``("v0",)``), or ``None`` to use the default (raise on any
-                old schema).
+            include_current: Whether to read the current result table and count
+                its rows of another data context. ``False`` leaves the search to
+                tables at an older layout, which reads no current table.
+
+        Returns:
+            Result tables at an older layout (at this pod's path, or anywhere
+            under its function's name), and, for a pod that takes the invocation
+            context, rows of another data context in the current result table.
         """
-        self._cache.set_ignore_schema(ignore_schema)
+        return self._cache.stale_tables(
+            self.data_context_key, include_current=include_current
+        )
 
     def set_auto_flush(self, on: bool = True) -> None:
         """Set whether each stored result is committed (flushed) right away.
@@ -84,6 +97,14 @@ class CachedFunctionPod(WrappedFunctionPod):
                 ``False`` leaves the commit to the caller.
         """
         self._cache.set_auto_flush(on)
+
+    def stale_result_tables_accounted_for(self) -> None:
+        """Record that the caller accounted for what ``stale_result_tables`` found.
+
+        The pod then does not report or refuse those tables again on its first
+        lookup.
+        """
+        self._cache.stale_tables_accounted_for()
 
     def lookup_cached_data(self, data: DataProtocol) -> DataProtocol | None:
         """Look up a cached result for ``data`` without triggering computation.
@@ -105,7 +126,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             The cached output ``Data`` (with ``RESULT_COMPUTED_FLAG=False``
             appended), or ``None`` if no cached result exists for this input.
         """
-        cached = self._cache.lookup(data)
+        cached = self._cache.lookup(data, data_context_key=self.data_context_key)
         if cached is None:
             return None
         return cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
@@ -137,7 +158,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             A ``(tag, output_data)`` tuple; output_data is ``None``
             if the inner function filters the data out.
         """
-        cached = self._cache.lookup(data)
+        cached = self._cache.lookup(data, data_context_key=self.data_context_key)
         if cached is not None:
             module_logger.info("Pod-level cache hit")
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
@@ -158,7 +179,9 @@ class CachedFunctionPod(WrappedFunctionPod):
                 python_schema=pf.get_execution_data_schema(),
                 data_context=pf.data_context,
             )
-            self._cache.store(data, output, var_dg, exec_dg)
+            self._cache.store(
+                data, output, var_dg, exec_dg, data_context_key=self.data_context_key
+            )
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
 
@@ -188,7 +211,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             A ``(tag, output_data)`` tuple; output_data is ``None``
             if the inner function filters the data out.
         """
-        cached = self._cache.lookup(data)
+        cached = self._cache.lookup(data, data_context_key=self.data_context_key)
         if cached is not None:
             module_logger.info("Pod-level cache hit")
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
@@ -209,7 +232,9 @@ class CachedFunctionPod(WrappedFunctionPod):
                 python_schema=pf.get_execution_data_schema(),
                 data_context=pf.data_context,
             )
-            self._cache.store(data, output, var_dg, exec_dg)
+            self._cache.store(
+                data, output, var_dg, exec_dg, data_context_key=self.data_context_key
+            )
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
 
@@ -370,7 +395,8 @@ class CachedFunctionPod(WrappedFunctionPod):
     ) -> "pa.Table | None":
         """Return all cached records from the result store for this pod."""
         return self._cache.get_all_records(
-            include_system_columns=include_system_columns
+            self.data_context_key,
+            include_system_columns=include_system_columns,
         )
 
     def process(

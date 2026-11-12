@@ -47,6 +47,7 @@ from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import CacheMode
+from orcapod.system_constants import OPERATOR_DB_SCHEMA_VERSION
 
 Row = tuple[TagProtocol, DataProtocol]
 
@@ -552,7 +553,8 @@ def _record_ids(node: OperatorJobNode) -> dict[str, bytes]:
     database = node._pipeline_database  # pyright: ignore[reportPrivateUsage]
     assert database is not None
     records = database.get_all_records(
-        node.node_identity_path, record_id_column=node.HASH_COLUMN_NAME
+        node.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,),
+        record_id_column=node.HASH_COLUMN_NAME,
     )
     assert records is not None
     return {
@@ -563,6 +565,9 @@ def _record_ids(node: OperatorJobNode) -> dict[str, bytes]:
 
 class TestIdentityPinned:
     """Values recorded on ``main`` at ab544982, before the fix.
+
+    Re-recorded under starfix hash format 2 (``arrow_v1``, ITL-910): the node content
+    hash and the record hashes are Arrow-derived; the pipeline hash is not.
 
     The node's identity, the output data and the row-0 record hash (whose
     source-info token was already right) are unchanged; only rows whose stored
@@ -581,10 +586,10 @@ class TestIdentityPinned:
         _ = node.execute(src)
 
         assert node.pipeline_hash().to_string() == (
-            "semantic_v0.1:1f533cfa7293bad96debd5cda622e04bc39d72970ce6827dcd6e890a7428823c"
+            "semantic_v1:62bd560f1fa945b5cac83f3eb99b6f8bb0fea607ce7e9503c987df4c36134da4"
         )
         assert node.content_hash().to_string() == (
-            "semantic_v0.1:6dc7f9c42cf4d0351d8a577bb2c72d69aadbca97e1c31d0cfc62d6a8087f3038"
+            "semantic_v1:4560867b554ece10a4be5ad2f85b5ec9c74b923a98bfae067796ca63e746983f"
         )
         ids = _record_ids(node)
         assert ids["a"] == ROW_ZERO_RECORD_ID
@@ -605,16 +610,25 @@ class TestIdentityPinned:
         }
 
 
-# ``_record_hash`` of rows a, b, c stored by the pinned node on ab544982 (pre-fix).
+# ``_record_hash`` of rows a, b, c stored by the pinned node before the fix (ab544982).
 # Row a's source-info token was already right, so the fix leaves its record hash.
-ROW_ZERO_RECORD_ID = (
-    b"000001688856047a9f37112172e612834209fb07f2cf4be5db30f0fa3b7059db85905e"
+# Re-recorded in starfix hash format 2 (ITL-910) and again as labelled digests
+# (``b"arrow_v1:" + digest``, ITL-945) by reproducing the pre-fix broadcast with
+# ``_broadcast_row_zero``.
+ROW_ZERO_RECORD_ID = b"arrow_v1:" + bytes.fromhex(
+    "000002f3a7e7119b3d11ec89f0d46a708da003c1c3c96cfc0612063dc6337014e3c045"
 )
 PRE_FIX_RECORD_IDS = frozenset(
     {
         ROW_ZERO_RECORD_ID,
-        b"0000016f23c92ad43ef01bb80e438f16da66d02354998351430b3237d938a340943039",
-        b"00000138599ee77c1f3dc62bf02a117150b32db27c6582db885cda2d28b7cef3964657",
+        b"arrow_v1:"
+        + bytes.fromhex(
+            "000002cfa40faafdbd4ccb9a91199be62f481af307060e1a37d47f2f4190567985ce24"
+        ),
+        b"arrow_v1:"
+        + bytes.fromhex(
+            "000002f0889561abdea82e996a2ffcde43cdff54ee89ef8f6c461f0a43334c38ffb605"
+        ),
     }
 )
 

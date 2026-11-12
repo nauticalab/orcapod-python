@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import collections
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -214,6 +215,10 @@ UUID_B = uuid.UUID("87654321-4321-8765-4321-876543218765")
 # Group: semantic — BaseSemanticHasher on Python values and type objects
 # ---------------------------------------------------------------------------
 
+# Added by ITL-942 (finding T): field order is part of a namedtuple's hash.
+_POINT_XY = collections.namedtuple("Point", ["x", "y"])
+_POINT_YX = collections.namedtuple("Point", ["y", "x"])
+
 SEMANTIC_VALUES: dict[str, Any] = {
     "int.zero": 0,
     "int.one": 1,
@@ -251,6 +256,13 @@ SEMANTIC_VALUES: dict[str, Any] = {
     "ndarray.float64": np.array([[0.5, 1.5], [2.5, 3.5]], dtype=np.float64),
     "ndarray.empty": np.zeros((0,), dtype=np.float32),
     "dataframe.basic": pd.DataFrame({"a": [1, 2], "b": ["x", "y"]}),
+    # Added by ITL-942: set order, dict keys and '__type__' dicts.
+    "set.mixed_str_equal": {1, "1", 2, "2"},
+    "dict.int_keys": {1: "x", 2: "y"},
+    "dict.str_keys_like_ints": {"1": "x", "2": "y"},
+    "dict.type_key": {"__type__": "tuple", "items": [1, 2]},
+    "namedtuple.xy": _POINT_XY(x=1, y=2),
+    "namedtuple.yx": _POINT_YX(y=2, x=1),
 }
 
 
@@ -530,6 +542,54 @@ def _arrow_tables() -> dict[str, pa.Table]:
         }
     )
     tables["empty.zero_rows"] = pa.table({"a": pa.array([], pa.int64())})
+    # Added with starfix hash format 2 (ITL-910): inputs format 1 could not hash or
+    # hashed alike (ITL-848, ITL-927).
+    tables["fixed_size_list.float32_2"] = pa.table(
+        {"a": pa.array([[0.5, 1.5], [2.5, 3.5]], pa.list_(pa.float32(), 2))}
+    )
+    tables["fixed_size_list.null_slot"] = pa.table(
+        {"a": pa.array([[1, 2], None], pa.list_(pa.int64(), 2))}
+    )
+    list3 = pa.large_list(pa.large_list(pa.large_list(pa.int64())))
+    tables["collision.list_lengths_a"] = pa.table(
+        {"a": pa.array([[[[1]], [[2], [3]]]], list3)}
+    )
+    tables["collision.list_lengths_b"] = pa.table(
+        {"a": pa.array([[[[1], [2]], [[3]]]], list3)}
+    )
+    tables["collision.null_struct"] = pa.table(
+        {"a": pa.array([None], pa.struct([("x", pa.int64())]))}
+    )
+    tables["collision.struct_of_nulls"] = pa.table(
+        {"a": pa.array([{"x": None}], pa.struct([("x", pa.int64())]))}
+    )
+    tables["bool.chunked"] = pa.Table.from_batches(
+        tables["bool"].to_batches(max_chunksize=1)
+    )
+    # Added by ITL-942 (finding I): nested nullability is part of the hash whether or
+    # not the column holds data.
+    non_null_struct = pa.struct([pa.field("x", pa.int64(), nullable=False)])
+    nullable_struct = pa.struct([pa.field("x", pa.int64(), nullable=True)])
+    non_null_list = pa.large_list(pa.field("item", pa.int64(), nullable=False))
+    for label, struct_t, list_t in (
+        ("non_null", non_null_struct, non_null_list),
+        ("nullable", nullable_struct, pa.large_list(pa.int64())),
+    ):
+        tables[f"nested_nullability.struct_{label}.data"] = pa.table(
+            {"a": pa.array([{"x": 1}], struct_t)}
+        )
+        tables[f"nested_nullability.struct_{label}.zero_rows"] = pa.table(
+            {"a": pa.array([], struct_t)}
+        )
+        tables[f"nested_nullability.struct_{label}.all_null"] = pa.table(
+            {"a": pa.array([None], struct_t)}
+        )
+        tables[f"nested_nullability.list_{label}.data"] = pa.table(
+            {"a": pa.array([[1]], list_t)}
+        )
+        tables[f"nested_nullability.list_{label}.zero_rows"] = pa.table(
+            {"a": pa.array([], list_t)}
+        )
     return tables
 
 
@@ -558,6 +618,22 @@ def _extension_tables() -> dict[str, pa.Table]:
     tables["extension.unregistered_passthrough"] = pa.table(
         {"c": pa.ExtensionArray.from_storage(GoldenOpaqueType(), storage)}
     )
+    # pyarrow's canonical extension types, hashable with their identity since ITL-910.
+    tables["extension.canonical_uuid"] = pa.table(
+        {
+            "c": pa.ExtensionArray.from_storage(
+                pa.uuid(), pa.array([UUID_A.bytes, UUID_B.bytes], pa.binary(16))
+            )
+        }
+    )
+    tables["extension.canonical_fixed_shape_tensor"] = pa.table(
+        {
+            "c": pa.ExtensionArray.from_storage(
+                pa.fixed_shape_tensor(pa.float32(), [2]),
+                pa.array([[0.5, 1.5], [2.5, 3.5]], pa.list_(pa.float32(), 2)),
+            )
+        }
+    )
     return tables
 
 
@@ -575,11 +651,19 @@ def arrow_extension_table_hashes() -> dict[str, Any]:
 
 @case("arrow", "schema")
 def arrow_schema_hashes() -> dict[str, Any]:
-    # hash_schema is not reachable for extension-typed schemas yet (ITL-848), so only
-    # extension-free schemas are pinned here.
     hasher = _ctx().arrow_hasher
     return {
         k: hasher.hash_schema(t.schema).to_string() for k, t in _arrow_tables().items()
+    }
+
+
+@case("arrow", "extension_schema")
+def arrow_extension_schema_hashes() -> dict[str, Any]:
+    """Schema hashes of extension columns, hashed with their identity (ITL-910, ITL-846)."""
+    hasher = _ctx().arrow_hasher
+    return {
+        k: hasher.hash_schema(t.schema).to_string()
+        for k, t in _extension_tables().items()
     }
 
 
@@ -741,6 +825,26 @@ def pipeline_pod() -> dict[str, Any]:
     return stream_summary(golden_ratio.pod(_subjects()))
 
 
+@case("pipeline", "pod_default_version")
+def pipeline_pod_default_version() -> dict[str, Any]:
+    """Pin one uri for one function whatever the entry point (ITL-942 finding N).
+
+    ``FunctionPod.from_fn`` and ``@function_pod`` both default to version ``v0.0``,
+    so the same function gets the same uri, and therefore the same table paths.
+
+    Returns:
+        The uri of the pod built each way.
+    """
+    from orcapod import FunctionPod
+
+    built = FunctionPod.from_fn(
+        golden_ratio,
+        output_keys="ratio",
+        name="golden_ratio",
+    )
+    return {"from_fn.uri": list(built.uri), "decorator.uri": list(golden_ratio.pod.uri)}
+
+
 @case("pipeline", "join_pod")
 def pipeline_join_pod() -> dict[str, Any]:
     from orcapod.operators import Join
@@ -839,6 +943,22 @@ def pipeline_column_selection() -> dict[str, Any]:
         _prefixed(
             "drop_tag", stream_summary(DropTagColumns(columns=["subject"])(_grouped()))
         )
+    )
+    # Added by ITL-942 (finding F): every spelling of one set of names has one
+    # identity; these equal the sorted-list entries.
+    for spelling, columns in {
+        "tuple": ("weight", "age"),
+        "set": {"weight", "age"},
+        "unsorted": ["weight", "age"],
+    }.items():
+        stream = SelectDataColumns(columns=columns)(_subjects())
+        out[f"select_data_spelling.{spelling}.pipeline_hash"] = (
+            stream.pipeline_hash().to_string()
+        )
+    out["select_data_spelling.sorted.pipeline_hash"] = (
+        SelectDataColumns(columns=["age", "weight"])(_subjects())
+        .pipeline_hash()
+        .to_string()
     )
     return out
 
@@ -974,6 +1094,47 @@ def pipeline_polars_filter_expr_job() -> dict[str, Any]:
                 _jsonable(v) for v in records.column("__golden_record_id").to_pylist()
             )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Group: arrow — value-hashed logical types in a column that holds no value
+# ---------------------------------------------------------------------------
+
+
+@case("arrow", "extension_no_values")
+def arrow_extension_columns_without_values() -> dict[str, Any]:
+    """Table hashes of value-hashed logical-type columns with zero rows or nulls only.
+
+    Such a column has no cell token, so its logical type enters the hash through
+    the hashed field alone (ITL-967). Every entry differs from every other and from
+    the plain ``large_binary`` entries.
+    """
+    import orcapod as op
+
+    ctx = _ctx()
+    types: dict[str, Any] = {
+        "uuid": uuid.UUID,
+        "file": op.File,
+        "directory": op.Directory,
+        "ndarray": np.ndarray,
+        "dataframe": pd.DataFrame,
+        "series": pd.Series,
+        "list_of_file": list[op.File],
+        "set_of_uuid": set[uuid.UUID],
+    }
+    entries: dict[str, Any] = {}
+    for rows, label in ((0, "zero_rows"), (2, "all_null")):
+        for name, python_type in types.items():
+            arrow_type = ctx.type_converter.python_type_to_arrow_type(python_type)
+            storage = pa.array([None] * rows, arrow_type.storage_type)
+            column = pa.ExtensionArray.from_storage(arrow_type, storage)
+            entries[f"{label}.{name}"] = ctx.arrow_hasher.hash_table(
+                pa.table({"c": column})
+            ).to_string()
+        entries[f"{label}.plain_large_binary"] = ctx.arrow_hasher.hash_table(
+            pa.table({"c": pa.array([None] * rows, pa.large_binary())})
+        ).to_string()
+    return entries
 
 
 def _nullable_readings() -> Any:

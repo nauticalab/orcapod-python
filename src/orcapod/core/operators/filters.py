@@ -4,9 +4,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
-from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
-from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -170,84 +168,4 @@ class PolarsFilter(UnaryOperator):
             self.__class__.__name__,
             self.predicates,
             self.constraints,
-        )
-
-
-class SelectDataColumns(UnaryOperator):
-    """
-    Operator that selects specified columns from a stream.
-    """
-
-    def __init__(self, columns: str | Collection[str], strict: bool = True, **kwargs):
-        if isinstance(columns, str):
-            columns = [columns]
-        self.columns = columns
-        self.strict = strict
-        super().__init__(**kwargs)
-
-    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, data_columns = stream.keys()
-        data_columns_to_drop = [c for c in data_columns if c not in self.columns]
-        new_data_columns = [c for c in data_columns if c not in data_columns_to_drop]
-
-        if len(new_data_columns) == len(data_columns):
-            logger.info("All data columns are selected. Returning stream unaltered.")
-            return stream
-
-        table = stream.as_table(
-            columns={"source": True, "system_tags": True, "sort_by_tags": False}
-        )
-        # make sure to drop associated source fields
-        associated_source_fields = [
-            f"{constants.SOURCE_PREFIX}{c}" for c in data_columns_to_drop
-        ]
-        data_columns_to_drop.extend(associated_source_fields)
-
-        modified_table = table.drop_columns(data_columns_to_drop)
-
-        return ArrowTableStream(
-            modified_table,
-            tag_columns=tag_columns,
-        )
-
-    def validate_unary_input(self, stream: StreamProtocol) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
-        # TODO: remove redundant logic
-        _, data_columns = stream.keys()
-        columns_to_select = self.columns
-        missing_columns = set(columns_to_select) - set(data_columns)
-        if missing_columns and self.strict:
-            raise InputValidationError(
-                f"Missing data columns: {missing_columns}. Make sure all specified columns to select are present or use strict=False to ignore missing columns"
-            )
-
-    def unary_output_schema(
-        self,
-        stream: StreamProtocol,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-        include_system_tags: bool = False,
-    ) -> tuple[Schema, Schema]:
-        tag_schema, data_schema = stream.output_schema(
-            columns=columns, all_info=all_info
-        )
-        _, data_columns = stream.keys()
-        data_to_drop = [pc for pc in data_columns if pc not in self.columns]
-
-        # this ensures all system tag columns are preserved
-        new_data_schema = {
-            k: v for k, v in data_schema.items() if k not in data_to_drop
-        }
-
-        return tag_schema, new_data_schema
-
-    def identity_structure(self) -> Any:
-        return (
-            self.__class__.__name__,
-            self.columns,
-            self.strict,
         )

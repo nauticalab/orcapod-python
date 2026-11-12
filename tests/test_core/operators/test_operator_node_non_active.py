@@ -13,6 +13,7 @@ from orcapod.core.operators import MapData
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
+from orcapod.system_constants import OPERATOR_DB_SCHEMA_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +186,12 @@ class TestCacheModeNonActive:
         node_log = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)
         node_log.run()
         # Confirm records exist so we know the guard, not an empty DB, returns empty
-        assert db.get_all_records(node_log.node_identity_path) is not None
+        assert (
+            db.get_all_records(
+                node_log.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,)
+            )
+            is not None
+        )
 
         # Fresh LOG node (same DB, no in-memory cache)
         node_fresh = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)

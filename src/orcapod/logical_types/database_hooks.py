@@ -22,10 +22,12 @@ These two functions are typically called in sequence via ``UniversalTypeConverte
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.logical_types.identifier import LogicalTypeIdentifierError
+from orcapod.logical_types.identifier import require_readable
 from orcapod.logical_types.registry import LogicalTypeRegistry
-from orcapod.logical_types.schema_walker import walk_schema
+from orcapod.logical_types.schema_walker import walk_field
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -54,6 +56,9 @@ def register_discovered_logical_types(
             in which case this call is a no-op.
 
     Raises:
+        LogicalTypeIdentifierError: If a column's stored identifier (extension
+            name and metadata) is not one the registered logical type reads. The
+            error names the column.
         ValueError: Propagated from the converter if an extension type's metadata
             has no registered factory or is malformed.
     """
@@ -63,23 +68,23 @@ def register_discovered_logical_types(
         )
         return
 
-    found = walk_schema(schema)
-    if not found:
-        logger.debug("register_discovered_logical_types: no extension types in schema")
-        return
-    logger.debug(
-        "register_discovered_logical_types: found %d extension type(s) in schema: %s",
-        len(found),
-        [info.extension_name for info in found],
-    )
-    for info in found:
-        # Bottom-up resolve the storage type first, then register the extension
-        resolved_storage = converter.register_storage_type(info.storage_type)
-        converter.register_logical_type_from_arrow_metadata(
-            info.extension_name,
-            info.extension_metadata,
-            resolved_storage,
-        )
+    for field in schema:
+        for info in walk_field(field):
+            logger.debug(
+                "register_discovered_logical_types: found extension type %r in column %r",
+                info.extension_name,
+                field.name,
+            )
+            try:
+                # Bottom-up resolve the storage type first, then register the extension
+                resolved_storage = converter.register_storage_type(info.storage_type)
+                converter.register_logical_type_from_arrow_metadata(
+                    info.extension_name,
+                    info.extension_metadata,
+                    resolved_storage,
+                )
+            except LogicalTypeIdentifierError as exc:
+                raise exc.for_column(field.name) from exc
 
 
 def apply_logical_types(
@@ -102,6 +107,12 @@ def apply_logical_types(
 
     Columns whose field has no ``ARROW:extension:name`` metadata (plain Arrow
     types) are left untouched.
+
+    A column is wrapped only when its stored extension metadata is one the
+    registered logical type declares readable
+    (``readable_extension_metadata``); otherwise ``LogicalTypeIdentifierError``
+    is raised, naming the column. The wrapped column has the type's current
+    identifier.
 
     Args:
         table: Arrow table whose columns may contain extension type metadata
@@ -155,14 +166,41 @@ def _apply_field(
     ext_name_bytes = field_meta.get(b"ARROW:extension:name")
 
     # ── Case 1: field is already an extension type (registered at read time) ──
-    if hasattr(field.type, "extension_name"):
-        return col, field
+    if isinstance(field.type, pa.ExtensionType):
+        lt = registry.get_by_arrow_extension_name(field.type.extension_name)
+        if lt is None:
+            return col, field
+        # The column's metadata is half of its identifier: keep the column only
+        # when the registered type declares it can read it.
+        try:
+            require_readable(lt, field.type.__arrow_ext_serialize__())
+        except LogicalTypeIdentifierError as exc:
+            raise exc.for_column(field.name) from exc
+        ext_type = lt.get_arrow_extension_type()
+        if field.type == ext_type:
+            return col, field
+        # A readable older identifier: the same storage under the current type.
+        rewrapped = [
+            pa.ExtensionArray.from_storage(
+                ext_type, cast("pa.ExtensionArray[Any]", chunk).storage
+            )
+            for chunk in col.chunks
+        ]
+        # The pyarrow stubs take no extension type here; pyarrow does.
+        new_col = pa.chunked_array(rewrapped, type=ext_type)  # pyright: ignore[reportCallIssue, reportArgumentType]
+        return new_col, field.with_type(ext_type)
 
     # ── Case 2: field has extension metadata and a matching registered type ───
     if ext_name_bytes is not None:
         ext_name = ext_name_bytes.decode("utf-8")
         lt = registry.get_by_arrow_extension_name(ext_name)
         if lt is not None:
+            # The stored metadata is half of the type's identifier: wrap the
+            # column only when the registered type declares it can read it.
+            try:
+                require_readable(lt, field_meta.get(b"ARROW:extension:metadata", b""))
+            except LogicalTypeIdentifierError as exc:
+                raise exc.for_column(field.name) from exc
             ext_type = lt.get_arrow_extension_type()
             wrapped_chunks = [
                 pa.ExtensionArray.from_storage(ext_type, chunk) for chunk in col.chunks
@@ -183,10 +221,11 @@ def _apply_field(
 
 
 def _has_nested_extension_fields(arrow_type: pa.DataType) -> bool:
-    """Return True if any child field at any nesting depth carries extension metadata.
+    """Return True if any child field at any nesting depth has an extension identity.
 
-    Used to guard struct recursion: structs whose children carry no
-    ``ARROW:extension:name`` metadata are returned as-is without rebuilding.
+    Used to guard struct recursion: structs whose children neither carry
+    ``ARROW:extension:name`` metadata nor are extension-typed are returned as-is
+    without rebuilding.
     """
     import pyarrow as pa
 
@@ -194,6 +233,10 @@ def _has_nested_extension_fields(arrow_type: pa.DataType) -> bool:
         child = arrow_type.field(i)
         meta = child.metadata or {}
         if b"ARROW:extension:name" in meta:
+            return True
+        # A member that is already extension-typed carries its identifier in its
+        # type, not in field metadata; it is checked like a stored one.
+        if isinstance(child.type, pa.ExtensionType):
             return True
         if pa.types.is_struct(child.type) and _has_nested_extension_fields(child.type):
             return True

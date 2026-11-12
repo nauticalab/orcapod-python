@@ -1,0 +1,146 @@
+{
+    "description": "Logical types registered in every data context, with the value handlers that hash their Python values. This file is not frozen: a logical type is versioned by its own identifier (Arrow extension name and metadata), not by the data context version, so adding one edits this file and no released data context manifest.",
+    "logical_type_registry": {
+        "_class": "orcapod.logical_types.registry.LogicalTypeRegistry",
+        "_config": {
+            "logical_types": [
+                {
+                    "_class": "orcapod.logical_types.builtin_logical_types.LogicalPath",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.builtin_logical_types.LogicalUPath",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.builtin_logical_types.LogicalUUID",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.file_type.LogicalFile",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.directory_type.LogicalDirectory",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.numpy_type.LogicalNumpyArray",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.pandas_type.LogicalPandasDataFrame",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.logical_types.pandas_type.LogicalPandasSeries",
+                    "_config": {}
+                }
+            ],
+            "factories": [
+                {
+                    "factory": {
+                        "_class": "orcapod.logical_types.dataclass_logical_type_factory.DataclassLogicalTypeFactory",
+                        "_config": {}
+                    },
+                    "category": "orcapod.dataclass",
+                    "python_bases": [
+                        {
+                            "_type": "builtins.object"
+                        }
+                    ]
+                },
+                {
+                    "factory": {
+                        "_class": "orcapod.logical_types.pydantic_logical_type_factory.PydanticLogicalTypeFactory",
+                        "_config": {}
+                    },
+                    "category": "orcapod.pydantic",
+                    "python_bases": [
+                        {
+                            "_type": "pydantic.BaseModel"
+                        }
+                    ]
+                },
+                {
+                    "factory": {
+                        "_class": "orcapod.logical_types.list_logical_type_factory.ListLogicalTypeFactory",
+                        "_config": {}
+                    },
+                    "category": "list"
+                },
+                {
+                    "factory": {
+                        "_class": "orcapod.logical_types.list_logical_type_factory.ListLogicalTypeFactory",
+                        "_config": {}
+                    },
+                    "category": "set"
+                }
+            ]
+        }
+    },
+    "value_handlers": [
+        [
+            {
+                "_type": "uuid.UUID"
+            },
+            {
+                "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDHandler",
+                "_config": {}
+            }
+        ],
+        [
+            {
+                "_type": "orcapod.logical_types.file_type.File"
+            },
+            {
+                "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FileHandler",
+                "_config": {
+                    "file_hasher": {
+                        "_ref": "file_hasher"
+                    }
+                }
+            }
+        ],
+        [
+            {
+                "_type": "orcapod.logical_types.directory_type.Directory"
+            },
+            {
+                "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.DirectoryHandler",
+                "_config": {
+                    "directory_hasher": {
+                        "_ref": "directory_hasher"
+                    }
+                }
+            }
+        ],
+        [
+            {
+                "_type": "numpy.ndarray"
+            },
+            {
+                "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.NumpyArrayHandler",
+                "_config": {}
+            }
+        ],
+        [
+            {
+                "_type": "pandas.DataFrame"
+            },
+            {
+                "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasDataFrameHandler",
+                "_config": {}
+            }
+        ],
+        [
+            {
+                "_type": "pandas.Series"
+            },
+            {
+                "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",
+                "_config": {}
+            }
+        ]
+    ]
+}

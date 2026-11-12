@@ -190,11 +190,31 @@ class LogicalTypeProtocol(Protocol):
         ...
 
     def get_arrow_extension_type(self) -> "pa.ExtensionType":
-        """Return the Arrow extension type for this logical type."""
+        """Return the Arrow extension type for this logical type.
+
+        Its extension name and serialized metadata are the logical type's
+        identifier: they are stored with every column of the type and are part
+        of every hash the type takes part in. Change them when, and only when,
+        an existing value would be stored or hashed differently.
+        """
         ...
 
     def get_polars_extension_type(self) -> "pl.BaseExtension":
         """Return an instance of the Polars extension type for this logical type."""
+        ...
+
+    def readable_extension_metadata(self) -> tuple[bytes, ...]:
+        """Return every stored extension metadata value this type can read.
+
+        The type's identifier is the extension name and serialized metadata of
+        ``get_arrow_extension_type()``. A stored column of that extension name is
+        read only when its stored metadata equals, byte for byte, one of the
+        values returned here; anything else raises ``LogicalTypeIdentifierError``.
+        What the bytes mean is up to the implementer.
+
+        Returns:
+            The readable metadata values, the current one first.
+        """
         ...
 
     def python_to_storage(

@@ -24,7 +24,7 @@ class TestPandasDataFrameHandler:
         df = pd.DataFrame({"a": [1.0, 2.0], "b": [3, 4]})
         result = PandasDataFrameHandler(arrow_hasher).handle(df, hasher=None)
         assert isinstance(result, ContentHash)
-        assert result.method == "arrow_v0.1"
+        assert result.method == "arrow_v1"
 
     def test_same_content_same_hash(self, arrow_hasher):
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
@@ -95,7 +95,7 @@ class TestPandasSeriesHandler:
         s = pd.Series([1.0, 2.0, 3.0], name="x")
         result = PandasSeriesHandler(arrow_hasher).handle(s, hasher=None)
         assert isinstance(result, ContentHash)
-        assert result.method == "arrow_v0.1"
+        assert result.method == "arrow_v1"
 
     def test_same_content_same_hash(self, arrow_hasher):
         from orcapod.hashing.semantic_hashing.builtin_handlers import (

@@ -190,7 +190,7 @@ class DerivedSource(RootSource):
         """Return the default ``source_id`` of a source built with ``tags_as_data``.
 
         The format is ``<kind>:<algorithm label>:<hex digest>``, for example
-        ``tags_as_data:semantic_v0.1:01bb...``: the kind names the operation that
+        ``tags_as_data:semantic_v1:01bb...``: the kind names the operation that
         derives the source, and the label and digest are the derivation hash
         (``_derivation_hash``) in its labelled form. An empty mapping is still
         this operation and gets the same kind. This one string is the
@@ -236,6 +236,9 @@ class DerivedSource(RootSource):
 
         self._explicit_source_id = source_id
         if source_id is None:
+            # A source id is the source's name, used as-is in system tags and
+            # source-info values. A default built from a hash keeps a source-kind
+            # prefix and the hash's label (developer, November 11, 2026).
             if self._tags_as_data is None:
                 source_id = f"derived:{origin.content_hash().to_string()}"
             else:

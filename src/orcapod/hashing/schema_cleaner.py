@@ -162,6 +162,47 @@ def clean_schema_for_hashing(schema: pa.Schema) -> pa.Schema:
     )
 
 
+def _contains_extension_type(arrow_type: pa.DataType) -> bool:
+    """Return True if ``arrow_type`` is or contains an Arrow extension type."""
+    if isinstance(arrow_type, pa.BaseExtensionType):
+        return True
+    if pa.types.is_struct(arrow_type):
+        return any(
+            _contains_extension_type(arrow_type.field(i).type)
+            for i in range(arrow_type.num_fields)
+        )
+    if (
+        pa.types.is_list(arrow_type)
+        or pa.types.is_large_list(arrow_type)
+        or pa.types.is_fixed_size_list(arrow_type)
+    ):
+        return _contains_extension_type(arrow_type.value_type)
+    if pa.types.is_map(arrow_type):
+        return _contains_extension_type(
+            arrow_type.key_type
+        ) or _contains_extension_type(arrow_type.item_type)
+    if pa.types.is_dictionary(arrow_type):
+        return _contains_extension_type(arrow_type.value_type)
+    return False
+
+
+def has_extension_type(schema: pa.Schema) -> bool:
+    """Return True if any field of ``schema``, at any depth, has an extension type.
+
+    Covers Python-defined ``pa.ExtensionType`` subclasses and pyarrow's built-in canonical
+    extension types (``arrow.uuid``, ``arrow.fixed_shape_tensor``, ...), which derive from
+    ``pa.BaseExtensionType`` only. starfix hashes an extension type as its storage type and
+    adds its ``ARROW:extension:*`` identity only when metadata is included.
+
+    Args:
+        schema: The ``pa.Schema`` to inspect.
+
+    Returns:
+        True if an extension type occurs anywhere in ``schema``; False otherwise.
+    """
+    return any(_contains_extension_type(field.type) for field in schema)
+
+
 def has_extension_metadata(schema: pa.Schema) -> bool:
     """Return True if ``schema`` has any ``ARROW:extension:name`` key at any depth.
 

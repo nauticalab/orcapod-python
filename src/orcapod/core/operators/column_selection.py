@@ -19,15 +19,28 @@ else:
 logger = logging.getLogger(__name__)
 
 
+def _canonical_columns(columns: str | Collection[str]) -> tuple[str, ...]:
+    """Return the column names an operator acts on, as a sorted tuple without repeats.
+
+    Select and Drop operators act on a set of names: the output keeps the
+    stream's column order whatever order the names were given in, and a repeated
+    name changes nothing. Their identity is therefore that set, written as a
+    sorted list, so a list, a tuple, a set or a single string naming the same
+    columns give one hash; an already sorted list keeps the hash it had before
+    (ITL-942 F). A tuple is stored, never the caller's own collection.
+    """
+    if isinstance(columns, str):
+        return (columns,)
+    return tuple(sorted(set(columns)))
+
+
 class SelectTagColumns(UnaryOperator):
     """
     Operator that selects specified columns from a stream.
     """
 
     def __init__(self, columns: str | Collection[str], strict: bool = True, **kwargs):
-        if isinstance(columns, str):
-            columns = [columns]
-        self.columns = columns
+        self.columns = _canonical_columns(columns)
         self.strict = strict
         super().__init__(**kwargs)
 
@@ -128,7 +141,7 @@ class SelectTagColumns(UnaryOperator):
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
-            self.columns,
+            list(self.columns),
             self.strict,
         )
 
@@ -139,9 +152,7 @@ class SelectDataColumns(UnaryOperator):
     """
 
     def __init__(self, columns: str | Collection[str], strict: bool = True, **kwargs):
-        if isinstance(columns, str):
-            columns = [columns]
-        self.columns = columns
+        self.columns = _canonical_columns(columns)
         self.strict = strict
         super().__init__(**kwargs)
 
@@ -249,7 +260,7 @@ class SelectDataColumns(UnaryOperator):
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
-            self.columns,
+            list(self.columns),
             self.strict,
         )
 
@@ -260,9 +271,7 @@ class DropTagColumns(UnaryOperator):
     """
 
     def __init__(self, columns: str | Collection[str], strict: bool = True, **kwargs):
-        if isinstance(columns, str):
-            columns = [columns]
-        self.columns = columns
+        self.columns = _canonical_columns(columns)
         self.strict = strict
         super().__init__(**kwargs)
 
@@ -369,7 +378,7 @@ class DropTagColumns(UnaryOperator):
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
-            self.columns,
+            list(self.columns),
             self.strict,
         )
 
@@ -380,9 +389,7 @@ class DropDataColumns(UnaryOperator):
     """
 
     def __init__(self, columns: str | Collection[str], strict: bool = True, **kwargs):
-        if isinstance(columns, str):
-            columns = [columns]
-        self.columns = columns
+        self.columns = _canonical_columns(columns)
         self.strict = strict
         super().__init__(**kwargs)
 
@@ -492,7 +499,7 @@ class DropDataColumns(UnaryOperator):
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
-            self.columns,
+            list(self.columns),
             self.strict,
         )
 

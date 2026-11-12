@@ -245,10 +245,11 @@ class TestProvenanceTokensMatchRowValues:
 
 
 class TestUnhashableColumnTypes:
-    """A column type the Arrow hasher cannot hash is named in the error (ITL-926).
+    """A column the Arrow hasher refuses is named in the error (ITL-926, ITL-967).
 
-    starfix 0.4.0 cannot hash ``fixed_size_list`` or ``map`` values; the source used to fail
-    with the hasher's bare ``NotImplementedError: Unsupported leaf type: ...``.
+    The hasher (starfix 0.5, ITL-910) raises ``ValueError`` for a type it does not hash,
+    such as ``map``, and names only the first such column. The source names every one,
+    with its type. ``fixed_size_list`` is hashed since starfix 0.5.
     """
 
     _FSL = pa.list_(pa.uint8(), 3)
@@ -257,30 +258,36 @@ class TestUnhashableColumnTypes:
     def _table(self, **extra: pa.Array[Any]) -> pa.Table:
         return pa.table({"k": ["a", "b"], "v": [1.0, 2.0], **extra})
 
-    def test_fixed_size_list_column_is_named(self):
+    def test_fixed_size_list_column_is_hashed(self):
+        """A source accepts a ``fixed_size_list`` column and keeps its type."""
         table = self._table(rgb=pa.array([[1, 2, 3], [4, 5, 6]], self._FSL))
-        with pytest.raises(NotImplementedError) as info:
-            ArrowTableSource(table, tag_columns=["k"])
-        message = str(info.value)
-        assert "'rgb'" in message
-        assert str(self._FSL) in message
-        assert "'v'" not in message
-        assert isinstance(info.value.__cause__, NotImplementedError)
+        source = ArrowTableSource(table, tag_columns=["k"])
+        assert source.as_table().schema.field("rgb").type == self._FSL
 
     def test_map_column_is_named(self):
         table = self._table(tags=pa.array([[("x", 1)], []], self._MAP))
-        with pytest.raises(NotImplementedError, match="'tags'"):
+        with pytest.raises(ValueError) as info:
             ArrowTableSource(table, tag_columns=["k"])
+        message = str(info.value)
+        assert message.startswith("cannot hash column 'tags' of type ")
+        assert str(self._MAP) in message
+        assert "'v'" not in message
+        assert isinstance(info.value.__cause__, ValueError)
+        # The hasher's own message is kept in the text as well as in the cause.
+        assert str(info.value.__cause__) in message
 
     def test_every_unhashable_column_is_named(self):
         table = self._table(
-            rgb=pa.array([[1, 2, 3], [4, 5, 6]], self._FSL),
             tags=pa.array([[("x", 1)], []], self._MAP),
+            attrs=pa.array([[], [("y", 2)]], self._MAP),
         )
-        with pytest.raises(NotImplementedError) as info:
+        with pytest.raises(ValueError) as info:
             ArrowTableSource(table, tag_columns=["k"])
-        assert "'rgb'" in str(info.value)
-        assert "'tags'" in str(info.value)
+        message = str(info.value)
+        assert message.startswith("cannot hash columns ")
+        assert "'tags'" in message
+        assert "'attrs'" in message
+        assert "'v'" not in message
 
     def test_hashable_table_is_hashed_once(self, monkeypatch):
         # Counts calls on the data context's hasher: the per-column probe must run only

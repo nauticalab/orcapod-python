@@ -383,6 +383,27 @@ class InMemoryArrowDatabase:
                 seen.add(key[len(prefix_slash) :])
         return sorted(tuple(k.split("/")) for k in seen if k)
 
+    def list_table_paths(self, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+        """List the paths of the tables stored under ``prefix``.
+
+        Exact: every table, flushed or still pending, whose path starts with
+        ``prefix``. Nothing is read.
+
+        Args:
+            prefix: Leading path components, relative to ``self.base_path``.
+
+        Returns:
+            The table paths, relative to ``self.base_path``, sorted.
+        """
+        full_prefix = self._path_prefix + prefix
+        skip = len(self._path_prefix)
+        found: set[tuple[str, ...]] = set()
+        for key in list(self._tables.keys()) + list(self._pending_batches.keys()):
+            path = tuple(key.split("/"))
+            if path[: len(full_prefix)] == full_prefix:
+                found.add(path[skip:])
+        return sorted(found)
+
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
         """Return ``True`` if a table exists at ``record_path``.
 

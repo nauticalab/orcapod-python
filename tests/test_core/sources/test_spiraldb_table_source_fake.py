@@ -275,40 +275,42 @@ class TestSourceId:
 
     def test_unrecorded_table_hashes_are_unchanged(self, two_projects):
         # A table without a nullability record reads exactly as before ITL-936: every
-        # column nullable, as SpiralDB reports it. Values pinned at 49956a6a, before the
-        # record existed.
+        # column nullable, as SpiralDB reports it. The values were pinned at 49956a6a,
+        # before the record existed, and re-recorded once for the v0.3 hash step
+        # (ITL-967: starfix 0.5 and the hash label rule move every one of them).
         source = SpiralDBTableSource("edi-sample-a", "unrecorded", source_id="subject")
         assert source.output_schema() == (
             Schema({"subject_id": str | None}),
             Schema({"sex": str | None}),
         )
         assert self._identity(source) == (
-            "semantic_v0.1:0380725acb9073df747380b348f72a8a66bbe52f02e46fb3df795e7518e7f4f6",
+            "semantic_v1:896d8f323df90ee26e6a38f1eb730be7a9de343fd1c852dbf0f7655b360bc7ff",
             "18d1efa53fbc52b6a40f406eca35ca81",
             "subject::row_0::sex",
         )
         assert source.pipeline_hash().to_string() == (
-            "semantic_v0.1:61796d9cdbd5afce45b2b99b1efe306a745ee63bdf4952e841772a04c450498a"
+            "semantic_v1:cc6c553ba26af325cd96432edb5bc4ea5453427594965cca7e85a66a420e87f1"
         )
         row_hash = source.as_table(columns={"content_hash": True}).column(
             "_content_hash"
         )
         assert row_hash.to_pylist() == [
-            "arrow_v0.1:0000017a393c2f094ebfb6ecb72d0a0d5ef088243f38b709695c846dbd4a17b095caf9"
+            "arrow_v1:000002bbde92209120af87be19987a1cfd0cb8a3aa4ab4562941c225530861c74d360e"
         ]
 
     def test_explicit_source_id_keeps_its_hashes(self, two_projects):
-        # Values pinned on main (ebf2511b) before the default changed. The table was
+        # Values pinned on main (ebf2511b) before the default changed, re-recorded once
+        # for the v0.3 hash step (ITL-967). The table was
         # written non-null; with the nullability record it reads back non-null, so the
         # hashes are those of the table as written.
         source = SpiralDBTableSource("edi-sample-a", "subject", source_id="subject")
         assert self._identity(source) == (
-            "semantic_v0.1:1f4ecfe64566d1684d7cdf1319f0274a7048e0124f8026c815814de7d0e365d3",
+            "semantic_v1:a06a417294cabb0625e47a9357ebf9cc8183576b17498282901bd68d0f02e820",
             "18d1efa53fbc52b6a40f406eca35ca81",
             "subject::row_0::sex",
         )
         assert source.pipeline_hash().to_string() == (
-            "semantic_v0.1:a771eabb35eac3fbd266b5751c75c6664556a2fab5d0d31977cefedc4b870a3d"
+            "semantic_v1:2e5095e09a558132e652e106af1dca4abf8654285409fc4db63a66ddc63a9f94"
         )
 
 

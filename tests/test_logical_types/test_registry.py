@@ -12,6 +12,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from orcapod.logical_types.identifier import LogicalTypeIdentifierError
+
 from orcapod.logical_types.protocols import (
     LogicalTypeProtocol,
     LogicalTypeFactoryProtocol,
@@ -829,7 +831,7 @@ class TestDeserializeStorageFamilyTolerance:
         name = _unique_name()
         cls = make_arrow_extension_type(name, pa.large_string(), metadata=b"expected")
         ext = cls()
-        with pytest.raises(ValueError, match="expected metadata"):
+        with pytest.raises(LogicalTypeIdentifierError):
             ext.__arrow_ext_deserialize__(pa.string(), b"wrong")
 
     def test_metadata_mismatch_raises_for_canonical_storage_too(self):
@@ -837,7 +839,7 @@ class TestDeserializeStorageFamilyTolerance:
         name = _unique_name()
         cls = make_arrow_extension_type(name, pa.large_string(), metadata=b"expected")
         ext = cls()
-        with pytest.raises(ValueError, match="expected metadata"):
+        with pytest.raises(LogicalTypeIdentifierError):
             ext.__arrow_ext_deserialize__(pa.large_string(), b"wrong")
 
 

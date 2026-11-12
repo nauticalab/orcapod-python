@@ -29,6 +29,7 @@ from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 from orcapod.types import CacheMode
+from orcapod.system_constants import OPERATOR_DB_SCHEMA_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +465,9 @@ class TestOperatorNodeHashColumnType:
         )
         node.run()
 
-        all_records = db.get_all_records(node.node_identity_path)
+        all_records = db.get_all_records(
+            node.node_identity_path + (OPERATOR_DB_SCHEMA_VERSION,)
+        )
         assert all_records is not None
         col_name = constants.NODE_CONTENT_HASH_COL
         assert col_name in all_records.column_names

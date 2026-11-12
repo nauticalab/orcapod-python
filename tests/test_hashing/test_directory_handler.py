@@ -27,7 +27,7 @@ class TestBasicDirectoryHasher:
         hasher = BasicDirectoryHasher(file_hasher=FileHasher())
         result = hasher.hash_directory(empty)
         assert isinstance(result, ContentHash)
-        assert result.method == "merkle_sha256"
+        assert result.method == "directory_v1"
 
     def test_empty_directory_hash_is_stable(self, tmp_path):
         d1 = tmp_path / "d1"

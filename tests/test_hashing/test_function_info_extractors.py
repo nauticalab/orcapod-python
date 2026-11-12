@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import orcapod as op
+from orcapod.contexts import get_default_context
 
 
 class TestFunctionNameExtractor:
@@ -253,7 +254,6 @@ class TestFunctionSignatureExtractorWithRegistry:
 
     @pytest.fixture
     def extractor(self):
-        from orcapod.contexts import get_default_context
         from orcapod.hashing.semantic_hashing.function_info_extractors import (
             FunctionSignatureExtractor,
         )
@@ -300,7 +300,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         def fn(f: op.File) -> str: ...
 
         info = extractor.extract_function_info(fn)
-        assert info["params"] == "f: orcapod.file"
+        assert info["params"] == "f: orcapod.file;7b2276657273696f6e223a317d"
 
     def test_generic_param_annotation_canonical(self, extractor):
         """list[op.File] in a parameter is canonicalized."""
@@ -308,7 +308,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         def fn(files: list[op.File]) -> str: ...
 
         info = extractor.extract_function_info(fn)
-        assert info["params"] == "files: list[orcapod.file]"
+        assert info["params"] == "files: list[orcapod.file;7b2276657273696f6e223a317d]"
 
     def test_union_return_annotation_is_raw_union(self, extractor):
         """op.File | None return annotation is stored as a raw union type object.
@@ -395,7 +395,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         info_param = extractor.extract_function_info(fn_param)
         info_return = extractor.extract_function_info(fn_return)
 
-        assert info_param["params"] == "f: orcapod.file"
+        assert info_param["params"] == "f: orcapod.file;7b2276657273696f6e223a317d"
         assert info_return["returns"] is op.File
 
     def test_simulated_relocation_stable(self, extractor):
@@ -426,7 +426,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         def fn(p: Path) -> str: ...
 
         info = extractor.extract_function_info(fn)
-        assert info["params"] == "p: orcapod.path"
+        assert info["params"] == "p: orcapod.path;7b2276657273696f6e223a317d"
 
     def test_uuid_param_annotation_is_canonical_string(self, extractor):
         """uuid.UUID in a param annotation is canonicalized to 'orcapod.uuid'.
@@ -438,7 +438,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         def fn(u: uuid.UUID) -> str: ...
 
         info = extractor.extract_function_info(fn)
-        assert info["params"] == "u: orcapod.uuid"
+        assert info["params"] == "u: orcapod.uuid;7b2276657273696f6e223a317d"
 
     def test_union_with_path_canonical(self, extractor):
         """str | Path union param: Path is canonicalized to 'orcapod.path'.
@@ -452,7 +452,7 @@ class TestFunctionSignatureExtractorWithRegistry:
         def fn(x: str | Path) -> None: ...
 
         info = extractor.extract_function_info(fn)
-        assert info["params"] == "x: orcapod.path | str"
+        assert info["params"] == "x: orcapod.path;7b2276657273696f6e223a317d | str"
 
     def test_path_return_annotation_type_object_hashes_to_canonical(self, extractor):
         """pathlib.Path as return: extractor stores raw type, TypeObjectHandler gives 'type:orcapod.path'.
@@ -464,7 +464,6 @@ class TestFunctionSignatureExtractorWithRegistry:
            same ``type_converter``), it produces ``"type:orcapod.path"`` — the stable canonical
            form — not ``"type:pathlib.Path"`` (the old module-path form).
         """
-        from orcapod.contexts import get_default_context
         from orcapod.hashing.semantic_hashing.builtin_handlers import TypeObjectHandler
 
         def fn(s: str) -> Path: ...
@@ -481,6 +480,6 @@ class TestFunctionSignatureExtractorWithRegistry:
         handler = TypeObjectHandler(type_converter=tc)
         hasher = get_default_context().semantic_hasher
         serialized = handler.handle(info["returns"], hasher)
-        assert serialized == "type:orcapod.path", (
-            f"Expected 'type:orcapod.path', got {serialized!r}"
+        assert serialized == "type:orcapod.path;7b2276657273696f6e223a317d", (
+            f"Expected the identifier text of orcapod.path, got {serialized!r}"
         )

@@ -49,7 +49,7 @@ class Join(NonZeroInputOperator):
         # Canonically order by pipeline_hash for deterministic operation.
         # pipeline_hash is structure-only, so streams with the same schema+topology
         # get the same ordering regardless of data content.
-        return sorted(streams, key=lambda s: s.pipeline_hash().to_string())
+        return sorted(streams, key=lambda s: s.pipeline_hash().to_hex())
 
     def argument_symmetry(self, streams: Collection) -> ArgumentGroup:
         return frozenset(streams)

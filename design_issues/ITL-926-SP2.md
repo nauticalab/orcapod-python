@@ -27,9 +27,9 @@ process. Findings, with repro scripts, are in `superpowers/specs/itl-926-live/FI
 
 * Every column of the EDI sample tables is nullable, so a function pod over them must
   annotate `T | None`; recorded columns arrive as `T` (SP3, ITL-936).
-* `fixed_size_list` columns cannot be hashed: not supported until Orcapod adopts starfix
-  0.5.0 (ITL-910; starfix support is ITL-927). `map` columns fail the same way in starfix
-  0.4.0 (none in the EDI tables).
+* `fixed_size_list` columns could not be hashed with starfix 0.4.0; they are hashed since
+  Orcapod adopted starfix 0.5.0 (ITL-910, ITL-927). `map` columns are still refused: the
+  source raises `ValueError` naming every refused column (none in the EDI tables).
 * The whole table is read at construction, which rules out tables such as `spike_event`
   (8.1M rows); the streaming design is in
   `superpowers/specs/2026-11-11-itl-186-spiral-streaming-source-design.md`.

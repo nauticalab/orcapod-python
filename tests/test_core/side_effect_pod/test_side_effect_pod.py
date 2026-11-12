@@ -805,6 +805,7 @@ class TestSideEffectInvocationLogHashType:
             record_id=record_id,
             record_id_hash_bytes=record_id_hash_bytes,
             run_id=None,
+            data_context_key="std:v1:default",
         )
 
         records = db.get_all_records(table_path)
@@ -829,6 +830,7 @@ class TestSideEffectInvocationLogHashType:
             record_id=record_id,
             record_id_hash_bytes=record_id_hash_bytes,
             run_id="run-42",
+            data_context_key="std:v1:default",
         )
 
         records = db.get_all_records(table_path)

@@ -86,7 +86,9 @@ class TestSideEffectFunctionPodSchema:
         assert pod.uri[0] == "side_effect_function"
         assert pod.uri[-1] == "python.function.v0"
         assert len(pod.uri) == 5
-        assert pod.uri[3] == "v1"
+        assert (
+            pod.uri[3] == "v0"
+        )  # default version v0.0 for every entry point (ITL-942 N)
 
 
 class TestSideEffectFunctionPodStreamStandalone:

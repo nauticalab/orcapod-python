@@ -192,6 +192,44 @@ class ConnectorArrowDatabase:
             return None
         return pa.Table.from_batches(batches)
 
+    def list_table_paths(self, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+        """List the paths of the tables stored under ``prefix``.
+
+        A table name in the backend does not keep the path it was made from (see
+        ``_path_to_table_name``), so this lists by name: the tables, committed or
+        pending, whose name starts with the name ``prefix`` maps to. The components
+        after ``prefix`` are the rest of the name split at ``__``. They are in the
+        backend's form: every character other than letters, digits and ``_`` is
+        ``_``, and a component that holds ``__`` comes back as two. Such a path
+        still names the same table. A table of another path that maps to a name
+        with the same beginning is listed as well. With an empty prefix at the
+        root, a name that got the ``t_`` prefix keeps it.
+
+        Costs one listing of the backend's table names; no table is read.
+
+        Args:
+            prefix: Leading path components, relative to ``self.base_path``.
+
+        Returns:
+            The table paths, relative to ``self.base_path``, sorted.
+        """
+        full_prefix = self._path_prefix + prefix
+        names = set(self._connector.get_table_names())
+        names.update(
+            self._path_to_table_name(tuple(key.split("/")))
+            for key in self._pending_batches
+        )
+        stem = self._path_to_table_name(full_prefix) if full_prefix else ""
+        found: set[tuple[str, ...]] = set()
+        for name in names:
+            if not stem:
+                found.add(tuple(name.split("__")))
+            elif name == stem:
+                found.add(prefix)
+            elif name.startswith(stem + "__"):
+                found.add(prefix + tuple(name[len(stem) + 2 :].split("__")))
+        return sorted(found)
+
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
         """Return ``True`` if a table exists at ``record_path``.
 

@@ -211,8 +211,9 @@ class TestFunctionNodeContentHashScope:
         assert path[-1].startswith("instance:"), (
             f"Expected instance:... got {path[-1]!r}"
         )
-        assert node.pipeline_hash().to_string() in path[-2]
-        assert node.content_hash().to_string() in path[-1]
+        # Whole components: a labelled hash ("schema:semantic_v1:...") must fail.
+        assert path[-2] == f"schema:{node.pipeline_hash().to_hex()}"
+        assert path[-1] == f"instance:{node.content_hash().to_hex()}"
 
     def test_two_nodes_different_source_id_have_different_paths(self):
         """Different source_id → different content_hash → different node_identity_path."""
@@ -472,8 +473,9 @@ class TestOperatorNodeContentHashScope:
         assert path[-1].startswith("instance:"), (
             f"Expected instance:... got {path[-1]!r}"
         )
-        assert node.pipeline_hash().to_string() in path[-2]
-        assert node.content_hash().to_string() in path[-1]
+        # Whole components: a labelled hash ("schema:semantic_v1:...") must fail.
+        assert path[-2] == f"schema:{node.pipeline_hash().to_hex()}"
+        assert path[-1] == f"instance:{node.content_hash().to_hex()}"
 
     def test_two_nodes_different_source_ids_have_different_paths(self):
         db = InMemoryArrowDatabase()
@@ -533,7 +535,7 @@ class TestOperatorNodeDescriptorTableScope:
             "label": None,
             "content_hash": "fake_hash",
             "pipeline_hash": "fake_pipeline_hash",
-            "data_context_key": "std:v0.1:default",
+            "data_context_key": "std:v1:default",
             # "table_scope" intentionally omitted
             "output_schema": {"tag": {"key": "large_string"}, "data": {"val": "int64"}},
             "operator": {
@@ -560,7 +562,7 @@ class TestOperatorNodeDescriptorTableScope:
             "label": None,
             "content_hash": "fake_hash",
             "pipeline_hash": "fake_pipeline_hash",
-            "data_context_key": "std:v0.1:default",
+            "data_context_key": "std:v1:default",
             "table_scope": "pipeline_hash",
             "output_schema": {"tag": {"key": "large_string"}, "data": {"val": "int64"}},
             "operator": {
@@ -587,7 +589,7 @@ class TestOperatorNodeDescriptorTableScope:
             "label": None,
             "content_hash": "fake_hash",
             "pipeline_hash": "fake_pipeline_hash",
-            "data_context_key": "std:v0.1:default",
+            "data_context_key": "std:v1:default",
             "table_scope": "content_hash",
             "output_schema": {"tag": {"key": "large_string"}, "data": {"val": "int64"}},
             "operator": {

@@ -10,6 +10,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Iterable
 
+from orcapod.logical_types.identifier import LogicalTypeIdentifierError
+from orcapod.logical_types.identifier import LogicalTypeIdentifier
 from orcapod.logical_types.protocols import (
     LogicalTypeProtocol,
     LogicalTypeFactoryProtocol,
@@ -60,6 +62,7 @@ def make_arrow_extension_type(
     extension_name: str,
     storage_type: pa.DataType,
     metadata: bytes | None = None,
+    also_reads: tuple[bytes, ...] = (),
 ) -> type[pa.ExtensionType]:
     """Synthesise and return a ``pa.ExtensionType`` subclass.
 
@@ -89,6 +92,12 @@ def make_arrow_extension_type(
             uses it to auto-generate the correct ``LogicalTypeProtocol`` implementation
             for the specific Python class within that category, without requiring
             explicit prior registration.
+        also_reads: Further stored metadata values the type can read, beside
+            ``metadata``: identifiers of older versions whose stored layout this
+            version still decodes. Data stored under one of them is given the
+            current type on read. The returned class exposes the full tuple as
+            ``readable_metadata``, which ``BaseLogicalType`` uses as the default
+            for ``readable_extension_metadata``.
 
     Returns:
         A ``pa.ExtensionType`` subclass. Call it with no arguments to obtain
@@ -96,6 +105,7 @@ def make_arrow_extension_type(
         returning from ``get_arrow_extension_type()``.
     """
     _name, _storage, _metadata = extension_name, storage_type, metadata or b""
+    _readable = (_metadata, *(m for m in also_reads if m != _metadata))
 
     def _deserialize(
         cls, storage_type: pa.DataType, serialized: bytes
@@ -133,10 +143,9 @@ def make_arrow_extension_type(
                 f"Arrow extension type '{_name}': expected storage_type "
                 f"{_storage!r} but got {storage_type!r}."
             )
-        if serialized != _metadata:
-            raise ValueError(
-                f"Arrow extension type '{_name}': expected metadata "
-                f"{_metadata!r} but got {serialized!r}."
+        if serialized not in _readable:
+            raise LogicalTypeIdentifierError(
+                LogicalTypeIdentifier(_name, serialized), _readable
             )
         return cls()
 
@@ -147,6 +156,7 @@ def make_arrow_extension_type(
             "__init__": lambda self: pa.ExtensionType.__init__(self, _storage, _name),
             "__arrow_ext_serialize__": lambda self: _metadata,
             "__arrow_ext_deserialize__": classmethod(_deserialize),
+            "readable_metadata": _readable,
         },
     )
 
@@ -283,10 +293,17 @@ class LogicalTypeRegistry:
         Raises:
             ValueError: If any of the three keys (``logical_type_name``,
                 Arrow extension name, ``python_type``) is already bound to a
-                *different* ``LogicalTypeProtocol`` in this registry.
+                *different* ``LogicalTypeProtocol`` in this registry, or if the
+                Arrow extension name contains ``;`` (the separator between name
+                and metadata in the identifier text that is hashed).
         """
         arrow_ext = logical_type.get_arrow_extension_type()
         arrow_ext_name = arrow_ext.extension_name
+        if ";" in arrow_ext_name:
+            raise ValueError(
+                f"Cannot register logical type with Arrow extension name "
+                f"{arrow_ext_name!r}: an extension name must not contain ';'."
+            )
         py_type = logical_type.python_type
         logical_name = logical_type.logical_type_name
 

@@ -27,6 +27,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from orcapod.hashing.semantic_hashing.encoded import Encoded
+from orcapod.logical_types.identifier import logical_type_identifier
 from orcapod.types import ContentHash, Schema
 from orcapod.utils.canonical_type_names import canonical_type_name
 
@@ -85,8 +87,12 @@ class TypeObjectHandler:
     """Hasher for type objects (classes passed as values).
 
     Resolves types registered in the ``LogicalTypeRegistry`` exposed by
-    *type_converter* to their stable ``logical_type_name``
-    (e.g. ``"type:orcapod.file"`` for ``op.File``).
+    *type_converter* to their logical type identifier, the Arrow extension name
+    and extension metadata, written as ``LogicalTypeIdentifier.text``
+    (``"type:orcapod.file;7b2276657273696f6e223a317d"`` for ``op.File``:
+    the name, ``;``, then the metadata ``{"version":1}`` in hex). A change of
+    either part of the identifier therefore changes every type, schema,
+    function and pipeline hash the type takes part in.
     Falls back to ``"type:<module>.<qualname>"`` for unregistered types or
     when no ``type_converter`` is provided. The module is the canonical one
     from ``canonical_type_name``, so standard-library types that moved into a
@@ -96,7 +102,7 @@ class TypeObjectHandler:
     Args:
         type_converter: Optional ``TypeConverterProtocol``.  When provided,
             ``type_converter.get_logical_type(obj)`` is called to resolve
-            registered logical types to their stable canonical name.  When
+            registered logical types to their identifier.  When
             ``None`` (the default), the fallback ``"type:<module>.<qualname>"``
             serialisation is always used.
     """
@@ -112,7 +118,7 @@ class TypeObjectHandler:
         if self._type_converter is not None:
             lt = self._type_converter.get_logical_type(obj)
             if lt is not None:
-                return f"type:{lt.logical_type_name}"
+                return f"type:{logical_type_identifier(lt).text}"
         return f"type:{canonical_type_name(obj)}"
 
 
@@ -122,6 +128,24 @@ class SpecialFormHandler:
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         name = getattr(obj, "_name", None) or repr(obj)
         return f"special_form:typing.{name}"
+
+
+def _sorted_hashes(
+    hasher: "SemanticHasherProtocol", args: tuple[Any, ...]
+) -> list[ContentHash]:
+    """Hash each of ``args`` and return the hashes ordered by digest.
+
+    The hashes are returned as ``ContentHash`` objects: the structure hasher feeds only
+    their digests into the enclosing hash, never their labels.
+
+    Args:
+        hasher: The structure hasher in use.
+        args: The members of a union.
+
+    Returns:
+        One hash per member, sorted by hex digest so that member order does not matter.
+    """
+    return sorted((hasher.hash_object(arg) for arg in args), key=ContentHash.to_hex)
 
 
 class GenericAliasHandler:
@@ -135,13 +159,14 @@ class GenericAliasHandler:
         if origin is None:
             return f"generic_alias:{obj!r}"
         if origin is typing.Union:
-            hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
-            return {"__type__": "union", "args": hashed_args}
-        return {
-            "__type__": "generic_alias",
-            "origin": hasher.hash_object(origin).to_string(),
-            "args": [hasher.hash_object(arg).to_string() for arg in args],
-        }
+            return Encoded("union", {"args": _sorted_hashes(hasher, args)})
+        return Encoded(
+            "generic_alias",
+            {
+                "origin": hasher.hash_object(origin),
+                "args": [hasher.hash_object(arg) for arg in args],
+            },
+        )
 
 
 class UnionTypeHandler:
@@ -149,8 +174,7 @@ class UnionTypeHandler:
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         args = getattr(obj, "__args__", None) or ()
-        hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
-        return {"__type__": "union", "args": hashed_args}
+        return Encoded("union", {"args": _sorted_hashes(hasher, args)})
 
 
 class ArrowTableHandler:
@@ -190,8 +214,8 @@ class SchemaHandler:
 
     Canonical, explicit path for schema hashing. For each field, hashes the Python
     type via ``hasher.hash_object`` (which dispatches to ``TypeObjectHandler``, using
-    the stable ``logical_type_name`` / Arrow extension name for registered types and the
-    stable ``builtins.*`` / stdlib path for native types). Field names are sorted so the
+    the logical type identifier, Arrow extension name and metadata, for registered types
+    and the stable ``builtins.*`` / stdlib path for native types). Field names are sorted so the
     hash is deterministic regardless of insertion order.
 
     This produces the same hash as the previous accidental path through ``_expand_mapping``
@@ -225,8 +249,9 @@ class SchemaHandler:
                 Python type.
 
         Returns:
-            A ``dict[str, str]`` mapping field name to the ``to_string()`` of each
-            field type's hash, sorted by field name for determinism.
+            A ``dict[str, ContentHash]`` mapping field name to the hash of the field's
+            type, sorted by field name for determinism. The structure hasher feeds
+            only the digests into the schema hash.
 
         Raises:
             TypeError: If ``obj`` is not a ``Schema``, or if ``type_converter`` is
@@ -234,7 +259,7 @@ class SchemaHandler:
         """
         if not isinstance(obj, Schema):
             raise TypeError(f"SchemaHandler: expected a Schema, got {type(obj)!r}")
-        result: dict[str, str] = {}
+        result: dict[str, ContentHash] = {}
         for field_name, python_type in obj.items():
             if self._type_converter is not None:
                 try:
@@ -248,7 +273,7 @@ class SchemaHandler:
                         f"supported native type (int, str, float, bool, bytes, "
                         f"datetime, date)."
                     ) from exc
-            result[field_name] = hasher.hash_object(python_type).to_string()
+            result[field_name] = hasher.hash_object(python_type)
         # Sort by field name for determinism — matches _expand_mapping's sort_keys.
         return dict(sorted(result.items()))
 
