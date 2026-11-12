@@ -355,7 +355,19 @@ Function Pods: inspect data content (never tags), synthesize new values, cached 
 
 Every pipeline element has two parallel hashes:
 
-1. content_hash() — data-inclusive. Changes when data changes. Used for deduplication.
+1. content_hash() — the pipeline bound to its named sources: schema, topology and source
+   identity. For a source it is a stable address, not a digest of its rows (developer,
+   November 11, 2026: "sources content hash is meant to be a stable address and is not
+   necessarily going to reflect the very data content"). A root source hashes
+   (class name, output schema, source_id); given a source_id, changed, added or reordered
+   rows leave it unchanged. Row content enters only where a source puts it into its own
+   identity: the default source_id of the in-memory sources (a hash of the table, used when
+   none is given) and the elements of a ListSource. A downstream stream or node hashes its
+   pod's identity plus its upstreams' content hashes; a function pod's identity is its uri,
+   not its body. Only a datagram (one row's tags or data) has a content_hash() that is a
+   digest of its values; that row hash, not the node's content hash, is what results are
+   memoized by. The node's content hash tells apart, inside a shared table, the rows of
+   pipelines bound to different sources (__node_content_hash).
 2. pipeline_hash() — schema + topology only. Ignores data content. Used for DB path scoping
    so that different sources with identical schemas share database tables.
 
