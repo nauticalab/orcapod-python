@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import dataclasses
 import logging
 from abc import abstractmethod
@@ -964,11 +965,16 @@ class FunctionPodStream(StreamBase):
         super().__init__(**kwargs)
 
         # Iterator acquired lazily on first use to avoid triggering upstream
-        # computation during construction.
+        # computation during construction. Each input row carries its index, attached
+        # once when the input is first read: an iteration that resumes the input after
+        # a partial one keeps counting from where the input is, never from 0 (ITL-1039).
         self._cached_input_iterator: (
-            Iterator[tuple[TagProtocol, DataProtocol]] | None
+            Iterator[tuple[int, tuple[TagProtocol, DataProtocol]]] | None
         ) = None
         self._needs_iterator = True
+        # The input raised while it was being read: its iterator is closed, so the next
+        # read opens the input again and skips the rows already cached.
+        self._input_interrupted = False
 
         # DataProtocol-level caching (for the output data)
         self._cached_output_datas: dict[
@@ -1025,16 +1031,30 @@ class FunctionPodStream(StreamBase):
         )
 
     def _ensure_iterator(self) -> None:
-        """Lazily acquire the upstream iterator on first use."""
+        """Lazily acquire the upstream iterator on first use, or again after it raised.
+
+        An input opened again after it raised yields its rows from the first, with the
+        same indices; the rows this stream already cached are skipped. Opening it again
+        is not a change of this stream's content, so its modified time stays.
+        """
         if self._needs_iterator:
-            self._cached_input_iterator = self._input_stream.iter_data()
+            self._cached_input_iterator = enumerate(self._input_stream.iter_data())
             self._needs_iterator = False
             self._update_modified_time()
+        elif self._input_interrupted:
+            self._cached_input_iterator = enumerate(self._input_stream.iter_data())
+            self._input_interrupted = False
+
+    def _input_raised(self) -> None:
+        """Record that the input raised while being read: it is opened again next read."""
+        self._cached_input_iterator = None
+        self._input_interrupted = True
 
     def clear_cache(self) -> None:
         """Discard all in-memory cached state."""
         self._cached_input_iterator = None
         self._needs_iterator = True
+        self._input_interrupted = False
         self._cached_output_datas.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
@@ -1059,75 +1079,139 @@ class FunctionPodStream(StreamBase):
                 if data is not None:
                     yield tag, data
 
+    def _pod_base(self) -> "_FunctionPodBase":
+        """The stream's pod, with its row hooks: every function pod is a ``_FunctionPodBase``."""
+        pod = self._function_pod
+        assert isinstance(pod, _FunctionPodBase), type(pod)
+        return pod
+
     def _iter_data_sequential(
         self,
     ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-        input_iter = self._cached_input_iterator
-        assert input_iter is not None
-        for i, (tag, data) in enumerate(input_iter):
-            if i in self._cached_output_datas:
-                # Use cached result
-                tag, data = self._cached_output_datas[i]
+        """Yield every row in input order, computing each uncached one as it is reached.
+
+        Rows an earlier (possibly partial, possibly interleaved) iteration computed are
+        yielded from the cache under their own input index; the next uncached index is
+        always the next row of the shared input, which is computed, cached under its own
+        index, and yielded.
+        """
+        index = 0
+        while True:
+            if index in self._cached_output_datas:
+                tag, data = self._cached_output_datas[index]
                 if data is not None:
                     yield tag, data
-            else:
-                # Process data
-                tag, output_data = self._function_pod._invoke_with_hooks(tag, data)
-                self._cached_output_datas[i] = (tag, output_data)
-                if output_data is not None:
-                    yield tag, output_data
-
-        # Mark completion by releasing the iterator
-        self._cached_input_iterator = None
+                index += 1
+                continue
+            if self._cached_input_iterator is None and self._input_interrupted:
+                # Another iteration saw the input raise: open it again.
+                self._ensure_iterator()
+            input_iter = self._cached_input_iterator
+            if input_iter is None:
+                # The input was read to its end, by this or another iteration.
+                return
+            try:
+                input_index, (tag, data) = next(input_iter)
+            except StopIteration:
+                # Mark completion by releasing the iterator
+                self._cached_input_iterator = None
+                return
+            except BaseException:
+                # The input itself raised; its iterator is closed. Open it again on
+                # the next read instead of taking it as exhausted.
+                self._input_raised()
+                raise
+            if input_index in self._cached_output_datas:
+                # An input opened again yields the rows this stream already cached.
+                continue
+            try:
+                out_tag, output_data = self._pod_base()._invoke_with_hooks(tag, data)
+            except BaseException:
+                # The row was taken from the input but not computed: put it back, so
+                # the next read computes it instead of skipping it.
+                self._cached_input_iterator = itertools.chain(
+                    [(input_index, (tag, data))], input_iter
+                )
+                raise
+            tag = out_tag
+            self._cached_output_datas[input_index] = (tag, output_data)
+            if output_data is not None:
+                yield tag, output_data
+            index = input_index + 1
 
     def _iter_data_concurrent(
         self,
     ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-        """Collect remaining inputs, execute concurrently, and yield results in order."""
+        """Collect remaining inputs, execute concurrently, and yield every row in order."""
         input_iter = self._cached_input_iterator
         assert input_iter is not None
 
-        # Materialise remaining inputs and separate cached from uncached.
-        all_inputs: list[tuple[int, TagProtocol, DataProtocol]] = []
-        to_compute: list[tuple[int, TagProtocol, DataProtocol]] = []
-        for i, (tag, data) in enumerate(input_iter):
-            all_inputs.append((i, tag, data))
-            if i not in self._cached_output_datas:
-                to_compute.append((i, tag, data))
-        self._cached_input_iterator = None
+        # Materialise the rest of the input, each row with its own input index; the rows
+        # before it were cached by an earlier iteration.
+        try:
+            to_compute: list[tuple[int, TagProtocol, DataProtocol]] = [
+                (i, tag, data)
+                for i, (tag, data) in input_iter
+                if i not in self._cached_output_datas
+            ]
+        except BaseException:
+            # The input itself raised; its iterator is closed. The rows read so far are
+            # not computed yet, so nothing is lost: the next read opens the input again
+            # and reads them anew (an upstream stream yields its cached rows).
+            self._input_raised()
+            raise
+        # Submit uncached data concurrently via async_process_data. Every row that
+        # returns is cached; a row whose function raised stays in the input, so the
+        # next read computes it again, and the first error is raised after the others
+        # are cached.
+        try:
+            if to_compute:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
 
-        # Submit uncached data concurrently via async_process_data.
-        if to_compute:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is not None:
-                # Already in event loop — fall back to sequential sync
-                results = [
-                    self._function_pod._invoke_with_hooks(tag, pkt)
-                    for _, tag, pkt in to_compute
-                ]
-            else:
-
-                async def _gather() -> list[tuple[TagProtocol, DataProtocol | None]]:
-                    return list(
-                        await asyncio.gather(
-                            *[
-                                self._function_pod._async_invoke_with_hooks(tag, pkt)
-                                for _, tag, pkt in to_compute
-                            ]
+                if loop is not None:
+                    # Already in event loop — fall back to sequential sync
+                    for i, tag, pkt in to_compute:
+                        self._cached_output_datas[i] = (
+                            self._pod_base()._invoke_with_hooks(tag, pkt)
                         )
-                    )
+                else:
 
-                results = asyncio.run(_gather())
+                    async def _gather() -> list[
+                        tuple[TagProtocol, DataProtocol | None] | BaseException
+                    ]:
+                        return list(
+                            await asyncio.gather(
+                                *[
+                                    self._pod_base()._async_invoke_with_hooks(tag, pkt)
+                                    for _, tag, pkt in to_compute
+                                ],
+                                return_exceptions=True,
+                            )
+                        )
 
-            for (i, _, _), (tag, output_data) in zip(to_compute, results):
-                self._cached_output_datas[i] = (tag, output_data)
+                    first_error: BaseException | None = None
+                    for (i, _, _), result in zip(
+                        to_compute, asyncio.run(_gather()), strict=True
+                    ):
+                        if isinstance(result, BaseException):
+                            first_error = first_error or result
+                        else:
+                            self._cached_output_datas[i] = result
+                    if first_error is not None:
+                        raise first_error
+        finally:
+            remaining = [
+                (i, (tag, pkt))
+                for i, tag, pkt in to_compute
+                if i not in self._cached_output_datas
+            ]
+            self._cached_input_iterator = iter(remaining) if remaining else None
 
-        # Yield everything in original order.
-        for i, *_ in all_inputs:
+        # Yield every row in input order, those an earlier iteration computed included.
+        for i in range(len(self._cached_output_datas)):
             tag, data = self._cached_output_datas[i]
             if data is not None:
                 yield tag, data
@@ -1230,7 +1314,11 @@ class FunctionPodStream(StreamBase):
         if has_results and schema_requires_io(self, config):
             # The input gave no rows, so its columns are still known only by polling
             # it: show the result as computed, without columns.
-            finished = not self._needs_iterator and self._cached_input_iterator is None
+            finished = (
+                not self._needs_iterator
+                and not self._input_interrupted
+                and self._cached_input_iterator is None
+            )
             return dataclasses.replace(
                 StreamHead.without_rows(
                     self,
@@ -1262,7 +1350,11 @@ class FunctionPodStream(StreamBase):
                 total_rows=self._cached_output_table.num_rows,
                 origin="computed",
             )
-        finished = not self._needs_iterator and self._cached_input_iterator is None
+        finished = (
+            not self._needs_iterator
+            and not self._input_interrupted
+            and self._cached_input_iterator is None
+        )
         if not finished and not self._cached_output_datas:
             return self._head_without_rows(config, HeadStatus.NOT_COMPUTED)
         shown, total = self._computed_prefix(n)
