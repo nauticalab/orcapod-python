@@ -60,8 +60,8 @@ def _storage_sort_key(
 ) -> Callable[[Any], Any]:
     """Return the ordering key MergeJoin uses for a column's stored values.
 
-    The array logical type defines ``storage_sort_key`` (its stored ``(dtype tag,
-    shape, data)``). A list of such values, at any depth (an array column after
+    The array logical type defines ``storage_sort_key`` (the value digest of the
+    stored array). A list of such values, at any depth (an array column after
     ``GroupBy`` or ``Batch``), is ordered by the tuple of its elements' keys, with
     ``None`` first. Every other type is ordered by its stored value as before.
     General struct ordering is ITL-839.

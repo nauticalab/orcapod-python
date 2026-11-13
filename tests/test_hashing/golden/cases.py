@@ -349,6 +349,13 @@ SEMANTIC_VALUES: dict[str, Any] = {
     "ndarray.int64": np.arange(6, dtype=np.int64).reshape(2, 3),
     "ndarray.float64": np.array([[0.5, 1.5], [2.5, 3.5]], dtype=np.float64),
     "ndarray.empty": np.zeros((0,), dtype=np.float32),
+    # Added by ITL-981: the properties the strict array hash counts or never counts.
+    "ndarray.fortran": np.asfortranarray(np.arange(6, dtype=np.int32).reshape(2, 3)),
+    "ndarray.big_endian": np.arange(6, dtype=">i4").reshape(2, 3),
+    "ndarray.aligned_struct": np.array(
+        [(1, 0.5), (-2, 1.5)], dtype=np.dtype([("a", "i1"), ("b", "<f8")], align=True)
+    ),
+    "ndarray.strided_view": np.arange(12, dtype=np.int32).reshape(2, 6)[:, ::2],
     "dataframe.basic": pd.DataFrame({"a": [1, 2], "b": ["x", "y"]}),
     # Added by ITL-942: set order, dict keys and '__type__' dicts.
     "set.mixed_str_equal": {1, "1", 2, "2"},

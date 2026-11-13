@@ -4,7 +4,10 @@
 **Issue:** ITL-888 (fixes ITL-883; refs ITL-874, ITL-871, ITL-465, ITL-882, ITL-884)
 **Design basis:** ITL-874 review, PR #285 (`superpowers/specs/2026-11-10-array-tensor-storage.md`,
 candidate 4c, sections C4 and C5; experiments `b0`, `c1`, `c2`, `c3`, `b7`).
-**Status:** Implemented in PR #289.
+**Status:** Implemented in PR #289. SUPERSEDED on November 12, 2026 by ITL-981
+(`superpowers/specs/2026-11-12-itl-981-library-value-types-design.md`): arrays are stored as
+`.npy` under `orcapod.numpy.ndarray` and hashed strictly. Of this spec, the dtype tags and the
+digest of section C1 remain, as the element digest of the new hash.
 
 **Decisions (developer, November 10 and 11, 2026).** Every design choice in this spec is
 decided:

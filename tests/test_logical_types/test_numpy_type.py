@@ -15,10 +15,10 @@ class TestLogicalNumpyArrayProtocol:
         assert isinstance(LogicalNumpyArray(), LogicalTypeProtocol)
 
     def test_logical_type_name(self):
-        """The logical type name is ``orcapod.ndarray``."""
+        """The logical type name is ``orcapod.numpy.ndarray``."""
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
 
-        assert LogicalNumpyArray().logical_type_name == "orcapod.ndarray"
+        assert LogicalNumpyArray().logical_type_name == "orcapod.numpy.ndarray"
 
     def test_python_type(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
@@ -26,24 +26,46 @@ class TestLogicalNumpyArrayProtocol:
         assert LogicalNumpyArray().python_type is np.ndarray
 
     def test_arrow_ext_name(self):
-        """The Arrow extension name is ``orcapod.ndarray``."""
+        """The Arrow extension name is ``orcapod.numpy.ndarray``."""
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
 
         assert (
             LogicalNumpyArray().get_arrow_extension_type().extension_name
-            == "orcapod.ndarray"
+            == "orcapod.numpy.ndarray"
         )
 
     def test_arrow_ext_storage_type(self):
-        """The Arrow storage type is the shared array struct."""
-        from orcapod.logical_types.numpy_type import LogicalNumpyArray
+        """The Arrow storage type is ``large_binary``: one ``.npy`` file per value."""
+        import pyarrow as pa
 
-        from orcapod.logical_types.array_format import ARRAY_STORAGE_TYPE
+        from orcapod.logical_types.numpy_type import LogicalNumpyArray
 
         assert (
             LogicalNumpyArray().get_arrow_extension_type().storage_type
-            == ARRAY_STORAGE_TYPE
+            == pa.large_binary()
         )
+
+    def test_ignore_list_is_the_extension_metadata(self):
+        """The ignore list is written into the extension metadata and makes another type."""
+        from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
+        strict = LogicalNumpyArray().get_arrow_extension_type()
+        lenient = LogicalNumpyArray(
+            ["memory_order", "byte_order"]
+        ).get_arrow_extension_type()
+        assert strict.__arrow_ext_serialize__() == b'{"ignore":[],"version":1}'
+        assert (
+            lenient.__arrow_ext_serialize__()
+            == b'{"ignore":["byte_order","memory_order"],"version":1}'
+        )
+        assert strict != lenient
+
+    def test_unknown_ignore_name_raises(self):
+        """A property name the array hash cannot ignore is refused."""
+        from orcapod.logical_types.numpy_type import LogicalNumpyArray
+
+        with pytest.raises(ValueError, match="'strides'"):
+            LogicalNumpyArray(["strides"])
 
     def test_arrow_ext_is_cached(self):
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
@@ -59,13 +81,17 @@ class TestLogicalNumpyArrayProtocol:
 
 
 class TestLogicalNumpyArrayStorage:
-    def test_python_to_storage_returns_the_array_struct_row(self):
-        """``python_to_storage`` returns the array struct row: dtype tag, shape and data."""
+    def test_python_to_storage_returns_a_npy_file(self):
+        """``python_to_storage`` returns a ``.npy`` file of format 3.0 that NumPy loads."""
+        import io
+
         from orcapod.logical_types.numpy_type import LogicalNumpyArray
 
         arr = np.array([1.0, 2.0, 3.0])
         result = LogicalNumpyArray().python_to_storage(arr)
-        assert result == {"dtype": "float64", "shape": [3], "data": arr.tobytes()}
+        assert isinstance(result, bytes)
+        assert result[:8] == b"\x93NUMPY\x03\x00"
+        assert np.array_equal(np.load(io.BytesIO(result), allow_pickle=False), arr)
 
     def test_object_dtype_raises(self):
         """``python_to_storage`` refuses object arrays."""
@@ -127,10 +153,9 @@ class TestLogicalNumpyArrayRoundTrip:
         assert np.array_equal(result["x"], arr["x"])
         assert np.array_equal(result["y"], arr["y"])
 
-    def test_fortran_order_reads_back_c_order(self):
-        """A Fortran-ordered array reads back C-contiguous with the same values."""
-        # Memory order is not part of an array's identity: storage is C order.
+    def test_fortran_order_reads_back_fortran_order(self):
+        """A Fortran-ordered array reads back Fortran-contiguous with the same values."""
         arr = np.asfortranarray(np.array([[1, 2], [3, 4]], dtype=np.float64))
         result = self._rt(arr)
         assert np.array_equal(result, arr)
-        assert result.flags["C_CONTIGUOUS"]
+        assert result.flags["F_CONTIGUOUS"] and not result.flags["C_CONTIGUOUS"]

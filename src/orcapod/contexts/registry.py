@@ -321,6 +321,10 @@ class JSONDataContextRegistry:
     # to them by this name, as ``{"_ref": "logical_type_registry"}``.
     _LOGICAL_TYPE_REGISTRY_REF = "logical_type_registry"
 
+    # The ignore list declared for an extension name in the registration file's
+    # ``hash_ignore`` object is referred to as ``hash_ignore:<extension name>``.
+    _HASH_IGNORE_REF_PREFIX = "hash_ignore:"
+
     def _uses_logical_type_registration(self, spec: dict[str, Any]) -> bool:
         """Whether ``spec`` takes its logical types from the registration file.
 
@@ -339,8 +343,10 @@ class JSONDataContextRegistry:
         """Read the logical type registration file.
 
         Returns:
-            Its ``logical_type_registry`` object spec and its ``value_handlers``
-            list of ``[type, handler]`` object-spec pairs.
+            Its ``logical_type_registry`` object spec, its ``value_handlers`` list
+            of ``[type, handler]`` object-spec pairs and, when present, its
+            ``hash_ignore`` object: per extension name, the property names the
+            value hash of that type ignores.
         """
         with open(self.logical_types_file, "r") as f:
             return json.load(f)
@@ -365,6 +371,20 @@ class JSONDataContextRegistry:
             registration: dict[str, Any] | None = None
             if self._uses_logical_type_registration(spec):
                 registration = self._load_logical_type_registration()
+                # The ignore list of each library value type is declared once, by
+                # extension name; its logical type and its value handler both take
+                # it as ``{"_ref": "hash_ignore:<extension name>"}`` (ITL-981).
+                for name, ignore in registration.get("hash_ignore", {}).items():
+                    # A JSON object or string would iterate as names; only a list
+                    # of names is a list of names.
+                    if not isinstance(ignore, list) or not all(
+                        isinstance(item, str) for item in ignore
+                    ):
+                        raise ValueError(
+                            f"hash_ignore[{name!r}] must be a list of property "
+                            f"names, got {ignore!r}"
+                        )
+                    ref_lut[f"{self._HASH_IGNORE_REF_PREFIX}{name}"] = list(ignore)
                 ref_lut[self._LOGICAL_TYPE_REGISTRY_REF] = parse_objectspec(
                     registration["logical_type_registry"], ref_lut=ref_lut
                 )

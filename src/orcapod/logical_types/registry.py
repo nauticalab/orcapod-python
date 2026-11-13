@@ -37,6 +37,29 @@ def _sanitize(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
+def storage_type_matches(expected: pa.DataType, stored: pa.DataType) -> bool:
+    """Return whether ``stored`` is an acceptable storage type for ``expected``.
+
+    When ``expected`` is in its large-normalized form, any physically equivalent
+    member of the same family is accepted, at any nesting depth (``string`` or
+    ``string_view`` for ``large_string``, ``binary`` for ``large_binary``): Delta
+    Lake compaction rewrites large columns as plain ones (ITL-602, ITL-881).
+    Otherwise the two types must be equal, so a narrowing is never accepted.
+
+    Args:
+        expected: The storage type the extension type declares.
+        stored: The storage type found with the stored column.
+
+    Returns:
+        ``True`` when a column stored as ``stored`` can be read as ``expected``.
+    """
+    from orcapod.utils.arrow_utils import normalize_to_large_types
+
+    if normalize_to_large_types(expected, keep_null=True) == expected:
+        return normalize_to_large_types(stored, keep_null=True) == expected
+    return stored == expected
+
+
 def make_arrow_extension_type(
     extension_name: str,
     storage_type: pa.DataType,
@@ -111,21 +134,9 @@ def make_arrow_extension_type(
         #
         # Cross-family mismatches (string where large_binary was registered, or
         # vice-versa) are genuine semantic errors and always raise.
-        from orcapod.utils.arrow_utils import normalize_to_large_types
-
-        if normalize_to_large_types(_storage, keep_null=True) == _storage:
-            # _storage is the canonical large form — accept any same-family variant,
-            # at any nesting depth (a struct field rewritten from large_string to
-            # string by Delta compaction, ITL-881).
-            storage_ok = (
-                normalize_to_large_types(storage_type, keep_null=True) == _storage
-            )
-        else:
-            # Non-canonical _storage — require exact match.
-            storage_ok = storage_type == _storage
         from orcapod.errors import TypeIdentityError
 
-        if not storage_ok:
+        if not storage_type_matches(_storage, storage_type):
             raise TypeIdentityError(
                 f"Arrow extension type '{_name}': expected storage_type "
                 f"{_storage!r} but got {storage_type!r}."

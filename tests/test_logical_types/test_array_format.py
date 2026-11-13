@@ -1,9 +1,9 @@
-"""Tests for the shared array storage struct and value digest (ITL-888).
+"""Tests for the element digest shared by array-like value types (ITL-888, ITL-981).
 
 The reference digest below is written independently of Orcapod, with ``struct`` and
-``hashlib`` only, from the byte-level definition in
-``superpowers/specs/2026-11-10-array-format-v0.3.md`` (section C1). It is the
-definition other implementations (starfix, torch) must reproduce.
+``hashlib`` only, from the byte-level definition in ``docs/reference/hashing.md``
+(section 8). It is the first step of the ``numpy.ndarray`` value hash, and the
+definition other array types (torch) must reproduce.
 """
 
 from __future__ import annotations
@@ -11,14 +11,18 @@ from __future__ import annotations
 import hashlib
 import struct
 
-import pyarrow as pa
 import pytest
 
-from orcapod.logical_types.array_format import ARRAY_STORAGE_TYPE, array_digest_v1
+from orcapod.logical_types.array_format import (
+    NDARRAY_EXTENSION_NAME,
+    NDARRAY_OPTIONS,
+    array_digest_v1,
+    length_prefixed,
+)
 
 
 def reference_digest(tag: str, shape: tuple[int, ...], data: bytes) -> bytes:
-    """Independent implementation of the v1 array digest."""
+    """Independent implementation of the v1 element digest."""
     t = tag.encode("utf-8")
     preimage = struct.pack("<Q", len(t)) + t
     preimage += struct.pack("<Q", len(shape))
@@ -59,7 +63,7 @@ def test_digest_accepts_any_buffer() -> None:
 
 
 def test_digest_separates_every_field() -> None:
-    """Every field of the stored row contributes to the digest."""
+    """Every field of the preimage contributes to the digest."""
     assert array_digest_v1("int8", (0, 3), b"") != array_digest_v1("int8", (3, 0), b"")
     assert array_digest_v1("int8", (), b"\x01") != array_digest_v1(
         "int8", (1,), b"\x01"
@@ -78,14 +82,13 @@ def test_digest_rejects_negative_dimension() -> None:
         _ = array_digest_v1("int8", (-1,), b"")
 
 
-def test_storage_type() -> None:
-    """The storage type is the dtype, shape and data struct of the spec."""
-    # Children are nullable at the Arrow level: Polars drops nested non-null flags
-    # (ITL-842), so non-null is enforced by the logical type instead.
-    assert ARRAY_STORAGE_TYPE == pa.struct(
-        [
-            pa.field("dtype", pa.large_string()),
-            pa.field("shape", pa.large_list(pa.int64())),
-            pa.field("data", pa.large_binary()),
-        ]
-    )
+def test_length_prefixed_text() -> None:
+    """A text field is its UTF-8 bytes after their 8-byte little-endian length."""
+    assert length_prefixed("") == struct.pack("<Q", 0)
+    assert length_prefixed("hé") == struct.pack("<Q", 3) + "hé".encode()
+
+
+def test_ndarray_constants() -> None:
+    """The array type's extension name and the properties its hash can ignore."""
+    assert NDARRAY_EXTENSION_NAME == "orcapod.numpy.ndarray"
+    assert NDARRAY_OPTIONS == {"byte_order", "memory_order", "struct_layout"}

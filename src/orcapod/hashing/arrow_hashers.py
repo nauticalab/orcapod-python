@@ -155,10 +155,20 @@ class StarfixArrowHasher:
     def hash_schema(self, schema: "pa.Schema") -> ContentHash:
         """Hash an Arrow schema using the starfix canonical algorithm.
 
-        Extension-typed columns are normalized to their storage type with the
-        extension identity in field metadata, as ``hash_table`` does, so the
-        extension name and metadata are part of the hash.
+        Each field is hashed under the same rule as in ``hash_table``
+        (``SemanticHashingVisitor.hashed_field``). A logical type whose values
+        are hashed by a value handler is a ``large_binary`` field carrying the
+        type's identifier (extension name and metadata), whatever its storage
+        type: how such a type is stored is not part of its identity. Any other
+        extension type is normalized to its storage type with the extension
+        identity in field metadata, because its stored values are what is
+        hashed.
         """
+        visitor = SemanticHashingVisitor(self._type_converter, self._semantic_hasher)
+        hashed = pa.schema([visitor.hashed_field(field) for field in schema])
+        if schema.metadata is not None:
+            hashed = hashed.with_metadata(dict(schema.metadata))
+        schema = hashed
         schema = normalize_extension_columns(schema.empty_table()).schema
         include_meta = has_extension_metadata(schema) or has_extension_type(schema)
         if include_meta:

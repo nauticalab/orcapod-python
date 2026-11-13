@@ -56,7 +56,7 @@ The labels of v0.3:
 | `semantic_v1` | the structure hash: a Python structure expanded to tagged JSON, SHA-256 of its canonical text | `SEMANTIC_HASH_LABEL`, `hashing/semantic_hashing/semantic_hasher.py` |
 | `arrow_v1` | the Arrow table and schema hash (§9) | `ARROW_HASH_LABEL`, `hashing/arrow_hashers.py` |
 | `directory_v1` | the directory hash: a SHA-256 Merkle tree over the entries | `DIRECTORY_HASH_LABEL`, `hashing/directory_hashers.py` |
-| `ndarray_v1` | the array value digest (§8) | `NumpyArrayHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
+| `ndarray_v1` | the array value hash (§8) | `NumpyArrayHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
 | `polars_expr_v1` | the Polars expression hash (§1c) | `POLARS_EXPR_HASH_LABEL`, `hashing/semantic_hashing/polars_expr.py` |
 | `sha256` | the file content hash: SHA-256 of the file's bytes | the file hasher's `algorithm` |
 
@@ -816,63 +816,149 @@ in any data-level preimage; they serve logging, observability, and result inspec
 
 ---
 
-## 8. Array Value Digest
+## 8. Array Value Hash
 
 **Value hash labels.** A type whose values are hashed by a dedicated handler labels its hash
-`<type>_v<N>`, for example `ndarray_v1` (and later `tensor_v1`). The label is the
-`ContentHash.method`; the type's implementer chooses it. The bytes produced under an existing
-label never change. A new definition gets a new label, so a hash always says which definition
-produced it. The label is not part of any hash input (see
-[The hash label rule](#the-hash-label-rule)).
+`<type>_v<N>`, for example `ndarray_v1`. The label is the `ContentHash.method`; the type's
+implementer chooses it. The bytes produced under an existing label never change. A new
+definition gets a new label, so a hash always says which definition produced it. The label
+is not part of any hash input (see [The hash label rule](#the-hash-label-rule)).
 
-A `numpy.ndarray` value is hashed by value (since v0.3, ITL-888). The semantic hasher's
-`NumpyArrayHandler` returns `ContentHash(method="ndarray_v1", digest=D)`, where `D` is the
-version-1 array digest of the array's stored row. Inside a table hash, an array cell becomes
-the token `b"orcapod.ndarray;7b2276657273696f6e223a317d::" + D`: the logical type's identifier (the extension name, `;`, the extension metadata `{"version":1}` in hex), then the digest, without the label. The stored row, the dtype tags and the canonical form are described in
-[NumPy Arrays](../concepts/arrays.md).
+A `numpy.ndarray` is stored as a `.npy` file and hashed by value (ITL-981). The hash is
+defined on the array, never on the stored bytes. The semantic hasher's `NumpyArrayHandler`
+returns `ContentHash(method="ndarray_v1", digest=D)`. What is stored and what reads back is
+described in [NumPy Arrays](../concepts/arrays.md).
 
-For a stored row with dtype tag `T`, shape `(d0, ..., dn-1)` and data bytes `B`:
+`D` is computed in two steps. Notation: `u8` is one byte, `u64le` and `i64le` are 8-byte
+little-endian unsigned and signed integers, and `lp(x) = u64le(len(utf8(x))) || utf8(x)`.
+
+**Step 1, the element digest `E`.** Take the array in canonical form: C order,
+little-endian, structured fields packed in declared order. With dtype tag `T` (below), shape
+`(d0, ..., dn-1)` and the canonical element bytes `B`:
 
 ```
-P = u64le(len(utf8(T))) || utf8(T)
- || u64le(n) || i64le(d0) || ... || i64le(dn-1)
- || u64le(len(B)) || B
-D = SHA-256(P)
+E = SHA-256( lp(T) || u64le(n) || i64le(d0) || ... || i64le(dn-1) || u64le(len(B)) || B )
 ```
 
-`u64le` and `i64le` are 8-byte little-endian unsigned and signed integers. Every field is
-length-prefixed, so two different rows never share a preimage. `D` depends only on the stored
-row, so it can be recomputed from a stored table by any SHA-256 implementation. The label
-`ndarray_v1` names this definition; a different definition gets a different label. A
-`torch.Tensor` type is to share the digest under its own label.
+`E` covers the dtype, the shape and every element bit, and nothing else. It is shared with
+other array types (a tensor type computes the same `E`).
 
-| Variation | Same `D`? |
+**Step 2, the value hash `D`.**
+
+```
+D = SHA-256( lp("orcapod.numpy.ndarray") || E || u8(memory_order)
+             || lp(byte_order) || lp(struct_layout) )
+```
+
+| Field | Value | Canonical value (written when the property is ignored) |
+|---|---|---|
+| leading text | the type's extension name, `orcapod.numpy.ndarray` | |
+| `memory_order` | `1` when the array is Fortran-contiguous and not C-contiguous, else `0` | `0` |
+| `byte_order` | one character per scalar field of the dtype, depth first in declared field order, a subarray field counting once: `<` little-endian, `>` big-endian, `\|` for a type without byte order (`bool`, 8-bit integers, `S`, `V`). NumPy's native marker `=` is resolved to the machine's order. `float32` gives `<` | the same text with every `>` replaced by `<` |
+| `struct_layout` | JSON without whitespace of `L(dtype)`: `null` for an unstructured dtype, otherwise the list `[itemsize, [offset_1, L(field_1)], [offset_2, L(field_2)], ...]` in declared field order; a subarray field uses its base dtype. `float32` gives `null` | `L` of the packed dtype |
+
+Every field is always present and length-prefixed or of fixed width, so two different
+inputs never share a preimage.
+
+**The ignore list.** The three properties `memory_order`, `byte_order` and `struct_layout`
+count by default. A data context can list any of them as ignored for the type. An ignored
+property's field is still written, with its canonical value, so arrays that differ only in
+ignored properties have equal `D`, and with all three ignored `D` equals the default `D` of
+the canonical array. The list itself is not in the preimage. It is in the type's extension
+metadata, `{"ignore":[...],"version":1}` (names sorted, keys sorted, no whitespace), and so
+in the logical type identifier: two lists are two logical types. A bare array is hashed with
+the data context's list; a cell is hashed with the list of its own column.
+
+**Cells.** Inside a table hash, an array cell becomes the token
+`b"orcapod.numpy.ndarray;7b2269676e6f7265223a5b5d2c2276657273696f6e223a317d::" + D`: the
+logical type's identifier (the extension name, `;`, the extension metadata
+`{"ignore":[],"version":1}` in hex), then the digest, without the label. The cell is decoded
+to an array first; the stored `.npy` bytes are never hashed.
+
+| Variation | Same `D` by default? |
 |---|---|
-| C or Fortran order, strides, views | yes |
-| Little- or big-endian byte order | yes |
-| Structured offsets, alignment padding | yes |
+| Dtype (including width, units, string width), shape, any element bit, structured field names or field order | no |
+| C against Fortran memory order | no (`memory_order`) |
+| Little- against big-endian byte order | no (`byte_order`) |
+| Structured field offsets or item size (aligned against packed) | no (`struct_layout`) |
+| Step slices, reversed or broadcast views against their C-contiguous copy | yes |
 | `np.matrix`, `np.recarray`, `np.memmap` against the plain array | yes |
-| Dtype (including width), shape, any element bit, structured field names or field order | no |
+| The `writeable` flag, dtype `metadata`, the `align` flag, padding bytes | yes |
 
-The reference implementation below uses only the standard library, and the vectors are pinned:
+The last three rows are what the `.npy` storage does not keep: a value read back from a
+store must hash like the value that was written.
+
+### Dtype tags
+
+The tag names the element type without a byte order. For a structured dtype, the tag is a
+JSON list with one `[name, tag]` entry per field, or `[name, tag, [dims]]` for a subarray
+field, in declared field order. It is written with no whitespace and with non-ASCII
+characters escaped (`json.dumps(..., separators=(",", ":"), ensure_ascii=True)`).
+
+| NumPy | Tag | Canonical element bytes |
+|---|---|---|
+| `bool` | `bool` | one byte, 0 or 1 |
+| `int8` ... `int64`, `uint8` ... `uint64` | `int8` ... `uint64` | two's complement or unsigned, little-endian |
+| `float16`, `float32`, `float64` | same names | IEEE 754, little-endian |
+| `complex64`, `complex128` | same names | real part, then imaginary part |
+| `datetime64[ns]`, `datetime64[10ms]`, ... | `datetime64[ns]`, `datetime64[10ms]`, ... | `int64`, little-endian (NaT is the minimum) |
+| `timedelta64[s]`, ... | `timedelta64[s]`, ... | `int64`, little-endian |
+| `U5` | `ucs4[5]` | five UCS-4 code units, each `uint32` little-endian, NUL-padded |
+| `S3` | `bytes[3]` | three raw bytes, NUL-padded |
+| `V4` | `void[4]` | four raw bytes |
+| `[("b", "f8"), ("a", "i4", (2,))]` | `[["b","float64"],["a","int32",[2]]]` | fields packed in tag order |
+
+### Reference implementation
+
+The implementation below uses only the standard library, and the vectors are pinned:
 
 ```python
 import hashlib
 import struct
 
-def array_digest_v1(tag: str, shape: tuple[int, ...], data: bytes) -> str:
-    t = tag.encode("utf-8")
-    p = struct.pack("<Q", len(t)) + t + struct.pack("<Q", len(shape))
+def lp(text: str) -> bytes:
+    data = text.encode("utf-8")
+    return struct.pack("<Q", len(data)) + data
+
+def element_digest(tag: str, shape: tuple[int, ...], data: bytes) -> bytes:
+    p = lp(tag) + struct.pack("<Q", len(shape))
     p += b"".join(struct.pack("<q", d) for d in shape)
     p += struct.pack("<Q", len(data)) + data
+    return hashlib.sha256(p).digest()
+
+def ndarray_hash(
+    tag: str,
+    shape: tuple[int, ...],
+    data: bytes,
+    memory_order: int = 0,
+    byte_order: str = "<",
+    struct_layout: str = "null",
+) -> str:
+    p = lp("orcapod.numpy.ndarray") + element_digest(tag, shape, data)
+    p += bytes([memory_order]) + lp(byte_order) + lp(struct_layout)
     return hashlib.sha256(p).hexdigest()
 
-print(array_digest_v1("float32", (2, 3), struct.pack("<6f", 0, 1, 2, 3, 4, 5)))
+six = struct.pack("<6f", 0, 1, 2, 3, 4, 5)
+print(element_digest("float32", (2, 3), six).hex())
 # 318f6e503e8064e89ce6039453fce709f8e01f60c501af2b63bbbe9cf8fbf90e
-print(array_digest_v1("float64", (), struct.pack("<d", 2.5)))
-# 47f182d862f5dd597d88836deddaed609ed94490827302e75e8364e877633cae
-print(array_digest_v1("int8", (0, 3), b""))
-# 54165f92526b48bf9bae265168aa7020b135a9973d372d9ceaa9ae92f611068a
+print(ndarray_hash("float32", (2, 3), six))
+# bef92ae814ed78857164d1aea02e5590ff1ab7f00179f4c75d17aec7cae27317
+print(ndarray_hash("float32", (2, 3), six, memory_order=1))
+# bb8d317f7bd44a4832eeb7468867b2137621fb539b084de988426dd5928af130
+print(ndarray_hash("float32", (2, 3), six, byte_order=">"))
+# 1d5b6c2eb0ceaafd3758356256d651c5edf9ca0efa4deecf12c76c4e15bdb637
+print(ndarray_hash("float64", (), struct.pack("<d", 2.5)))
+# 642ad052de6aa53ffd059e5cd9a2eeeb5519caa3d3eb12efcf9e0c3fdbeab17b
+print(
+    ndarray_hash(
+        '[["a","int8"],["b","float64"]]',
+        (1,),
+        struct.pack("<bd", 1, 0.5),
+        byte_order="|<",
+        struct_layout="[16,[0,null],[8,null]]",
+    )
+)
+# a47c34b71f1d8c812f52d3a3b78ef6dbafb3b9adb320123b885cbacf72fa50b8
 ```
 
 The same values through Orcapod:
@@ -883,11 +969,30 @@ import numpy as np
 from orcapod.contexts import get_default_context
 
 hasher = get_default_context().semantic_hasher
-print(hasher.hash_object(np.arange(6, dtype=np.float32).reshape(2, 3)).to_string())
-# ndarray_v1:318f6e503e8064e89ce6039453fce709f8e01f60c501af2b63bbbe9cf8fbf90e
+a = np.arange(6, dtype=np.float32).reshape(2, 3)
+print(hasher.hash_object(a).to_string())
+# ndarray_v1:bef92ae814ed78857164d1aea02e5590ff1ab7f00179f4c75d17aec7cae27317
+print(hasher.hash_object(np.asfortranarray(a)).to_string())
+# ndarray_v1:bb8d317f7bd44a4832eeb7468867b2137621fb539b084de988426dd5928af130
+print(hasher.hash_object(a.astype(">f4")).to_string())
+# ndarray_v1:1d5b6c2eb0ceaafd3758356256d651c5edf9ca0efa4deecf12c76c4e15bdb637
 print(hasher.hash_object(np.array(2.5)).to_string())
-# ndarray_v1:47f182d862f5dd597d88836deddaed609ed94490827302e75e8364e877633cae
+# ndarray_v1:642ad052de6aa53ffd059e5cd9a2eeeb5519caa3d3eb12efcf9e0c3fdbeab17b
+aligned = np.dtype([("a", "i1"), ("b", "<f8")], align=True)
+print(hasher.hash_object(np.array([(1, 0.5)], dtype=aligned)).to_string())
+# ndarray_v1:a47c34b71f1d8c812f52d3a3b78ef6dbafb3b9adb320123b885cbacf72fa50b8
 ```
+
+### The Arrow schema hash
+
+`StarfixArrowHasher.hash_schema` hashes each field under the same rule as `hash_table`. A
+logical type that has a value handler (`uuid.UUID`, `File`, `Directory`, `numpy.ndarray`,
+the pandas types, and `list` or `set` of them) is hashed as a `large_binary` field that
+carries the type's identifier; its storage type is not part of the hash. A logical type
+without a value handler (`Path`, dataclasses and other user classes) is hashed as its
+storage type with the identifier, because its stored values are what a table hash covers.
+Orcapod's own schema hash (site 3), type hash and pipeline hash do not use this method:
+they hash Python types, where a logical type contributes its identifier text only.
 
 ## 9. Arrow Table Hash (`arrow_v1`)
 

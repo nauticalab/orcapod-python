@@ -496,3 +496,63 @@ class TestHashTableExtensionAware:
             _make_hasher().hash_table(t_clean).digest
             == _make_hasher().hash_table(t_noise).digest
         )
+
+
+class TestSchemaHashFieldRule:
+    """``hash_schema`` hashes a field under the same rule as ``hash_table`` (ITL-981)."""
+
+    @staticmethod
+    def _identified(storage: pa.DataType, extension: pa.ExtensionType) -> pa.Schema:
+        """A plain ``storage`` field that carries the identifier of ``extension``."""
+        return pa.schema(
+            [
+                pa.field(
+                    "c",
+                    storage,
+                    metadata={
+                        "ARROW:extension:name": extension.extension_name,
+                        "ARROW:extension:metadata": extension.__arrow_ext_serialize__(),
+                    },
+                )
+            ]
+        )
+
+    def test_value_hashed_type_does_not_depend_on_its_storage_type(self):
+        """A type hashed by a value handler is a ``large_binary`` field with its identifier."""
+        import numpy as np
+
+        import orcapod as op
+        from orcapod.contexts import get_default_context
+
+        context = get_default_context()
+        hasher = context.arrow_hasher
+        assert isinstance(hasher, StarfixArrowHasher)
+        for python_type in (op.File, np.ndarray):
+            extension = context.type_converter.python_type_to_arrow_type(python_type)
+            assert isinstance(extension, pa.ExtensionType)
+            schema_hash = hasher.hash_schema(pa.schema([pa.field("c", extension)]))
+            assert schema_hash == hasher.hash_schema(
+                self._identified(pa.large_binary(), extension)
+            )
+        # ``File`` is stored as a string; that storage type is not in its schema hash.
+        file_type = context.type_converter.python_type_to_arrow_type(op.File)
+        assert isinstance(file_type, pa.ExtensionType)
+        assert file_type.storage_type == pa.large_string()
+        assert hasher.hash_schema(
+            pa.schema([pa.field("c", file_type)])
+        ) != hasher.hash_schema(self._identified(pa.large_string(), file_type))
+
+    def test_type_without_value_handler_keeps_its_storage_type(self):
+        """A type whose stored values are hashed keeps its storage type in the schema hash."""
+        from pathlib import Path
+
+        from orcapod.contexts import get_default_context
+
+        context = get_default_context()
+        hasher = context.arrow_hasher
+        assert isinstance(hasher, StarfixArrowHasher)
+        extension = context.type_converter.python_type_to_arrow_type(Path)
+        assert isinstance(extension, pa.ExtensionType)
+        assert hasher.hash_schema(
+            pa.schema([pa.field("c", extension)])
+        ) == hasher.hash_schema(self._identified(extension.storage_type, extension))

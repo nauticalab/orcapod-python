@@ -200,7 +200,7 @@ def test_logical_type_registration_is_unchanged_by_the_move() -> None:
     assert sorted(registry._by_logical_name) == [
         "orcapod.directory",
         "orcapod.file",
-        "orcapod.ndarray",
+        "orcapod.numpy.ndarray",
         "orcapod.path",
         "orcapod.upath",
         "orcapod.uuid",

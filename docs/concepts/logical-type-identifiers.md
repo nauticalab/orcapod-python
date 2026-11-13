@@ -1,7 +1,7 @@
 # Logical Type Identifiers
 
 A *logical type* binds a Python class to the way its values are stored in an Arrow column:
-`pathlib.Path` is stored as a string, `numpy.ndarray` as a struct, a dataclass as a struct
+`pathlib.Path` is stored as a string, `numpy.ndarray` as a `.npy` file, a dataclass as a struct
 of its fields. Orcapod ships logical types for paths, files, directories, UUIDs, NumPy
 arrays and pandas objects, and you can register your own.
 
@@ -68,7 +68,7 @@ under one identifier.
 ## Built-in types
 
 Orcapod's own types follow the same contract as yours. Their metadata is the JSON text
-`{"version":N}`:
+`{"version":N}`, or `{"ignore":[...],"version":N}` for a library value type (below):
 
 | Python type | Extension name | Extension metadata |
 |---|---|---|
@@ -77,11 +77,30 @@ Orcapod's own types follow the same contract as yours. Their metadata is the JSO
 | `uuid.UUID` | `orcapod.uuid` | `{"version":1}` |
 | `orcapod.File` | `orcapod.file` | `{"version":1}` |
 | `orcapod.Directory` | `orcapod.directory` | `{"version":1}` |
-| `numpy.ndarray` | `orcapod.ndarray` | `{"version":1}` |
+| `numpy.ndarray` | `orcapod.numpy.ndarray` | `{"ignore":[],"version":1}` |
 | `pandas.DataFrame` | `pandas.dataframe` | `{"version":1}` |
 | `pandas.Series` | `pandas.series` | `{"version":1}` |
 
 `{"version":N}` is the convention of the built-in types only. Your types may use any bytes.
+
+### Library value types: the ignore list
+
+A value from a library such as NumPy has properties beyond its content, for example memory
+order and byte order. Its hash counts every property the storage keeps, and the type names
+the properties a data context may choose to ignore. The names a data context ignores are the
+type's *ignore list*, and the list is part of the identifier: the extension metadata is
+
+```
+{"ignore":[],"version":1}
+{"ignore":["byte_order","memory_order"],"version":1}
+```
+
+with the names sorted, each once, the keys sorted and no whitespace; `ignore` is present
+also when empty. So one type under two lists is two logical types: the schema hashes differ,
+a join of two such columns is an error, and a data context reads only columns stored under
+its own list (anything else raises `LogicalTypeIdentifierError`, naming the column and both
+lists). Storage is the same under every list. `numpy.ndarray` is the first such type; its
+property names are in [NumPy Arrays](arrays.md#the-ignore-list).
 
 ### Native containers: `list[T]` and `set[T]`
 

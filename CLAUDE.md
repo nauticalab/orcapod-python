@@ -284,6 +284,37 @@ A logical type's identifier is its Arrow extension name plus its Arrow extension
   never fall back to the storage type. List an older value in `also_reads` only when the
   current code decodes that layout.
 
+## Library value types: storage, strict hash, ignore list
+
+Developer, November 12, 2026 (ITL-981); see `docs/concepts/arrays.md` and
+`docs/reference/hashing.md` section 8.
+
+- Storage and hashing are decided separately. A value of a library type (`numpy.ndarray`,
+  later tensors and data frames) is stored with the library's own serialization and reads
+  back as given. Its hash is defined by Orcapod on the content: never hash the stored bytes.
+- The hash is strict by default: every property of a value that storage keeps is part of
+  its identity. A property storage does not restore never counts and has no option name,
+  because `hash(read(write(v)))` must equal `hash(v)`.
+- What the hash may ignore is a closed set of property names per type (`OPTIONS`). The names
+  a data context ignores are declared once, in `hash_ignore` of
+  `contexts/logical_types.json`, and referred to as `hash_ignore:<extension name>` by the
+  logical type entry and the value handler entry.
+- The list is in the extension metadata, `{"ignore":[...],"version":N}` (sorted names,
+  sorted keys, `ignore` always present), written only by `ignore_list.ignore_metadata`. Two
+  lists are two logical types. Never put the list into a hash preimage: an ignored property's
+  field is always written, with its canonical value.
+- Build such a type from `logical_types/ignore_list.py` (`IgnoreListLogicalType`,
+  `IgnoreListHandler`). A bare value is hashed with the handler's configured list; a cell
+  with the list of its own column (`SemanticHashingVisitor` calls `hash_ignoring`). A data
+  context reads only columns stored under its own list; anything else raises
+  `LogicalTypeIdentifierError`.
+- Extension names of library value types are lower case `orcapod.<library>.<type>`
+  (`orcapod.numpy.ndarray`). The leading type text of a value hash is the extension name.
+- `numpy.ndarray`: one `.npy` file per cell (`numpy.lib.format`, format 3.0,
+  `allow_pickle=False` on write and read; never raise `max_header_size`). Options:
+  `memory_order`, `byte_order`, `struct_layout`. Where stored arrays must be ordered, order
+  them by value hash (`storage_sort_key`), never by stored bytes.
+
 ## User classes: exact and structural
 
 A class a user defines is one of two kinds (developer, November 12, 2026, ITL-972; see

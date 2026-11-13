@@ -25,3 +25,9 @@ results.
 Known compromise: the struct's children are nullable at the Arrow level, because Polars drops
 nested non-null flags on its way back to Arrow (ITL-842). The logical type enforces non-null
 instead. Tighten under a new storage version once nested nullability survives Polars.
+
+**Superseded (ITL-981, November 12, 2026):** the struct storage and the layout-independent hash
+described above were replaced before any release by `.npy` storage under
+`orcapod.numpy.ndarray` and a strict value hash with a per-type ignore list; see entry LV1
+(`design_issues/ITL-981-LV1.md`). The refusals, the declared-output check and the v0.2
+statements of this entry still hold.

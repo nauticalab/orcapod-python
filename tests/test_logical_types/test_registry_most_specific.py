@@ -60,7 +60,7 @@ def test_ndarray_subclasses_resolve_to_the_array_type() -> None:
     registry = LogicalTypeRegistry(logical_types=[LogicalNumpyArray()])
     for sub in (np.matrix, np.recarray, np.memmap):
         lt = registry.get_by_python_type(sub)
-        assert lt is not None and lt.logical_type_name == "orcapod.ndarray"
+        assert lt is not None and lt.logical_type_name == "orcapod.numpy.ndarray"
 
 
 def test_registered_subclass_wins_for_itself_and_its_subclasses() -> None:

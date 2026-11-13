@@ -11,6 +11,7 @@ import pytest
 
 from orcapod import PipelineJob, function_pod
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
+from orcapod.operators import Batch, GroupBy
 from orcapod.pipeline import AsyncPipelineOrchestrator
 from orcapod.sources import DictSource
 from tests.test_arrays.array_cases import ARRAYS, NUMERIC, assert_arrays_identical
@@ -94,3 +95,70 @@ def test_pipeline_keeps_arrays_exact(tmp_path: Path, store: str, runner: str) ->
         expected = np.asarray(ARRAYS[name] * 2)
         assert_arrays_identical(doubled[name], expected)
         assert totals[name] == pytest.approx(float(np.real(expected).sum()))
+
+
+@function_pod(output_keys="parts")
+def split(x: np.ndarray) -> list[np.ndarray]:  # pyright: ignore[reportMissingTypeArgument]  # the bare np.ndarray annotation is under test
+    return [x.copy(), np.asarray(x * 2)]
+
+
+@pytest.mark.parametrize(
+    ("store", "runner"),
+    [
+        ("in_memory", "sync"),
+        ("in_memory", "async"),
+        ("delta", "sync"),
+        ("delta", "async"),
+    ],
+)
+def test_pod_output_list_of_arrays(tmp_path: Path, store: str, runner: str) -> None:
+    """A pod output ``list[np.ndarray]`` is stored and read back on every store and runner."""
+    source = DictSource(
+        data=[{"k": k, "x": ARRAYS[k]} for k in NUMERIC],
+        tag_columns=["k"],
+        source_id="numeric",
+    )
+    job = PipelineJob(name="array_lists", store=STORES[store](tmp_path))
+    with job:
+        split.pod(source, label="split")
+    RUNNERS[runner](job)
+
+    parts = _node(job, "split", "parts")
+    assert sorted(parts) == sorted(NUMERIC)
+    for name in NUMERIC:
+        assert_arrays_identical(parts[name][0], ARRAYS[name])
+        assert_arrays_identical(parts[name][1], np.asarray(ARRAYS[name] * 2))
+
+
+@function_pod(output_keys="firsts")
+def first_elements(x: list[np.ndarray]) -> list[float]:  # pyright: ignore[reportMissingTypeArgument]  # the bare np.ndarray annotation is under test
+    assert all(type(a) is np.ndarray and a.shape == (3,) for a in x)
+    return sorted(float(a[0]) for a in x)
+
+
+@pytest.mark.parametrize("runner", sorted(RUNNERS))
+@pytest.mark.parametrize("store", sorted(STORES))
+@pytest.mark.parametrize("operator", ["batch", "group_by"])
+def test_batch_and_group_by_over_an_array_column(
+    tmp_path: Path, operator: str, store: str, runner: str
+) -> None:
+    """``Batch`` and ``GroupBy`` over an array column feed a pod on every store and runner."""
+    source = DictSource(
+        data=[
+            {"g": "a" if i < 2 else "b", "k": f"r{i}", "x": np.arange(3.0) + i}
+            for i in range(4)
+        ],
+        tag_columns=["g", "k"],
+        source_id="grouped",
+    )
+    job = PipelineJob(name="array_groups", store=STORES[store](tmp_path))
+    with job:
+        if operator == "batch":
+            grouped = Batch(batch_size=2)(source)
+        else:
+            grouped = GroupBy(["g"])(source)
+        first_elements.pod(grouped, label="firsts")
+    RUNNERS[runner](job)
+
+    firsts = sorted(d.as_dict()["firsts"] for _, d in job.nodes["firsts"].iter_data())
+    assert firsts == [[0.0, 1.0], [2.0, 3.0]]

@@ -275,11 +275,11 @@ def test_builtin_uuid_round_trip(
 def test_builtin_ndarray_round_trip(
     storage_backend: _StorageBackend, tmp_path: Path
 ) -> None:
-    """numpy.ndarray round-trips through storage with extension name ``orcapod.ndarray``.
+    """numpy.ndarray round-trips through storage with extension name ``orcapod.numpy.ndarray``.
 
     Tests both a simple 1-D float64 array and a structured (record) array with
     named fields, since structured arrays are a primary motivation for this type.
-    The read-side converter already knows about ``orcapod.ndarray`` because it is
+    The read-side converter already knows about ``orcapod.numpy.ndarray`` because it is
     registered in the default context (``contexts/logical_types.json``).
     """
     import numpy as np
@@ -303,7 +303,7 @@ def test_builtin_ndarray_round_trip(
     assert hasattr(field.type, "extension_name"), (
         f"Expected extension type on field 'col', got plain type {field.type!r}"
     )
-    assert field.type.extension_name == "orcapod.ndarray"
+    assert field.type.extension_name == "orcapod.numpy.ndarray"
 
     rows = read_converter.arrow_table_to_python_dicts(result)
     assert len(rows) == 1

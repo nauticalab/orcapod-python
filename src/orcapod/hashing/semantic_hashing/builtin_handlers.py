@@ -29,7 +29,9 @@ from uuid import UUID
 
 from orcapod.hashing.semantic_hashing.encoded import Encoded
 from orcapod.hashing.semantic_hashing.function_info_extractors import ParameterDefault
+from orcapod.logical_types.array_format import NDARRAY_OPTIONS
 from orcapod.logical_types.identifier import logical_type_identifier
+from orcapod.logical_types.ignore_list import IgnoreListHandler
 from orcapod.types import ContentHash, Schema
 from orcapod.utils.canonical_type_names import canonical_type_name
 
@@ -401,47 +403,45 @@ class DirectoryHandler:
         return self.directory_hasher.hash_directory(wrapped, ignore=ignore)
 
 
-class NumpyArrayHandler:
-    """Hasher for ``numpy.ndarray``: the version-1 value digest under ``ndarray_v1``.
+class NumpyArrayHandler(IgnoreListHandler):
+    """Hasher for ``numpy.ndarray``: the strict value digest under ``ndarray_v1``.
 
-    The array is put in its canonical form (C order, little-endian, structured
-    fields packed in declared order; see ``logical_types.numpy_type``), which is
-    exactly what ``LogicalNumpyArray`` stores. The digest is
-    ``array_format.array_digest_v1(tag, shape, data)`` of that stored row, so
-    memory layout, byte order, structured padding and subclass do not change the
-    hash, while dtype (including structured field names and order), shape and
-    every element bit do.
+    The digest is ``numpy_type.array_value_digest``: the element digest of the
+    array (dtype, shape and element bits) and, on top of it, memory order, byte
+    order and structured layout, each of which the configured ignore list can
+    take out. What storage does not keep (strides beyond C or Fortran
+    contiguity, subclass, flags) never changes the hash.
 
-    The label ``ndarray_v1`` names the definition (and binds the digest to the
-    ndarray type): another array type sharing the digest body uses its own label.
+    The label ``ndarray_v1`` names this algorithm; the ignore list is part of
+    the logical type identifier, not of the label or the preimage.
+
+    Args:
+        ignore: Names from ``array_format.NDARRAY_OPTIONS`` ignored when a bare
+            array is hashed (the data context's list for the type).
     """
 
+    OPTIONS = NDARRAY_OPTIONS
     HASH_LABEL = "ndarray_v1"
     """``ContentHash.method`` of an ndarray hash."""
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> ContentHash:
-        """Return the ``ndarray_v1`` value hash of ``obj``.
+    def digest(self, obj: Any, ignore: frozenset[str]) -> bytes:
+        """Return the value digest of ``obj``, ignoring the named properties.
 
         Args:
             obj: A ``numpy.ndarray`` instance (subclasses are hashed as plain arrays).
-            hasher: Ignored. Present for protocol conformance.
+            ignore: Names from ``OPTIONS`` to ignore.
 
         Returns:
-            ``ContentHash("ndarray_v1", array_digest_v1(tag, shape, data))``.
+            ``numpy_type.array_value_digest(obj, ignore)``.
 
         Raises:
             TypeError: If ``obj`` is not a ``numpy.ndarray``.
             ValueError: If the array cannot be stored (masked, object,
                 ``StringDType``, ``longdouble``, ...).
         """
-        from orcapod.logical_types.array_format import array_digest_v1
-        from orcapod.logical_types.numpy_type import array_bytes, canonical_array
+        from orcapod.logical_types.numpy_type import array_value_digest
 
-        tag, array = canonical_array(obj)
-        return ContentHash(
-            method=self.HASH_LABEL,
-            digest=array_digest_v1(tag, array.shape, array_bytes(array)),
-        )
+        return array_value_digest(obj, ignore)
 
 
 class PandasDataFrameHandler:
