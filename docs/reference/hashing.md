@@ -485,6 +485,8 @@ moves no path.
 
 ### 1e. Polars DataFrame and Series values
 
+This hash is provisional in v0.3 (see [section 8](#8-array-value-hash)).
+
 A `polars.DataFrame` or `polars.Series` is a value-hashed logical type
 (`PolarsDataFrameHandler`, `PolarsSeriesHandler`; the algorithm is defined in
 `orcapod.logical_types.polars_type`). Inside a table its cell token is, like every
@@ -913,6 +915,15 @@ in any data-level preimage; they serve logging, observability, and result inspec
 ---
 
 ## 8. Array Value Hash
+
+**Provisional.** The value hashes of the library value types, `numpy.ndarray` (this section),
+`torch.Tensor` ([below](#torch-tensor-value-hash)), polars `DataFrame` and `Series`
+([1e](#1e-polars-dataframe-and-series-values)) and pandas `DataFrame` and `Series`, and their
+logical type identifiers, are provisional in v0.3 and may change in v0.4. Using one issues
+`ProvisionalHashWarning` once per type per process (see
+[Provisional value hashes](../concepts/arrays.md#provisional-value-hashes)). The types are
+declared in the `provisional` list of `orcapod/contexts/logical_types.json`, by extension name;
+that list enters no hash, identifier or stored path.
 
 **Value hash labels.** A type whose values are hashed by a dedicated handler labels its hash
 `<type>_v<N>`, for example `ndarray_v1` or `torch_tensor_v1`. The label is the `ContentHash.method`; the type's
@@ -1375,6 +1386,8 @@ print(digest.method, digest.digest[:3].hex())
 ```
 
 ## 10. pandas Value Hash (`pandas_dataframe_v1`, `pandas_series_v1`)
+
+This hash is provisional in v0.3 (see [section 8](#8-array-value-hash)).
 
 A `pandas.DataFrame` or `pandas.Series` value (a pod input or output, a value in a source
 column, or any object given to the semantic hasher) is hashed by

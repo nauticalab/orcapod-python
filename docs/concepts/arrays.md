@@ -42,6 +42,36 @@ for tag, data in scale.pod(source).iter_data():
     The v0.2 tables and rows stay on disk unchanged, readable with v0.2. A migration is
     planned after v0.3 (ITL-889).
 
+## Provisional value hashes
+
+The value hashes and stored identities of the library value types are provisional in v0.3:
+`numpy.ndarray`, `torch.Tensor`, and the pandas and polars `DataFrame` and `Series`. They
+will be reviewed for v0.4 and may change then. Every other type, and the hashing of everything
+else in a pipeline, is unaffected.
+
+Using one of these types issues `orcapod.errors.ProvisionalHashWarning` once per type per
+process, on whichever use comes first: a value hashed, a source column of the type, a function
+pod with a parameter or output of the type, or stored results of the type read back. It names
+the type, for example `orcapod.numpy.ndarray`.
+
+In practice nothing needs to change. Use these types as described on this page. If v0.4
+changes how one of them is hashed, a result Orcapod computed under v0.3 from such a value gets
+a different identity, so v0.4 computes it again instead of reusing it. Nothing stored is lost
+or becomes wrong: the v0.3 rows stay where they are. Plan for that recomputation if a
+pipeline is expensive. To silence the warning once you have taken note of it, filter its class
+after importing Orcapod:
+
+```python
+import warnings
+
+from orcapod.errors import ProvisionalHashWarning
+
+warnings.filterwarnings("ignore", category=ProvisionalHashWarning)
+```
+
+Python's `-W` option and `PYTHONWARNINGS` cannot name this class: they are read before
+installed packages can be imported.
+
 ## What counts as the same array
 
 Two arrays are the same value when everything below that counts is equal.

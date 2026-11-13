@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 from orcapod.errors import MissingOptionalDependencyError
 from orcapod.logical_types.identifier import LogicalTypeIdentifierError
 from orcapod.logical_types.identifier import LogicalTypeIdentifier
+from orcapod.logical_types.provisional import warn_provisional
 from orcapod.logical_types.protocols import (
     LogicalTypeProtocol,
     LogicalTypeFactoryProtocol,
@@ -270,6 +271,13 @@ class LogicalTypeRegistry:
     for example the ignore list of its value hash). See
     ``orcapod.utils.deferred_types``.
 
+    An optional ``provisional`` collection names, by extension name, the types
+    whose value hash and stored identity may still change (ITL-1068): looking one
+    up (``get_by_python_type``, ``get_by_arrow_extension_name``) issues
+    ``ProvisionalHashWarning`` once per type per process. It is read from the
+    ``provisional`` list of ``contexts/logical_types.json`` and never enters an
+    identifier or a hash.
+
     An optional ``factories`` list can also be passed to pre-register
     ``LogicalTypeFactoryProtocol`` instances at construction time. Each entry is a
     dict with keys ``factory`` (the factory instance), ``category`` (optional str),
@@ -289,7 +297,10 @@ class LogicalTypeRegistry:
         logical_types: list[LogicalTypeProtocol] | None = None,
         factories: list[dict] | None = None,
         deferred_logical_types: list[dict[str, Any]] | None = None,
+        provisional: Iterable[str] = (),
     ) -> None:
+        # Extension names of the types whose value hash is provisional (ITL-1068).
+        self._provisional: frozenset[str] = frozenset(provisional)
         # Serialises loading a deferred type, so concurrent first lookups load it once.
         self._deferred_lock = threading.Lock()
         self._deferred_by_python_name: dict[str, dict[str, Any]] = {}
@@ -458,6 +469,14 @@ class LogicalTypeRegistry:
     def get_by_python_type(self, python_type: type) -> LogicalTypeProtocol | None:
         """Return the logical type for *python_type*, or ``None``.
 
+        A type declared provisional issues ``ProvisionalHashWarning`` on its first
+        lookup in the process (``_find_by_python_type`` gives the rules).
+        """
+        return self._noted(self._find_by_python_type(python_type))
+
+    def _find_by_python_type(self, python_type: type) -> LogicalTypeProtocol | None:
+        """Return the logical type for *python_type*, or ``None``.
+
         The most specific type wins: *python_type* itself, then each class of its
         MRO in order, and for each class a registered type before a deferred one
         (which is loaded), so a subclass registered with its own logical
@@ -514,6 +533,31 @@ class LogicalTypeRegistry:
         return None
 
     def get_by_arrow_extension_name(
+        self, arrow_name: str
+    ) -> LogicalTypeProtocol | None:
+        """Return the logical type registered under *arrow_name*, or ``None``.
+
+        A type declared provisional issues ``ProvisionalHashWarning`` on its first
+        lookup in the process.
+
+        Raises:
+            MissingOptionalDependencyError: If *arrow_name* belongs to a deferred
+                logical type whose required module is not installed.
+        """
+        return self._noted(self._find_by_arrow_extension_name(arrow_name))
+
+    def _noted(
+        self, logical_type: LogicalTypeProtocol | None
+    ) -> LogicalTypeProtocol | None:
+        """Warn when *logical_type* is declared provisional; return it unchanged."""
+        if (
+            logical_type is not None
+            and logical_type.logical_type_name in self._provisional
+        ):
+            warn_provisional(logical_type.logical_type_name)
+        return logical_type
+
+    def _find_by_arrow_extension_name(
         self, arrow_name: str
     ) -> LogicalTypeProtocol | None:
         """Return the logical type registered under *arrow_name*, or ``None``.

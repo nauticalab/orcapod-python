@@ -379,6 +379,25 @@ class StoreContentWarning(UserWarning):
     """
 
 
+class ProvisionalHashWarning(UserWarning):
+    """A value type was used whose value hash and stored identity are provisional.
+
+    The library value types (``numpy.ndarray``, ``torch.Tensor``, pandas and polars
+    ``DataFrame`` and ``Series``) are hashed and stored with formats that may still
+    change in v0.4. A result computed now from such a value may then get another hash,
+    so it is computed again after the upgrade: nothing stored is lost or wrong. The
+    warning is issued once per type per process, on whichever use comes first: a value
+    hashed, a column converted to or from Arrow, a function pod annotated with the type,
+    a stored column read. Which types are provisional is declared in the ``provisional``
+    list of ``orcapod/contexts/logical_types.json``.
+
+    To silence it, call ``warnings.filterwarnings("ignore",
+    category=ProvisionalHashWarning)`` after importing Orcapod. Python's ``-W`` option
+    and ``PYTHONWARNINGS`` cannot name this class: they are read before installed
+    packages can be imported.
+    """
+
+
 class EmptyDataAccessError(Exception):
     """Raised when a payload-access method is called on an ``EmptyData`` instance.
 

@@ -373,6 +373,10 @@ class JSONDataContextRegistry:
     # ``hash_ignore`` object is referred to as ``hash_ignore:<extension name>``.
     _HASH_IGNORE_REF_PREFIX = "hash_ignore:"
 
+    # The registration file's ``provisional`` list (extension names of the types
+    # whose value hash is provisional, ITL-1068) is referred to by this name.
+    _PROVISIONAL_REF = "provisional"
+
     def _uses_logical_type_registration(self, spec: dict[str, Any]) -> bool:
         """Whether ``spec`` takes its logical types from the registration file.
 
@@ -395,7 +399,8 @@ class JSONDataContextRegistry:
             of ``[type, handler]`` object-spec pairs and, when present, its
             ``deferred_value_handlers`` list of handlers loaded on first use and
             its ``hash_ignore`` object: per extension name, the property names the
-            value hash of that type ignores.
+            value hash of that type ignores; and its ``provisional`` list: the
+            extension names of the types whose value hash is provisional.
         """
         return _read_json_file(self.logical_types_file)
 
@@ -433,6 +438,19 @@ class JSONDataContextRegistry:
                             f"names, got {ignore!r}"
                         )
                     ref_lut[f"{self._HASH_IGNORE_REF_PREFIX}{name}"] = list(ignore)
+                # The types whose value hash is provisional are declared once, by
+                # extension name; the logical type registry takes the list as
+                # ``{"_ref": "provisional"}`` and the value handler registry below
+                # is given it. It never enters an identifier or a hash (ITL-1068).
+                provisional = registration.get(self._PROVISIONAL_REF, [])
+                if not isinstance(provisional, list) or not all(
+                    isinstance(item, str) for item in provisional
+                ):
+                    raise ValueError(
+                        f"provisional must be a list of extension names, got "
+                        f"{provisional!r}"
+                    )
+                ref_lut[self._PROVISIONAL_REF] = list(provisional)
                 ref_lut[self._LOGICAL_TYPE_REGISTRY_REF] = parse_objectspec(
                     registration["logical_type_registry"], ref_lut=ref_lut
                 )
@@ -462,6 +480,7 @@ class JSONDataContextRegistry:
                         entry["handler"],
                         parse_objectspec(entry.get("_config", {}), ref_lut=ref_lut),
                     )
+                handler_registry.declare_provisional(ref_lut[self._PROVISIONAL_REF])
 
             return DataContext(
                 context_key=context_key,

@@ -408,12 +408,15 @@ class IgnoreListLogicalType(BaseLogicalType):
 class IgnoreListHandler:
     """Base of a value hasher that honours an ignore list.
 
-    A subclass sets ``OPTIONS`` and ``HASH_LABEL`` and implements ``digest``.
-    A bare value is hashed with the list the handler was configured with (the
+    A subclass sets ``EXTENSION_NAME``, ``OPTIONS`` and ``HASH_LABEL`` and
+    implements ``digest``. A bare value is hashed with the list the handler was configured with (the
     data context's). A cell of a typed column is hashed with the list of the
     column's own extension metadata, through ``hash_ignoring``.
 
     Attributes:
+        EXTENSION_NAME: The extension name of the logical type of the values,
+            the same constant as the logical type's. The handler registry checks
+            it against the types declared provisional (ITL-1068).
         OPTIONS: The closed set of property names the hash can ignore; the same
             set as the logical type's.
         HASH_LABEL: The label of the hash algorithm (``ContentHash.method``).
@@ -425,6 +428,7 @@ class IgnoreListHandler:
         ValueError: If ``ignore`` holds a name that is not in ``OPTIONS``.
     """
 
+    EXTENSION_NAME: ClassVar[str]
     OPTIONS: ClassVar[frozenset[str]]
     HASH_LABEL: ClassVar[str]
 

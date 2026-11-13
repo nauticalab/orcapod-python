@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
 
+from orcapod.logical_types.provisional import warn_provisional
 from orcapod.utils.deferred_types import load_object, qualified_name
 
 if TYPE_CHECKING:
@@ -48,6 +49,8 @@ class PythonTypeHandlerRegistry:
         self._deferred: dict[str, dict[str, Any]] = {}
         self._handlers: dict[type, "PythonTypeHandlerProtocol"] = {}
         self._lock = threading.RLock()
+        # Extension names of the types whose value hash is provisional (ITL-1068).
+        self._provisional: frozenset[str] = frozenset()
         if handlers:
             for entry in handlers:
                 # Skip empty or incomplete pairs.  When a handler pair in the context
@@ -124,8 +127,26 @@ class PythonTypeHandlerRegistry:
                 return True
             return False
 
+    def declare_provisional(self, extension_names: Iterable[str]) -> None:
+        """Declare the types whose value hash is provisional (ITL-1068).
+
+        A handler whose ``EXTENSION_NAME`` is declared issues
+        ``ProvisionalHashWarning`` the first time in the process that ``get_handler``
+        returns it for a value. The data context loader passes the ``provisional``
+        list of ``contexts/logical_types.json``; the declaration never enters a hash.
+
+        Args:
+            extension_names: The extension names declared provisional. They replace
+                any earlier declaration.
+        """
+        with self._lock:
+            self._provisional = frozenset(extension_names)
+
     def get_handler(self, obj: Any) -> "PythonTypeHandlerProtocol | None":
         """Look up the handler for *obj* using MRO-aware resolution.
+
+        A handler of a type declared provisional (``declare_provisional``) issues
+        ``ProvisionalHashWarning`` on its first use in the process.
 
         Args:
             obj: The object for which a handler is needed.
@@ -133,7 +154,11 @@ class PythonTypeHandlerRegistry:
         Returns:
             The registered ``PythonTypeHandlerProtocol``, or None.
         """
-        return self.get_handler_for_type(type(obj))
+        handler = self.get_handler_for_type(type(obj))
+        extension_name = getattr(handler, "EXTENSION_NAME", None)
+        if extension_name is not None and extension_name in self._provisional:
+            warn_provisional(extension_name)
+        return handler
 
     def get_handler_for_type(
         self, target_type: type

@@ -20,6 +20,7 @@ import pytest
 
 from orcapod import function_pod
 from orcapod.contexts import get_default_context
+from orcapod.errors import ProvisionalHashWarning
 from orcapod.logical_types.numpy_type import dtype_to_tag
 from orcapod.operators import MergeJoin
 from orcapod.sources import ArrowTableSource, DictSource
@@ -261,6 +262,9 @@ def test_dtype_metadata_is_dropped_without_a_warning() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
+        # The array type's own provisional-hash notice (ITL-1068) is not about
+        # dtype metadata; it is issued on the first use in a process.
+        warnings.filterwarnings("ignore", category=ProvisionalHashWarning)
         got = read_back(with_metadata)
     assert got.dtype.metadata is None
     assert got.tobytes() == plain.tobytes()

@@ -11,6 +11,7 @@ from typing import Any
 from orcapod.logical_types.ignore_list import IgnoreListHandler
 from orcapod.logical_types.torch_type import (
     OPTIONS,
+    TORCH_TENSOR_EXTENSION_NAME,
     TORCH_TENSOR_HASH_LABEL,
     tensor_digest,
 )
@@ -29,6 +30,7 @@ class TorchTensorHandler(IgnoreListHandler):
     elements, also inside an untyped Python structure.
     """
 
+    EXTENSION_NAME = TORCH_TENSOR_EXTENSION_NAME
     OPTIONS = OPTIONS
     HASH_LABEL = TORCH_TENSOR_HASH_LABEL
 

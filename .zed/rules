@@ -320,6 +320,11 @@ Developer, November 12, 2026 (ITL-981); see `docs/concepts/arrays.md` and
   `allow_pickle=False` on write and read; never raise `max_header_size`). Options:
   `memory_order`, `byte_order`, `struct_layout`. Where stored arrays must be ordered, order
   them by value hash (`storage_sort_key`), never by stored bytes.
+- Library value types are provisional until the v0.4 audit (developer, November 13, 2026,
+  ITL-1068): their extension names are listed in `provisional` of
+  `contexts/logical_types.json`, and using one issues `ProvisionalHashWarning` once per type
+  per process. A new library value type must be added to that list. The list never enters a
+  hash, identifier or stored path.
 
 ## User classes: exact and structural
 
