@@ -95,21 +95,95 @@ Things to know about Spiral tables:
   that strings, binaries and lists become their large variants. Joining two Spiral tables on
   their shared key columns works; joining with another source requires the same Arrow types on
   both sides (`uint32` against `int64` is an error, not a conversion).
-- **The whole table is read when the source is built.** Use tables of up to a few hundred
-  thousand rows. Very large tables (for example `spike_event`) need the streaming source that
-  is still being designed.
 - **Not supported:** columns of type `map`, which the Arrow hasher does not hash. Building
   the source raises `ValueError` naming each such column and its type; drop or convert
   those columns first. `fixed_size_list` columns are supported. Also not supported: time zones (SpiralDB stores
   timestamps without one) and Orcapod logical types such as `Path` (they come back as their
   storage type).
-- **Source identity.** The default `source_id` is `<project id>/<dataset>/<table>`, for
-  example `edi-sample-v1-855632/default/session`, so tables with the same name in different
-  projects stay apart.
-- **Record identity.** Without `record_id_column`, a row's record ID comes from its position
-  in the table, which SpiralDB orders by key, so a row inserted before existing rows changes
-  the IDs of the rows after it. Pass `record_id_column=` (a column whose value is unique per
-  row) to derive the IDs from that column's values instead, so they stay with their rows.
+- **Source identity.** A Spiral source is identified by where its table is, never by its
+  rows. The default `source_id` is `<project id>/<dataset>.<table>@<Spiral table id>`, for
+  example `edi-tutorial-v1-841226/default.session@table_Jo7J0lpkLcOM`. The table id is
+  SpiralDB's own, so tables with the same name in different projects stay apart, and a table
+  that is dropped and created again under the same name is a different source: nothing
+  recorded for the old table is reused. A renamed table also gets a new `source_id`.
+- **Record identity.** A row is identified by its primary key: its record ID is derived from
+  the hash of its key columns. A row keeps its record ID when other rows are added, and has
+  the same one whichever read returned it.
+
+#### Reading a Spiral table
+
+Building a `SpiralDBTableSource` reads no rows. It reads the table's schema, key columns and
+table id, which takes about a second whatever the table's size. `output_schema()`, `keys()`,
+`content_hash()` and `pipeline_hash()` read no rows either. Rows are read when you ask for
+them, and every read scans the table again:
+
+- `iter_data()` and a pipeline job hand the rows on in batches of at most `batch_rows`
+  rows (default 8,192). SpiralDB sends a scan in batches that follow its stored fragments,
+  whose sizes cannot be chosen; one of them is held while its rows are handed on.
+- `as_table()`, `as_df()`, `as_polars_df()`, `as_pandas_df()` and `as_lazy_frame()` read
+  the rows into memory and return them all.
+
+To read part of a table, say so when you build the source. SpiralDB applies both
+restrictions before any row is transferred:
+
+<!-- docs-test: skip -->
+```python
+first = SpiralDBTableSource("edi-tutorial-v1-841226", "spike_event", limit=1000)
+unit = SpiralDBTableSource(
+    "edi-tutorial-v1-841226", "spike_event", where={"unit_id": 106}
+)
+print(first.row_count_estimate)  # rows in the whole table, without reading any
+```
+
+- `limit=n` reads the first `n` rows in key order.
+- `where={column: value, ...}` reads the rows in which every named column equals its value.
+- `asof=` reads the table as of an earlier version. Without it, a source reads the version
+  the table had when the source was built, in every read.
+
+**The row cap.** One read returns at most `max_rows` rows (default 100,000). A read that
+would return more raises `SourceTooLargeError`, which gives the row count and the ways out:
+`limit=`, `where=`, or a larger `max_rows` (`max_rows=None` removes the cap). When nothing
+but `limit=` bounds the read, the source decides before reading any row, from the row count
+SpiralDB records for the table. That count can include deleted rows that are not yet
+compacted, so a table near the cap can be refused although a scan would return fewer rows;
+the error says so. The cap is there
+because a pipeline job keeps every row it processes in memory, about 5 KB per row for each
+node, so 100,000 rows cost about 0.5 GB per node. A table of millions of rows can be iterated
+with `max_rows=None`, but it cannot yet be run through a job on a laptop.
+
+**Looking at a table in a notebook.** A Spiral source shown at the end of a notebook cell
+(or through `view()`) reads only its first 10 rows, in one scan to which the row cap does not
+apply, so a table of any size can be looked at. The header line says what is shown, for
+example `SpiralDBTableSource[spike_event] — first 10 rows of about 63,349` (the table's
+recorded row count, read without scanning), `all 4 rows` when the source reads no more than
+that, or `first 10 matching rows (where unit_id=106); the table has about 63,349 rows` with
+`where=`. Tag columns come first, marked with `*`. To see more rows, use `as_df()` with a
+`limit=` or `where=` source.
+
+**Restrictions are not part of identity.** `where`, `limit` and `asof` choose rows of the
+same table, so two sources on one table have the same `source_id` and `content_hash`
+whatever their restrictions, and a row's result is computed once and shared. One
+consequence: with a shared store, reading a job's node back (`get_all_records()`, a loaded
+job, and `as_table()` after an async run) returns every row that any job with the same
+pipeline has read from that table, not only the rows of the latest restriction. The rows
+sent downstream during a run are only the rows that run read.
+
+**Running again.** A second run scans the table again and computes nothing for the rows it
+has already seen. A source object keeps reading the version its table had when it was
+built, so rows added to the Spiral table afterwards are seen only by a new source: build
+the source (and the job around it) again, and the added rows are new keys, the only rows
+computed.
+
+**Known limitations.**
+
+- Each row's key is hashed with one call, about 0.2 ms per row (about 18 s per 100,000
+  rows), in addition to about 0.1 ms per row to build the row.
+- A job keeps its rows in memory (see the row cap above).
+- Only equality on column values can be pushed down; there is no key range, no column
+  selection (use `SelectDataColumns` after the source), and no polling for new rows within
+  one run.
+- A table that has only its key columns (for example one never written to) has no data
+  column and cannot be a source.
 
 #### Nullability of Spiral columns
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping
@@ -440,8 +441,36 @@ class StreamBase(TraceableBase):
         """
         return [e for e in self.iter_data()]
 
+    def _preview(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "tuple[pl.DataFrame, str | None]":
+        """Return the rows a notebook display of the stream shows, and a note on them.
+
+        ``_repr_html_`` and ``view`` show what this returns. The default is every row of
+        the stream and no note. A stream whose rows are costly to read overrides it to
+        show fewer, and says so in the note.
+
+        Args:
+            columns: Column configuration, as for ``as_table``.
+            all_info: Include all column groups, as for ``as_table``.
+
+        Returns:
+            The rows to show and a note for the header line, or ``None`` for no note.
+        """
+        return self.as_polars_df(columns=columns, all_info=all_info), None
+
+    def _preview_header(self, note: str | None) -> str:
+        """Return the header line a notebook display puts above the rows, HTML-escaped."""
+        header = f"{self.__class__.__name__}[{self.label}]"
+        return html.escape(
+            header if note is None else f"{header} — {note}", quote=False
+        )
+
     def _repr_html_(self) -> str:
-        df = self.as_polars_df()
+        df, note = self._preview()
         # reorder columns
         new_column_order = [c for c in df.columns if c in self.keys()[0]] + [
             c for c in df.columns if c not in self.keys()[0]
@@ -450,7 +479,7 @@ class StreamBase(TraceableBase):
         tag_map = {t: f"*{t}" for t in self.keys()[0]}
         # TODO: construct repr html better
         df = df.rename(tag_map)
-        return f"{self.__class__.__name__}[{self.label}]\n" + df._repr_html_()
+        return self._preview_header(note) + "\n" + df._repr_html_()
 
     def view(
         self,
@@ -458,23 +487,20 @@ class StreamBase(TraceableBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> "StreamView":
-        df = self.as_polars_df(
-            columns=columns,
-            all_info=all_info,
-        )
+        df, note = self._preview(columns=columns, all_info=all_info)
         tag_map = {t: f"*{t}" for t in self.keys()[0]}
         # TODO: construct repr html better
         df = df.rename(tag_map)
-        return StreamView(self, df)
+        return StreamView(self, df, self._preview_header(note))
 
 
 class StreamView:
-    def __init__(self, stream: StreamBase, view_df: "pl.DataFrame") -> None:
+    def __init__(
+        self, stream: StreamBase, view_df: "pl.DataFrame", header: str
+    ) -> None:
         self._stream = stream
         self._view_df = view_df
+        self._header = header
 
     def _repr_html_(self) -> str:
-        return (
-            f"{self._stream.__class__.__name__}[{self._stream.label}]\n"
-            + self._view_df._repr_html_()
-        )
+        return self._header + "\n" + self._view_df._repr_html_()

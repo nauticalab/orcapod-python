@@ -8,11 +8,14 @@ project.
 
 Only the calls the connector makes are implemented:
 
-* ``Spiral(overrides=...)``, ``Spiral.project(id)``, ``Spiral.scan(expr)``
+* ``Spiral(overrides=...)``, ``Spiral.project(id)``,
+  ``Spiral.scan(expr, where=..., limit=..., asof=...)``, ``Spiral.core.manifest_stats``
+  (each call is recorded in ``scan_log``; batches are read on demand)
 * ``Project.list_tables()`` (``TableResource`` with ``.dataset`` / ``.table``),
   ``Project.table(id)``, ``Project.create_table(id, key_schema=..., exist_ok=...)``,
   ``Project.drop_table(id)``
-* ``Table.key_schema``, ``Table.schema().to_arrow()``, ``Table.select()``, ``Table.write(t)``,
+* ``Table.key_schema``, ``Table.table_id``, ``Table.last_modified_at()``, ``Table[name] == v``,
+  ``Table.core.get_snapshot()``, ``Table.schema().to_arrow()``, ``Table.select()``, ``Table.write(t)``,
   ``Table.get_metadata()``, ``Table.set_metadata(kv)``, ``Table.drop_metadata(keys)``
 * ``Scan.to_record_batches()``, ``Scan.to_table()``
 
@@ -49,6 +52,8 @@ from __future__ import annotations
 import json
 import os
 import types
+import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -64,6 +69,21 @@ _BEHAVIOUR_FILE = "_behaviour.json"
 _MAX_PAIR_BYTES = 8192
 _MAX_KEY_CHARS = 255
 _MAX_ENTRIES = 1024
+
+
+@dataclass
+class ScanRecord:
+    """One ``Spiral.scan(...)`` call: the table, its keyword arguments, batches handed out."""
+
+    identifier: str
+    kwargs: dict[str, Any]
+    batches_read: int = 0
+
+
+# Every scan opened in this process, oldest first. Tests clear it and read it.
+scan_log: list[ScanRecord] = []
+# Rows per batch a scan hands out (SpiralDB's batches follow its stored fragments).
+scan_batch_rows = 2
 
 
 @dataclass(frozen=True)
@@ -253,10 +273,22 @@ class _Store:
             json.dumps(key_schema.names)
         )
         self._path(project_id, identifier, ".kv.json").write_text("{}")
+        # SpiralDB gives every table its own id; a recreated table gets a new one.
+        self._path(project_id, identifier, ".id.txt").write_text(
+            f"table_{uuid.uuid4().hex[:12]}"
+        )
+        self._path(project_id, identifier, ".version.txt").write_text("0")
 
     def drop(self, project_id: str, identifier: str) -> None:
         """Remove every file of table ``identifier``."""
-        for suffix in (".keys.json", ".keys.arrow", ".kv.json", ".data.arrow"):
+        for suffix in (
+            ".keys.json",
+            ".keys.arrow",
+            ".kv.json",
+            ".data.arrow",
+            ".id.txt",
+            ".version.txt",
+        ):
             p = self._path(project_id, identifier, suffix)
             if p.exists():
                 p.unlink()
@@ -275,10 +307,21 @@ class _Store:
             return r.read_all()
 
     def write(self, project_id: str, identifier: str, table: pa.Table) -> None:
-        """Replace table ``identifier``'s rows with ``table``."""
+        """Replace table ``identifier``'s rows with ``table`` and move its version on."""
         p = self._path(project_id, identifier, ".data.arrow")
         with pa.ipc.new_file(str(p), table.schema) as w:
             w.write_table(table)
+        self._path(project_id, identifier, ".version.txt").write_text(
+            str(self.version(project_id, identifier) + 1)
+        )
+
+    def table_id(self, project_id: str, identifier: str) -> str:
+        """Return table ``identifier``'s own id."""
+        return self._path(project_id, identifier, ".id.txt").read_text()
+
+    def version(self, project_id: str, identifier: str) -> int:
+        """Return table ``identifier``'s version: ``0`` before the first write."""
+        return int(self._path(project_id, identifier, ".version.txt").read_text())
 
     def kv(self, project_id: str, identifier: str) -> dict[str, bytes]:
         """Return table ``identifier``'s key-value metadata."""
@@ -317,6 +360,7 @@ class FakeSchema:
     """What ``Table.schema()`` returns: a wrapper whose ``to_arrow()`` gives the schema."""
 
     def __init__(self, schema: pa.Schema) -> None:
+        """Wrap ``schema``."""
         self._schema = schema
 
     def to_arrow(self) -> pa.Schema:
@@ -328,25 +372,90 @@ class FakeExpr:
     """The result of ``Table.select()``: names the table to scan."""
 
     def __init__(self, table: FakeTable) -> None:
+        """Name ``table`` as the table to scan."""
         self.table = table
 
 
-class FakeScan:
-    """What ``Spiral.scan(table.select())`` returns: reads the whole stored table."""
+class FakePredicate:
+    """A ``where`` expression: every named column equals its value."""
 
-    def __init__(self, table: FakeTable) -> None:
+    def __init__(self, equalities: list[tuple[str, Any]]) -> None:
+        """Hold the ``(column, value)`` pairs a row must all match."""
+        self.equalities = equalities
+
+    def __and__(self, other: FakePredicate) -> FakePredicate:
+        """Return a predicate requiring this one's equalities and ``other``'s."""
+        return FakePredicate(self.equalities + other.equalities)
+
+    def __repr__(self) -> str:
+        """Return the equalities as ``name == value`` terms joined by ``&``."""
+        return " & ".join(f"{name} == {value!r}" for name, value in self.equalities)
+
+
+class FakeColumn:
+    """What ``table[name]`` returns: compare it with ``==`` to get a predicate."""
+
+    def __init__(self, name: str) -> None:
+        """Name the column ``name``."""
+        self._name = name
+
+    def __eq__(self, value: object) -> FakePredicate:  # pyright: ignore[reportIncompatibleMethodOverride]  # as pyspiral's Expr does
+        """Return the predicate that this column equals ``value``."""
+        return FakePredicate([(self._name, value)])
+
+    __hash__ = None  # pyright: ignore[reportAssignmentType]  # an expression, not a value
+
+
+class FakeScan:
+    """What ``Spiral.scan(table.select(), where=..., limit=...)`` returns."""
+
+    def __init__(
+        self,
+        table: FakeTable,
+        record: ScanRecord,
+        where: FakePredicate | None,
+        limit: int | None,
+    ) -> None:
+        """Prepare a scan of ``table``; no row is read until rows are asked for.
+
+        Args:
+            table: The table to scan.
+            record: The ``scan_log`` entry that counts the batches handed out.
+            where: The equalities a row must match, or ``None`` for every row.
+            limit: The most rows to return, or ``None`` for no limit.
+        """
         self._table = table
+        self._record = record
+        self._where = where
+        self._limit = limit
+
+    def _rows(self) -> pa.Table:
+        """Return the rows matching ``where``, cut to ``limit``, in key order."""
+        rows = self._table._read_all()
+        for name, value in self._where.equalities if self._where else []:
+            rows = rows.filter(
+                pc.equal(
+                    rows.column(name), pa.scalar(value, rows.schema.field(name).type)
+                )
+            )
+        return rows if self._limit is None else rows.slice(0, self._limit)
 
     def to_table(self) -> pa.Table:
-        """Return every stored row, in key order."""
-        return self._table._read_all()
+        """Return the scanned rows, in key order."""
+        return self._rows()
 
-    def to_record_batches(self) -> pa.RecordBatchReader:
-        """Return the stored rows in key order, as batches of at most two rows."""
-        t = self._table._read_all()
-        # SpiralDB yields more than one batch for larger tables; split to exercise that.
-        batches = t.to_batches(max_chunksize=2) if t.num_rows else []
-        return pa.RecordBatchReader.from_batches(t.schema, batches)
+    def to_record_batches(self, **kwargs: Any) -> pa.RecordBatchReader:
+        """Return the rows in key order, ``scan_batch_rows`` per batch, read on demand."""
+        rows = self._rows()
+
+        def batches() -> Iterator[pa.RecordBatch]:
+            # SpiralDB yields more than one batch for larger tables; split to exercise that.
+            """Yield ``rows`` in batches, counting each in the scan record."""
+            for batch in rows.to_batches(max_chunksize=scan_batch_rows):
+                self._record.batches_read += 1
+                yield batch
+
+        return pa.RecordBatchReader.from_batches(rows.schema, batches())
 
 
 class FakeTable:
@@ -362,6 +471,7 @@ class FakeTable:
     """
 
     def __init__(self, store: _Store, project_id: str, identifier: str) -> None:
+        """Open table ``identifier`` of ``project_id`` in ``store``."""
         if not store.exists(project_id, identifier):
             raise ValueError(f"Table not found: {project_id}/{identifier}")
         self._store = store
@@ -372,6 +482,24 @@ class FakeTable:
     def key_schema(self) -> pa.Schema:
         """The key columns, in key order."""
         return self._store.key_schema(self._project_id, self._identifier)
+
+    @property
+    def table_id(self) -> str:
+        """The table's own id: kept on rename, new when the table is recreated."""
+        return self._store.table_id(self._project_id, self._identifier)
+
+    @property
+    def core(self) -> Any:
+        """The table's low-level handle; only ``get_snapshot`` is modelled."""
+        return types.SimpleNamespace(get_snapshot=lambda asof=None: self)
+
+    def last_modified_at(self) -> int:
+        """Return the table's version: ``0`` before the first write."""
+        return self._store.version(self._project_id, self._identifier)
+
+    def __getitem__(self, name: str) -> FakeColumn:
+        """Return the column expression ``table[name]``."""
+        return FakeColumn(name)
 
     def schema(self) -> FakeSchema:
         """Return the stored schema (only the key columns before the first write)."""
@@ -521,6 +649,7 @@ class FakeProject:
     """What ``Spiral.project(id)`` returns: list, open, create and drop tables."""
 
     def __init__(self, store: _Store, project_id: str) -> None:
+        """Bind project ``project_id`` in ``store``."""
         self._store = store
         self._project_id = project_id
 
@@ -529,7 +658,8 @@ class FakeProject:
         out = []
         for ident in self._store.identifiers(self._project_id):
             dataset, _, table = ident.partition(".")
-            out.append(TableResource(ident, self._project_id, dataset, table))
+            table_id = self._store.table_id(self._project_id, ident)
+            out.append(TableResource(table_id, self._project_id, dataset, table))
         return out
 
     def table(self, identifier: str) -> FakeTable:
@@ -544,6 +674,23 @@ class FakeProject:
         root_uri: Any = None,
         exist_ok: bool = False,
     ) -> FakeTable:
+        """Create the table ``"<dataset>.<table>"`` with ``key_schema`` and open it.
+
+        Key columns are stored the way SpiralDB stores them, nullable under
+        ``server_nullability`` however they were declared.
+
+        Args:
+            identifier: ``"<dataset>.<table>"``.
+            key_schema: An Arrow schema, or ``(name, type)`` pairs as pyspiral accepts.
+            root_uri: Accepted for signature compatibility; unused.
+            exist_ok: Open an existing table instead of raising.
+
+        Returns:
+            The new table, or with ``exist_ok`` the existing one.
+
+        Raises:
+            ValueError: If the table exists and ``exist_ok`` is false.
+        """
         if self._store.exists(self._project_id, identifier):
             if not exist_ok:
                 raise ValueError(f"Table already exists: {identifier}")
@@ -586,6 +733,7 @@ class FakeSpiral:
     def __init__(
         self, *, config: Any = None, overrides: dict[str, str] | None = None
     ) -> None:
+        """Open the store under ``FAKE_SPIRAL_ROOT`` and record ``overrides``."""
         root = os.environ.get(_ROOT_ENV)
         if not root:
             raise RuntimeError(f"{_ROOT_ENV} is not set; call fake_pyspiral.install()")
@@ -597,12 +745,40 @@ class FakeSpiral:
         return FakeProject(self._store, project_id)
 
     def scan(self, *projections: Any, **kwargs: Any) -> FakeScan:
-        """Return a scan of one ``table.select()``; other projections are not modelled."""
+        """Return a scan of one ``table.select()``, restricted by ``where`` and ``limit``.
+
+        Every call is appended to ``scan_log``. ``asof`` is accepted and recorded; the
+        fake keeps one version of a table. Other projections and ``key_ranges`` are
+        not modelled.
+        """
         if len(projections) != 1 or not isinstance(projections[0], FakeExpr):
             raise NotImplementedError(
                 "fake Spiral.scan supports only scan(table.select())"
             )
-        return FakeScan(projections[0].table)
+        unsupported = {k for k, v in kwargs.items() if v is not None} - {
+            "where",
+            "limit",
+            "asof",
+        }
+        if unsupported:
+            raise NotImplementedError(f"fake Spiral.scan: {sorted(unsupported)}")
+        table = projections[0].table
+        record = ScanRecord(table._identifier, dict(kwargs))
+        scan_log.append(record)
+        return FakeScan(table, record, kwargs.get("where"), kwargs.get("limit"))
+
+    @property
+    def core(self) -> Any:
+        """The client's low-level handle; only ``manifest_stats`` is modelled."""
+
+        def manifest_stats(snapshot: FakeTable) -> Any:
+            """Return stats whose ``key_space_stats.total_rows`` counts rows."""
+            rows = snapshot._read_all().num_rows
+            return types.SimpleNamespace(
+                key_space_stats=types.SimpleNamespace(total_rows=rows)
+            )
+
+        return types.SimpleNamespace(manifest_stats=manifest_stats)
 
 
 fake_spiral_module = types.SimpleNamespace(Spiral=FakeSpiral)

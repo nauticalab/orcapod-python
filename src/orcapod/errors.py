@@ -44,6 +44,14 @@ class RecursiveTypeError(TypeError):
     """
 
 
+class SourceTooLargeError(ValueError):
+    """Raised when a read of a source would return more rows than its ``max_rows``.
+
+    The message gives the number of rows found or expected, the cap, and the ways to
+    read fewer rows or lift the cap.
+    """
+
+
 class DuplicateTagError(ValueError):
     """Raised when duplicate tag values are found and skip_duplicates=False"""
 

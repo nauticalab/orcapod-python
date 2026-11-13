@@ -8,6 +8,10 @@ Uses the pyspiral fake (``tests/test_databases/fake_pyspiral.py``). Observed on 
 (ebf2511b): inserting a row whose key sorts first shifts every later row's provenance token
 (``row_0`` → ``row_1`` ...), so each gets a new record ID; ``record_id_column`` accepts one
 column only, and a non-unique one gives two rows the same token.
+
+Fixed by ITL-186: a Spiral row's token is the hash of its primary key, so the tokens printed
+before and after the insert are now the same for the rows that were already there, and
+``SpiralDBTableSource`` no longer takes ``record_id_column``.
 """
 
 import sys
@@ -38,11 +42,3 @@ with fake_pyspiral.install(tempfile.mkdtemp()):
     print("before insert:", tokens(SpiralDBTableSource("p", "t")))
     table.write(pa.table({"s": ["a"], "n": pa.array([0], pa.int32()), "v": [0.0]}))
     print("after insert: ", tokens(SpiralDBTableSource("p", "t")))
-    print(
-        "record_id_column='s':",
-        tokens(SpiralDBTableSource("p", "t", record_id_column="s")),
-    )
-    try:
-        SpiralDBTableSource("p", "t", record_id_column=["s", "n"])  # pyright: ignore[reportArgumentType]  (deliberate)
-    except ValueError as exc:
-        print(f"composite record_id_column: ValueError: {exc}")

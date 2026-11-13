@@ -22,7 +22,7 @@ import base64
 import json
 import logging
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -541,8 +541,6 @@ class SpiralDBConnector:
             NullInNonNullableColumnError: If a batch holds a null in a recorded
                 non-nullable column (naming the table and the column).
         """
-        import pyarrow as _pa  # noqa: PLC0415
-
         self._require_open()
         if params is not None:
             logger.warning(
@@ -557,15 +555,36 @@ class SpiralDBConnector:
                 "Ignoring batch_size=%r",
                 batch_size,
             )
-        table_name = _parse_table_name(query)
-        tbl = self._project.table(self._table_id(table_name))
+        yield from self.scan_batches(_parse_table_name(query))
+
+    def _batch_preparer(
+        self, tbl: Any, table_name: str
+    ) -> Callable[[pa.RecordBatch], pa.RecordBatch]:
+        """Return the function that gives a scanned batch the types Orcapod reports.
+
+        The function restores field and schema metadata from the table's key-value
+        store, normalizes every type to its large variants and applies the table's
+        nullability record, exactly as ``iter_batches`` documents.
+
+        Args:
+            tbl: The pyspiral table.
+            table_name: Plain table name (no dataset prefix).
+
+        Returns:
+            A function from a scanned batch to the prepared batch.
+
+        Raises:
+            NullabilityRecordError: If the table's nullability record cannot be read.
+        """
+        import pyarrow as _pa  # noqa: PLC0415
+
         kv = tbl.get_metadata()
         schema_meta, field_trees = _load_arrow_metadata(kv)
         qualified = self._qualified(table_name)
         with _about_table(qualified):
             paths = read_nullability_record(kv)
-        reader = self._spiral.scan(tbl.select()).to_record_batches()
-        for batch in reader:
+
+        def prepare(batch: pa.RecordBatch) -> pa.RecordBatch:
             schema = batch.schema
             new_fields = []
             needs_rebuild = False
@@ -596,7 +615,120 @@ class SpiralDBConnector:
             if paths is not None:
                 with _about_table(qualified):
                     batch = enforce_nullability_record(batch, paths)
-            yield batch
+            return batch
+
+        return prepare
+
+    def scan_batches(
+        self,
+        table_name: str,
+        *,
+        where: Mapping[str, object] | None = None,
+        limit: int | None = None,
+        asof: int | None = None,
+    ) -> Iterator[pa.RecordBatch]:
+        """Scan a table, optionally restricted, and yield prepared Arrow batches.
+
+        The restrictions are applied by SpiralDB, before any row reaches this
+        process. Batches arrive in key order; their sizes follow SpiralDB's stored
+        fragments and cannot be chosen. Each batch has the types, metadata and
+        nullability ``iter_batches`` documents.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+            where: Column name to value. A row is read only if every named column
+                equals its value.
+            limit: Read at most this many rows, the first in key order.
+            asof: Read the table as of this version (a ``get_table_version`` value).
+
+        Yields:
+            Arrow RecordBatch objects. Nothing for a table with no matching row.
+
+        Raises:
+            NullabilityRecordError: If the table's nullability record cannot be read or
+                names a column the table does not have.
+            NullInNonNullableColumnError: If a batch holds a null in a recorded
+                non-nullable column (naming the table and the column).
+        """
+        self._require_open()
+        tbl = self._project.table(self._table_id(table_name))
+        prepare = self._batch_preparer(tbl, table_name)
+        predicate = None
+        for column, value in (where or {}).items():
+            equals = tbl[column] == value
+            predicate = equals if predicate is None else predicate & equals
+        scan = self._spiral.scan(tbl.select(), where=predicate, limit=limit, asof=asof)
+        for batch in scan.to_record_batches():
+            yield prepare(batch)
+
+    def get_arrow_schema(self, table_name: str) -> pa.Schema:
+        """Return the schema of the batches ``scan_batches`` yields, without scanning.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+
+        Returns:
+            The prepared Arrow schema: large-normalized types, restored metadata and
+            the nullability the table's nullability record gives.
+
+        Raises:
+            NullabilityRecordError: If the table's nullability record cannot be read or
+                names a column the table does not have.
+        """
+        import pyarrow as _pa  # noqa: PLC0415
+
+        self._require_open()
+        tbl = self._project.table(self._table_id(table_name))
+        declared = tbl.schema().to_arrow()
+        empty = _pa.RecordBatch.from_pylist([], schema=declared)
+        return self._batch_preparer(tbl, table_name)(empty).schema
+
+    def get_spiral_table_id(self, table_name: str) -> str:
+        """Return SpiralDB's own id of the table (for example ``table_W7C01nkLTmEJ``).
+
+        The id stays the same when the table is renamed. A table dropped and created
+        again under the same name gets a new one.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+
+        Returns:
+            The table id.
+        """
+        self._require_open()
+        return str(self._project.table(self._table_id(table_name)).table_id)
+
+    def get_table_version(self, table_name: str) -> int:
+        """Return the table's current version, usable as ``asof`` in ``scan_batches``.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+
+        Returns:
+            The time of the table's last change, in microseconds; ``0`` for a table
+            that was never written.
+        """
+        self._require_open()
+        return int(self._project.table(self._table_id(table_name)).last_modified_at())
+
+    def get_row_count_estimate(self, table_name: str, asof: int | None = None) -> int:
+        """Return the table's row count as SpiralDB's manifests record it, without scanning.
+
+        The count is what the manifests hold: it can be above the number of rows a
+        scan returns when rows were deleted or overwritten and not yet compacted.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+            asof: Count the table as of this version (a ``get_table_version`` value,
+                as ``scan_batches`` takes). If ``None`` (default), the current version.
+
+        Returns:
+            The recorded row count.
+        """
+        self._require_open()
+        tbl = self._project.table(self._table_id(table_name))
+        stats = self._spiral.core.manifest_stats(tbl.core.get_snapshot(asof=asof))
+        return int(stats.key_space_stats.total_rows)
 
     def delete_table(self, table_name: str) -> None:
         """Drop a table from SpiralDB, if it exists.

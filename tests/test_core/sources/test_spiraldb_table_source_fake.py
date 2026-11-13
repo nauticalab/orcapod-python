@@ -87,7 +87,10 @@ def spiral_root(tmp_path: Path):
 
 
 class TestSchema:
+    """Spiral tables arrive with their nullability and Arrow types."""
+
     def test_nullable_spiral_columns_are_optional(self, spiral_root):
+        """Nullable Spiral columns arrive as ``T | None`` tags and data."""
         tag, data = SpiralDBTableSource(_PROJECT, "session").output_schema()
         assert dict(tag) == {
             "subject_id": str | None,
@@ -96,6 +99,7 @@ class TestSchema:
         assert dict(data) == {"booth": str | None, "date_of_record": dt.date | None}
 
     def test_arrow_types_are_kept(self, spiral_root):
+        """Arrow types are kept, only normalized to their large variants."""
         table = SpiralDBTableSource(_PROJECT, "experiment").as_table()
         assert {f.name: f.type for f in table.schema} == {
             "subject_id": pa.large_string(),
@@ -108,6 +112,7 @@ class TestSchema:
         }
 
     def test_dataframe_view_has_tags_and_data_only(self, spiral_root):
+        """``as_df`` holds the tag and data columns only."""
         frame = SpiralDBTableSource(_PROJECT, "session").as_df()
         assert frame.columns == [
             "subject_id",
@@ -117,8 +122,11 @@ class TestSchema:
         ]
 
     def test_plain_typed_pod_is_refused(self, spiral_root):
+        """A pod taking ``int`` is refused over a nullable column."""
+
         @function_pod(output_keys="n")
         def plain(total_trials: int) -> int:
+            """Return ``total_trials`` unchanged."""
             return total_trials
 
         source = SpiralDBTableSource(_PROJECT, "experiment")
@@ -128,7 +136,10 @@ class TestSchema:
 
 
 class TestErrors:
+    """A table that cannot be found is reported by name."""
+
     def test_missing_table_names_project_and_dataset(self, spiral_root):
+        """A missing table is refused, naming the table, project and dataset."""
         with pytest.raises(ValueError) as info:
             SpiralDBTableSource(_PROJECT, "no_such_table", dataset="default")
         message = str(info.value)
@@ -138,6 +149,8 @@ class TestErrors:
 
 
 class TestWorkshopPath:
+    """The workshop job runs, reruns from its store, and saves and loads."""
+
     def _job(self, store: Path, calls: list[int]) -> PipelineJob:
         """Build the workshop job (Join, select, counting pod) over the Delta ``store``."""
 
@@ -145,6 +158,7 @@ class TestWorkshopPath:
         def counted(
             correct_trials: int | None, total_trials: int | None
         ) -> float | None:
+            """Return the share of correct trials, or ``None``; counts the call."""
             calls.append(1)
             if correct_trials is None or not total_trials:
                 return None
@@ -164,6 +178,7 @@ class TestWorkshopPath:
         return job
 
     def test_run_rerun_save_load(self, spiral_root, tmp_path):
+        """Each row is computed once, a rerun computes nothing, and the job reloads."""
         store = tmp_path / "store"
         calls: list[int] = []
         job = self._job(store, calls)
@@ -197,6 +212,7 @@ class TestWorkshopPath:
 
 
 def test_hashes_are_stable_across_processes(spiral_root):
+    """A second Python process computes the same content and pipeline hashes."""
     source = SpiralDBTableSource(_PROJECT, "experiment")
     script = (
         "import json\n"
@@ -251,6 +267,7 @@ class TestSourceId:
 
     @staticmethod
     def _identity(source: SpiralDBTableSource) -> tuple[str, str, str]:
+        """Return the content hash, first record id and first ``_source_sex`` token."""
         table = source.as_table(all_info=True)
         record_id = next(
             c for c in table.column_names if c.startswith("_tag_record_id")
@@ -261,12 +278,20 @@ class TestSourceId:
             table.column("_source_sex")[0].as_py(),
         )
 
-    def test_default_source_id_is_project_dataset_table(self, two_projects):
+    # The row token of subject "m1": the Arrow hash of its primary key (ITL-186).
+    _M1 = "arrow_v1:00000290f26c354e2b6a1683a500d4a3dd8dc0a10d8db76aa7d2c804fc908bd44f749e"
+
+    def test_default_source_id_is_project_dataset_table_and_table_id(
+        self, two_projects
+    ):
+        """The default source id is the project, dataset, table and table id."""
         source = SpiralDBTableSource("edi-sample-a", "subject")
-        assert source.source_id == "edi-sample-a/default/subject"
-        assert self._identity(source)[2] == "edi-sample-a/default/subject::row_0::sex"
+        expected = f"edi-sample-a/default.subject@{source.table_id}"
+        assert source.source_id == expected
+        assert self._identity(source)[2] == f"{expected}::{self._M1}::sex"
 
     def test_same_table_in_two_projects_does_not_collide(self, two_projects):
+        """One table in two projects shares the pipeline hash only."""
         a = SpiralDBTableSource("edi-sample-a", "subject")
         b = SpiralDBTableSource("edi-sample-b", "subject")
         assert a.pipeline_hash() == b.pipeline_hash()  # schema only
@@ -278,6 +303,10 @@ class TestSourceId:
         # column nullable, as SpiralDB reports it. The values were pinned at 49956a6a,
         # before the record existed, and re-recorded once for the v0.3 hash step
         # (ITL-967: starfix 0.5 and the hash label rule move every one of them).
+        # ITL-186 moved the record id and the row token only (from the row's position to
+        # the hash of its primary key); the token is the same with and without a
+        # nullability record, because key fields are hashed as non-nullable.
+        """An unrecorded table reads all-optional, with its pinned hashes."""
         source = SpiralDBTableSource("edi-sample-a", "unrecorded", source_id="subject")
         assert source.output_schema() == (
             Schema({"subject_id": str | None}),
@@ -285,8 +314,8 @@ class TestSourceId:
         )
         assert self._identity(source) == (
             "semantic_v1:896d8f323df90ee26e6a38f1eb730be7a9de343fd1c852dbf0f7655b360bc7ff",
-            "18d1efa53fbc52b6a40f406eca35ca81",
-            "subject::row_0::sex",
+            "1493a9f4caa95b7ca33dcf61e15d5eca",
+            f"subject::{self._M1}::sex",
         )
         assert source.pipeline_hash().to_string() == (
             "semantic_v1:cc6c553ba26af325cd96432edb5bc4ea5453427594965cca7e85a66a420e87f1"
@@ -303,11 +332,12 @@ class TestSourceId:
         # for the v0.3 hash step (ITL-967). The table was
         # written non-null; with the nullability record it reads back non-null, so the
         # hashes are those of the table as written.
+        """A recorded table with a given source id keeps its pinned hashes."""
         source = SpiralDBTableSource("edi-sample-a", "subject", source_id="subject")
         assert self._identity(source) == (
             "semantic_v1:a06a417294cabb0625e47a9357ebf9cc8183576b17498282901bd68d0f02e820",
-            "18d1efa53fbc52b6a40f406eca35ca81",
-            "subject::row_0::sex",
+            "1493a9f4caa95b7ca33dcf61e15d5eca",
+            f"subject::{self._M1}::sex",
         )
         assert source.pipeline_hash().to_string() == (
             "semantic_v1:2e5095e09a558132e652e106af1dca4abf8654285409fc4db63a66ddc63a9f94"
@@ -447,6 +477,7 @@ class TestNonNullableColumns:
 
         @function_pod(output_keys="half")
         def halve(weight: float) -> float:
+            """Return half of ``weight``."""
             return weight / 2
 
         source = SpiralDBTableSource(_PROJECT, "session_unrecorded")
@@ -469,6 +500,7 @@ class TestNonNullableColumns:
 
         @function_pod(output_keys="score")
         def score(total_trials: int, weight: float) -> float:
+            """Return ``total_trials`` times ``weight``."""
             return total_trials * weight
 
         store = tmp_path / "store"

@@ -1,16 +1,18 @@
-"""Tests for SpiralDBTableSource.
+"""Tests for SpiralDBTableSource's interface as a source.
 
-SpiralDB requires network access and credentials, so all tests use
-``unittest.mock`` to patch ``SpiralDBConnector`` at the import site inside
-``spiraldb_table_source``.  No live SpiralDB instance is required.
+SpiralDB needs network access and credentials, so these tests run against the
+disk-backed pyspiral fake (``tests/test_databases/fake_pyspiral.py``): the source goes
+through the real ``SpiralDBConnector``. Reading in batches, restrictions, the row cap and
+record identity are in ``test_spiraldb_table_source_streaming.py``; the workshop path is in
+``test_spiraldb_table_source_fake.py``.
 
 Test sections:
  1. Import / export sanity
  2. Protocol conformance
  3. PK as default tag columns (single and composite)
  4. Explicit tag column override
- 5. No key schema → ValueError (no ROWID fallback)
- 6. Error cases (missing table, empty table)
+ 5. Error cases (missing table, no key schema)
+ 6. The connector (arguments forwarded, closed after use)
  7. Stream behaviour
  8. Deterministic hashing
  9. Config round-trip (to_config / from_config)
@@ -19,109 +21,62 @@ Test sections:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from collections.abc import Generator
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import patch
 
 import pyarrow as pa
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Helpers — build mock connector behaviour
-# ---------------------------------------------------------------------------
+from orcapod.core.sources import SpiralDBTableSource
+from orcapod.databases import SpiralDBConnector
+from tests.test_databases import fake_pyspiral
 
 _TABLE_NAME = "spike_data"
 _PROJECT_ID = "test-project-123456"
-_DATASET = "default"
+_CONNECTOR = "orcapod.core.sources.spiraldb_table_source.SpiralDBConnector"
 
 
-def _make_mock_connector(
-    table_names: list[str] | None = None,
-    pk_columns: list[str] | None = None,
-    batches: list[pa.RecordBatch] | None = None,
-) -> MagicMock:
-    """Return a MagicMock that faithfully simulates SpiralDBConnector lifecycle.
-
-    Specifically, ``close()`` flips a closed flag and ``to_config()`` raises
-    ``RuntimeError`` once closed — matching the real ``SpiralDBConnector``
-    behaviour.  This ensures tests catch bugs where ``to_config()`` (or any
-    other post-close call) is accidentally delegated to the connector.
-
-    Args:
-        table_names: Tables reported by ``get_table_names()``.
-        pk_columns: PK columns returned by ``get_pk_columns()``.
-        batches: Arrow batches returned by ``iter_batches()``.
-    """
-    if table_names is None:
-        table_names = [_TABLE_NAME]
-    if pk_columns is None:
-        pk_columns = ["session_id"]
-    if batches is None:
-        batches = [
-            pa.record_batch(
-                {
-                    "session_id": pa.array(["s1", "s2", "s3"], type=pa.large_string()),
-                    "firing_rate": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
-                }
-            )
-        ]
-
-    connector = MagicMock(name="MockSpiralDBConnector")
-    connector.get_table_names.return_value = table_names
-    connector.get_pk_columns.return_value = pk_columns
-    connector.get_column_info.return_value = []
-    connector.iter_batches.return_value = iter(batches)
-
-    # Simulate the closed-connector lifecycle: close() flips the flag and
-    # to_config() raises RuntimeError afterwards, exactly as the real
-    # SpiralDBConnector does.
-    connector._closed = False
-
-    def _close():
-        connector._closed = True
-
-    def _to_config():
-        if connector._closed:
-            raise RuntimeError("SpiralDBConnector is closed")
-        return {
-            "connector_type": "spiraldb",
-            "project_id": _PROJECT_ID,
-            "dataset": _DATASET,
-            "overrides": None,
-        }
-
-    connector.close.side_effect = _close
-    connector.to_config.side_effect = _to_config
-    return connector
+def _make_table(
+    name: str = _TABLE_NAME,
+    pk_columns: tuple[str, ...] = ("session_id",),
+    rows: pa.Table | None = None,
+    project_id: str = _PROJECT_ID,
+    dataset: str = "default",
+) -> None:
+    """Create a table in the fake project and write ``rows`` to it."""
+    if rows is None:
+        rows = pa.table(
+            {
+                "session_id": pa.array(["s1", "s2", "s3"], type=pa.large_string()),
+                "firing_rate": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
+            }
+        )
+    keys = pa.schema([rows.schema.field(name) for name in pk_columns])
+    project = fake_pyspiral.FakeSpiral().project(project_id)
+    project.create_table(f"{dataset}.{name}", key_schema=keys).write(rows)
 
 
-def _make_composite_pk_connector() -> MagicMock:
-    """Mock connector with composite PK (session_id, probe_id) and data."""
-    batches = [
-        pa.record_batch(
+def _make_composite_pk_table() -> None:
+    """Create a table with composite PK (session_id, probe_id) and data."""
+    _make_table(
+        pk_columns=("session_id", "probe_id"),
+        rows=pa.table(
             {
                 "session_id": pa.array(["s1", "s1"], type=pa.large_string()),
                 "probe_id": pa.array([1, 2], type=pa.int64()),
                 "neuron_count": pa.array([100, 200], type=pa.int64()),
             }
-        )
-    ]
-    return _make_mock_connector(
-        pk_columns=["session_id", "probe_id"],
-        batches=batches,
+        ),
     )
 
 
-# ---------------------------------------------------------------------------
-# Shared fixture — patches SpiralDBConnector at the module level
-# ---------------------------------------------------------------------------
-
-
-def _patch_connector(mock_connector: MagicMock):
-    """Context manager: patch SpiralDBConnector to return *mock_connector*."""
-    return patch(
-        "orcapod.core.sources.spiraldb_table_source.SpiralDBConnector",
-        return_value=mock_connector,
-    )
+@pytest.fixture(autouse=True)
+def fake_spiral(tmp_path: Path):
+    """Route every source in this module to a fresh fake SpiralDB."""
+    with fake_pyspiral.install(tmp_path / "spiral"):
+        yield
 
 
 # ===========================================================================
@@ -130,18 +85,21 @@ def _patch_connector(mock_connector: MagicMock):
 
 
 def test_import_from_core_sources():
+    """``SpiralDBTableSource`` is importable from ``orcapod.core.sources``."""
     from orcapod.core.sources import SpiralDBTableSource
 
     assert SpiralDBTableSource is not None
 
 
 def test_import_from_orcapod_sources():
+    """``SpiralDBTableSource`` is importable from ``orcapod.sources``."""
     from orcapod.sources import SpiralDBTableSource
 
     assert SpiralDBTableSource is not None
 
 
 def test_in_core_sources_all():
+    """``SpiralDBTableSource`` is listed in ``orcapod.core.sources.__all__``."""
     import orcapod.core.sources as m
 
     assert "SpiralDBTableSource" in m.__all__
@@ -153,32 +111,30 @@ def test_in_core_sources_all():
 
 
 class TestProtocolConformance:
+    """A ``SpiralDBTableSource`` satisfies the source, stream and hashing protocols."""
+
     def test_is_source_protocol(self):
-        from orcapod.core.sources import SpiralDBTableSource
+        """The source satisfies ``SourceProtocol``."""
         from orcapod.protocols.core_protocols import SourceProtocol
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert isinstance(src, SourceProtocol)
+        _make_table()
+        assert isinstance(SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), SourceProtocol)
 
     def test_is_stream_protocol(self):
-        from orcapod.core.sources import SpiralDBTableSource
+        """The source satisfies ``StreamProtocol``."""
         from orcapod.protocols.core_protocols import StreamProtocol
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert isinstance(src, StreamProtocol)
+        _make_table()
+        assert isinstance(SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), StreamProtocol)
 
     def test_is_pipeline_element_protocol(self):
-        from orcapod.core.sources import SpiralDBTableSource
+        """The source satisfies ``PipelineElementProtocol``."""
         from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert isinstance(src, PipelineElementProtocol)
+        _make_table()
+        assert isinstance(
+            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), PipelineElementProtocol
+        )
 
 
 # ===========================================================================
@@ -187,67 +143,25 @@ class TestProtocolConformance:
 
 
 class TestPKAsDefaultTags:
+    """By default the primary key columns are the tag columns."""
+
     def test_single_pk_is_tag_column(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(pk_columns=["session_id"])
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-
-    def test_pk_not_in_data_schema(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(pk_columns=["session_id"])
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        _, data_schema = src.output_schema()
-        assert "session_id" not in data_schema
-
-    def test_non_pk_columns_in_data_schema(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(pk_columns=["session_id"])
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        _, data_schema = src.output_schema()
-        assert "firing_rate" in data_schema
+        """A one-column primary key is the only tag; the other column is data."""
+        _make_table()
+        tag_schema, data_schema = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME
+        ).output_schema()
+        assert list(tag_schema) == ["session_id"]
+        assert list(data_schema) == ["firing_rate"]
 
     def test_composite_pk_all_columns_are_tags(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_composite_pk_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "probe_id" in tag_schema
-
-    def test_composite_pk_data_column_in_data(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_composite_pk_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        _, data_schema = src.output_schema()
-        assert "neuron_count" in data_schema
-
-    def test_default_source_id_is_fully_qualified(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.source_id == f"{_PROJECT_ID}/{_DATASET}/{_TABLE_NAME}"
-
-    def test_explicit_source_id_overrides_default(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, source_id="my_src")
-        assert src.source_id == "my_src"
+        """Every column of a composite primary key is a tag."""
+        _make_composite_pk_table()
+        tag_schema, data_schema = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME
+        ).output_schema()
+        assert list(tag_schema) == ["session_id", "probe_id"]
+        assert list(data_schema) == ["neuron_count"]
 
 
 # ===========================================================================
@@ -256,142 +170,96 @@ class TestPKAsDefaultTags:
 
 
 class TestExplicitTagOverride:
+    """Given ``tag_columns`` replace the primary key as the tags."""
+
     def test_explicit_tag_columns_override_pk(self):
-        from orcapod.core.sources import SpiralDBTableSource
+        """Given ``tag_columns`` are the tags; key columns left out become data."""
+        _make_composite_pk_table()
+        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=["probe_id"])
+        tag_schema, data_schema = src.output_schema()
+        assert list(tag_schema) == ["probe_id"]
+        assert set(data_schema) == {"session_id", "neuron_count"}
 
-        connector = _make_mock_connector(pk_columns=["session_id"])
-        # Provide explicit tag_columns — PK should be ignored
-        # Use "firing_rate" as tag by overriding, and "session_id" as data
-        batches = [
-            pa.record_batch(
-                {
-                    "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
-                    "firing_rate": pa.array([0.1, 0.2], type=pa.float64()),
-                    "amplitude": pa.array([1.0, 2.0], type=pa.float64()),
-                }
-            )
-        ]
-        connector.iter_batches.return_value = iter(batches)
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, tag_columns=["firing_rate"]
-            )
-        tag_schema, _ = src.output_schema()
-        assert "firing_rate" in tag_schema
-        assert "session_id" not in tag_schema
+    def test_a_bare_string_names_one_tag_column(self):
+        """A bare string names a single tag column."""
+        _make_composite_pk_table()
+        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns="session_id")
+        assert list(src.output_schema()[0]) == ["session_id"]
 
-    def test_multiple_explicit_tag_columns(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_composite_pk_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(
-                _PROJECT_ID,
-                _TABLE_NAME,
-                tag_columns=["session_id", "probe_id"],
-            )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "probe_id" in tag_schema
+    def test_unknown_tag_column_raises(self):
+        """A ``tag_columns`` name the table lacks is refused."""
+        _make_table()
+        with pytest.raises(ValueError, match="tag_columns not found"):
+            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=["nope"])
 
 
 # ===========================================================================
-# 5. No key schema → ValueError
-# ===========================================================================
-
-
-class TestNoPKRaisesError:
-    def test_no_pk_columns_and_no_explicit_tags_raises(self):
-        """SpiralDB has no ROWID fallback — raise ValueError when no PK."""
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(pk_columns=[])
-        with _patch_connector(connector):
-            with pytest.raises(ValueError, match="no primary key"):
-                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-
-    def test_no_pk_columns_but_explicit_tags_succeeds(self):
-        """Explicit tag_columns bypass the PK requirement."""
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(pk_columns=[])
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, tag_columns=["session_id"]
-            )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-
-
-# ===========================================================================
-# 6. Error cases
+# 5. Error cases
 # ===========================================================================
 
 
 class TestErrorCases:
+    """Construction refuses a table it cannot read as a source."""
+
     def test_missing_table_raises_value_error(self):
-        from orcapod.core.sources import SpiralDBTableSource
+        """A missing table is refused, naming the project and dataset."""
+        _make_table()
+        with pytest.raises(ValueError, match="not found in database") as raised:
+            SpiralDBTableSource(_PROJECT_ID, "no_such_table", dataset="default")
+        assert _PROJECT_ID in str(raised.value)
+        assert "default" in str(raised.value)
 
-        connector = _make_mock_connector(table_names=[])
-        with _patch_connector(connector):
-            with pytest.raises(ValueError, match="not found in database"):
-                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+    @pytest.mark.parametrize("tag_columns", [None, ["session_id"]])
+    def test_a_table_without_a_key_schema_raises(self, tag_columns):
+        """Rows are identified by their primary key, so a key schema is required."""
+        _make_table()
+        with patch.object(SpiralDBConnector, "get_pk_columns", return_value=[]):
+            with pytest.raises(ValueError, match="no primary key"):
+                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=tag_columns)
 
-    def test_empty_table_raises_value_error(self):
-        from orcapod.core.sources import SpiralDBTableSource
 
-        connector = _make_mock_connector(batches=[])
-        with _patch_connector(connector):
-            with pytest.raises(ValueError, match="is empty"):
-                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+# ===========================================================================
+# 6. The connector
+# ===========================================================================
 
-    def test_connector_closed_after_successful_init(self):
-        """Connector must be closed even on success (eager load)."""
-        from orcapod.core.sources import SpiralDBTableSource
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        connector.close.assert_called()
+class TestConnector:
+    """The source forwards its arguments to the connector and closes it."""
 
-    def test_connector_closed_after_failed_init(self):
-        """Connector must be closed even when init raises."""
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(table_names=[])
-        with _patch_connector(connector):
-            with pytest.raises(ValueError):
-                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        connector.close.assert_called()
-
-    def test_dataset_forwarded_to_connector(self):
-        """dataset argument must be passed through to SpiralDBConnector."""
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with patch(
-            "orcapod.core.sources.spiraldb_table_source.SpiralDBConnector",
-            return_value=connector,
-        ) as mock_cls:
-            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, dataset="prod")
-        mock_cls.assert_called_once_with(
-            project_id=_PROJECT_ID, dataset="prod", overrides=None
-        )
-
-    def test_overrides_forwarded_to_connector(self):
-        """overrides argument must be passed through to SpiralDBConnector."""
-        from orcapod.core.sources import SpiralDBTableSource
-
+    def test_dataset_and_overrides_forwarded_to_connector(self):
+        """``dataset`` and ``overrides`` are forwarded to ``SpiralDBConnector``."""
         overrides = {"server.url": "http://api.spiraldb.dev"}
-        connector = _make_mock_connector()
-        with patch(
-            "orcapod.core.sources.spiraldb_table_source.SpiralDBConnector",
-            return_value=connector,
-        ) as mock_cls:
-            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, overrides=overrides)
-        mock_cls.assert_called_once_with(
-            project_id=_PROJECT_ID, dataset="default", overrides=overrides
+        _make_table(dataset="prod")
+        with patch(_CONNECTOR, wraps=SpiralDBConnector) as connector_class:
+            SpiralDBTableSource(
+                _PROJECT_ID, _TABLE_NAME, dataset="prod", overrides=overrides
+            )
+        connector_class.assert_called_once_with(
+            project_id=_PROJECT_ID, dataset="prod", overrides=overrides
         )
+
+    def test_every_connector_is_closed(self):
+        """Every connector is closed: build, full read, unfinished read, error."""
+        _make_table()
+        opened: list[SpiralDBConnector] = []
+
+        def connect(**kwargs):
+            """Open a real connector with ``kwargs`` and record it in ``opened``."""
+            opened.append(SpiralDBConnector(**kwargs))
+            return opened[-1]
+
+        with patch(_CONNECTOR, side_effect=connect):
+            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+            src.as_table()
+            # iter_data is a generator function, so the read can be closed.
+            unfinished = cast("Generator[Any, None, None]", src.iter_data())
+            next(unfinished)  # a read that is not finished
+            unfinished.close()
+            with pytest.raises(ValueError):
+                SpiralDBTableSource(_PROJECT_ID, "no_such_table")
+        assert len(opened) == 4
+        # About the connector's own closed flag: nothing public reports it.
+        assert [c._closed for c in opened] == [True] * 4  # pyright: ignore[reportPrivateUsage]
 
 
 # ===========================================================================
@@ -400,83 +268,33 @@ class TestErrorCases:
 
 
 class TestStreamBehaviour:
-    def test_producer_is_none(self):
-        from orcapod.core.sources import SpiralDBTableSource
+    """The source is a root stream whose rows are the table's."""
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+    def test_producer_is_none_and_upstreams_empty(self):
+        """A source has no producer and no upstreams."""
+        _make_table()
+        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src.producer is None
-
-    def test_upstreams_is_empty(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src.upstreams == ()
 
-    def test_iter_data_yields_one_per_row(self):
-        from orcapod.core.sources import SpiralDBTableSource
+    def test_iter_data_yields_one_pair_per_row(self):
+        """``iter_data`` yields one tag and data pair per row, in key order."""
+        _make_table()
+        pairs = list(SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).iter_data())
+        assert [tag.as_dict()["session_id"] for tag, _ in pairs] == ["s1", "s2", "s3"]
+        assert [data.as_dict()["firing_rate"] for _, data in pairs] == pytest.approx(
+            [0.1, 0.2, 0.3]
+        )
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        data = list(src.iter_data())
-        assert len(data) == 3
-
-    def test_iter_data_tags_contain_pk(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
-
-    def test_output_schema_returns_two_schemas(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        result = src.output_schema()
-        assert len(result) == 2
-
-    def test_as_table_returns_pyarrow_table(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        t = src.as_table()
-        assert isinstance(t, pa.Table)
-
-    def test_as_table_row_count_matches_source(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.as_table().num_rows == 3
-
-    def test_data_values_are_correct(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        firing_rates = sorted(pkt["firing_rate"] for _, pkt in src.iter_data())
-        assert firing_rates == pytest.approx([0.1, 0.2, 0.3])
-
-    def test_tag_values_are_correct(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        session_ids = sorted(tags["session_id"] for tags, _ in src.iter_data())
-        assert session_ids == ["s1", "s2", "s3"]
+    def test_as_table_returns_the_rows(self):
+        """``as_table`` returns the table's rows as a ``pa.Table``."""
+        _make_table()
+        table = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).as_table()
+        assert isinstance(table, pa.Table)
+        assert table.to_pydict() == {
+            "session_id": ["s1", "s2", "s3"],
+            "firing_rate": [0.1, 0.2, 0.3],
+        }
 
 
 # ===========================================================================
@@ -485,73 +303,47 @@ class TestStreamBehaviour:
 
 
 class TestDeterministicHashing:
-    def test_pipeline_hash_is_deterministic(self):
-        from orcapod.core.sources import SpiralDBTableSource
+    """Hashes depend on the table and its schema, not on the source object."""
 
-        c1 = _make_mock_connector()
-        c2 = _make_mock_connector()
-        with _patch_connector(c1):
-            src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        with _patch_connector(c2):
-            src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+    def test_hashes_are_deterministic(self):
+        """Two sources of one table have equal pipeline and content hashes."""
+        _make_table()
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src1.pipeline_hash() == src2.pipeline_hash()
-
-    def test_content_hash_is_deterministic(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        c1 = _make_mock_connector()
-        c2 = _make_mock_connector()
-        with _patch_connector(c1):
-            src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        with _patch_connector(c2):
-            src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src1.content_hash() == src2.content_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        # src1 uses PK (session_id) as tag; src2 uses firing_rate
-        batches = [
-            pa.record_batch(
-                {
-                    "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
-                    "firing_rate": pa.array([0.1, 0.2], type=pa.float64()),
-                    "amplitude": pa.array([1.0, 2.0], type=pa.float64()),
-                }
-            )
-        ]
-        c1 = _make_mock_connector(batches=batches)
-        c2 = _make_mock_connector(batches=batches)
-        with _patch_connector(c1):
-            src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        c2.iter_batches.return_value = iter(batches)
-        with _patch_connector(c2):
-            src2 = SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, tag_columns=["firing_rate"]
-            )
+    def test_different_tag_columns_yield_different_pipeline_hash(self):
+        """Other tag columns give another pipeline hash."""
+        _make_composite_pk_table()
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=["probe_id"])
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
     def test_different_schemas_yield_different_pipeline_hash(self):
         """pipeline_hash is schema-only; different column schemas → different hash."""
-        from orcapod.core.sources import SpiralDBTableSource
-
-        # src1: tag=session_id (large_string), data=firing_rate (float64)
-        c1 = _make_mock_connector()
-        # src2: tag=session_id (large_string), data=neuron_count (int64)
-        batches2 = [
-            pa.record_batch(
+        _make_table()
+        _make_table(
+            name="counts",
+            rows=pa.table(
                 {
                     "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
                     "neuron_count": pa.array([10, 20], type=pa.int64()),
                 }
-            )
-        ]
-        c2 = _make_mock_connector(batches=batches2)
-        with _patch_connector(c1):
-            src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        with _patch_connector(c2):
-            src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+            ),
+        )
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src2 = SpiralDBTableSource(_PROJECT_ID, "counts")
         assert src1.pipeline_hash() != src2.pipeline_hash()
+
+    def test_same_schema_in_two_tables_shares_the_pipeline_hash_only(self):
+        """Two tables of one schema share the pipeline hash, not the content hash."""
+        _make_table()
+        _make_table(name="other")
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src2 = SpiralDBTableSource(_PROJECT_ID, "other")
+        assert src1.pipeline_hash() == src2.pipeline_hash()
+        assert src1.content_hash() != src2.content_hash()
 
 
 # ===========================================================================
@@ -560,161 +352,55 @@ class TestDeterministicHashing:
 
 
 class TestConfigSerialization:
-    def test_to_config_source_type(self):
-        from orcapod.core.sources import SpiralDBTableSource
+    """``to_config`` and ``from_config`` round-trip a source."""
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.to_config()["source_type"] == "spiraldb_table"
-
-    def test_to_config_has_no_connector_key(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert "connector" not in src.to_config()
-
-    def test_to_config_has_project_id(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.to_config()["project_id"] == _PROJECT_ID
-
-    def test_to_config_has_dataset(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, dataset="prod")
-        assert src.to_config()["dataset"] == "prod"
-
-    def test_to_config_has_table_name(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.to_config()["table_name"] == _TABLE_NAME
-
-    def test_to_config_has_tag_columns(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector(pk_columns=["session_id"])
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert "session_id" in src.to_config()["tag_columns"]
-
-    def test_to_config_has_overrides(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
+    def test_to_config_fields(self):
+        """``to_config`` records the table, its id, tags, overrides, id and hashes."""
+        _make_table(dataset="prod")
         overrides = {"server.url": "http://api.spiraldb.dev"}
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, overrides=overrides)
-        assert src.to_config()["overrides"] == overrides
-
-    def test_to_config_overrides_none_by_default(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert src.to_config()["overrides"] is None
-
-    def test_to_config_has_identity_fields(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, dataset="prod", overrides=overrides
+        )
         cfg = src.to_config()
-        assert "content_hash" in cfg
-        assert "pipeline_hash" in cfg
-
-    def test_to_config_works_after_connector_is_closed(self):
-        """to_config() must not call the connector — it is closed after __init__.
-
-        Regression test: the mock connector's to_config() raises RuntimeError
-        when closed (matching SpiralDBConnector's behaviour).  If
-        SpiralDBTableSource.to_config() delegates to the connector, this test
-        will raise RuntimeError and fail.
-        """
-        from orcapod.core.sources import SpiralDBTableSource
-
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        # Connector is closed at this point; calling to_config() must not
-        # raise.
-        assert connector._closed, "connector should be closed after __init__"
-        cfg = src.to_config()  # must not raise RuntimeError
         assert cfg["source_type"] == "spiraldb_table"
+        assert "connector" not in cfg
         assert cfg["project_id"] == _PROJECT_ID
+        assert cfg["dataset"] == "prod"
+        assert cfg["table_name"] == _TABLE_NAME
+        assert cfg["table_id"] == src.table_id
+        assert cfg["tag_columns"] == ["session_id"]
+        assert cfg["overrides"] == overrides
+        assert cfg["source_id"] == src.source_id
+        for field in ("content_hash", "pipeline_hash", "tag_schema", "data_schema"):
+            assert field in cfg
 
-    def test_from_config_reconstructs_successfully(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        c1 = _make_mock_connector()
-        with _patch_connector(c1):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-            cfg = src.to_config()
-
-        c2 = _make_mock_connector()
-        with _patch_connector(c2):
-            src2 = SpiralDBTableSource.from_config(cfg)
-        assert src2.source_id == src.source_id
+    def test_to_config_defaults(self):
+        """``to_config`` records the default restrictions, cap and batch size."""
+        _make_table()
+        cfg = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).to_config()
+        assert cfg["overrides"] is None
+        assert cfg["where"] == {}
+        assert cfg["limit"] is None
+        assert cfg["asof"] is None
+        assert cfg["max_rows"] == 100_000
+        assert cfg["batch_rows"] == 8_192
 
     def test_from_config_hashes_match(self):
-        from orcapod.core.sources import SpiralDBTableSource
-
-        c1 = _make_mock_connector()
-        with _patch_connector(c1):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-            cfg = src.to_config()
-
-        c2 = _make_mock_connector()
-        with _patch_connector(c2):
-            src2 = SpiralDBTableSource.from_config(cfg)
-        assert src2.content_hash() == src.content_hash()
-        assert src2.pipeline_hash() == src.pipeline_hash()
-
-    def test_from_config_forwards_dataset(self):
-        """from_config must pass dataset back to the constructor."""
-        from orcapod.core.sources import SpiralDBTableSource
-
-        c1 = _make_mock_connector()
-        with _patch_connector(c1):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, dataset="prod")
-            cfg = src.to_config()
-
-        assert cfg["dataset"] == "prod"
-        c2 = _make_mock_connector()
-        with patch(
-            "orcapod.core.sources.spiraldb_table_source.SpiralDBConnector",
-            return_value=c2,
-        ) as mock_cls:
-            SpiralDBTableSource.from_config(cfg)
-        mock_cls.assert_called_once_with(
-            project_id=_PROJECT_ID, dataset="prod", overrides=None
-        )
+        """A source rebuilt by ``from_config`` keeps its hashes and reads the rows."""
+        _make_table(dataset="prod")
+        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, dataset="prod")
+        src2 = SpiralDBTableSource.from_config(src.to_config())
+        assert src.pipeline_hash() == src2.pipeline_hash()
+        assert src.content_hash() == src2.content_hash()
+        assert src2.as_table().num_rows == 3
 
     def test_resolve_source_from_config_works(self):
-        from orcapod.core.sources import SpiralDBTableSource
+        """``resolve_source_from_config`` rebuilds a ``SpiralDBTableSource``."""
         from orcapod.pipeline.serialization import resolve_source_from_config
 
-        c1 = _make_mock_connector()
-        with _patch_connector(c1):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-            cfg = src.to_config()
-
-        c2 = _make_mock_connector()
-        with _patch_connector(c2):
-            src2 = resolve_source_from_config(cfg)
-        assert isinstance(src2, SpiralDBTableSource)
+        _make_table()
+        cfg = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).to_config()
+        assert isinstance(resolve_source_from_config(cfg), SpiralDBTableSource)
 
 
 # ===========================================================================
@@ -724,54 +410,26 @@ class TestConfigSerialization:
 
 @pytest.mark.integration
 class TestPipelineIntegration:
+    """A ``SpiralDBTableSource`` feeds a function pod in a ``PipelineJob``."""
+
     def test_spiraldb_source_in_pipeline(self):
         """Verify SpiralDBTableSource drives a full pipeline end-to-end."""
-        from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.data_function import PythonDataFunction
-        from orcapod.core.sources import SpiralDBTableSource
+        from orcapod import PipelineJob, function_pod
         from orcapod.databases import InMemoryArrowDatabase
-        from orcapod.pipeline import PipelineJob
-        from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
-        def double_rate(firing_rate: float) -> float:
-            return firing_rate * 2.0
+        @function_pod(output_keys="doubled")
+        def double_rate(firing_rate: float | None) -> float | None:
+            """Return twice ``firing_rate``, or ``None`` for a null."""
+            return None if firing_rate is None else firing_rate * 2.0
 
-        connector = _make_mock_connector()
-        with _patch_connector(connector):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-
-        pf = PythonDataFunction(double_rate, output_keys="doubled")
-        pod = FunctionPod(pf)
-
+        _make_table()
         job = PipelineJob(name="spiraldb_integration", store=InMemoryArrowDatabase())
         with job:
-            pod(src, label="doubler")
+            double_rate.pod(
+                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), label="doubler"
+            )
+        job.run()
 
-        from orcapod.pipeline.dag import OrcaDAG
-
-        exec_dag: OrcaDAG = OrcaDAG()
-        for node in job._persistent_node_map.values():
-            exec_dag.add_node(node)
-        for u_hash, v_hash in job._graph_edges:
-            if (
-                u_hash in job._persistent_node_map
-                and v_hash in job._persistent_node_map
-            ):
-                exec_dag.add_edge(
-                    job._persistent_node_map[u_hash],
-                    job._persistent_node_map[v_hash],
-                )
-        orch = SyncPipelineOrchestrator()
-        result = orch.run(exec_dag)
-
-        fn_outputs = [
-            v for k, v in result.node_outputs.items() if k.node_type == "function"
-        ]
-        assert len(fn_outputs) == 1
-        assert len(fn_outputs[0]) == 3
-
-        doubled_values = sorted([pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]])
-        assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
-
-        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
-        assert tag_values == ["s1", "s2", "s3"]
+        rows = job.nodes["doubler"].as_table().sort_by("session_id").to_pydict()
+        assert rows["session_id"] == ["s1", "s2", "s3"]
+        assert rows["doubled"] == pytest.approx([0.2, 0.4, 0.6])

@@ -531,3 +531,26 @@ class TestArrowTableStreamNullablePreservation:
         result = builder.build(table, tag_columns=["tag"], source_kind="arrow_table")
         _, data_schema = result.stream.output_schema()
         assert data_schema["val"] is int
+
+
+class TestNotebookDisplay:
+    """A stream shown in a notebook renders every row, tag columns first and marked."""
+
+    def test_repr_html_is_the_header_and_every_row(self):
+        stream = make_table_stream(n_rows=25)
+        stream.label = "numbers"
+
+        html = stream._repr_html_()
+
+        frame = stream.as_polars_df()
+        expected = frame.select(["id", "value"]).rename({"id": "*id"})
+        assert html == "ArrowTableStream[numbers]\n" + expected._repr_html_()
+
+    def test_view_is_the_header_and_every_row(self):
+        stream = make_table_stream(n_rows=25)
+        stream.label = "numbers"
+
+        html = stream.view()._repr_html_()
+
+        expected = stream.as_polars_df().rename({"id": "*id"})
+        assert html == "ArrowTableStream[numbers]\n" + expected._repr_html_()
