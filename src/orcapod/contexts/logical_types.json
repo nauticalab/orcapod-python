@@ -3,7 +3,8 @@
     "hash_ignore": {
         "orcapod.numpy.ndarray": [],
         "orcapod.polars.dataframe": [],
-        "orcapod.polars.series": []
+        "orcapod.polars.series": [],
+        "orcapod.torch.tensor": []
     },
     "logical_type_registry": {
         "_class": "orcapod.logical_types.registry.LogicalTypeRegistry",
@@ -58,6 +59,19 @@
                     "_config": {
                         "ignore": {
                             "_ref": "hash_ignore:orcapod.polars.series"
+                        }
+                    }
+                }
+            ],
+            "deferred_logical_types": [
+                {
+                    "python_type": "torch.Tensor",
+                    "extension_name": "orcapod.torch.tensor",
+                    "logical_type": "orcapod.logical_types.torch_type.LogicalTorchTensor",
+                    "requires": "torch",
+                    "_config": {
+                        "ignore": {
+                            "_ref": "hash_ignore:orcapod.torch.tensor"
                         }
                     }
                 }
@@ -204,5 +218,16 @@
                 }
             }
         ]
+    ],
+    "deferred_value_handlers": [
+        {
+            "python_type": "torch.Tensor",
+            "handler": "orcapod.hashing.semantic_hashing.torch_handler.TorchTensorHandler",
+            "_config": {
+                "ignore": {
+                    "_ref": "hash_ignore:orcapod.torch.tensor"
+                }
+            }
+        }
     ]
 }

@@ -76,12 +76,38 @@ class UnsupportedValueError(ValueError):
     """
 
 
+class MissingOptionalDependencyError(ImportError):
+    """A stored value needs an optional dependency that is not installed.
+
+    Raised when a column's Arrow extension type belongs to a value type that is
+    registered lazily (for example ``orcapod.torch.tensor``, which needs PyTorch)
+    and its library cannot be imported. The message names the extension type and
+    the missing module.
+    """
+
+
 class DataFunctionUnavailableError(RuntimeError):
     """Raised when a data function proxy is invoked without a bound function.
 
     This occurs when a pipeline is loaded in an environment where the
     original data function is not available. Only cached results can
     be accessed.
+    """
+
+
+class ValueConversionWarning(UserWarning):
+    """Orcapod accepted a value and stored a converted form of it.
+
+    Example: a torch tensor on a GPU or with autograd history (a ``grad_fn``), which
+    is stored as a CPU tensor without that history. The message names who gave the value (a function pod's output, a source's
+    column), what was converted and how to avoid the conversion. A value passed in by
+    the caller is never modified. The code that issues the warning issues it once per
+    (function or source, output or column, conversion), however many rows a run has,
+    and does not rely on Python's warning registry to do so. To make it an error, call
+    ``warnings.simplefilter("error", ValueConversionWarning)``: every conversion then
+    raises, on every row, and in a pipeline that row fails. Python's ``-W`` option
+    and ``PYTHONWARNINGS`` cannot name this class: they are read before installed
+    packages can be imported.
     """
 
 

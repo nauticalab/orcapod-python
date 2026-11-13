@@ -78,6 +78,7 @@ Orcapod's own types follow the same contract as yours. Their metadata is the JSO
 | `orcapod.File` | `orcapod.file` | `{"version":1}` |
 | `orcapod.Directory` | `orcapod.directory` | `{"version":1}` |
 | `numpy.ndarray` | `orcapod.numpy.ndarray` | `{"ignore":[],"version":1}` |
+| `torch.Tensor` (optional, needs PyTorch) | `orcapod.torch.tensor` | `{"ignore":[],"version":1}` |
 | `pandas.DataFrame` | `pandas.dataframe` | `{"version":1}` |
 | `pandas.Series` | `pandas.series` | `{"version":1}` |
 | `polars.DataFrame` | `orcapod.polars.dataframe` | `{"ignore":[],"version":1}` |
@@ -102,7 +103,8 @@ also when empty. So one type under two lists is two logical types: the schema ha
 a join of two such columns is an error, and a data context reads only columns stored under
 its own list (anything else raises `LogicalTypeIdentifierError`, naming the column and both
 lists). Storage is the same under every list. `numpy.ndarray` is the first such type; its
-property names are in [NumPy Arrays](arrays.md#the-ignore-list).
+property names are in [NumPy Arrays](arrays.md#the-ignore-list). `torch.Tensor` is another;
+its names are in [PyTorch tensors](arrays.md#what-counts-as-the-same-tensor).
 
 ### Native containers: `list[T]` and `set[T]`
 

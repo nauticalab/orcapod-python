@@ -37,6 +37,7 @@ from orcapod.utils import schema_utils
 from orcapod.utils.canonical_type_names import stabilize_type_names
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.utils.tensor_conversions import describe, tensor_conversions, warn_once
 
 from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
 
@@ -454,6 +455,8 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
 
         assert function_name is not None
         self._function_name = function_name
+        # (output key, conversion) pairs already reported with ValueConversionWarning.
+        self._reported_conversions: set[tuple[str, str]] = set()
 
         super().__init__(
             label=label,
@@ -637,6 +640,17 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
                     value,
                     mismatch.describe(),
                     mismatch.hint,
+                )
+            conversions = tensor_conversions(value)
+            if conversions:
+                warn_once(
+                    self._reported_conversions,
+                    key,
+                    conversions,
+                    f"Function {self._function_name!r} output {key!r} returned a "
+                    f"torch tensor {describe(conversions)}; Orcapod stored a CPU "
+                    "tensor without autograd history, and the returned tensor is "
+                    "unchanged. Return value.detach().cpu() to avoid this warning.",
                 )
 
         def combine(*components: tuple[str, ...]) -> str:

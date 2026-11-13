@@ -393,7 +393,8 @@ class JSONDataContextRegistry:
         Returns:
             Its ``logical_type_registry`` object spec, its ``value_handlers`` list
             of ``[type, handler]`` object-spec pairs and, when present, its
-            ``hash_ignore`` object: per extension name, the property names the
+            ``deferred_value_handlers`` list of handlers loaded on first use and
+            its ``hash_ignore`` object: per extension name, the property names the
             value hash of that type ignores.
         """
         return _read_json_file(self.logical_types_file)
@@ -453,6 +454,14 @@ class JSONDataContextRegistry:
                     pair = parse_objectspec(pair_spec, ref_lut=ref_lut)
                     if pair and len(pair) == 2 and all(x is not None for x in pair):
                         handler_registry.register(pair[0], pair[1])
+                # Handlers of optional value types are named, not built: the
+                # library is imported when a value of the type is first hashed.
+                for entry in registration.get("deferred_value_handlers", []):
+                    handler_registry.register_deferred(
+                        entry["python_type"],
+                        entry["handler"],
+                        parse_objectspec(entry.get("_config", {}), ref_lut=ref_lut),
+                    )
 
             return DataContext(
                 context_key=context_key,

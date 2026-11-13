@@ -9,6 +9,7 @@ from orcapod.types import DataValue, SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.schema_utils import _normalize_column_list
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.utils.tensor_conversions import warn_source_tensor_conversions
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -41,14 +42,15 @@ class DictSource(RootSource):
 
         # Accept either a Python SchemaLike (Mapping[str, type]) or a
         # pa.Schema directly via data_schema; route to the converter accordingly.
+        rows = [dict(row) for row in data]
         if isinstance(data_schema, pa.Schema):
             arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
-                [dict(row) for row in data],
+                rows,
                 arrow_schema=data_schema,
             )
         else:
             arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
-                [dict(row) for row in data],
+                rows,
                 python_schema=data_schema,
             )
             if data_schema is None:
@@ -72,6 +74,7 @@ class DictSource(RootSource):
         self._tag_columns = result.tag_columns
         if self._source_id is None:
             self._source_id = result.source_id
+        warn_source_tensor_conversions(self._source_id, rows)
 
     def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (data is not serializable)."""

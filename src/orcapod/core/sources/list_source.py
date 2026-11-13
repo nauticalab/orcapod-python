@@ -9,6 +9,7 @@ from orcapod.protocols.core_protocols import TagProtocol
 from orcapod.types import SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.canonical_type_names import stabilize_type_names
+from orcapod.utils.tensor_conversions import warn_source_tensor_conversions
 
 if TYPE_CHECKING:
     pass
@@ -98,6 +99,7 @@ class ListSource(RootSource):
         self._stream = result.stream
         if self._source_id is None:
             self._source_id = result.source_id
+        warn_source_tensor_conversions(self._source_id, rows)
 
     def _hash_tag_function(self) -> str:
         """Produce a stable hash string for the tag function."""

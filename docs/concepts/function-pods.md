@@ -219,7 +219,7 @@ the other rows are computed and stored. With `error_policy="fail_fast"` the sync
 orchestrator stops the run; the asynchronous orchestrator does not stop for row failures yet
 (ITL-879, see below).
 
-The function-output rule is: the returned value must be an instance of the declared type, or an exact numeric equivalent; a subclass stands in for its base and is stored as the base.
+The function-output rule is: the returned value must be an instance of the declared type, or an exact numeric equivalent; a subclass stands in for its base. What is stored for a subclass instance is decided by the logical type of the declared class: a user class is stored as the base (the declared class's fields only), while a `torch.nn.Parameter` returned for `-> torch.Tensor` is stored, read back and hashed as an `nn.Parameter`.
 
 | Declared | Returned | Result |
 |---|---|---|

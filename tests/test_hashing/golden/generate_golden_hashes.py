@@ -110,7 +110,21 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    groups = args.group or list(cases.GROUPS)
+    unavailable = [g for g in args.group or [] if not cases.group_available(g)]
+    if unavailable:
+        parser.error(
+            f"group(s) {unavailable} need an optional dependency that is not installed "
+            f"({[cases.OPTIONAL_GROUPS[g] for g in unavailable]})"
+        )
+    groups = args.group or list(cases.available_groups())
+    skipped = [
+        g for g in cases.GROUPS if g not in groups and not cases.group_available(g)
+    ]
+    if skipped and not args.stdout:
+        # Never rewrite an optional group's file without its dependency (ITL-871).
+        print(
+            f"skipped {skipped}: optional dependency not installed; files left as they are"
+        )
     computed = {
         g: cases.compute_group(g, allow_errors=args.allow_errors) for g in groups
     }
@@ -120,6 +134,25 @@ def main(argv: list[str] | None = None) -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for group, values in computed.items():
         path = golden_path(group, args.output_dir)
+        missing = cases.unavailable_entries(group)
+        if missing:
+            # Keep the pins this environment cannot compute (an older optional
+            # dependency), from the target file or else the repository's, so a
+            # golden file is never written without them.
+            source = path if path.exists() else golden_path(group)
+            pinned = (
+                json.loads(source.read_text(encoding="utf-8"))
+                if source.exists()
+                else {}
+            )
+            lost = sorted(e for e in missing if e not in pinned)
+            if lost:
+                raise SystemExit(
+                    f"cannot write {path}: this environment cannot compute {lost} "
+                    "and no existing golden file pins them; install the newer "
+                    "optional dependency"
+                )
+            values = {**values, **{e: pinned[e] for e in missing}}
         path.write_text(dump(values), encoding="utf-8")
         print(f"wrote {len(values)} entries to {path}")
 

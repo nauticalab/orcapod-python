@@ -50,7 +50,17 @@ postgresql = ["psycopg[binary]>=3.0"]
 spiraldb = [
     "pyspiral>=0.16.33",
 ]
-all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]"]
+# Convenience extra that installs PyTorch. Orcapod's torch.Tensor support depends only on
+# torch being importable, however it was installed (ITL-871). 2.6 is the first version whose
+# restricted loader (torch.load(weights_only=True)) reads uint16, uint32 and uint64 tensors.
+torch = ["torch>=2.6"]
+all = [
+    "orcapod[redis]",
+    "orcapod[ray]",
+    "orcapod[postgresql]",
+    "orcapod[spiraldb]",
+    "orcapod[torch]",
+]
 
 [project.scripts]
 orcapod = "orcapod.cli:app"
@@ -98,7 +108,20 @@ dev = [
     "typing_extensions",
     "mkdocs-material>=9.7.5",
     "mkdocstrings[python]>=1.0.3",
+    # torch for the torch.Tensor tests: the default `uv run` sync (the org-required pytest
+    # and typecheck jobs) installs the dev group but no extras (ITL-871).
+    "orcapod[torch]",
 ]
+
+[[tool.uv.index]]
+# CPU-only PyTorch wheels, so Linux CI never downloads the CUDA stack (ITL-871). Only uv
+# uses this; `pip install orcapod[torch]` installs torch from PyPI as usual.
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 
 [tool.ruff]

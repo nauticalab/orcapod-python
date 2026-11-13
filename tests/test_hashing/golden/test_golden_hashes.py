@@ -42,7 +42,23 @@ def _load_golden() -> dict[str, dict[str, Any]]:
 
 
 GOLDEN = _load_golden()
-GOLDEN_ENTRIES = [(group, entry) for group in cases.GROUPS for entry in GOLDEN[group]]
+
+
+def _needs(group: str) -> Any:
+    """A skip mark for a group whose optional dependency is not installed (ITL-871)."""
+    module = cases.OPTIONAL_GROUPS.get(group)
+    return pytest.mark.skipif(
+        not cases.group_available(group),
+        reason=f"golden group {group!r} needs the optional package {module!r}",
+    )
+
+
+GOLDEN_ENTRIES = [
+    pytest.param(group, entry, id=f"{group}:{entry}", marks=_needs(group))
+    for group in cases.GROUPS
+    for entry in GOLDEN[group]
+]
+GROUP_PARAMS = [pytest.param(group, marks=_needs(group)) for group in cases.GROUPS]
 
 
 def _moved_message(group: str, entry: str, expected: Any, actual: Any) -> str:
@@ -69,16 +85,16 @@ def test_golden_file_present(group: str) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("group", "entry"), GOLDEN_ENTRIES, ids=[f"{g}:{e}" for g, e in GOLDEN_ENTRIES]
-)
+@pytest.mark.parametrize(("group", "entry"), GOLDEN_ENTRIES)
 def test_golden_entry(live: dict[str, dict[str, Any]], group: str, entry: str) -> None:
+    if entry in cases.unavailable_entries(group):
+        pytest.skip(f"{group}:{entry} needs a newer version of an optional dependency")
     actual = live[group].get(entry, "<entry no longer produced>")
     expected = GOLDEN[group][entry]
     assert actual == expected, _moved_message(group, entry, expected, actual)
 
 
-@pytest.mark.parametrize("group", cases.GROUPS)
+@pytest.mark.parametrize("group", GROUP_PARAMS)
 def test_no_unpinned_entries(live: dict[str, dict[str, Any]], group: str) -> None:
     unpinned = sorted(set(live[group]) - set(GOLDEN[group]))
     assert not unpinned, (
@@ -124,9 +140,10 @@ def test_values_independent_of_process_and_hash_seed(seed: str) -> None:
     computed = json.loads(result.stdout)
     moved = [
         _moved_message(group, entry, value, computed[group].get(entry))
-        for group in cases.GROUPS
+        for group in cases.available_groups()
         for entry, value in GOLDEN[group].items()
-        if computed[group].get(entry) != value
+        if entry not in cases.unavailable_entries(group)
+        and computed[group].get(entry) != value
     ]
     assert not moved, f"PYTHONHASHSEED={seed}:\n" + "\n".join(moved[:5])
 
@@ -251,3 +268,180 @@ def test_schema_round_trips_through_arrow_with_equal_hash(python_type: Any) -> N
     assert ctx.semantic_hasher.hash_object(
         round_tripped
     ) == ctx.semantic_hasher.hash_object(schema)
+
+
+def _reference_array_digest(tag: str, shape: tuple[int, ...], data: bytes) -> str:
+    """The version-1 array digest from its specification (``hashlib`` + ``struct`` only)."""
+    import hashlib
+    import struct
+
+    t = tag.encode("utf-8")
+    preimage = struct.pack("<Q", len(t)) + t + struct.pack("<Q", len(shape))
+    preimage += b"".join(struct.pack("<q", d) for d in shape)
+    preimage += struct.pack("<Q", len(data)) + data
+    return hashlib.sha256(preimage).hexdigest()
+
+
+def _reference_tensor_digest(
+    element_digest: str,
+    flags: tuple[int, int, int],
+    strides: tuple[int, ...],
+    class_name: str,
+) -> str:
+    """The tensor value hash ``D`` from its specification (``hashlib`` + ``struct`` only).
+
+    ``D = SHA-256(lp("orcapod.torch.tensor") || E || u8(requires_grad) || u8(conj_bit)
+    || u8(neg_bit) || u64le(ndim) || i64le(each stride) || lp(class name))``.
+    """
+    import hashlib
+    import struct
+
+    def lp(text: str) -> bytes:
+        """Return ``text`` as UTF-8 behind its length (unsigned 64-bit little-endian)."""
+        raw = text.encode("utf-8")
+        return struct.pack("<Q", len(raw)) + raw
+
+    preimage = lp("orcapod.torch.tensor") + bytes.fromhex(element_digest)
+    preimage += bytes(flags) + struct.pack("<Q", len(strides))
+    preimage += b"".join(struct.pack("<q", s) for s in strides) + lp(class_name)
+    return hashlib.sha256(preimage).hexdigest()
+
+
+_TENSOR = "torch.Tensor"
+_ARANGE_2X3 = np.arange(6, dtype="<f4").reshape(2, 3)
+
+# name: (dtype tag, shape, element bytes in C order,
+#        (requires_grad, conj_bit, neg_bit), strides, class name)
+TORCH_PINNED: dict[
+    str,
+    tuple[str, tuple[int, ...], bytes, tuple[int, int, int], tuple[int, ...], str],
+] = {
+    "bool": ("bool", (3,), b"\x01\x00\x01", (0, 0, 0), (1,), _TENSOR),
+    # bfloat16 bits of 1.5, -2.25, 3.0, little-endian.
+    "bfloat16": (
+        "bfloat16",
+        (3,),
+        bytes.fromhex("c03f10c04040"),
+        (0, 0, 0),
+        (1,),
+        _TENSOR,
+    ),
+    "zero_dim": ("float32", (), np.array(2.5, "<f4").tobytes(), (0, 0, 0), (), _TENSOR),
+    "empty": ("float32", (0,), b"", (0, 0, 0), (1,), _TENSOR),
+    # The transposed (2, 3) arange: shape (3, 2), elements in C order, strides (1, 3).
+    "non_contiguous": (
+        "float32",
+        (3, 2),
+        _ARANGE_2X3.T.copy().tobytes(),
+        (0, 0, 0),
+        (1, 3),
+        _TENSOR,
+    ),
+    "requires_grad": (
+        "float32",
+        (2, 3),
+        _ARANGE_2X3.tobytes(),
+        (1, 0, 0),
+        (3, 1),
+        _TENSOR,
+    ),
+    "parameter": (
+        "float32",
+        (2, 3),
+        _ARANGE_2X3.tobytes(),
+        (0, 0, 0),
+        (3, 1),
+        "torch.nn.parameter.Parameter",
+    ),
+    # The logical values of the conjugate view: 1-2j, 3+4j.
+    "conj": (
+        "complex64",
+        (2,),
+        np.array([1 - 2j, 3 + 4j], "<c8").tobytes(),
+        (0, 1, 0),
+        (1,),
+        _TENSOR,
+    ),
+    # Every second column of a (2, 6) arange, stored as its clone: strides (3, 1).
+    "step_slice": (
+        "float32",
+        (2, 3),
+        np.arange(12, dtype="<f4").reshape(2, 6)[:, ::2].copy().tobytes(),
+        (0, 0, 0),
+        (3, 1),
+        _TENSOR,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(TORCH_PINNED))
+def test_pinned_tensor_hashes_match_an_independent_reference(name: str) -> None:
+    # Runs without torch: the pinned torch_tensor_v1 values are D computed by hand.
+    """Pinned tensor hashes equal the value hash computed from the specification."""
+    tag, shape, data, flags, strides, class_name = TORCH_PINNED[name]
+    element = _reference_array_digest(tag, shape, data)
+    assert GOLDEN["torch"][f"value.{name}"] == (
+        "torch_tensor_v1:"
+        + _reference_tensor_digest(element, flags, strides, class_name)
+    )
+
+
+@pytest.mark.parametrize("name", ["int32", "int64", "float64", "empty"])
+def test_tensor_and_ndarray_pins_differ(name: str) -> None:
+    """Pinned tensor and ndarray hashes of equal elements have different digests."""
+    tensor_label, tensor_body = GOLDEN["torch"][f"value.{name}"].split(":")
+    array_label, array_body = GOLDEN["semantic"][f"value.ndarray.{name}"].split(":")
+    assert (tensor_label, array_label) == ("torch_tensor_v1", "ndarray_v1")
+    assert tensor_body != array_body
+
+
+OLDER_TORCH_GOLDEN = """
+import json
+import pathlib
+import shutil
+import sys
+
+from tests.test_hashing.golden import cases
+from tests.test_hashing.golden.generate_golden_hashes import golden_path, main
+
+# Stand in for a supported PyTorch that predates float8_e8m0fnu (added in torch
+# 2.7). The attribute itself cannot be removed: torch.save refers to it.
+_installed = cases.installed_torch_dtype
+cases.installed_torch_dtype = (
+    lambda name: None if name == "float8_e8m0fnu" else _installed(name)
+)
+
+live = cases.compute_group("torch")
+print("produced:", "value.float8_e8m0fnu" in live)
+print("unavailable:", sorted(cases.unavailable_entries("torch")))
+out = pathlib.Path(sys.argv[1])
+shutil.copy(golden_path("torch"), out / "torch.json")
+main(["--group", "torch", "--output-dir", str(out)])
+kept = json.loads((out / "torch.json").read_text())
+pinned = json.loads(golden_path("torch").read_text())
+print("pins kept:", kept == pinned)
+empty = out / "empty"
+main(["--group", "torch", "--output-dir", str(empty)])
+fresh = json.loads((empty / "torch.json").read_text())
+print("pins kept in an empty output dir:", fresh == pinned)
+"""
+
+
+@pytest.mark.skipif(not cases.group_available("torch"), reason="needs torch")
+def test_torch_group_runs_on_a_torch_without_a_newer_dtype(tmp_path: Path) -> None:
+    """With a torch lacking a pinned dtype, the group computes, skips that entry, keeps its pin."""
+    repo_root = Path(__file__).resolve().parents[3]
+    proc = subprocess.run(
+        [sys.executable, "-c", OLDER_TORCH_GOLDEN, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(repo_root)},
+        cwd=repo_root,
+        timeout=GENERATOR_TIMEOUT_S,
+    )
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    lines = [line for line in proc.stdout.splitlines() if ": " in line]
+    assert "produced: False" in lines
+    assert "unavailable: ['value.float8_e8m0fnu']" in lines
+    assert "pins kept: True" in lines
+    assert "pins kept in an empty output dir: True" in lines

@@ -39,7 +39,7 @@ nav:
     - Operators: concepts/operators.md
     - Function Pods: concepts/function-pods.md
     - Your Own Data Types: concepts/your-own-data-types.md
-    - NumPy Arrays: concepts/arrays.md
+    - Arrays and Tensors: concepts/arrays.md
     - Logical Type Identifiers: concepts/logical-type-identifiers.md
     - Identity & Hashing: concepts/identity.md
     - File Hash Caching: concepts/file-hash-caching.md

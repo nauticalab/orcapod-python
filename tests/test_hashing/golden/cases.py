@@ -41,7 +41,35 @@ from orcapod import function_pod
 
 CaseFn = Callable[[], dict[str, Any]]
 
-GROUPS = ("semantic", "schema", "arrow", "datagram", "pipeline")
+GROUPS = ("semantic", "schema", "arrow", "datagram", "pipeline", "torch")
+
+OPTIONAL_GROUPS: dict[str, str] = {"torch": "torch"}
+"""Groups that need an optional dependency, mapped to the module they need (ITL-871).
+
+Such a group is computed, generated and checked only where the module is installed; its
+golden file is never rewritten without it.
+"""
+
+
+def group_available(group: str) -> bool:
+    """Whether ``group`` can be computed in this environment.
+
+    Args:
+        group: One of ``GROUPS``.
+
+    Returns:
+        False when the group needs an optional module that is not installed.
+    """
+    import importlib.util
+
+    module = OPTIONAL_GROUPS.get(group)
+    return module is None or importlib.util.find_spec(module) is not None
+
+
+def available_groups() -> tuple[str, ...]:
+    """The groups that can be computed in this environment, in ``GROUPS`` order."""
+    return tuple(g for g in GROUPS if group_available(g))
+
 
 _CASES: dict[str, list[tuple[str, CaseFn]]] = {group: [] for group in GROUPS}
 
@@ -94,7 +122,7 @@ def compute_group(group: str, *, allow_errors: bool = False) -> dict[str, Any]:
 
 
 def compute_all(*, allow_errors: bool = False) -> dict[str, dict[str, Any]]:
-    """Compute every golden group.
+    """Compute every golden group this environment can compute (``available_groups``).
 
     Args:
         allow_errors: Passed to ``compute_group``.
@@ -102,7 +130,7 @@ def compute_all(*, allow_errors: bool = False) -> dict[str, dict[str, Any]]:
     Returns:
         A dict mapping each group name to its computed entries.
     """
-    return {g: compute_group(g, allow_errors=allow_errors) for g in GROUPS}
+    return {g: compute_group(g, allow_errors=allow_errors) for g in available_groups()}
 
 
 # ---------------------------------------------------------------------------
@@ -1718,3 +1746,141 @@ def pipeline_default_source_ids() -> dict[str, Any]:
         job.nodes["adjust"].as_source().source_id
     )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Group: torch — torch.Tensor values (ITL-871); needs the optional torch package
+# ---------------------------------------------------------------------------
+
+
+def _torch_values() -> dict[str, Any]:
+    """Tensors whose hashes are pinned: the ndarray cases' values, torch-only dtypes
+    and one case per optional property of the value hash."""
+    import torch
+
+    base = torch.arange(6, dtype=torch.float32).reshape(2, 3)
+    return {
+        # The same values as the ndarray.* semantic cases.
+        "int32": torch.arange(6, dtype=torch.int32).reshape(2, 3),
+        "int64": torch.arange(6, dtype=torch.int64).reshape(2, 3),
+        "float64": torch.tensor([[0.5, 1.5], [2.5, 3.5]], dtype=torch.float64),
+        "empty": torch.zeros((0,), dtype=torch.float32),
+        "bool": torch.tensor([True, False, True]),
+        "bfloat16": torch.tensor([1.5, -2.25, 3.0], dtype=torch.bfloat16),
+        "complex32": torch.tensor([1 + 2j, -0.5 + 0.25j], dtype=torch.complex32),
+        "zero_dim": torch.tensor(2.5),
+        # One case per optional property of the hash (all others canonical).
+        "non_contiguous": base.T,
+        "requires_grad": base.clone().requires_grad_(True),
+        "parameter": torch.nn.Parameter(base.clone(), requires_grad=False),
+        "conj": torch.tensor([1 + 2j, 3 - 4j], dtype=torch.complex64).conj(),
+        # A view of a larger buffer is hashed as its clone: contiguous strides.
+        "step_slice": torch.arange(12, dtype=torch.float32).reshape(2, 6)[:, ::2],
+        # Powers of two are exact in every float8 format. A dtype this torch lacks is
+        # left out; its pinned entry is listed by unavailable_entries.
+        **{
+            name: torch.tensor([0.5, 1.0, 2.0]).to(dtype)
+            for name in TORCH_VERSIONED_DTYPES
+            if (dtype := installed_torch_dtype(name)) is not None
+        },
+    }
+
+
+TORCH_VERSIONED_DTYPES = (
+    "float8_e4m3fn",
+    "float8_e5m2",
+    "float8_e4m3fnuz",
+    "float8_e5m2fnuz",
+    "float8_e8m0fnu",
+)
+"""Pinned torch dtypes that a supported torch may lack (``float8_e8m0fnu`` needs 2.7)."""
+
+
+def installed_torch_dtype(name: str) -> Any:
+    """Return the installed torch's dtype called ``name``, or ``None`` if it has none.
+
+    The one place the torch cases ask whether a dtype exists, so a test can stand
+    in for an older torch by replacing this function.
+
+    Args:
+        name: A torch dtype name, for example ``"float8_e8m0fnu"``.
+
+    Returns:
+        The ``torch.dtype``, or ``None``.
+    """
+    import torch
+
+    dtype = getattr(torch, name, None)
+    return dtype if isinstance(dtype, torch.dtype) else None
+
+
+def unavailable_entries(group: str) -> set[str]:
+    """Pinned entries of ``group`` that this environment cannot compute.
+
+    These are the ``value.*`` entries of torch dtypes the installed torch lacks. The
+    golden test skips them and the generator keeps their pins.
+
+    Args:
+        group: One of ``GROUPS``.
+
+    Returns:
+        The entry names; empty for every group but an available ``torch`` group.
+    """
+    if group != "torch" or not group_available(group):
+        return set()
+    return {
+        f"value.{name}"
+        for name in TORCH_VERSIONED_DTYPES
+        if installed_torch_dtype(name) is None
+    }
+
+
+@case("torch", "value")
+def torch_values() -> dict[str, Any]:
+    """Semantic hashes of the pinned tensors."""
+    hasher = _ctx().semantic_hasher
+    return {k: hasher.hash_object(v).to_string() for k, v in _torch_values().items()}
+
+
+@case("torch", "type")
+def torch_type() -> dict[str, Any]:
+    """Semantic hash of the ``torch.Tensor`` type."""
+    import torch
+
+    return {
+        "torch_tensor": _ctx().semantic_hasher.hash_object(torch.Tensor).to_string()
+    }
+
+
+@case("torch", "single_field")
+def torch_single_field() -> dict[str, Any]:
+    """Arrow type and schema hash of a one-field ``torch.Tensor`` schema."""
+    import torch
+
+    from orcapod.types import Schema
+
+    ctx = _ctx()
+    return {
+        "torch_tensor.arrow_type": _arrow_type_text(
+            ctx.type_converter.python_type_to_arrow_type(torch.Tensor)
+        ),
+        "torch_tensor.schema_hash": ctx.semantic_hasher.hash_object(
+            Schema({"c": torch.Tensor})
+        ).to_string(),
+    }
+
+
+@case("torch", "datagram")
+def torch_datagram() -> dict[str, Any]:
+    """Identity of a two-row tensor source."""
+    import torch
+
+    from orcapod.sources import DictSource
+
+    rows = [
+        {"k": "r1", "c": torch.arange(4, dtype=torch.int64)},
+        {"k": "r2", "c": torch.tensor([[0.5, 1.5]], dtype=torch.float64)},
+    ]
+    return stream_summary(
+        DictSource(data=rows, tag_columns=["k"], source_id="golden_torch_tensor")
+    )

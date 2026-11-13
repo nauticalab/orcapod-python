@@ -57,6 +57,7 @@ The labels of v0.3:
 | `arrow_v1` | the Arrow table and schema hash (§9) | `ARROW_HASH_LABEL`, `hashing/arrow_hashers.py` |
 | `directory_v1` | the directory hash: a SHA-256 Merkle tree over the entries | `DIRECTORY_HASH_LABEL`, `hashing/directory_hashers.py` |
 | `ndarray_v1` | the array value hash (§8) | `NumpyArrayHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
+| `torch_tensor_v1` | the torch tensor value hash (§8): the element digest, then `requires_grad`, the lazy conjugate and negative bits, the strides and the class | `TORCH_TENSOR_HASH_LABEL`, `logical_types/torch_type.py` |
 | `polars_expr_v1` | the Polars expression hash (§1c) | `POLARS_EXPR_HASH_LABEL`, `hashing/semantic_hashing/polars_expr.py` |
 | `polars_dataframe_v1` | the Polars DataFrame value hash (§1e) | `PolarsDataFrameHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
 | `polars_series_v1` | the Polars Series value hash (§1e) | `PolarsSeriesHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
@@ -912,7 +913,7 @@ in any data-level preimage; they serve logging, observability, and result inspec
 ## 8. Array Value Hash
 
 **Value hash labels.** A type whose values are hashed by a dedicated handler labels its hash
-`<type>_v<N>`, for example `ndarray_v1`. The label is the `ContentHash.method`; the type's
+`<type>_v<N>`, for example `ndarray_v1` or `torch_tensor_v1`. The label is the `ContentHash.method`; the type's
 implementer chooses it. The bytes produced under an existing label never change. A new
 definition gets a new label, so a hash always says which definition produced it. The label
 is not part of any hash input (see [The hash label rule](#the-hash-label-rule)).
@@ -934,7 +935,8 @@ E = SHA-256( lp(T) || u64le(n) || i64le(d0) || ... || i64le(dn-1) || u64le(len(B
 ```
 
 `E` covers the dtype, the shape and every element bit, and nothing else. It is shared with
-other array types (a tensor type computes the same `E`).
+other array types: a `torch.Tensor` computes the same `E`, see
+[Torch tensor value hash](#torch-tensor-value-hash) below.
 
 **Step 2, the value hash `D`.**
 
@@ -1074,6 +1076,99 @@ print(hasher.hash_object(np.array(2.5)).to_string())
 aligned = np.dtype([("a", "i1"), ("b", "<f8")], align=True)
 print(hasher.hash_object(np.array([(1, 0.5)], dtype=aligned)).to_string())
 # ndarray_v1:a47c34b71f1d8c812f52d3a3b78ef6dbafb3b9adb320123b885cbacf72fa50b8
+```
+
+### Torch tensor value hash
+
+A `torch.Tensor` value (since v0.3, ITL-871) is hashed by `TorchTensorHandler`, which returns
+`ContentHash(method="torch_tensor_v1", digest=D)`. The hash is defined on the tensor, never on
+its stored bytes (a cell is a `torch.save` archive, whose bytes PyTorch does not promise to
+keep across versions). It has two steps.
+
+Step 1 is the element digest `E` of the array value hash above, over `(T, shape, B)`,
+where `T` is the PyTorch dtype name (`float32`, `bfloat16`), and `B` holds the logical
+elements (lazy conjugate and negative bits applied) in C order, little-endian. The dtypes
+NumPy does not have give their raw bits: `bfloat16` the 16-bit patterns, `complex32` the real
+then the imaginary `float16` of each element, and the `float8` tags (`float8_e4m3fn`,
+`float8_e5m2`, `float8_e4m3fnuz`, `float8_e5m2fnuz`, `float8_e8m0fnu`) one byte per element.
+
+Step 2, the value hash:
+
+```
+lp(x) = u64le(len(utf8(x))) || utf8(x)
+P = lp("orcapod.torch.tensor")
+ || E                                  (32 bytes)
+ || u8(requires_grad) || u8(conj_bit) || u8(neg_bit)
+ || u64le(n) || i64le(s0) || ... || i64le(sn-1)
+ || lp(class name)
+D = SHA-256(P)
+```
+
+`s0 ... sn-1` are the strides, in elements, and the class name is `torch.Tensor` or
+`torch.nn.parameter.Parameter`. The leading text is the type's extension name; it keeps a
+tensor apart from every other array type, so a tensor and an ndarray with equal elements
+never share a hash, also inside an untyped Python structure.
+
+The five properties of step 2 are read from the tensor **as it is stored**
+([Arrays and Tensors](../concepts/arrays.md#how-a-tensor-is-stored)): a tensor that does not
+cover its buffer is stored as `clone(memory_format=torch.preserve_format)`, so its strides are
+those of the clone and its lazy bits are 0. This is what makes
+`hash(read(write(v))) == hash(v)`.
+
+Each of the five properties has an option name: `requires_grad`, `memory_layout`, `conj_bit`,
+`neg_bit`, `subclass`. A name in the type's ignore list (the `ignore` array of the extension
+metadata, `{"ignore":[...],"version":1}`) writes that property's slot with its canonical
+value instead of the real one: `0`, the strides of a C-contiguous tensor of that shape (the
+last is 1, each earlier one is the next stride times the next dimension's size, a size of 0
+counting as 1), `0`, `0`, `torch.Tensor`. The slot is always present and the list itself is
+not in `P`. So values that differ only in ignored properties hash the same, and with all five
+ignored `D` equals the strict `D` of the plain contiguous tensor. A bare value is hashed with
+the list of the data context; a stored cell with the list of its own column. The cell token is
+`<identifier text> || "::" || D`, where the identifier text (the extension name, `;`, the
+metadata in hex) holds the list: for the default,
+`b"orcapod.torch.tensor;7b2269676e6f7265223a5b5d2c2276657273696f6e223a317d::" + D`.
+
+| Variation | Same `D` by default? |
+|---|---|
+| Dtype, shape, any element bit | no |
+| `requires_grad` | no |
+| Strides of a tensor that covers its buffer (transposed, `channels_last`) | no |
+| Lazy conjugate or negative bit of a tensor that covers its buffer | no |
+| `torch.Tensor` against `torch.nn.Parameter` | no |
+| Device (CPU, CUDA, MPS) | yes |
+| Autograd history (`grad_fn`, `.grad`) | yes |
+| A view of a larger buffer against its `clone(memory_format=torch.preserve_format)` | yes |
+
+A reference implementation with the standard library only, with `lp` and `element_digest`
+from the array reference above:
+
+```python
+def torch_tensor_hash(
+    element: bytes,
+    requires_grad: bool,
+    conj_bit: bool,
+    neg_bit: bool,
+    strides: tuple[int, ...],
+    class_name: str,
+) -> str:
+    p = lp("orcapod.torch.tensor") + element
+    p += bytes([requires_grad, conj_bit, neg_bit]) + struct.pack("<Q", len(strides))
+    p += b"".join(struct.pack("<q", s) for s in strides) + lp(class_name)
+    return hashlib.sha256(p).hexdigest()
+
+# torch.arange(6, dtype=torch.float32).reshape(2, 3)
+elements = element_digest("float32", (2, 3), struct.pack("<6f", 0, 1, 2, 3, 4, 5))
+print(torch_tensor_hash(elements, False, False, False, (3, 1), "torch.Tensor"))
+# 118005088af13c5566b5bc6e798fd5906520e34da424811f6ba128ea2fbd8fcb
+```
+
+The same value through Orcapod (PyTorch is optional, so this sample needs it installed):
+
+```python
+import torch
+
+print(hasher.hash_object(torch.arange(6, dtype=torch.float32).reshape(2, 3)).to_string())
+# torch_tensor_v1:118005088af13c5566b5bc6e798fd5906520e34da424811f6ba128ea2fbd8fcb
 ```
 
 ### The Arrow schema hash
