@@ -225,6 +225,26 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
+class _CloseDeferredWriter:
+    """A writer that forwards rows to ``output`` and leaves closing it to its owner.
+
+    A node hands it to a pod that closes the writer it is given, when the node must
+    still do something (stamp its modified time) before its downstream nodes see the
+    end. The node closes ``output`` itself afterwards.
+    """
+
+    def __init__(self, output: WritableChannel[tuple[TagProtocol, DataProtocol]]):
+        """Wrap ``output``."""
+        self._output = output
+
+    async def send(self, item: tuple[TagProtocol, DataProtocol]) -> None:
+        """Send ``item`` to the wrapped output."""
+        await self._output.send(item)
+
+    async def close(self) -> None:
+        """Do nothing: the owner closes the wrapped output."""
+
+
 # ---------------------------------------------------------------------------
 # FunctionNodeBase — shared base (no DB)
 # ---------------------------------------------------------------------------
@@ -3522,13 +3542,21 @@ class FunctionJobNode(FunctionNodeBase):
                 # Commit the last rows inside a job (ITL-919); a no-op otherwise.
                 self._commit_at_node_end()
             else:
-                # No-DB path: delegate dispatch entirely to the pod.
-                # The pod's async_execute() closes `output` in its own finally.
+                # No-DB path: delegate dispatch entirely to the pod. The pod closes
+                # the writer it is given; that close waits for the finally below, so
+                # the node is stamped before its downstream nodes see the end.
                 await self._function_pod.async_execute(
-                    [input_channel], output, observer=ctx_obs, run_id=run_id
+                    [input_channel],
+                    _CloseDeferredWriter(output),
+                    observer=ctx_obs,
+                    run_id=run_id,
                 )
 
             ctx_obs.on_node_end(node_label, node_hash)
+            # The run is complete: stamp the node as the sync execute() does, before
+            # the finally closes the output, so every downstream node, which stamps
+            # after it has seen that close, is newer than this one (ITL-1042).
+            self._update_modified_time()
         except Exception as run_error:
             self._commit_after_failure(run_error)
             raise

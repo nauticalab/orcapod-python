@@ -520,7 +520,10 @@ class StreamBase(TraceableBase):
         This default shows no rows: a stream class that can serve rows without computing
         overrides it. The zero-row table then has the stream's columns, typed from its
         declared (Python) schema, so a column's Arrow width can differ from the one the
-        computed stream will have (``int`` shows as ``int64``).
+        computed stream will have (``int`` shows as ``int64``). That zero-row table has
+        the declared columns only: never a ``_source_*``, ``_context_key`` or
+        content-hash column, whatever ``columns`` asks for, because whether such a column
+        exists and, for ``_source_*``, its type are known only from rows.
 
         Args:
             n: The largest number of rows to return.

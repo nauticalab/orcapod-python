@@ -983,6 +983,14 @@ class FunctionPodStream(StreamBase):
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
+        # Staleness bookkeeping, in memory only (never hashed, saved or stored). The
+        # stream stamps its modified time when its input is read to the end, if its
+        # input did not change while it was read (ITL-1042, ITL-1052): every reset
+        # bumps the generation, and the state of the input taken when the first row
+        # arrived is compared at the end.
+        self._reset_generation = 0
+        self._input_state: tuple[object, ...] | None = None
+
     @property
     def producer(self) -> PodProtocol:
         return self._function_pod
@@ -1040,7 +1048,6 @@ class FunctionPodStream(StreamBase):
         if self._needs_iterator:
             self._cached_input_iterator = enumerate(self._input_stream.iter_data())
             self._needs_iterator = False
-            self._update_modified_time()
         elif self._input_interrupted:
             self._cached_input_iterator = enumerate(self._input_stream.iter_data())
             self._input_interrupted = False
@@ -1050,8 +1057,63 @@ class FunctionPodStream(StreamBase):
         self._cached_input_iterator = None
         self._input_interrupted = True
 
+    @property
+    def last_modified(self) -> datetime | None:
+        """When this stream's results were completed; ``None`` while they are not current.
+
+        ``None`` (modification time unknown) while the stream is stale, that is while its
+        input or its pod changed after its results were completed, or while those results
+        may mix two states of its input. A stream reading this one then sees an unknown
+        time and is stale as well, however far down the chain it is.
+        """
+        own_time = self._modified_time
+        if own_time is None:
+            return None
+        for upstream_time in (
+            self._input_stream.last_modified,
+            self._function_pod.last_modified,
+        ):
+            if upstream_time is None or upstream_time > own_time:
+                return None
+        return own_time
+
+    def _current_input_state(self) -> tuple[object, ...]:
+        """What tells a change of the input: its reset generation, else its modified time.
+
+        A pod stream's modified time moves when it finishes its own read, which happens
+        while this stream reads it; only its resets are changes. Any other input
+        (operator stream, source, node) is computed or fixed by the time it yields.
+        """
+        upstream = self._input_stream
+        if isinstance(upstream, FunctionPodStream):
+            return (upstream._reset_generation,)
+        return (upstream.last_modified,)
+
+    def _note_input_state(self) -> None:
+        """Remember the input's state when its first row (or its end) arrives."""
+        if self._input_state is None:
+            self._input_state = self._current_input_state()
+
+    def _input_read_to_end(self) -> None:
+        """Stamp the completed result, or mark it stale if the input changed during the read.
+
+        A stream stamps its modified time when its results are complete, before its
+        reader sees the end, so it is newer than its input and older than its readers.
+        If the input was reset while it was read, or is itself not current (no modified
+        time), the result may mix two states of the input: the modified time is cleared
+        instead, which makes this stream, and every stream reading it, stale.
+        """
+        self._note_input_state()
+        changed = self._input_state != self._current_input_state()
+        if changed or self._input_stream.last_modified is None:
+            self._set_modified_time(None)
+        else:
+            self._update_modified_time()
+
     def clear_cache(self) -> None:
         """Discard all in-memory cached state."""
+        self._reset_generation += 1
+        self._input_state = None
         self._cached_input_iterator = None
         self._needs_iterator = True
         self._input_interrupted = False
@@ -1113,14 +1175,17 @@ class FunctionPodStream(StreamBase):
             try:
                 input_index, (tag, data) = next(input_iter)
             except StopIteration:
-                # Mark completion by releasing the iterator
+                # Mark completion by releasing the iterator, and stamp the result
+                # before the reader sees the end.
                 self._cached_input_iterator = None
+                self._input_read_to_end()
                 return
             except BaseException:
                 # The input itself raised; its iterator is closed. Open it again on
                 # the next read instead of taking it as exhausted.
                 self._input_raised()
                 raise
+            self._note_input_state()
             if input_index in self._cached_output_datas:
                 # An input opened again yields the rows this stream already cached.
                 continue
@@ -1160,6 +1225,9 @@ class FunctionPodStream(StreamBase):
             # and reads them anew (an upstream stream yields its cached rows).
             self._input_raised()
             raise
+        # The input has delivered its rows (after its own refresh, if it had one): note
+        # its state now, before computing, so a reset during the computation is seen.
+        self._note_input_state()
         # Submit uncached data concurrently via async_process_data. Every row that
         # returns is cached; a row whose function raised stays in the input, so the
         # next read computes it again, and the first error is raised after the others
@@ -1209,6 +1277,8 @@ class FunctionPodStream(StreamBase):
                 if i not in self._cached_output_datas
             ]
             self._cached_input_iterator = iter(remaining) if remaining else None
+        # Every row is computed: stamp the result before the reader sees any row.
+        self._input_read_to_end()
 
         # Yield every row in input order, those an earlier iteration computed included.
         for i in range(len(self._cached_output_datas)):

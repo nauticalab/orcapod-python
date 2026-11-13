@@ -165,7 +165,17 @@ What each kind of object shows:
 A head of an operator is never the operator applied to the heads of its inputs: a group over
 the first ten rows has the wrong members. So an uncomputed stream shows its columns and
 "not computed" until `as_table()`, `iter_data()` or a job run computes it. An empty result
-shows status `rows` with zero rows, so it is never mistaken for "not computed".
+shows status `rows` with zero rows, so it is never mistaken for "not computed". A head without
+rows because nothing is computed or stored yet shows the stream's declared columns: the
+source-info (`_source_*`), `_context_key` and content-hash columns, which are known only from
+rows, can be missing from it even when `columns` or `all_info` asks for them.
+
+A stream or node records that its results are current when it has read its input to the end.
+So after `job.run()` on either orchestrator, sync or async, every node shows the rows of that
+run: `head()`, `as_table()` and `iter_data()` serve them from memory, without reading the
+store (a function node whose run left no rows in memory reads its stored rows). Likewise, once a chain of streams such as `g.pod(f.pod(source))` has been read to the
+end, reading it again computes nothing. A change upstream (`clear_cache()`) makes every stream
+after it out of date, and its next read computes it again.
 
 In the preview, large cells are summarised (an array as `ndarray float64 (2, 3)`, bytes as
 `bytes (300 B)`, long text and long lists shortened); `head().table` keeps the full values.
