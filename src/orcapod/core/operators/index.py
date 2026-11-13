@@ -133,13 +133,20 @@ class Index(UnaryOperator):
             NotImplementedError: If the column holds an extension type whose
                 ``index_element`` is not yet implemented.
         """
-        _, data_schema = stream.output_schema()
+        tag_schema, data_schema = stream.output_schema()
         data_columns = list(data_schema.keys())
 
         if self.column not in data_columns:
             raise InputValidationError(
                 f"Index: column {self.column!r} not found in data schema. "
                 f"Available data columns: {data_columns}"
+            )
+
+        if self.out is not None and self.out in tag_schema:
+            raise InputValidationError(
+                f"Index: out column {self.out!r} is a tag column of the input, "
+                f"and a name cannot be both a tag and a data column. Choose a "
+                f"different name, or rename the tag with map_tags."
             )
 
         if self.out is not None and self.out in data_columns:

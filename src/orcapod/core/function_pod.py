@@ -244,8 +244,22 @@ class _FunctionPodBase(TraceableBase):
             ValueError: If inputs are incompatible with the data function schema.
         """
         input_stream = self.handle_input_streams(*streams)
-        _, incoming_data_schema = input_stream.output_schema()
+        incoming_tag_schema, incoming_data_schema = input_stream.output_schema()
         self._validate_input_schema(incoming_data_schema)
+        self._validate_output_keys(incoming_tag_schema.keys())
+
+    def _validate_output_keys(self, tag_names: Collection[str]) -> None:
+        """Reject an output key that is also a tag column of the input.
+
+        Args:
+            tag_names: The tag column names of the pod's (joined) input.
+
+        Raises:
+            InputValidationError: If an output key of the function is a tag name.
+        """
+        schema_utils.require_output_keys_not_tags(
+            tag_names, self.data_function.output_data_schema.keys()
+        )
 
     def _validate_input_schema(self, input_schema: Schema) -> None:
         expected_data_schema = self.input_data_schema
@@ -642,7 +656,14 @@ class _FunctionPodBase(TraceableBase):
                         sem.release()
 
             async with asyncio.TaskGroup() as tg:
+                first_row = True
                 async for tag, data in inputs[0]:
+                    if first_row:
+                        # The sync path checks the input's schema; here the first
+                        # tag is the schema. Raised outside process_one, whose
+                        # handler would skip the row silently.
+                        first_row = False
+                        self._validate_output_keys(tag.keys())
                     if sem is not None:
                         await sem.acquire()
                     tg.create_task(process_one(tag, data))
@@ -741,6 +762,7 @@ class _FunctionPodBase(TraceableBase):
         )
         # validate that incoming_data_schema is valid
         self._validate_input_schema(incoming_data_schema)
+        self._validate_output_keys(tag_schema.keys())
         # The output schema of the FunctionPodProtocol is determined by the data function
         # TODO: handle and extend to include additional columns
         # Namely, the source columns
@@ -834,7 +856,9 @@ class FunctionPod(_FunctionPodBase):
         input_stream = self.handle_input_streams(*streams)
 
         # perform input stream schema validation
-        self._validate_input_schema(input_stream.output_schema()[1])
+        tag_schema, data_schema = input_stream.output_schema()
+        self._validate_input_schema(data_schema)
+        self._validate_output_keys(tag_schema.keys())
         self.tracker_manager.record_function_pod_invocation(
             self, input_stream, label=label
         )

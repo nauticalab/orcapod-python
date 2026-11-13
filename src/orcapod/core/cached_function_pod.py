@@ -427,7 +427,9 @@ class CachedFunctionPod(WrappedFunctionPod):
         active trackers (so a ``PipelineJob`` records this pod).
         """
         input_stream = self.handle_input_streams(*streams)
-        self._validate_input_schema(input_stream.output_schema()[1])
+        tag_schema, data_schema = input_stream.output_schema()
+        self._validate_input_schema(data_schema)
+        self._validate_output_keys(tag_schema.keys())
         # The pod has no ``from_config`` (it cannot be rebuilt without its cache
         # database), the one member of FunctionPodProtocol it lacks; the tracker uses
         # none of it.

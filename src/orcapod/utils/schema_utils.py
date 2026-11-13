@@ -7,6 +7,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from types import UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
+from orcapod.errors import InputValidationError
 from orcapod.types import Schema, SchemaLike
 
 logger = logging.getLogger(__name__)
@@ -552,3 +553,27 @@ def _normalize_column_list(value: Any) -> list[str]:
             f"got {[type(x).__name__ for x in bad]!r}"
         )
     return result
+
+
+def require_output_keys_not_tags(
+    tag_names: Collection[str], output_keys: Collection[str]
+) -> None:
+    """Raise if a function's output key is also a tag column of its input.
+
+    A name is a tag or a data column, never both, and a function pod keeps its
+    input's tags next to the data it produces.
+
+    Args:
+        tag_names: The tag column names of the pod's input.
+        output_keys: The names of the function's output data columns.
+
+    Raises:
+        InputValidationError: If a name is in both. The message names the output
+            key and the remedy.
+    """
+    for name in sorted(set(tag_names) & set(output_keys)):
+        raise InputValidationError(
+            f"function output key {name!r} is also a tag column of the input, and a "
+            + "name cannot be both a tag and a data column. Rename the output "
+            + "(the function's output key), or rename the tag with map_tags."
+        )

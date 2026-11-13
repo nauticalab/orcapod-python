@@ -1014,3 +1014,48 @@ def test_join_accepts_layout_only_key_difference(
         expected = sync_rows(Join(), *operands)
         assert len(expected) == 2
         assert_equivalent(expected, async_rows(Join(), *operands))
+
+
+# A name that is a tag in one input and a data column in another (ITL-940): both paths raise
+# the same InputValidationError, never a KeyError or rows whose tag and data values differ.
+def _tag_data_sources() -> tuple[ArrowTableSource, ArrowTableSource]:
+    tag_side = _source(
+        {"x": pa.array([1, 2], pa.int64()), "a": pa.array([3, 4], pa.int64())},
+        tags=("x",),
+        source_id="tag_side",
+    )
+    data_side = _source(
+        {
+            "k": pa.array([1, 2], pa.int64()),
+            "x": pa.array([1, 2], pa.int64()),
+            "b": pa.array([5, 6], pa.int64()),
+        },
+        tags=("k",),
+        source_id="data_side",
+    )
+    return tag_side, data_side
+
+
+_TAG_DATA_MESSAGE = r"column 'x' is a tag in the (first|second) input and a data column"
+
+
+@pytest.mark.parametrize("operator", [Join, MergeJoin], ids=["join", "merge_join"])
+def test_join_paths_reject_a_tag_and_a_data_column_of_one_name(
+    operator: type[Join] | type[MergeJoin],
+) -> None:
+    tag_side, data_side = _tag_data_sources()
+    for operands in ((tag_side, data_side), (data_side, tag_side)):
+        with pytest.raises(InputValidationError, match=_TAG_DATA_MESSAGE):
+            _ = operator()(*operands)
+        with pytest.raises(BaseException) as excinfo:
+            _ = async_rows(operator(), *operands)
+        # Join's merge runs inside a task group, which wraps the error.
+        errors = (
+            excinfo.value.exceptions
+            if isinstance(excinfo.value, BaseExceptionGroup)
+            else (excinfo.value,)
+        )
+        assert any(
+            isinstance(e, InputValidationError) and re.search(_TAG_DATA_MESSAGE, str(e))
+            for e in errors
+        ), errors

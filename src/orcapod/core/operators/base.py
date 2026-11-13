@@ -58,6 +58,47 @@ def require_shared_arrow_type(
     return shared
 
 
+def require_tag_data_roles_agree(
+    first_tags: Collection[str],
+    first_data: Collection[str],
+    second_tags: Collection[str],
+    second_data: Collection[str],
+) -> None:
+    """Raise if a name is a tag in one input and a data column in the other.
+
+    A name belongs to one of a stream's two column groups, so an operator whose
+    output would hold the name as both a tag and a data column cannot be built.
+    The check reads names only, so it runs at graph-build time (from the
+    schemas) and on the first row of each side of an async join (from the
+    datagrams), with the same result.
+
+    Args:
+        first_tags: The tag column names of one input.
+        first_data: The data column names of that input.
+        second_tags: The tag column names of the other input.
+        second_data: The data column names of that input.
+
+    Raises:
+        InputValidationError: If a name is a tag of one input and a data column
+            of the other. The message names the column, says which input has it
+            in which role (``first`` or ``second`` of the two given) and
+            suggests the remedy.
+    """
+    for name in sorted(set(first_tags) & set(second_data)):
+        raise _tag_data_error(name, "first", "second")
+    for name in sorted(set(second_tags) & set(first_data)):
+        raise _tag_data_error(name, "second", "first")
+
+
+def _tag_data_error(name: str, tag_side: str, data_side: str) -> InputValidationError:
+    return InputValidationError(
+        f"column {name!r} is a tag in the {tag_side} input and a data column in the "
+        + f"{data_side}, and a name cannot be both. Rename it in one input with "
+        + "map_tags or map_data, or declare it a tag at the source that has it as "
+        + "a data column."
+    )
+
+
 class UnaryOperator(StaticOutputOperatorPod):
     """Base class for all unary operators."""
 

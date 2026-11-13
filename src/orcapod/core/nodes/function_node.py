@@ -275,7 +275,7 @@ class FunctionNodeBase(StreamBase):
             and input_stream.load_status == LoadStatus.UNAVAILABLE
         )
         if not _stream_unavailable:
-            _, incoming_data_types = input_stream.output_schema()
+            incoming_tag_types, incoming_data_types = input_stream.output_schema()
             # Use the pod's exposed input schema (ctx excluded) rather than the
             # data function's full schema, because ctx is auto-injected per row.
             expected_data_schema = function_pod.input_data_schema
@@ -288,6 +288,11 @@ class FunctionNodeBase(StreamBase):
                     f"is not compatible with expected input schema "
                     f"{expected_data_schema}: {reason}"
                 )
+
+            schema_utils.require_output_keys_not_tags(
+                incoming_tag_types.keys(),
+                function_pod.data_function.output_data_schema.keys(),
+            )
 
         self._input_stream = input_stream
 
