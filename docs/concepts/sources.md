@@ -394,7 +394,8 @@ before. Things to know:
   has provenance columns of its own, like the result of handing the same rows to
   `ArrowTableSource`. Use it in place of the origin. Its default `source_id` is
   `tags_as_data:` followed by a labelled hash built from the origin's identity and the mapping, so
-  it changes when either changes; pass `source_id=` to choose a name.
+  it changes when either changes; pass `source_id=` to choose a name. The mapping is part of the
+  source's `content_hash` either way, so two mappings never share one.
 - A saved job reloads a derived source whenever its origin can be reloaded (a CSV file, a
   Delta table, a database table). Over an in-memory source it is saved but not reloaded, like
   the in-memory source itself.

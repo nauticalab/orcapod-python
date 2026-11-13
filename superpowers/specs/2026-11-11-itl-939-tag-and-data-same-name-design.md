@@ -892,6 +892,7 @@ What answers 5 to 7 change in 8.3:
   hash). It matters for `derived.cached(database)`, whose table is keyed by the content hash:
   changing the origin, the mapping or the `record_id_column` under the same explicit
   `source_id` would reuse the rows cached before, so such a change needs a new `source_id`.
+  **Superseded by ITL-1000 (developer, November 12, 2026) for the mapping:** the sorted `tags_as_data` items now enter the `content_hash` also with an explicit `source_id`; the origin and the `record_id_column` still do not.
   The default `source_id` does this by itself, since it is built from all three.
 * **`pipeline_hash`** stays schema only.
 * The plain form, `node.as_source()` without `tags_as_data`, keeps today's identity and

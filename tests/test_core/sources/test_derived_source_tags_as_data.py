@@ -24,6 +24,7 @@ from orcapod.databases import InMemoryArrowDatabase
 from orcapod.errors import InputValidationError
 from orcapod.operators import Join
 from orcapod.pipeline import AsyncPipelineOrchestrator
+from orcapod.types import ColumnConfig
 from orcapod.sources import ArrowTableSource, DictSource, SQLiteTableSource
 
 UTC = dt.timezone.utc
@@ -400,13 +401,62 @@ class TestIdentity:
         )
         assert base.content_hash() != _experiment().content_hash()
 
-    def test_content_hash_is_the_root_source_rule(self):
+    def test_content_hash_is_the_root_source_rule_plus_the_mapping(self):
+        """The identity structure is the root source rule followed by the sorted mapping."""
         derived = DerivedSource(_experiment(), tags_as_data=COPY)
+        # identity_structure is the non-public entry point this test is about: the
+        # structure is the root source rule followed by the sorted mapping items.
         assert derived.identity_structure() == (
             "DerivedSource",
             derived.output_schema(),
             derived.source_id,
+            ("tags_as_data", tuple(sorted(COPY.items()))),
         )
+
+    def test_mappings_with_one_schema_have_different_content_hashes(self):
+        """Two mappings with one schema and one source_id still differ in content hash (ITL-1000)."""
+        # ITL-1000: two tag columns of one type copied to one name give one schema
+        # but different values, so with one explicit source_id the mapping must tell
+        # the sources apart.
+        table = pa.table(
+            {
+                "a": pa.array([1, 2], pa.int64()),
+                "b": pa.array([3, 4], pa.int64()),
+                "x": pa.array([0.5, 1.5], pa.float64()),
+            }
+        )
+        base = ArrowTableSource(table, tag_columns=["a", "b"], source_id="two_tags")
+        from_a = DerivedSource(base, source_id="same", tags_as_data={"a": "k"})
+        from_b = DerivedSource(base, source_id="same", tags_as_data={"b": "k"})
+        assert from_a.output_schema() == from_b.output_schema()
+        assert from_a.source_id == from_b.source_id
+        assert from_a.pipeline_hash() == from_b.pipeline_hash()
+        assert from_a.content_hash() != from_b.content_hash()
+        # The copies hold different values, and record ids (from the source id and
+        # row position) are equal.
+        ta, tb = from_a.as_table(), from_b.as_table()
+        assert ta.column("k").to_pylist() != tb.column("k").to_pylist()
+        ca, cb = (
+            from_a.as_table(columns=ColumnConfig(system_tags=True)),
+            from_b.as_table(columns=ColumnConfig(system_tags=True)),
+        )
+        (rid_a,) = _prefixed(ca, "_tag_record_id")
+        (rid_b,) = _prefixed(cb, "_tag_record_id")
+        assert ca.column(rid_a).to_pylist() == cb.column(rid_b).to_pylist()
+
+    def test_mapping_order_does_not_change_content_hash(self):
+        """The mapping enters the identity sorted, so its order does not matter."""
+        a = DerivedSource(
+            _experiment(),
+            source_id="s",
+            tags_as_data={"subject_id": "p", "experiment_index": "q"},
+        )
+        b = DerivedSource(
+            _experiment(),
+            source_id="s",
+            tags_as_data={"experiment_index": "q", "subject_id": "p"},
+        )
+        assert a.content_hash() == b.content_hash()
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +636,8 @@ class TestPipelineJob:
         assert reloaded.content_hash() == original.content_hash()
         assert reloaded.as_table(all_info=True).equals(original.as_table(all_info=True))
         assert loaded.nodes["len"].pipeline_hash() == job.nodes["len"].pipeline_hash()
+        # The node identities include the mapping through the source's content hash.
+        assert loaded.nodes["len"].content_hash() == job.nodes["len"].content_hash()
 
     def test_config_round_trip_keeps_an_explicit_source_id(self, tmp_path):
         db_path = _make_probe_db(tmp_path / "edi.db")
@@ -600,6 +652,7 @@ class TestPipelineJob:
         assert config["tags_as_data"] == {"name": "name_copy"}
         rebuilt = DerivedSource.from_config(config)
         assert rebuilt.source_id == "probe_named"
+        assert rebuilt.content_hash() == derived.content_hash()
         assert rebuilt.as_table(all_info=True).equals(derived.as_table(all_info=True))
 
     def test_not_reloadable_when_the_origin_is_not(self, tmp_path):

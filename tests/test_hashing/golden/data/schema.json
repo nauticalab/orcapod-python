@@ -1,7 +1,7 @@
 {
   "compute_schema_hash.chars_16": "03596e8aeb60e3f5",
   "compute_schema_hash.full": "03596e8aeb60e3f594b596b4f5c0ab87c8e2efb2ee3bd1886775e971e8d7fc39",
-  "derived_source_tags_as_data.default_source_id.content_hash": "semantic_v1:c41422acd1e99d2754b7dcb1c70fc65411f922ac1bcd68d0be8d23281f78989b",
+  "derived_source_tags_as_data.default_source_id.content_hash": "semantic_v1:8bdcacb99dec766697c555c1631a3f96e776abd2758aeccc0dd624807742f3fa",
   "derived_source_tags_as_data.default_source_id.pipeline_hash": "semantic_v1:3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a",
   "derived_source_tags_as_data.default_source_id.row[{\"subject\":\"s1\"}]._tag_record_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a": "8be2c82e53555b479b5bd2df2b8f56ca",
   "derived_source_tags_as_data.default_source_id.row[{\"subject\":\"s1\"}]._tag_source_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a": "tags_as_data:semantic_v1:a255549e5d36cb6fd37496fc382dcfc776e54461313cdc1e22a1ccaee98747f6",
@@ -17,7 +17,7 @@
     "_tag_source_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a",
     "_tag_record_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a"
   ],
-  "derived_source_tags_as_data.named_source_id.content_hash": "semantic_v1:8597ec7aafe8117c96c052a35d8f102d3fa8a3ada1d5418b77380ec6dce907c9",
+  "derived_source_tags_as_data.named_source_id.content_hash": "semantic_v1:a02722ed9904292f268293a3bc6c2d708b9473f69ea1c4c239a6066a6fdbc0af",
   "derived_source_tags_as_data.named_source_id.pipeline_hash": "semantic_v1:3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a",
   "derived_source_tags_as_data.named_source_id.row[{\"subject\":\"s1\"}]._tag_record_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a": "aa78da3cf532571baccfbd2122decfb1",
   "derived_source_tags_as_data.named_source_id.row[{\"subject\":\"s1\"}]._tag_source_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a": "golden_derived",
@@ -33,7 +33,7 @@
     "_tag_source_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a",
     "_tag_record_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a"
   ],
-  "derived_source_tags_as_data.record_id_column.content_hash": "semantic_v1:1c2e6bef64bd40852e4439cd3e2025049034f6d9ae40696bae2b3c444786556d",
+  "derived_source_tags_as_data.record_id_column.content_hash": "semantic_v1:b681686fb59cb9eef4426db6a005fa6144efbf5ae6dbfb3d98d0707540bc2a3f",
   "derived_source_tags_as_data.record_id_column.pipeline_hash": "semantic_v1:3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a",
   "derived_source_tags_as_data.record_id_column.row[{\"subject\":\"s1\"}]._tag_record_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a": "fb17ac745786500eb610b18676bf9f81",
   "derived_source_tags_as_data.record_id_column.row[{\"subject\":\"s1\"}]._tag_source_id::3becdc3d3abb1d555203a086f4b02d6712e4dfead024591d1e844b519fc14c7a": "tags_as_data:semantic_v1:4bc1b45a35684cfe7142828423ebf054568796e49d6bf17ebba30a97818acf66",

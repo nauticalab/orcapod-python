@@ -138,8 +138,9 @@ class DerivedSource(RootSource):
           the ``record_id_column`` when one is set. It changes when the origin's
           identity or one of these parameters changes. An explicit ``source_id``
           replaces it.
-        - ``content_hash`` follows the rule of every root source: class name,
-          output schema and ``source_id``.
+        - ``content_hash`` follows the rule of every root source (class name,
+          output schema and ``source_id``) plus the sorted ``tags_as_data`` items,
+          since two mappings can give one schema and one explicit ``source_id``.
         - ``pipeline_hash`` is schema-only, as for every root source.
 
     Identity (plain form):
@@ -261,10 +262,25 @@ class DerivedSource(RootSource):
     # -------------------------------------------------------------------------
 
     def identity_structure(self) -> Any:
+        """Return what the content hash is built from.
+
+        The plain form is tied to the origin node's content hash. The
+        ``tags_as_data`` form is the root source rule (class name, output schema,
+        ``source_id``) followed by the sorted mapping items: two mappings can give
+        the same schema (two tag columns of one type copied to one name) while the
+        copy holds different values, so with an explicit ``source_id`` the mapping
+        has to tell the sources apart (ITL-1000).
+
+        Returns:
+            The identity structure.
+        """
         if self._tags_as_data is None:
             # Tied precisely to the specific node's data identity
             return (self._origin.content_hash(),)
-        return super().identity_structure()
+        return (
+            *super().identity_structure(),
+            ("tags_as_data", tuple(sorted(self._tags_as_data.items()))),
+        )
 
     # -------------------------------------------------------------------------
     # Serialization
