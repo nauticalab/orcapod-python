@@ -194,14 +194,15 @@ unit_key = [
     "spike_extraction_hash", "subject_id", "session_start_datetime",
     "recording_index", "probe_index", "unit_id",
 ]
-per_unit = spikes.group_by(unit_key).drop_tag_columns("timestamp")
+per_unit = spikes.group_by(unit_key)
 print(per_unit.keys())
 # (('spike_extraction_hash', 'subject_id', 'session_start_datetime', 'recording_index', 'probe_index', 'unit_id'), ('spike_amplitude_uv', 'spike_time_us'))
 ```
 
 `per_unit` has one row per unit, and its `spike_time_us` list is in time order: `group_by`
 orders the members of a group by the tags outside the group key, and on the full unit key
-the only such tag is `timestamp`. `group_by(["unit_id"])` alone sorts by
+the only such tag is `timestamp`. The `timestamp` tag itself is dropped, as `group_by` drops
+every tag outside the key; its copy `spike_time_us` is data and stays. `group_by(["unit_id"])` alone sorts by
 `spike_extraction_hash`, subject, session, recording, probe, then `timestamp`, so time order
 holds only within one session and probe; group on the full unit key.
 

@@ -145,9 +145,10 @@ def test_group_by() -> None:
     out = list(GroupBy(by=["g"])(arrays_source()).iter_data())
     assert sorted(fields(t)["g"] for t, _ in out) == ["g0", "g1", "g2"]
     for tag, data in out:
-        # GroupBy keeps the non-key tag ``k`` as a list-valued tag.
-        names = list(fields(tag)["k"])
-        assert sorted(names) == sorted(n for n in NAMES if GROUP[n] == fields(tag)["g"])
+        # GroupBy drops the non-key tag ``k`` (ITL-1070); it still orders the
+        # members, so the group's names come in ascending order.
+        assert set(fields(tag)) == {"g"}
+        names = sorted(n for n in NAMES if GROUP[n] == fields(tag)["g"])
         for name, x in zip(names, fields(data)["x"], strict=True):
             assert_arrays_identical(x, expected_x(name))
 

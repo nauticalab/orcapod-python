@@ -477,7 +477,8 @@ OTHER_OPERATOR_CASES: list[tuple[str, Any, Any, set[str]]] = [
         "GroupBy",
         lambda: GroupBy(by=["probe"]),
         lambda: [_int_stream(["probe", "session"], ["n_units"], 0, nullable=False)],
-        {"probe", "session", "n_units"},
+        # The non-key tag ``session`` is dropped (ITL-1070).
+        {"probe", "n_units"},
     ),
     (
         "SelectTagColumns",

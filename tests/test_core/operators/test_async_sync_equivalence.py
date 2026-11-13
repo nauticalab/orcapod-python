@@ -648,24 +648,28 @@ def test_drop_nulls_without_tag_columns() -> None:
 PROVENANCE_CASES = [pytest.param(c, id=c.label) for c in CASES]
 
 
-def test_group_by_keeps_non_key_tags_as_tags_on_both_paths() -> None:
-    """Neither path moves a non-key tag into the data (ITL-955).
+def test_group_by_keeps_only_key_tags_on_both_paths() -> None:
+    """Both paths drop the non-key tags and keep the data lists (ITL-1070).
 
-    ``source_a`` has tags ``k`` and ``ta``; grouping by ``ta`` leaves ``k`` a
-    list-valued tag, and the data of every row holds only the input's data
-    columns.
+    ``source_a`` has tags ``k`` and ``ta``; grouping by ``ta`` drops ``k``, and
+    the data of every row holds only the input's data columns, ordered by ``k``.
     """
     _, data_keys = source_a().keys()
+    results = []
     for rows in (
         sync_rows(GroupBy(["ta"]), source_a()),
         async_rows(GroupBy(["ta"]), source_a()),
     ):
-        members = sorted(tuple(cast(list[int], tag.as_dict()["k"])) for tag, _ in rows)
-        assert members == [(1, 2), (3,)]
         for tag, data in rows:
-            assert set(tag.keys()) == {"k", "ta"}
+            assert set(tag.keys()) == {"ta"}
             assert set(data.keys()) == set(data_keys)
-            assert tag.as_table().schema.field("k").type == pa.large_list(pa.int16())
+        results.append(
+            sorted(
+                (tag.as_dict()["ta"], data.as_table().to_pylist()[0])
+                for tag, data in rows
+            )
+        )
+    assert results[0] == results[1]
 
 
 @pytest.mark.parametrize("case", PROVENANCE_CASES)

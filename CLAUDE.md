@@ -567,8 +567,10 @@ no input tag name may appear among the data columns.
 Two operators reduce row count many→one. `Batch` groups consecutive rows by count; `GroupBy`
 groups by tag values: it collapses the N rows sharing a tag tuple into one row with
 list-valued members. Neither synthesizes new data values — every emitted element came from an
-input row — and `GroupBy` keys only on tags, never on data. Its non-key tags stay tags,
-list-valued, as `Batch` keeps them.
+input row — and `GroupBy` keys only on tags, never on data. `GroupBy` keeps only its `by`
+tags and drops every other tag (developer, November 13, 2026, ITL-1070): a list of the members'
+values is not a key, as SQL drops a non-key column after `GROUP BY`. `Batch` has no key and keeps
+every tag, list-valued (developer, same day): its lists are what tells a batch's members apart.
 
 Filters are the operators that read data columns (ITL-943): `PolarsFilter` evaluates its
 predicate on values, and `DropNulls` reads only whether a value is present (its validity),
@@ -686,10 +688,10 @@ current data context are the current entries.
 2. **Name-extending** — multi-input ops (join, merge join). Each input's system tag column
    name gets `::{pipeline_hash}:{canonical_position}` appended. Commutative operators
    canonically order inputs by `pipeline_hash` and sort system tag values per row.
-3. **Reducing** — many→one ops (`Batch`, `GroupBy`). User tag and data columns become
-   `list[T]` and stay in their own group (a tag stays a tag; only the scalar keys of a
-   `GroupBy` are not list-wrapped), and source-info columns become `list[str]` with one element
-   per member. System
+3. **Reducing** — many→one ops (`Batch`, `GroupBy`). Data columns become `list[T]`; `Batch`
+   makes every user tag `list[T]` and keeps it a tag, while `GroupBy` keeps its scalar keys and
+   drops every other user tag (ITL-1070). No tag ever moves to the data group. Source-info
+   columns become `list[str]` with one element per member. System
    tag columns must stay **scalar**, because `_build_record_id_preimage`
    (`core/nodes/function_node.py`) hashes them directly to derive record identity. They fold
    to a deterministic digest via `arrow_utils.fold_system_tag_values` and their column name
@@ -839,10 +841,14 @@ data. The rules:
   tag values with the system `record_id` as tiebreaker, so the hashed lists are stable across
   runs. Groups themselves are emitted in key order, so a reordered input yields a
   byte-identical table.
-- `GroupBy`'s output tag columns are its input's tag columns, in input order: keys scalar,
-  every other tag `list[T]` (ITL-955). A grouped stream can be grouped again on a coarser key;
-  its list-valued tags then nest (`list[list[T]]`) and still order the members, so the member
-  sort key (`_null_last_key`) is recursive and sorts nulls last at every depth.
+- `GroupBy`'s output tag columns are its `by` columns, scalar, in the input's tag order; every
+  other tag is dropped (ITL-1070; ITL-955 had kept them as `list[T]` tags, never released). The
+  dropped tags still order the members, so the data lists are as before. Their values are not
+  carried: a step that needs them makes the column data before grouping (at the source, or
+  `DerivedSource(tags_as_data=...)`). A list-valued tag of the input (a list-typed source tag)
+  can still order members, so the member sort key (`_null_last_key`) is
+  recursive and sorts nulls last at every depth. A grouped stream grouped again on a coarser key
+  orders its members by the first grouping's keys outside the coarser key, then by record id. An opt-in mode that keeps non-key tags is ITL-1071.
 - `Data` source-info values may be `str`, `None`, or `list[...]`, nested to any depth; the
   Arrow and Python types are derived from the value, with `None` mapping to `large_string`.
   That rule has one definition, `arrow_utils.source_info_arrow_type`, and applies only to

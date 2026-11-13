@@ -9,6 +9,7 @@ Delta Lake store.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 from pathlib import Path
 
 import pyarrow as pa
@@ -22,7 +23,6 @@ from orcapod.core.sources import ArrowTableSource, DictSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import DeltaTableDatabase
 from orcapod.pipeline import PipelineJob
-from orcapod.system_constants import constants
 from orcapod.types import Schema
 
 # ---------------------------------------------------------------------------
@@ -42,8 +42,8 @@ _CALLS: dict[str, list] = {"path": [], "v": [], "cfg": []}
 def count_paths(path: list[str]) -> int:
     """Record the members' `path` values and return how many there are.
 
-    `Batch` and `GroupBy` both keep `probe` as a list-valued *tag*, so `path`
-    is the only data column reaching the pod.
+    `Batch` keeps `probe` as a list-valued *tag* and `GroupBy` drops it, so
+    `path` is the only data column reaching the pod.
     """
     _CALLS["path"].append(list(path))
     return len(path)
@@ -105,6 +105,21 @@ class TestGroupByInJob:
         _run(store, session_source_factory(), GroupBy(by=["subject", "date"]), "gb")
         assert len(_CALLS["path"]) == 2
         assert sorted(_CALLS["path"]) == [["a", "b"], ["c", "d"]]
+
+    def test_stored_records_hold_only_the_key_tags(self, store, session_source_factory):
+        """The pod after ``GroupBy`` stores the keys, not the dropped tag (ITL-1070)."""
+        job = _run(
+            store, session_source_factory(), GroupBy(by=["subject", "date"]), "gb"
+        )
+        counter = job.nodes["counter"]
+        assert counter.keys() == (("subject", "date"), ("n",))
+        records = counter.get_all_records()
+        assert records is not None
+        assert "probe" not in records.column_names
+        assert sorted(records.select(["date", "n"]).to_pylist(), key=str) == [
+            {"date": "d1", "n": 2},
+            {"date": "d2", "n": 2},
+        ]
 
     def test_batch_completes(self, store, session_source_factory):
         """The provenance fix is independent of grouping."""
@@ -179,11 +194,11 @@ class TestGroupByMemoization:
 
 
 class _LegacyGroupBy(GroupBy):
-    """``GroupBy`` with the output shape it had before ITL-955.
+    """``GroupBy`` with the output shape of v0.2.0, before ITL-955 and ITL-1070.
 
-    Non-key tags are declared as data columns, which is what stores written by
-    an earlier version hold.  It keeps the identity of ``GroupBy`` so that it
-    occupies the same place in the pipeline.
+    Non-key tags are list-valued data columns, which is what stores written by
+    v0.2.0 hold.  It keeps the identity of ``GroupBy`` so that it occupies the
+    same place in the pipeline.
     """
 
     def identity_structure(self):
@@ -191,10 +206,12 @@ class _LegacyGroupBy(GroupBy):
         return ("GroupBy", self.by)
 
     def unary_static_process(self, stream):
-        """Group as ``GroupBy`` does, then declare only the ``by`` columns as tags.
+        """Group as ``GroupBy`` does, then add the non-key tags as data columns.
 
-        The non-key tags become data columns, the shape ``GroupBy`` produced before
-        ITL-955.
+        ``GroupBy`` drops the non-key tags (ITL-1070); v0.2.0 kept each as a
+        list-valued data column, in member order.  The members of a group are
+        ordered by their non-key tag values, so each such list is its group's
+        values sorted (the fixture's tags hold no nulls or ties).
 
         Args:
             stream: The stream to group.
@@ -203,14 +220,34 @@ class _LegacyGroupBy(GroupBy):
             The grouped stream in the legacy shape.
         """
         grouped = super().unary_static_process(stream)
+        table = grouped.as_table(columns={"source": True, "system_tags": True})
+        tag_columns, _ = stream.keys()
+        non_key = [c for c in tag_columns if c not in self.by]
+        input_table = stream.as_table()
+        members: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+        for row in input_table.to_pylist():
+            members.setdefault(tuple(row[c] for c in self.by), []).append(row)
+        keys = [
+            tuple(r[c] for c in self.by)
+            for r in table.select(list(self.by)).to_pylist()
+        ]
+        # v0.2.0 placed the moved tags right after the keys, before the data.
+        for position, column in enumerate(non_key, start=len(self.by)):
+            values = [sorted(m[column] for m in members[key]) for key in keys]
+            list_type = pa.large_list(input_table.schema.field(column).type)
+            table = table.add_column(
+                position,
+                pa.field(column, list_type, nullable=False),
+                pa.array(values, type=list_type),
+            )
         return ArrowTableStream(
-            grouped.as_table(columns={"source": True, "system_tags": True}),
+            table,
             tag_columns=self.by,
             data_context=grouped.data_context,  # pyright: ignore[reportAttributeAccessIssue]  # not on StreamProtocol, as in GroupBy itself (ITL-844)
         )
 
     def unary_output_schema(self, stream, *, columns=None, all_info=False):
-        """Predict the legacy schema: non-key tags are moved to the data schema.
+        """Predict the legacy schema: non-key tags are list-valued data columns.
 
         Args:
             stream: The stream to group.
@@ -223,22 +260,19 @@ class _LegacyGroupBy(GroupBy):
         tag_schema, data_schema = super().unary_output_schema(
             stream, columns=columns, all_info=all_info
         )
-        tags = {
-            k: v
-            for k, v in tag_schema.items()
-            if k in self.by or k.startswith(constants.SYSTEM_TAG_PREFIX)
-        }
-        moved = {k: v for k, v in tag_schema.items() if k not in tags}
-        return Schema(tags), Schema({**moved, **data_schema})
+        in_tags, _ = stream.output_schema()
+        moved = {k: list[v] for k, v in in_tags.items() if k not in self.by}
+        return tag_schema, Schema({**moved, **data_schema})
 
 
-class TestStoreWrittenBeforeTagsStayedTags:
-    """Results stored before ITL-955 are still found after it.
+class TestStoreWrittenByV020:
+    """Results stored by v0.2.0 are still found (ITL-955, ITL-1070).
 
-    Before the fix a pod could only follow ``GroupBy`` by selecting the real
-    data columns (or by taking the moved tags as parameters).  The fix changes
-    neither a pipeline hash nor the pod's input data, so a store written by the
-    old shape serves the new one without recomputing.
+    In v0.2.0 a pod could only follow ``GroupBy`` by selecting the real data
+    columns (or by taking the moved tags as parameters).  Neither later change
+    moves a pipeline hash or the pod's input data, and the dropped tags make
+    the stored shape after the select equal to today's, so a store written by
+    the old shape serves the new one without recomputing.
     """
 
     @staticmethod
@@ -286,15 +320,13 @@ class TestStoreWrittenBeforeTagsStayedTags:
 
         assert counter.pipeline_hash() == old_counter.pipeline_hash()
         assert _CALLS["path"] == [], "stored results must be reused, not recomputed"
-        assert after.nodes["agg"].keys() == (("subject", "date", "probe"), ("path",))
-        assert counter.keys() == (("subject", "date", "probe"), ("n",))
-        rows = sorted(
-            counter.as_table().select(["date", "probe", "n"]).to_pylist(),
-            key=lambda r: r["date"],
-        )
+        assert after.nodes["agg"].keys() == (("subject", "date"), ("path",))
+        # The stored shape of v0.2.0 is the shape of today (ITL-1070).
+        assert counter.keys() == old_counter.keys() == (("subject", "date"), ("n",))
+        rows = sorted(counter.as_table().to_pylist(), key=lambda r: r["date"])
         assert rows == [
-            {"date": "d1", "probe": [0, 1], "n": 2},
-            {"date": "d2", "probe": [0, 1], "n": 2},
+            {"subject": "G", "date": "d1", "n": 2},
+            {"subject": "G", "date": "d2", "n": 2},
         ]
 
 

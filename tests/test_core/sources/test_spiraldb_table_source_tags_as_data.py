@@ -360,12 +360,14 @@ class TestTheWorkshopCase:
     """Grouping on the unit key gives each unit's spike times in time order."""
 
     def test_group_by_the_unit_key_orders_spike_times_by_time(self, project):
-        """The only tag left to order members is the time, so the lists are in time order."""
+        """The only tag left to order members is the time, so the lists are in time order.
+
+        ``group_by`` drops the non-key tag ``timestamp`` (ITL-1070); its copy
+        ``spike_time_us`` is data and is kept.
+        """
         spikes = _source(tags_as_data=_COPY)
 
-        per_unit = spikes.group_by(["subject_id", "unit_id"]).drop_tag_columns(
-            "timestamp"
-        )
+        per_unit = spikes.group_by(["subject_id", "unit_id"])
 
         assert per_unit.keys() == (
             ("subject_id", "unit_id"),

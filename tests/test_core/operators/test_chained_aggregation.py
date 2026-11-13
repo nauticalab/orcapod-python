@@ -131,6 +131,11 @@ AGGREGATE_THEN_AGGREGATE = {
     "lst": LL(LL(LL(pa.int8()))),
     "p": LIST_LIST_PATH,
 }
+# ``GroupBy(["g"])`` drops the non-key tag ``id`` (ITL-1070), so a chain whose
+# upstream is a ``GroupBy`` has no ``id`` column to aggregate again.
+GROUP_BY_THEN_AGGREGATE = {
+    k: v for k, v in AGGREGATE_THEN_AGGREGATE.items() if k != "id"
+}
 
 
 def _batch_members(upstream: Rows, row: int, size: int = 2) -> list[int]:
@@ -150,7 +155,7 @@ CHAINS: dict[str, dict[str, Any]] = {
     "mergejoin_group_by": {
         "upstream": merge_join_ac,
         "op": lambda: GroupBy(["g"]),
-        "types": {"id": LL(pa.int64()), "g": pa.int64(), **MERGE_JOIN_THEN_AGGREGATE},
+        "types": {"g": pa.int64(), **MERGE_JOIN_THEN_AGGREGATE},
         "members": lambda up, r, tag: _group_members(up, tag["g"]),
     },
     "mergejoin_batch": {
@@ -172,13 +177,13 @@ CHAINS: dict[str, dict[str, Any]] = {
     "group_by_batch": {
         "upstream": lambda: GroupBy(["g"])(source_a()),
         "op": lambda: Batch(batch_size=2),
-        "types": {"g": LL(pa.int64()), **AGGREGATE_THEN_AGGREGATE},
+        "types": {"g": LL(pa.int64()), **GROUP_BY_THEN_AGGREGATE},
         "members": lambda up, r, tag: _batch_members(up, r),
     },
     "group_by_group_by": {
         "upstream": lambda: GroupBy(["g"])(source_a()),
         "op": lambda: GroupBy(["g"]),
-        "types": {"g": pa.int64(), **AGGREGATE_THEN_AGGREGATE},
+        "types": {"g": pa.int64(), **GROUP_BY_THEN_AGGREGATE},
         "members": lambda up, r, tag: _group_members(up, tag["g"]),
     },
 }
@@ -293,9 +298,8 @@ class TestSyncChains:
     ) -> None:
         """Every row's provenance lists its own members' upstream tokens.
 
-        Only data columns carry provenance: a non-key tag that an upstream
-        ``GroupBy`` kept as a list-valued tag (``id``) has no source-info
-        column at all (ITL-955).
+        Only data columns carry provenance: a tag has no source-info column
+        (ITL-955).
         """
         upstream = list(chain.upstream.iter_data())
         rows = list(chain.result.iter_data())

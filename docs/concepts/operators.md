@@ -23,10 +23,11 @@ This boundary ensures that structural operations (joins, filters) and value comp
 (transformations, model inference) are cleanly separated, making pipelines easier to reason
 about and optimize.
 
-`GroupBy` is the one operator that reduces row count many-to-one: it collapses N rows sharing
-a tag tuple into a single row with list-valued members. It stays on the operator side of the
-boundary because it synthesizes no new data values -- every element of every emitted list came
-from an input row -- and it keys only on tags, never on data content.
+`GroupBy` is the one operator that reduces row count many-to-one by key: it collapses N rows
+sharing a key into a single row with list-valued data members, and keeps only its key tags. It
+stays on the operator side of the boundary because it synthesizes no new data values -- every
+element of every emitted list came from an input row -- and it keys only on tags, never on data
+content.
 
 One rule holds for every operator: **no data element comes from a tag value**. An operator may
 use tags to join, filter, group or order rows, but it never turns a tag column into a data
@@ -204,6 +205,10 @@ batch may be smaller; pass `drop_partial_batch=True` to discard it:
 batch = Batch(batch_size=10, drop_partial_batch=True)
 ```
 
+`Batch` keeps every tag, list-valued. It batches blindly, by count: it has no key, so the lists
+of tag values are the only thing that tells a batch's members apart. `GroupBy` (below) has a
+key and keeps only that.
+
 ### GroupBy
 
 Collapses every set of rows that share a tag tuple into a single row -- the one many-to-one
@@ -226,43 +231,58 @@ source = DictSource(
 
 grouped = GroupBy(by=["subject_id"])(source)
 print(grouped.keys())
-# (('subject_id', 'probe'), ('spike_count',))
+# (('subject_id',), ('spike_count',))
 for tag, data in grouped.iter_data():
     print("Tags:", tag.as_dict(), "Data:", data.as_dict())
-    # Tags: {'subject_id': 'mouse_01', 'probe': ['imec0', 'imec1']} Data: {'spike_count': [1200, 980]}
-    # Tags: {'subject_id': 'mouse_02', 'probe': ['imec0']} Data: {'spike_count': [1450]}
+    # Tags: {'subject_id': 'mouse_01'} Data: {'spike_count': [1200, 980]}
+    # Tags: {'subject_id': 'mouse_02'} Data: {'spike_count': [1450]}
 ```
 
 The output schema follows three rules:
 
-- **Group keys stay scalar tag columns** (`subject_id: str`).
-- **Non-key tag columns stay tag columns and become list-valued** (`probe: list[str]`), one
-  element per member, in the same order as the data lists. The output's tag columns are the
-  input's tag columns, in the same order. This is what `Batch` does with its tags too.
-- **Data columns become `list[T]`** (`spike_count: list[int]`).
+- **Group keys stay scalar tag columns** (`subject_id: str`), in the input's tag order. They are
+  the only tag columns of the output.
+- **A tag that is not a key is dropped** (`probe`). A list of the members' values is not a key
+  for the group, just as SQL drops a non-key, non-aggregated column after `GROUP BY`.
+- **Data columns become `list[T]`** (`spike_count: list[int]`), one element per member.
 
-The data columns of the output are exactly the data columns of the input. A function pod that
-follows `GroupBy` receives `spike_count` only; it cannot read `probe`, because a pod never sees
-tags. If the function needs to know which member each element came from, make that value a data
-column of the source. To remove the list-valued tags, use `drop_tag_columns`:
+!!! warning "Member tag values are not carried"
+    `GroupBy` does not keep the members' values of a non-key tag, as a tag or as data. If a
+    later step needs to know which member each element came from, make the column data
+    *before* grouping: declare it as data at the source, or derive a source that offers the tag
+    as data with `DerivedSource(origin, tags_as_data={...})`.
 
 ```python
-print(grouped.drop_tag_columns(["probe"]).keys())
-# (('subject_id',), ('spike_count',))
+from orcapod.sources import DerivedSource
+
+with_probe = DerivedSource(source, tags_as_data={"probe": "probe_name"})
+by_subject = GroupBy(by=["subject_id"])(with_probe)
+print(by_subject.keys())
+# (('subject_id',), ('spike_count', 'probe_name'))
+for tag, data in by_subject.iter_data():
+    print(tag.as_dict(), data.as_dict())
+    # {'subject_id': 'mouse_01'} {'spike_count': [1200, 980], 'probe_name': ['imec0', 'imec1']}
+    # {'subject_id': 'mouse_02'} {'spike_count': [1450], 'probe_name': ['imec0']}
 ```
 
-A grouped stream can be grouped again on a coarser key. Its list-valued tags then nest one level
-deeper (`list[list[T]]`), like the data lists.
+The data columns of the output are exactly the data columns of the input: a function pod that
+follows `GroupBy` receives `spike_count` (and `probe_name`, when the source offers it), never a
+tag.
 
 Ordering is deterministic by construction, because orcapod hashes the emitted lists to build
-cache keys: members are sorted by their non-key tag values (with the internal record id as a
-final tiebreaker), and groups are emitted in group-key order. A reordered input therefore
-produces a byte-identical output table.
+cache keys: members are sorted by the input's non-key tag values (with the internal record id
+as a final tiebreaker), even though those tags are dropped, and groups are emitted in group-key
+order. A reordered input therefore produces a byte-identical output table.
+
+A grouped stream can be grouped again on a coarser key; its data lists then nest one level
+deeper (`list[list[T]]`). The members of the second grouping are ordered by the first
+grouping's keys that are not in the coarser key, then by record id; a tag the first grouping
+dropped no longer takes part.
 
 Every name in `by` must be a **scalar tag column** of the input. `GroupBy` raises
 `InputValidationError` for an unknown column, a data column, or a list-valued tag column --
-the last means the stream came from `Batch` or from an earlier `GroupBy` that did not key on
-that column, so group *before* batching rather than after.
+the last usually means the stream came from `Batch`, so group *before* batching rather than
+after.
 
 Streams also expose this as a fluent method:
 

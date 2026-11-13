@@ -188,11 +188,13 @@ class StreamBase(TraceableBase):
         by: Collection[str],
         label: str | None = None,
     ) -> StreamBase:
-        """Reduce rows sharing a tag tuple into one packet per group.
+        """Reduce rows sharing a key into one row per group.
 
-        Group-key columns stay scalar tags; every other column becomes
-        list-valued and stays in its group: a non-key tag stays a tag, a data
-        column stays data.  See ``orcapod.core.operators.GroupBy``.
+        Group-key columns stay scalar tags and are the only tags of the output;
+        every other tag is dropped, and every data column becomes list-valued.
+        A dropped tag's values are not carried: make the column data before
+        grouping if a later step needs it.  See
+        ``orcapod.core.operators.GroupBy``.
 
         Args:
             by: Tag column names to group on.
