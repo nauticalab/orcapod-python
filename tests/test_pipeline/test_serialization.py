@@ -7,6 +7,7 @@ import json
 import pyarrow as pa
 import pytest
 
+import orcapod
 from orcapod.core.nodes import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
@@ -57,6 +58,31 @@ class TestPipelineBlueprintSave:
         pipeline.save(str(path))
         data = json.loads(path.read_text())
         assert data["orcapod_pipeline_version"] == PIPELINE_FORMAT_VERSION
+
+    def test_save_stamps_orcapod_version(self, spec_pipeline):
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        data = json.loads(path.read_text())
+        assert data["orcapod_version"] == orcapod.__version__
+        assert data["orcapod_pipeline_version"] == "0.2.0"
+
+    def test_load_ignores_orcapod_version(self, spec_pipeline):
+        """The stamp is informational: absent or unfamiliar, the file loads."""
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        data = json.loads(path.read_text())
+        for variant in ("absent", "0.0.1", "99.0.0"):
+            edited = dict(data)
+            if variant == "absent":
+                del edited["orcapod_version"]
+            else:
+                edited["orcapod_version"] = variant
+            other = tmp_path / f"pipeline_{variant}.json"
+            other.write_text(json.dumps(edited))
+            loaded = Pipeline.load(str(other))
+            assert set(loaded.nodes) == set(pipeline.nodes)
 
     def test_save_no_databases_block(self, spec_pipeline):
         """Pure blueprint save must not contain a 'databases' block."""
@@ -223,7 +249,7 @@ def compiled_pipeline():
 
 
 class TestNewSerializationFormat:
-    """v0.1.0 serialization format tests."""
+    """Serialization format tests (current format 0.2.0, loads 0.1.0)."""
 
     def test_save_load_roundtrip_with_source_node(self, tmp_path, compiled_pipeline):
         """Pipeline.save/load round-trip preserves SourceNode slots."""
@@ -253,17 +279,30 @@ class TestNewSerializationFormat:
                     node_data.get("source_config", {}).get("source_type") == "node"
                 ), f"Expected source_type='node', got {node_data.get('source_config')}"
 
-    def test_format_version_is_0_1_0(self, tmp_path, compiled_pipeline):
-        """Saved format version is 0.1.0."""
+    def test_format_version_is_0_2_0(self, tmp_path, compiled_pipeline):
+        """Saved format version is 0.2.0."""
         save_path = tmp_path / "test_pipeline.json"
         compiled_pipeline.save(save_path)
 
         with open(save_path) as f:
             data = json.load(f)
 
-        assert data.get("orcapod_pipeline_version") == "0.1.0", (
-            f"Expected version '0.1.0', got {data.get('orcapod_pipeline_version')!r}"
+        assert data.get("orcapod_pipeline_version") == "0.2.0", (
+            f"Expected version '0.2.0', got {data.get('orcapod_pipeline_version')!r}"
         )
+
+    def test_format_0_1_0_pipeline_loads_unchanged(self, tmp_path, compiled_pipeline):
+        """A 0.1.0 file (no orcapod_version) loads with the same node hashes."""
+        save_path = tmp_path / "pipeline.json"
+        compiled_pipeline.save(save_path)
+        data = json.loads(save_path.read_text())
+        data["orcapod_pipeline_version"] = "0.1.0"
+        del data["orcapod_version"]
+        old_path = tmp_path / "old_format.json"
+        old_path.write_text(json.dumps(data))
+
+        loaded = Pipeline.load(old_path)
+        assert set(loaded.nodes) == set(Pipeline.load(save_path).nodes)
 
     def test_unsupported_version_raises(self, tmp_path, compiled_pipeline):
         """Loading a pipeline with an unsupported version string raises ValueError."""
@@ -273,7 +312,7 @@ class TestNewSerializationFormat:
         with open(save_path) as f:
             data = json.load(f)
 
-        data["orcapod_pipeline_version"] = "0.2"
+        data["orcapod_pipeline_version"] = "9.9.9"
         old_path = tmp_path / "old_format.json"
         with open(old_path, "w") as f:
             json.dump(data, f)

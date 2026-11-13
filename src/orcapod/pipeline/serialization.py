@@ -25,8 +25,13 @@ logger = logging.getLogger(__name__)
 # Format version
 # ---------------------------------------------------------------------------
 
-PIPELINE_FORMAT_VERSION = "0.1.0"
-SUPPORTED_FORMAT_VERSIONS = frozenset({"0.1.0"})
+# The version a pipeline file is written at, and the versions a load accepts.
+# A format change adds the new version here and to the supported set; the loaders
+# only test membership (``Pipeline.load``).
+#   0.1.0: first format (v0.2.0).
+#   0.2.0: adds ``orcapod_version`` (v0.3.0); a 0.1.0 file loads unchanged.
+PIPELINE_FORMAT_VERSION = "0.2.0"
+SUPPORTED_FORMAT_VERSIONS = frozenset({"0.1.0", "0.2.0"})
 
 # ---------------------------------------------------------------------------
 # LoadStatus
@@ -1044,5 +1049,7 @@ _BUILTIN_TYPE_MAP: dict[str, type] = {
 # PipelineJob format version
 # ---------------------------------------------------------------------------
 
-PIPELINE_JOB_FORMAT_VERSION = "0.1.0"
-SUPPORTED_JOB_FORMAT_VERSIONS = frozenset({"0.1.0"})
+# Same scheme as ``PIPELINE_FORMAT_VERSION``: the written version, and the set a
+# load accepts (``PipelineJob.load``).
+PIPELINE_JOB_FORMAT_VERSION = "0.2.0"
+SUPPORTED_JOB_FORMAT_VERSIONS = frozenset({"0.1.0", "0.2.0"})

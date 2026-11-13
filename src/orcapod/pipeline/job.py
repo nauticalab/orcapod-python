@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import orcapod
 from orcapod.core.nodes import JobNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
@@ -1354,6 +1355,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
+            "orcapod_version": orcapod.__version__,
             "run": {
                 "run_id": self._run_id,
                 "status": status,

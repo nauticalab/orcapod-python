@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import cast
 
 import pyarrow as pa
 import pytest
 
+import orcapod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode
@@ -17,6 +19,8 @@ from orcapod.databases import InMemoryArrowDatabase
 from orcapod.errors import SourceSpecMismatchError
 from orcapod.pipeline.job import PipelineJob
 from orcapod.types import Schema
+
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -649,7 +653,86 @@ class TestPipelineJobSerialization:
         path = tmp_path / "completed.json"
         job.save(str(path))
         data = json.loads(path.read_text())
+        assert data["orcapod_pipeline_job_version"] == "0.2.0"
+
+    def test_save_stamps_orcapod_version(self, store, tmp_path):
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+        path = tmp_path / "stamped.json"
+        job.save(str(path))
+        data = json.loads(path.read_text())
+        assert data["orcapod_version"] == orcapod.__version__
+        assert data["pipeline"]["orcapod_version"] == orcapod.__version__
+        assert data["orcapod_pipeline_job_version"] == "0.2.0"
+        assert data["pipeline"]["orcapod_pipeline_version"] == "0.2.0"
+
+    def test_format_0_2_0_roundtrip_keeps_stamp_and_nodes(self, store, tmp_path):
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+        path = tmp_path / "roundtrip.json"
+        job.save(str(path))
+        loaded = PipelineJob.load(str(path))
+        assert set(loaded.pipeline.nodes) == set(job.pipeline.nodes)
+        resaved = tmp_path / "resaved.json"
+        loaded.save(str(resaved))
+        data = json.loads(resaved.read_text())
+        assert data["orcapod_pipeline_job_version"] == "0.2.0"
+        assert data["orcapod_version"] == orcapod.__version__
+
+    def test_format_0_1_0_fixture_loads_unchanged(self):
+        """A job file written by main before the bump (0.1.0, no stamp) loads.
+
+        The fixture was produced by ``fixtures/make_job_format_0_1_0.py`` run
+        against the source of origin/main commit cdb4f160.
+        """
+        path = _FIXTURES / "job_format_0_1_0.json"
+        data = json.loads(path.read_text())
         assert data["orcapod_pipeline_job_version"] == "0.1.0"
+        assert "orcapod_version" not in data
+        loaded = PipelineJob.load(str(path))
+        # Hashes recomputed on load equal the ones the 0.1.0 writer stored.
+        stored = {n["label"]: n for n in data["pipeline"]["nodes"].values()}
+        assert set(loaded.pipeline.nodes) == set(stored)
+        for label, node in loaded.pipeline.nodes.items():
+            assert node.content_hash().to_string() == stored[label]["content_hash"]
+            assert node.pipeline_hash().to_string() == stored[label]["pipeline_hash"]
+
+    @pytest.mark.parametrize("version", ["9.9.9", "0.3.0", ""])
+    def test_unknown_job_format_version_is_rejected(self, store, tmp_path, version):
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+        path = tmp_path / "unknown.json"
+        job.save(str(path))
+        data = json.loads(path.read_text())
+        data["orcapod_pipeline_job_version"] = version
+        path.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="Unsupported PipelineJob format version"):
+            PipelineJob.load(str(path))
+
+    @pytest.mark.parametrize("variant", ["absent", "0.0.1", "99.0.0"])
+    def test_load_ignores_orcapod_version(self, store, tmp_path, variant):
+        """The stamp is informational: absent or unfamiliar, the file loads."""
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+        path = tmp_path / "job_version.json"
+        job.save(str(path))
+        data = json.loads(path.read_text())
+        for obj in (data, data["pipeline"]):
+            if variant == "absent":
+                del obj["orcapod_version"]
+            else:
+                obj["orcapod_version"] = variant
+        path.write_text(json.dumps(data))
+        loaded = PipelineJob.load(str(path))
+        assert set(loaded.pipeline.nodes) == set(job.pipeline.nodes)
 
     def test_save_includes_run_block(self, store, tmp_path):
         """Unsaved template has status=pending and null run fields."""

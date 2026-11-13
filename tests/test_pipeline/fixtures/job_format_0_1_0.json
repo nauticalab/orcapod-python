@@ -1,0 +1,223 @@
+{
+  "orcapod_pipeline_job_version": "0.1.0",
+  "run": {
+    "run_id": null,
+    "status": "pending",
+    "unbound_sources": [],
+    "node_job_content_hashes": {
+      "add_values": "semantic_v1:3c72ef670ee28f1ff79c08282a799e188c738a884a916a2b24247597be6c0bdc"
+    },
+    "node_has_stored_records": {
+      "add_values": false
+    }
+  },
+  "pipeline": {
+    "orcapod_pipeline_version": "0.1.0",
+    "pipeline": {
+      "name": [
+        "pipeline"
+      ]
+    },
+    "nodes": {
+      "semantic_v1:d4ce5e9dae3c9843b233c0485cedf00c68e8f986d13e22ad0917de0e3a7f6904": {
+        "node_type": "source",
+        "label": "fixture_value",
+        "content_hash": "semantic_v1:d4ce5e9dae3c9843b233c0485cedf00c68e8f986d13e22ad0917de0e3a7f6904",
+        "pipeline_hash": "semantic_v1:dc09f4294237350029cae758c700057d198a001a0f24d5cd603994965cb1725c",
+        "output_schema": {
+          "tag": {
+            "key": "large_string"
+          },
+          "data": {
+            "value": "int64"
+          }
+        },
+        "node_uri": [
+          "source_node",
+          "fixture_value"
+        ],
+        "data_context_key": "std:v1:default",
+        "config": null,
+        "source_config": {
+          "source_type": "node",
+          "name": "fixture_value",
+          "tag_schema": {
+            "key": "large_string"
+          },
+          "data_schema": {
+            "value": "int64"
+          }
+        },
+        "reconstructable": true
+      },
+      "semantic_v1:14d8a00d66deb43e21eca83110591ea0445cba923cc951be2164cc0ce45dabad": {
+        "node_type": "source",
+        "label": "fixture_score",
+        "content_hash": "semantic_v1:14d8a00d66deb43e21eca83110591ea0445cba923cc951be2164cc0ce45dabad",
+        "pipeline_hash": "semantic_v1:7e7a28e16328840586a1ba4623698559df16a510016a3edb4660e86535893029",
+        "output_schema": {
+          "tag": {
+            "key": "large_string"
+          },
+          "data": {
+            "score": "int64"
+          }
+        },
+        "node_uri": [
+          "source_node",
+          "fixture_score"
+        ],
+        "data_context_key": "std:v1:default",
+        "config": null,
+        "source_config": {
+          "source_type": "node",
+          "name": "fixture_score",
+          "tag_schema": {
+            "key": "large_string"
+          },
+          "data_schema": {
+            "score": "int64"
+          }
+        },
+        "reconstructable": true
+      },
+      "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3": {
+        "node_type": "operator",
+        "label": "Join",
+        "content_hash": "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3",
+        "pipeline_hash": "semantic_v1:cba9b4b824f074a4e1123066a7f1da0f98897f5451b6e54e52f990c0e7818d5c",
+        "output_schema": {
+          "tag": {
+            "key": "large_string"
+          },
+          "data": {
+            "score": "int64",
+            "value": "int64"
+          }
+        },
+        "node_uri": [
+          "Join",
+          "295ca9336dc1935b209d140b0b4cdda1d61024372adfee6f4b746781972e4e83"
+        ],
+        "data_context_key": "std:v1:default",
+        "config": null,
+        "operator_config": {
+          "class_name": "Join",
+          "module_path": "orcapod.core.operators.join",
+          "config": {}
+        },
+        "table_scope": "pipeline_hash"
+      },
+      "semantic_v1:b8357687fdfc83a0496fd3be1be7cf5818316321d135ad563e8f8b747111f1c5": {
+        "node_type": "function",
+        "label": "add_values",
+        "content_hash": "semantic_v1:b8357687fdfc83a0496fd3be1be7cf5818316321d135ad563e8f8b747111f1c5",
+        "pipeline_hash": "semantic_v1:a34ccddbc257a6feb93523aa1ae912b185ea690ae2fdfcd5b99a7c7ffb00e282",
+        "output_schema": {
+          "tag": {
+            "key": "large_string"
+          },
+          "data": {
+            "total": "int64"
+          }
+        },
+        "node_uri": [
+          "add_values",
+          "a7d1e858291de2e2845d14f310a69d2af3305ebe038312f889035fb5660c917c",
+          "v0",
+          "python.function.v0"
+        ],
+        "data_context_key": "std:v1:default",
+        "config": null,
+        "function_config": {
+          "uri": [
+            "add_values",
+            "a7d1e858291de2e2845d14f310a69d2af3305ebe038312f889035fb5660c917c",
+            "v0",
+            "python.function.v0"
+          ],
+          "data_function": {
+            "data_function_type_id": "python.function.v0",
+            "uri": [
+              "add_values",
+              "a7d1e858291de2e2845d14f310a69d2af3305ebe038312f889035fb5660c917c",
+              "v0",
+              "python.function.v0"
+            ],
+            "config": {
+              "module_path": "__main__",
+              "callable_name": "add_values",
+              "version": "v0.0",
+              "input_data_schema": {
+                "value": "<class 'int'>",
+                "score": "<class 'int'>"
+              },
+              "output_data_schema": {
+                "total": "<class 'int'>"
+              },
+              "output_keys": [
+                "total"
+              ]
+            }
+          },
+          "pod_config": null,
+          "ctx_arg_name": null
+        },
+        "table_scope": "pipeline_hash"
+      }
+    },
+    "edges": [
+      [
+        "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3",
+        "semantic_v1:b8357687fdfc83a0496fd3be1be7cf5818316321d135ad563e8f8b747111f1c5"
+      ],
+      [
+        "semantic_v1:d4ce5e9dae3c9843b233c0485cedf00c68e8f986d13e22ad0917de0e3a7f6904",
+        "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3"
+      ],
+      [
+        "semantic_v1:14d8a00d66deb43e21eca83110591ea0445cba923cc951be2164cc0ce45dabad",
+        "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3"
+      ]
+    ]
+  },
+  "bindings": {
+    "sources": {
+      "fixture_score": {
+        "source_type": "arrow_table",
+        "tag_columns": [
+          "key"
+        ],
+        "source_id": "fixture_score",
+        "content_hash": "semantic_v1:cda8158fa2f84a77919f1dd4e11d04e8d70afc4b6134d8786453966114805b36",
+        "pipeline_hash": "semantic_v1:7e7a28e16328840586a1ba4623698559df16a510016a3edb4660e86535893029",
+        "tag_schema": {
+          "key": "large_string"
+        },
+        "data_schema": {
+          "score": "int64"
+        }
+      },
+      "fixture_value": {
+        "source_type": "arrow_table",
+        "tag_columns": [
+          "key"
+        ],
+        "source_id": "fixture_value",
+        "content_hash": "semantic_v1:8abefd8ae5549aa51ad87753c006c0c4cc06c6e6801634b36877415665453bb4",
+        "pipeline_hash": "semantic_v1:dc09f4294237350029cae758c700057d198a001a0f24d5cd603994965cb1725c",
+        "tag_schema": {
+          "key": "large_string"
+        },
+        "data_schema": {
+          "value": "int64"
+        }
+      }
+    },
+    "store": {
+      "type": "in_memory",
+      "base_path": [],
+      "max_hierarchy_depth": 10
+    }
+  }
+}

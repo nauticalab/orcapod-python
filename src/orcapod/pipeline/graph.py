@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import orcapod
 from orcapod.contexts import resolve_saved_context
 from orcapod.core.nodes import (
     FunctionNode,
@@ -215,6 +216,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
 
         output: dict[str, Any] = {
             "orcapod_pipeline_version": PIPELINE_FORMAT_VERSION,
+            "orcapod_version": orcapod.__version__,
             "pipeline": {"name": list(self._name)},
             "nodes": nodes,
             "edges": [list(edge) for edge in self._graph_edges],
