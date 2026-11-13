@@ -950,6 +950,11 @@ class DataFunctionWrapper(DataFunctionBase[E]):
         return self._data_function.label
 
     @property
+    def is_async(self) -> bool:
+        """Whether the wrapped function is an async coroutine function."""
+        return getattr(self._data_function, "is_async", False) is True
+
+    @property
     def major_version(self) -> int:
         return self._data_function.major_version
 

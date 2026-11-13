@@ -70,7 +70,8 @@ def _run(store: DeltaTableDatabase, timestamps: list[int | None]) -> PipelineJob
             "recording_start_timestamp", label="present"
         )
         pod(present, label="seconds")
-    return job.run()
+    _ = job.run()
+    return job
 
 
 def _seconds(job: PipelineJob) -> dict[str, float]:

@@ -40,8 +40,8 @@ def test_smoke_run_completes():
     with job:
         pod(_make_source(), label="doubler")
 
-    completed = job.run()
-    assert completed._has_run is True
+    _ = job.run()
+    assert job._has_run is True
 
 
 def test_smoke_nodes_accessible_after_run():
@@ -54,8 +54,8 @@ def test_smoke_nodes_accessible_after_run():
     with job:
         pod(_make_source(), label="adder")
 
-    completed = job.run()
-    assert "adder" in completed.pipeline.nodes
+    _ = job.run()
+    assert "adder" in job.pipeline.nodes
 
 
 def test_smoke_run_raises_without_pipeline():

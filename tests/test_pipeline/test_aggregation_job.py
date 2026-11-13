@@ -96,7 +96,8 @@ def _run(store, source, operator, name, function=count_paths):
     job = PipelineJob(name=name, store=store)
     with job:
         pod(operator(source, label="agg"), label="counter")
-    return job.run()
+    _ = job.run()
+    return job
 
 
 class TestGroupByInJob:
@@ -260,7 +261,8 @@ class TestStoreWrittenBeforeTagsStayedTags:
             grouped = group_by(source, label="agg")
             selected = SelectDataColumns(columns=["path"])(grouped, label="sel")
             pod(selected, label="counter")
-        return job.run()
+        _ = job.run()
+        return job
 
     def test_legacy_fixture_has_the_old_shape(self, session_source_factory):
         """Guard the fixture -- if this stops holding, the next test is vacuous."""

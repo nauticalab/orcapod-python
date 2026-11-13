@@ -401,6 +401,132 @@ print("function calls:", len(calls))
     flush tries them again. A flush that fails for any other reason raises `RuntimeError`,
     with the first failure as its cause.
 
+### Running asynchronously, in a script or a notebook
+
+`job.run()` uses the `SyncPipelineOrchestrator`, which runs one node after another. The
+`AsyncPipelineOrchestrator` runs every node at once, passing rows between them as they are
+ready, and runs your function on several rows concurrently. Choose it with the
+`orchestrator` argument. The line is the same in a script and in a Jupyter notebook:
+
+```python
+from orcapod.pipeline import AsyncPipelineOrchestrator
+
+job = PipelineJob(name="bmi_async", store=InMemoryArrowDatabase())
+with job:
+    source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
+    compute_bmi.pod(source, label="bmi")
+
+job.run(orchestrator=AsyncPipelineOrchestrator())
+
+# The async run stores rows as they finish: sort them to print in a fixed order.
+print(job.nodes["bmi"].as_table().sort_by("subject_id").to_pandas())
+#   subject_id          bmi
+# 0   mouse_01  1756.944444
+# 1   mouse_02  2210.000000
+# 2   mouse_03  2297.520661
+```
+
+Both orchestrators store the same rows, with the same record ids and hashes.
+
+A notebook kernel already runs an event loop. There, `job.run(...)` runs the job on a
+separate thread and waits for it, so the cell blocks until the run ends, as it does with the
+sync orchestrator. The interrupt button cancels the run: rows already stored stay stored, and
+the next run computes only the rest. A function that is in the middle of a row cannot be
+interrupted, so the cell waits until it returns. If it does not return (a function that
+loops forever, say), press the interrupt button again: the cell stops waiting at once, with a
+warning that the function in that node has not returned yet. The run is already cancelled,
+so nothing more is written to the store when the function does return. To stop the function
+itself, restart the kernel.
+
+An `async def` function must not block (with `time.sleep`, a busy loop or another blocking
+call). It runs on the event loop's own thread, so while it blocks, the cancellation cannot
+run. In that case the warning says so: rows already in progress may still be stored when
+the function returns, before the run stops.
+
+In async code, await the run instead, so the event loop stays free while it runs:
+`await job.run_async()` (the async orchestrator is its default). This also works at the top
+level of a notebook cell. In a script, start async code with `asyncio.run`:
+
+```python
+import asyncio
+
+job = PipelineJob(name="bmi_awaited", store=InMemoryArrowDatabase())
+with job:
+    source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
+    compute_bmi.pod(source, label="bmi")
+
+
+async def main():
+    await job.run_async()
+
+
+asyncio.run(main())
+print(job.nodes["bmi"].as_table().num_rows)
+# 3
+```
+
+### Reading the run summary
+
+`job.run()` (and `await job.run_async()`) returns a `RunSummary`: for each function node, how
+many rows were computed, how many were read from the store, and how many failed. At the end
+of a notebook cell it is shown as a table; `print` shows the same as text. The job keeps it as
+`job.last_run`. The results themselves are read from `job.nodes`, as above.
+
+Running the same job again computes nothing new, and the summary says so:
+
+```python
+job = PipelineJob(name="bmi_demo", store=db)
+with job:
+    source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
+    compute_bmi.pod(source, label="bmi")
+
+summary = job.run()
+print(summary)
+# Run of job 'bmi_demo': all rows succeeded.
+#   bmi: 3 rows: 0 computed, 3 from store, 0 failed
+```
+
+When a function raises for a row, the run skips that row and goes on with the others (the
+default `error_policy="continue"`). At the end it issues one `RowFailuresWarning` (from
+`orcapod.errors`) naming each node with failed rows, and the summary shows the first error.
+A run with no failed rows issues no warning:
+
+```python
+@function_pod(output_keys="bmi")
+def careless_bmi(weight: float, height: float) -> float:
+    return weight / heigth ** 2  # a typo: heigth
+
+
+job = PipelineJob(name="bmi_typo", store=InMemoryArrowDatabase())
+with job:
+    source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
+    careless_bmi.pod(source, label="bmi")
+
+summary = job.run()
+# RowFailuresWarning: 3 of 3 rows failed in node 'bmi' (first error: NameError: name 'heigth' is not defined). Full traceback: job.last_run.print_traceback("bmi").
+print(summary)
+# Run of job 'bmi_typo': 3 rows failed.
+#   bmi: 3 rows: 0 computed, 0 from store, 3 failed
+#     first error: NameError: name 'heigth' is not defined
+#     Full traceback: job.last_run.print_traceback("bmi")
+```
+
+`job.last_run.print_traceback("bmi")` prints the full traceback of the node's first failed
+row, ending in the line of your function that raised. Fix the function and run the job
+again: the rows that succeeded before are read from the store, and only the failed ones
+are computed. To stop a run at the first failed row instead, pass
+`SyncPipelineOrchestrator(error_policy="fail_fast")` as the orchestrator.
+
+The counts are also available one by one, for example in a test:
+
+```python
+node = summary.nodes["bmi"]
+print(node.computed, node.reused, node.failed, type(node.first_error).__name__)
+# 0 0 3 NameError
+print(summary.ok, summary.failed_rows)
+# False 3
+```
+
 ### When results are committed
 
 Inside `job.run()`, each function node commits its results and pipeline records to the

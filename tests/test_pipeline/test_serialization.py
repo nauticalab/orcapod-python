@@ -171,12 +171,12 @@ class TestPipelineBlueprintLoad:
         job = PipelineJob.from_pipeline(
             loaded, sources={"source_a": src_a, "source_b": src_b}, store=store
         )
-        completed = job.run()
-        assert completed._has_run is True
+        _ = job.run()
+        assert job._has_run is True
         # Verify all source specs were resolved (no unresolved specs)
-        assert completed.unbound_sources == []
+        assert job.unbound_sources == []
         # Verify the join node is present in the compiled pipeline
-        joiner_node = completed.pipeline.nodes.get("joiner")
+        joiner_node = job.pipeline.nodes.get("joiner")
         assert joiner_node is not None
 
     def test_load_hash_graph_has_node_types(self, spec_pipeline):

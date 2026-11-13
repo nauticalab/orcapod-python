@@ -1809,8 +1809,10 @@ class FunctionJobNode(FunctionNodeBase):
                         ctx_obs.on_node_end(node_label, node_hash)
                     raise
                 except Exception as exc:
-                    logger.warning(
-                        "Data execution failed in %s: %s",
+                    # Reported at the end of a job run (RunSummary, RowFailuresWarning),
+                    # so one traceback per failed row is only for debugging.
+                    logger.debug(
+                        "Data execution failed in %s, skipping: %s",
                         node_label,
                         exc,
                         exc_info=True,

@@ -415,9 +415,9 @@ class TestPipelineJobRun:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        result = job.run()
+        _ = job.run()
 
-        node = result.nodes["adder"]
+        node = job.nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2
@@ -432,9 +432,9 @@ class TestPipelineJobRun:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
-        result = job.run()
+        _ = job.run()
 
-        table = result.nodes["adder"].as_table()
+        table = job.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]  # a: 10+100, b: 20+200
 
@@ -451,20 +451,24 @@ class TestPipelineJobRun:
             joined = Join()(src_a, node_b)
             pod(joined, label="adder")
 
-        result = job.run()
+        _ = job.run()
         # Unbound sources should be reported
-        assert "spec_b" in result.unbound_sources
+        assert "spec_b" in job.unbound_sources
 
-    def test_run_returns_self_and_mutates_in_place(self, store):
-        """run() returns self and sets _has_run / _run_id in place."""
+    def test_run_returns_its_summary_and_mutates_in_place(self, store):
+        """run() returns the run's summary, kept as last_run, and sets _has_run / _run_id."""
+        from orcapod.pipeline import RunSummary
+
         src_a, src_b = _make_two_sources()
 
         job = PipelineJob(store=store)
         with job:
             Join()(src_a, src_b, label="joiner")
 
-        result = job.run()
-        assert result is job
+        assert job.last_run is None
+        summary = job.run()
+        assert isinstance(summary, RunSummary)
+        assert job.last_run is summary
         assert job._has_run is True
         assert job._run_id is not None
 
@@ -524,9 +528,9 @@ class TestPipelineJobRun:
             pod(joined, label="adder")
 
         job.run()
-        result = job.run()  # second run should not raise
+        _ = job.run()  # second run should not raise
 
-        table = result.nodes["adder"].as_table()
+        table = job.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -545,8 +549,8 @@ class TestPipelineJobRun:
         with job:
             pod(src, label="doubler")
 
-        completed = job.run(orchestrator=SyncPipelineOrchestrator())
-        records = completed.nodes["doubler"].get_all_records()
+        _ = job.run(orchestrator=SyncPipelineOrchestrator())
+        records = job.nodes["doubler"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
@@ -565,8 +569,8 @@ class TestPipelineJobRun:
         with job:
             pod(src, label="doubler")
 
-        completed = job.run(orchestrator=AsyncPipelineOrchestrator())
-        records = completed.nodes["doubler"].get_all_records()
+        _ = job.run(orchestrator=AsyncPipelineOrchestrator())
+        records = job.nodes["doubler"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
@@ -586,13 +590,13 @@ class TestPipelineJobEndToEnd:
         assert isinstance(job.pipeline.nodes["joiner"], OperatorNode)
         assert isinstance(job.pipeline.nodes["adder"], FunctionNode)
 
-        result = job.run()
+        _ = job.run()
 
-        fn_records = result.nodes["adder"].get_all_records()
+        fn_records = job.nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = result.nodes["adder"].as_table()
+        table = job.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -618,9 +622,9 @@ class TestPipelineJobEndToEnd:
             sources={"src_a": src_a, "src_b": src_b},
             store=store,
         )
-        result = job.run()
+        _ = job.run()
 
-        table = result.nodes["adder"].as_table()
+        table = job.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -632,7 +636,7 @@ class TestPipelineJobSerialization:
         with job:
             Join()(src_a, src_b)
 
-        path = tmp_path / "job.json"
+        path = tmp_path / "completed.json"
         job.save(str(path))
         assert path.exists()
 
@@ -642,7 +646,7 @@ class TestPipelineJobSerialization:
         with job:
             Join()(src_a, src_b)
 
-        path = tmp_path / "job.json"
+        path = tmp_path / "completed.json"
         job.save(str(path))
         data = json.loads(path.read_text())
         assert data["orcapod_pipeline_job_version"] == "0.1.0"
@@ -654,7 +658,7 @@ class TestPipelineJobSerialization:
         with job:
             Join()(src_a, src_b)
 
-        path = tmp_path / "job.json"
+        path = tmp_path / "completed.json"
         job.save(str(path))
         data = json.loads(path.read_text())
         assert data["run"]["status"] == "pending"
@@ -667,7 +671,7 @@ class TestPipelineJobSerialization:
         with job:
             Join()(src_a, src_b, label="joiner")
 
-        path = tmp_path / "job.json"
+        path = tmp_path / "completed.json"
         job.save(str(path))
         loaded = PipelineJob.load(str(path))
 
@@ -684,9 +688,9 @@ class TestPipelineJobSerialization:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        completed = job.run()
+        _ = job.run()
         path = tmp_path / "completed.json"
-        completed.save(str(path))
+        job.save(str(path))
 
         # Verify the file has correct status
         data = json.loads(path.read_text())
@@ -730,9 +734,9 @@ class TestPipelineJobSerialization:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        completed = job.run()
+        _ = job.run()
         path = tmp_path / "completed.json"
-        completed.save(str(path))
+        job.save(str(path))
         loaded = PipelineJob.load(str(path), store=store)
         assert loaded._has_run is True
 
@@ -766,10 +770,10 @@ class TestPipelineJobSerialization:
         with job:
             joined = Join()(src_a, node_b)
             pod(joined, label="adder")
-        result = job.run()
-        assert "unbound_b" in result.unbound_sources
+        _ = job.run()
+        assert "unbound_b" in job.unbound_sources
         path = tmp_path / "partial.json"
-        result.save(str(path))
+        job.save(str(path))
         loaded = PipelineJob.load(str(path), store=store)
         assert "unbound_b" in loaded.unbound_sources
 
@@ -783,7 +787,7 @@ class TestPipelineJobSerialization:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        path = tmp_path / "job.json"
+        path = tmp_path / "completed.json"
         job.save(str(path))
 
         # Load without sources so bind() is needed.
@@ -807,7 +811,7 @@ class TestPipelineJobSerialization:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        path = tmp_path / "job.json"
+        path = tmp_path / "completed.json"
         job.save(str(path))
 
         loaded = PipelineJob.load(str(path))
@@ -833,9 +837,9 @@ class TestPipelineJobSerialization:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.save(str(tmp_path / "job.json"))
+        job.save(str(tmp_path / "completed.json"))
 
-        loaded = PipelineJob.load(str(tmp_path / "job.json"), store=store)
+        loaded = PipelineJob.load(str(tmp_path / "completed.json"), store=store)
         adder = loaded.nodes.get("adder")
         assert adder is not None, "Expected 'adder' in loaded job nodes"
         assert isinstance(adder, FunctionJobNode), (
@@ -852,12 +856,12 @@ class TestPipelineJobSerialization:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        completed = job.run()
-        original_records = completed.nodes["adder"].get_all_records()
+        _ = job.run()
+        original_records = job.nodes["adder"].get_all_records()
         assert original_records is not None, "run() produced no records"
 
         path = tmp_path / "completed.json"
-        completed.save(str(path))
+        job.save(str(path))
 
         loaded = PipelineJob.load(str(path), store=store)
         loaded_records = loaded.nodes["adder"].get_all_records()

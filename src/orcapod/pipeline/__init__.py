@@ -5,6 +5,7 @@ from .execution_context import ExecutionContext
 from .graph import Pipeline
 from .job import PipelineJob
 from .logging_observer import LoggingObserver, DataLogger
+from .run_summary import NodeRunSummary, RunSummary
 from .serialization import (
     LoadStatus,
     PIPELINE_FORMAT_VERSION,
@@ -20,12 +21,14 @@ __all__ = [
     "GraphProtocol",
     "LoadStatus",
     "LoggingObserver",
+    "NodeRunSummary",
     "DataLogger",
     "OrcaDAG",
     "PIPELINE_FORMAT_VERSION",
     "PIPELINE_JOB_FORMAT_VERSION",
     "Pipeline",
     "PipelineJob",
+    "RunSummary",
     "StatusObserver",
     "SyncPipelineOrchestrator",
 ]

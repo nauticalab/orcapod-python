@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import sys
+import warnings
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.nodes import JobNode
@@ -18,6 +21,7 @@ from orcapod.contexts.stored import (
     unclaimed_tables_written_before_v03,
 )
 from orcapod.errors import (
+    RowFailuresWarning,
     StoreError,
     StoreReadError,
     StoreWriteError,
@@ -25,6 +29,15 @@ from orcapod.errors import (
 )
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.pipeline.dag import OrcaDAG
+from orcapod.pipeline.run_summary import (
+    NodeRunSummary,
+    RunCountingObserver,
+    RunSummary,
+)
+from orcapod.protocols.node_protocols import (
+    is_function_node,
+    is_side_effect_function_node,
+)
 from orcapod.protocols import core_protocols as cp
 from orcapod.databases.utils import as_table_committing
 from orcapod.types import CacheMode, NodeConfig
@@ -32,6 +45,7 @@ from orcapod.utils.store_errors import flush_best_effort
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from types import FrameType
 
     from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
     from orcapod.pipeline.execution_context import ExecutionContext
@@ -47,6 +61,67 @@ _PENDING_BEFORE_RUN_NOTE = (
     "without a flush, or by a run that failed). The run stopped before computing "
     "anything."
 )
+
+
+@dataclass(frozen=True)
+class _PreparedRun:
+    """What one run of a job needs, built by ``PipelineJob._prepare_run``.
+
+    Attributes:
+        exec_dag: The nodes to run (unbound sources and their dependents left out).
+        run_id: The run's identifier.
+        pipeline_uri: ``<job name>@<snapshot hash>``, passed to the observer.
+        pipeline_db: The job's view of the store.
+        result_db: The job's function-result view of the store.
+    """
+
+    exec_dag: OrcaDAG[Any]
+    run_id: str
+    pipeline_uri: str
+    pipeline_db: "ArrowDatabaseProtocol"
+    result_db: "ArrowDatabaseProtocol"
+
+
+def _with_counter(
+    observer: "ExecutionObserverProtocol | None", counter: RunCountingObserver
+) -> "ExecutionObserverProtocol":
+    """The observer a run passes to its orchestrator: the user's, plus the row counter.
+
+    Args:
+        observer: The observer the user passed to ``run``, if any.
+        counter: The run's row counter.
+
+    Returns:
+        ``counter`` alone, or a ``CompositeObserver`` calling ``observer`` then ``counter``.
+    """
+    if observer is None:
+        return counter
+    from orcapod.pipeline.composite_observer import CompositeObserver
+
+    return CompositeObserver(observer, counter)  # pyright: ignore[reportReturnType]  # forwards every hook; its **kwargs signatures do not match the protocol structurally
+
+
+def _warn_row_failures(summary: RunSummary, caller: FrameType) -> None:
+    """Issue the run's ``RowFailuresWarning``, shown after every run with failed rows.
+
+    Python's default filter shows a warning once per text and line, so a second identical
+    failing run from the same line (re-running a notebook cell) would show nothing. A
+    fresh registry for each run keeps every run's warning, while the user's filters
+    (``ignore``, ``error``) still apply.
+
+    Args:
+        summary: The run's summary, with failed rows.
+        caller: The frame that called ``run``; the warning is shown at its line.
+    """
+    warnings.warn_explicit(
+        summary.failures_message(),
+        RowFailuresWarning,
+        caller.f_code.co_filename,
+        caller.f_lineno,
+        module=caller.f_globals.get("__name__"),
+        registry=None,
+        module_globals=caller.f_globals,
+    )
 
 
 class PipelineJob(AbstractPipelineBase[JobNode]):
@@ -106,6 +181,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
         self._has_run: bool = False
         self._run_id: str | None = None
+        # The summary of the last run this object completed (ITL-997).
+        self._last_run: RunSummary | None = None
         # True for a job built by load(): it reads stored results and never runs.
         self._loaded: bool = False
 
@@ -177,6 +254,17 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     # ------------------------------------------------------------------
     # compiled_pipeline — lazy cache
     # ------------------------------------------------------------------
+
+    @property
+    def last_run(self) -> RunSummary | None:
+        """The summary of the last run this job completed, or ``None`` before one.
+
+        The same object ``run`` and ``run_async`` returned: per function node, the rows
+        computed, read from the store and failed, and each node's first error. Use
+        ``job.last_run.print_traceback("<node label>")`` to see a failed row's full
+        traceback. A run that raised leaves it unchanged. A loaded job has none.
+        """
+        return self._last_run
 
     @property
     def compiled_pipeline(self) -> "Pipeline":
@@ -774,7 +862,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         observer: "ExecutionObserverProtocol | None" = None,
         materialize_results: bool = True,
         commit_every_rows: int = 100,
-    ) -> "PipelineJob":
+    ) -> RunSummary:
         """Execute the resolvable subgraph of this job in place.
 
         Nodes whose upstream includes an unbound source (and all their
@@ -784,6 +872,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         After a successful run, ``job.nodes`` returns the execution-ready
         nodes with populated database caches.
+
+        ``job.run(orchestrator=AsyncPipelineOrchestrator())`` works the same in a
+        script and inside a running event loop, such as a Jupyter kernel: there the
+        run goes on a separate thread while the call waits, and blocks that loop
+        until it ends. From async code, ``await job.run_async()`` instead.
 
         Args:
             orchestrator: Orchestrator to use for execution. Defaults to
@@ -818,9 +911,16 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 once one table's pending rows reach that size, which would
                 break the node's results-before-records commit order.
 
+        Rows whose function raised (with the default ``error_policy="continue"``) are
+        skipped, and the run goes on. At the end, if any row failed, a single
+        ``RowFailuresWarning`` names each node with failed rows, how many failed, the
+        first error, and how to print its traceback. A run without failures is quiet.
+
         Returns:
-            ``self`` — the same ``PipelineJob`` instance, with
-            ``_has_run`` and ``_run_id`` set.
+            The run's ``RunSummary``: per function node, the rows computed, read from
+            the store and failed, with each node's first error. Shown at the end of a
+            notebook cell; also kept as ``job.last_run``. Results are read from
+            ``job.nodes``.
 
         Raises:
             ValueError: If no store is set, or ``commit_every_rows`` is not a
@@ -840,11 +940,98 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 was needed to write a node's results. Its rows are not recomputed
                 and the table is not overwritten.
         """
+        from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
+
+        prepared = self._prepare_run(commit_every_rows)
+        counter = RunCountingObserver()
+        effective_orchestrator = orchestrator or SyncPipelineOrchestrator()
+        with self._executing(prepared, commit_every_rows):
+            _ = effective_orchestrator.run(
+                prepared.exec_dag,
+                observer=_with_counter(observer, counter),
+                run_id=prepared.run_id,
+                pipeline_uri=prepared.pipeline_uri,
+                materialize_results=materialize_results,
+            )
+        summary = self._finish_run(prepared, counter)
+        if not summary.ok:
+            _warn_row_failures(summary, sys._getframe(1))  # pyright: ignore[reportPrivateUsage]  # the caller's line is where the warning is shown
+        return summary
+
+    async def run_async(
+        self,
+        orchestrator: "AsyncPipelineOrchestrator | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
+        materialize_results: bool = True,
+        commit_every_rows: int = 100,
+    ) -> RunSummary:
+        """Execute the job with the async orchestrator, from async code.
+
+        The awaitable form of ``run``: ``await job.run_async()`` runs on the caller's
+        event loop instead of blocking it. ``job.run(orchestrator=AsyncPipelineOrchestrator())``
+        also works inside a running loop (a Jupyter kernel), but blocks that loop until
+        the run ends. Both store the same rows and record ids. Arguments, errors and
+        result are those of ``run``.
+
+        Args:
+            orchestrator: The async orchestrator to run with. Defaults to
+                ``AsyncPipelineOrchestrator()``.
+            observer: Optional execution observer.
+            materialize_results: As for ``run``.
+            commit_every_rows: As for ``run``.
+
+        Returns:
+            The run's ``RunSummary``, as ``run`` returns.
+
+        Raises:
+            TypeError: If ``orchestrator`` is not an ``AsyncPipelineOrchestrator``;
+                run a ``SyncPipelineOrchestrator`` with ``job.run``.
+            ValueError: As for ``run``.
+            RuntimeError: As for ``run``.
+            StoreWriteError: As for ``run``.
+            StoreReadError: As for ``run``.
+        """
+        from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
+
+        if orchestrator is None:
+            orchestrator = AsyncPipelineOrchestrator()
+        elif not isinstance(orchestrator, AsyncPipelineOrchestrator):
+            raise TypeError(
+                "PipelineJob.run_async() runs an AsyncPipelineOrchestrator, got "
+                f"{type(orchestrator).__name__}. Use job.run(orchestrator=...) to run "
+                "it."
+            )
+        prepared = self._prepare_run(commit_every_rows)
+        counter = RunCountingObserver()
+        with self._executing(prepared, commit_every_rows):
+            _ = await orchestrator.run_async(
+                prepared.exec_dag,
+                observer=_with_counter(observer, counter),
+                run_id=prepared.run_id,
+                pipeline_uri=prepared.pipeline_uri,
+                materialize_results=materialize_results,
+            )
+        summary = self._finish_run(prepared, counter)
+        if not summary.ok:
+            _warn_row_failures(summary, sys._getframe(1))  # pyright: ignore[reportPrivateUsage]  # the caller's line is where the warning is shown
+        return summary
+
+    def _prepare_run(self, commit_every_rows: int) -> "_PreparedRun":
+        """Check the job can run and build what a run needs; shared by both run forms.
+
+        Args:
+            commit_every_rows: As for ``run``.
+
+        Returns:
+            The execution DAG, run id, pipeline URI and the store views of the run.
+
+        Raises:
+            ValueError: As for ``run``.
+            RuntimeError: As for ``run``.
+            StoreError: If writes still pending from before the run cannot be committed.
+        """
         import hashlib
         import uuid
-
-        from orcapod.pipeline.observer import NoOpObserver
-        from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
         if (
             isinstance(commit_every_rows, bool)
@@ -955,8 +1142,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     self._persistent_node_map[v_hash],
                 )
 
-        # --- Execute ---
-        effective_observer = observer or NoOpObserver()
         run_id = uuid.uuid4().hex[:16]
 
         # Snapshot hash: SHA-256 of sink-node content digests for the run URI.
@@ -988,28 +1173,59 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 flush_error.add_note(_PENDING_BEFORE_RUN_NOTE)
                 raise flush_error from exc
 
-        effective_orchestrator = orchestrator or SyncPipelineOrchestrator()
+        return _PreparedRun(
+            exec_dag=exec_dag,
+            run_id=run_id,
+            pipeline_uri=pipeline_uri,
+            pipeline_db=pipeline_db,
+            result_db=result_db,
+        )
+
+    @contextlib.contextmanager
+    def _executing(
+        self, prepared: "_PreparedRun", commit_every_rows: int
+    ) -> Iterator[None]:
+        """Hold every function node to the run's commit cadence while the orchestrator runs.
+
+        A failure inside commits the writes that succeeded before it, then propagates.
+
+        Args:
+            prepared: The run, from ``_prepare_run``.
+            commit_every_rows: As for ``run``.
+        """
         try:
             with contextlib.ExitStack() as batched:
                 # Function nodes commit every commit_every_rows rows (ITL-919).
-                for node in exec_dag.nodes():
+                for node in prepared.exec_dag.nodes():
                     if isinstance(node, FunctionJobNode):
                         batched.enter_context(
                             node._batched_commits(commit_every_rows)  # pyright: ignore[reportPrivateUsage]  # the job owns its nodes' commit cadence
                         )
-                effective_orchestrator.run(
-                    exec_dag,
-                    observer=effective_observer,
-                    run_id=run_id,
-                    pipeline_uri=pipeline_uri,
-                    materialize_results=materialize_results,
-                )
+                yield
         except Exception as run_error:
             # Commit the writes that did succeed before the failure, so their rows
             # do not look dropped, then report the failure itself.
-            flush_best_effort(run_error, pipeline_db, result_db)
+            flush_best_effort(run_error, prepared.pipeline_db, prepared.result_db)
             raise
 
+    def _finish_run(
+        self, prepared: "_PreparedRun", counter: RunCountingObserver
+    ) -> RunSummary:
+        """Commit the run's last writes, mark the job as run and keep its summary.
+
+        Args:
+            prepared: The run, from ``_prepare_run``.
+            counter: The observer that counted the run's rows.
+
+        Returns:
+            The run's summary, also kept as ``last_run``.
+
+        Raises:
+            StoreReadError: As for ``run``.
+            StoreWriteError: As for ``run``.
+        """
+        pipeline_db = prepared.pipeline_db
+        result_db = prepared.result_db
         # Flush databases. Every view of the store shares one set of pending
         # batches, so a failed batch can leave the ones after it unwritten.
         pending_note = (
@@ -1031,9 +1247,14 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         # Mutate self in place.
         self._has_run = True
-        self._run_id = run_id
-
-        return self
+        self._run_id = prepared.run_id
+        node_summaries: list[NodeRunSummary] = []
+        for node in prepared.exec_dag.topological_sort():
+            label: str = node.label
+            if is_function_node(node) or is_side_effect_function_node(node):
+                node_summaries.append(counter.node_summary(label))
+        self._last_run = RunSummary("/".join(self._name), node_summaries)
+        return self._last_run
 
     def __repr__(self) -> str:
         n_sources = len(self._sources)

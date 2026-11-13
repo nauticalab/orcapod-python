@@ -330,6 +330,17 @@ class PipelineJobRequiredError(RuntimeError):
     """
 
 
+class RowFailuresWarning(UserWarning):
+    """Issued once at the end of a job run in which rows failed.
+
+    With the default ``error_policy="continue"``, a row whose function raises is skipped
+    and the run goes on. The warning names each node with failed rows, how many failed out
+    of how many, and the first error, and says how to print its full traceback. The run's
+    ``RunSummary`` (returned by ``PipelineJob.run``, kept as ``job.last_run``) holds the
+    same counts.
+    """
+
+
 class EmptyDataAccessError(Exception):
     """Raised when a payload-access method is called on an ``EmptyData`` instance.
 

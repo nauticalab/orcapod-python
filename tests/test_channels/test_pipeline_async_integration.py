@@ -151,9 +151,9 @@ class TestAsyncPipelineIntegration:
     def test_sync_run_then_db_retrieval(self):
         """Baseline: sync run() populates the DB for later retrieval."""
         job = _build_job()
-        result_job = job.run()
+        _ = job.run()
 
-        records = result_job.nodes["letter_grade"].get_all_records()
+        records = job.nodes["letter_grade"].get_all_records()
         assert records is not None
         assert records.num_rows == 5
         assert _grades_from_table(records) == EXPECTED
@@ -162,8 +162,8 @@ class TestAsyncPipelineIntegration:
         """Sync and async execution paths yield the same grades."""
         # Sync path
         sync_job = _build_job()
-        sync_result = sync_job.run()
-        sync_records = sync_result.nodes["letter_grade"].get_all_records()
+        _ = sync_job.run()
+        sync_records = sync_job.nodes["letter_grade"].get_all_records()
         assert sync_records is not None
         sync_grades = _grades_from_table(sync_records)
 
@@ -199,8 +199,8 @@ class TestSyncAsyncSystemTagEquivalence:
     def test_join_pipeline_system_tags_identical(self):
         """Join pipeline: sync and async produce the same system-tag columns."""
         sync_job = _build_job()
-        sync_result = sync_job.run()
-        sync_records = sync_result.nodes["letter_grade"].get_all_records(
+        _ = sync_job.run()
+        sync_records = sync_job.nodes["letter_grade"].get_all_records(
             columns={"system_tags": True}
         )
         assert sync_records is not None
@@ -254,8 +254,8 @@ class TestSyncAsyncSystemTagEquivalence:
         from this comparison.
         """
         sync_job = _build_job()
-        sync_result = sync_job.run()
-        sync_records = sync_result.nodes["letter_grade"].get_all_records(
+        _ = sync_job.run()
+        sync_records = sync_job.nodes["letter_grade"].get_all_records(
             columns={"system_tags": True}
         )
         assert sync_records is not None

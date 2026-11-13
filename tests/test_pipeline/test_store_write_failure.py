@@ -755,10 +755,10 @@ class CrashRecorder(NoOpObserver):
         self.crashes.append((node_label, str(tag["k"])))
 
 
-# The per-row handlers' log messages: sync ``FunctionNode.execute`` and async
-# ``process_one`` (DEBUG there, ITL-879).
+# The per-row handlers' log messages, both at DEBUG: sync ``FunctionNode.execute``
+# (ITL-997) and async ``process_one`` (ITL-879).
 ROW_FAILURE_LOGS = (
-    "Data execution failed in %s: %s",
+    "Data execution failed in %s, skipping: %s",
     "Data processing failed, skipping: %s",
 )
 
