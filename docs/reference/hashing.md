@@ -57,6 +57,8 @@ The labels of v0.3:
 | `arrow_v1` | the Arrow table and schema hash (§9) | `ARROW_HASH_LABEL`, `hashing/arrow_hashers.py` |
 | `directory_v1` | the directory hash: a SHA-256 Merkle tree over the entries | `DIRECTORY_HASH_LABEL`, `hashing/directory_hashers.py` |
 | `ndarray_v1` | the array value hash (§8) | `NumpyArrayHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
+| `pandas_dataframe_v1` | the `pandas.DataFrame` value hash (§10) | `PANDAS_DATAFRAME_HASH_LABEL`, `hashing/pandas_value_hash.py` |
+| `pandas_series_v1` | the `pandas.Series` value hash (§10) | `PANDAS_SERIES_HASH_LABEL`, `hashing/pandas_value_hash.py` |
 | `torch_tensor_v1` | the torch tensor value hash (§8): the element digest, then `requires_grad`, the lazy conjugate and negative bits, the strides and the class | `TORCH_TENSOR_HASH_LABEL`, `logical_types/torch_type.py` |
 | `polars_expr_v1` | the Polars expression hash (§1c) | `POLARS_EXPR_HASH_LABEL`, `hashing/semantic_hashing/polars_expr.py` |
 | `polars_dataframe_v1` | the Polars DataFrame value hash (§1e) | `PolarsDataFrameHandler.HASH_LABEL`, `hashing/semantic_hashing/builtin_handlers.py` |
@@ -569,8 +571,8 @@ struct field order does the same for every struct's fields with
 `ordered_struct_fields=False`; ignoring a Series' name writes `""` for `"name"` in the
 descriptor and hashes its values as a column named `""`.
 
-A `pandas.DataFrame` is hashed differently: as the `arrow_v1` hash of its Arrow table, which
-ignores column order. A Polars frame and the equal pandas frame never share a hash.
+A `pandas.DataFrame` is hashed differently: with the `pandas_dataframe_v1` hash (§10), which
+counts column order. A Polars frame and the equal pandas frame never share a hash.
 
 ---
 
@@ -1186,7 +1188,7 @@ they hash Python types, where a logical type contributes its identifier text onl
 
 Every Arrow-derived hash in the sites above (row data hashes, `record_id`s built from a
 default `source_id`, base and pipeline entry ids, operator and cached-source record hashes,
-`pa.Table` and pandas values) comes from `StarfixArrowHasher.hash_table`, which returns
+`pa.Table` values) comes from `StarfixArrowHasher.hash_table`, which returns
 `ContentHash(method="arrow_v1", digest=D)`. `D` is 35 bytes: the starfix hash format
 number `00 00 02` followed by a SHA-256 digest, computed by `starfix` 0.5 (hash format 2) and
 byte-identical to the Rust `starfix` crate. The byte layout is specified in starfix's
@@ -1205,7 +1207,12 @@ table would get a different digest. Its number is not kept equal to the starfix 
 strings, binaries and lists hashing alike), nullability at every depth (top-level columns,
 struct fields and list items, whether or not the column holds data), every value, row order, list element
 order, list lengths at every depth, null structs (distinct from structs whose fields are all
-null) and the row count. Column order and struct field order are not part of the hash. How a
+null) and the row count. Column order and struct field order are not part of the hash:
+this is the hash of Orcapod's own tables (streams, datagrams, rows), which ignore order on
+purpose. A value whose own equality depends on order is hashed with
+`StarfixArrowHasher.hash_table_ordered` instead, which is the same procedure with starfix's
+`ordered_columns` and `ordered_struct_fields` options on, so that column order and struct
+field order at every depth are part of the digest; pandas values use it (§10). How a
 table is split into chunks or slices is not part of it either. A `fixed_size_list<T>[n]`
 column hashes differently from a `large_list<T>` column with the same values. Extension
 columns are hashed as their storage type plus their extension name and metadata, including
@@ -1365,4 +1372,234 @@ hasher = get_default_context().arrow_hasher
 digest = hasher.hash_table(pa.table({"x": pa.array([1, 2, 3], pa.int64())}))
 print(digest.method, digest.digest[:3].hex())
 # arrow_v1 000002
+```
+
+## 10. pandas Value Hash (`pandas_dataframe_v1`, `pandas_series_v1`)
+
+A `pandas.DataFrame` or `pandas.Series` value (a pod input or output, a value in a source
+column, or any object given to the semantic hasher) is hashed by
+`pandas_frame_content_hash` / `pandas_series_content_hash` in
+`orcapod/hashing/pandas_value_hash.py`.
+
+The pandas dependency is capped below 3 (`pandas>=2.2.3,<3`) for v0.3.0: the hash and its
+round trip are verified on pandas 2 only. ITL-1054 lifts the cap.
+
+Storage and hashing are separate (developer, November 12, 2026). Storage is the library's
+own serialization: the Arrow IPC stream of `pa.Table.from_pandas(value,
+preserve_index=True)`, read back with `to_pandas()`. The hash is defined by Orcapod and is
+about the content of the value; it is never a hash of the stored bytes.
+
+```text
+ContentHash("pandas_dataframe_v1" | "pandas_series_v1",
+            sha256(canonical_json(descriptor) + b"\x00" + D))
+```
+
+- `D` is the 35-byte digest of `StarfixArrowHasher.hash_table_ordered` (§9) over the
+  **values table**: `pa.Table.from_pandas(value, preserve_index=True)` with its fields
+  renamed by position, `c0 .. cN-1` for the columns in frame order, then `i0 .. iM-1` for
+  the index levels in order. A Series is digested as its one-column frame. `D` covers the
+  values, the Arrow types, row order, the row count, **column order, index level order and
+  struct field order**.
+- `descriptor` is canonical JSON (sorted keys, `,` and `:` separators, UTF-8) in a grammar
+  Orcapod owns, built from the pandas objects themselves. It carries what the Arrow values
+  do not show: `attrs`, typed labels, `columns.names`, the dtype of the column axis, index
+  level names and the pandas dtypes.
+- The label never enters the computation; only the bytes of `D` do.
+
+```text
+frame:  {"kind": "orcapod.pandas.dataframe", "height": <rows>, "attrs": <attrs>,
+         "columns": [[<label>, <dtype>], ...],      in column order
+         "columns_names": [<label>, ...],           columns.names, one per column level
+         "columns_dtypes": [<dtype>, ...],          column axis, one per column level; a
+                                                    pd.ArrowDtype level is
+                                                    {"arrow": <Arrow type text>}
+         "index": [[<name>, <dtype>], ...]}         index levels in order: name, dtype
+series: {"kind": "orcapod.pandas.series", "height": <rows>, "attrs": <attrs>,
+         "name": <label>, "dtype": <dtype>,
+         "index": [[<name>, <dtype>], ...]}
+
+<attrs> := attrs as the JSON object storage keeps ({1: "x"} is {"1": "x"}; a tuple is a
+           list); attrs with an entry JSON cannot write are refused
+<name>  := <str> | null                             an index level name as storage restores
+                                                    it: its text
+<label> := <str> | null | {"bool": b} | {"int": n} | {"float": <float.hex()>}
+         | {"tuple": [<label>, ...]}
+         | {"timestamp": [<count since the epoch, in unit>, <unit>, <tz or null>]}
+         | {"date": <iso date>}
+         | {"timedelta": [<count, in unit>, <unit>]}
+         | {"period": [<ordinal>, <period alias>]}
+         | {"nat": "datetime" | "timedelta"}
+<dtype> := {"numpy": <numpy dtype name>}
+         | {"masked": "Int8" | ... | "UInt64" | "Float32" | "Float64" | "boolean"}
+         | "string"                                 pd.StringDtype, any storage
+         | {"datetimetz": [<unit>, <tz>]}            <tz>: the text storage writes:
+                                                    "UTC", "Europe/Berlin", "+01:00"
+         | {"categorical": {"categories": [<dtype>, [<label>, ...]], "ordered": <bool>}}
+         | {"period": <period alias>} | {"interval": [<subtype dtype>, <closed>]}
+         | {"arrow": <Arrow type text>}             pd.ArrowDtype of a non-nested Arrow type:
+                                                    str(type), "large_binary", "null",
+                                                    "timestamp[ns, tz=UTC]"
+         | "arrow"                                  pd.ArrowDtype of a nested, dictionary or
+                                                    run-end type: the type is in D only
+```
+
+`kind` is the name of the value's logical type (its Arrow extension name).
+
+**The hash is strict.** Everything about a value that can be changed is part of its
+identity (developer, November 11 and 12, 2026), with one exception: **a property storage
+does not restore never counts**, so that a value read back from a store hashes exactly like
+the value that was written. `PANDAS_IDENTITY_PROPERTIES` in
+`orcapod/hashing/pandas_value_hash.py` is the one list in code of every property below.
+
+| Property | Part of the hash | Carried by |
+|---|---|---|
+| Column order | yes | `D` (ordered) |
+| MultiIndex level order (frame and Series) | yes | `D` (ordered) |
+| Struct field order in a `pd.ArrowDtype` struct column, at every depth | yes | `D` (ordered) |
+| Values, row order, row count, Arrow type (int width, datetime unit and timezone) | yes | `D` |
+| Index values, index level names (as the text storage writes), index dtype (as storage restores it) | yes | `D`, descriptor |
+| `columns.name` / `columns.names` | yes | descriptor |
+| Dtype of the column axis, per level (an `int64` versus an `object` Index of the same labels) | yes | descriptor |
+| Column label type where the labels have one type (`0` versus `"0"`), MultiIndex columns versus flat labels | yes | descriptor |
+| Series name, typed (`0` versus `"0"`); a frame versus its one-column Series | yes | descriptor |
+| pandas dtype where the Arrow values coincide: `Int64` versus `int64`, `boolean` versus `bool`, `string` versus `object` | yes | descriptor |
+| Categorical versus string; the category list, including unused categories; category order; `ordered` | yes | descriptor |
+| `attrs` (as the JSON object storage keeps: `{1: "x"}` is `{"1": "x"}`) | yes, although pandas' equality ignores it | descriptor |
+| `-0.0` versus `0.0` | yes, although pandas calls them equal: the values are hashed as bytes | `D` |
+| `flags` | never: storage does not restore it | |
+| Type of an index level name (`1` versus `"1"`) | never: storage writes the name as text | |
+| Types of column labels of mixed type (`0` beside `"b"` versus `"0"` beside `"b"`) | never: storage writes such labels as text | |
+| A masked, string or Arrow dtype of an index level (`Int64` versus `int64`) | never: storage restores an index level as NumPy | |
+| `RangeIndex` versus an `int64` index with the same values | never: storage restores an `Index` | |
+| `freq` of a `DatetimeIndex` or `TimedeltaIndex` | never: storage does not restore it | |
+| Unused levels of a MultiIndex | never: storage does not restore them | |
+| Storage of a string dtype (`string[python]` versus `string[pyarrow]`) | never: storage restores `string[python]` | |
+| `object` dtype of a column that reads back as another dtype | never: see below | |
+| Key order of dicts in an `object` column | never: a `dict` is unordered | |
+
+**`object` columns are hashed in the form storage restores.** An `object` column or index
+level whose values are not strings does not read back as `object`: `[1, 2]` reads back
+`int64`, `[1, None]` reads back `float64`, `datetime` objects read back `datetime64[us]`.
+Such a column is described and digested in the form it reads back in, so it hashes like the
+typed column it becomes. An `object` column of lists or dicts stays `object`, but its
+elements can change (a list `[1, None]` reads back `[1.0, nan]`), so the Arrow form of what
+is read back is digested. Any other `object` column that reads back as `object` (strings,
+bytes, decimals, dates) is hashed as it is.
+
+**The axes are described as storage restores them.** Storage writes the name of an index
+level as text. The index names `1` and `"1"` are therefore one name once read back, and
+**they hash equal**: a hash that told them apart would change when the value is read from a
+store. `columns.names` and a Series' name are restored with their types, so they stay typed
+(`0` versus `"0"` differ). The dtype of each level of the column axis is restored, so it is
+part of the hash. A timestamp or duration label is the integer count in its own unit, with
+the unit.
+
+More consequences of the same rule:
+
+- **Column labels of mixed type hash as their text.** Storage restores labels of one type
+  with that type (`0, 1` stay integers), but writes labels of mixed type as text: the
+  columns `0, "b"` read back `"0", "b"`. So a frame with the columns `0, "b"` and one with
+  `"0", "b"` hash equal.
+- **An index level hashes as the NumPy level it reads back as.** Storage restores a column
+  with its masked, string or Arrow dtype, but an index level as NumPy: an `Int64` index
+  reads back `int64` (`float64` when it holds a missing value), a `string` index reads
+  back `object`. So an `Int64` index and the `int64` index with the same values hash
+  equal. Categorical, timezone-aware, period and interval index levels are restored and
+  keep their dtype.
+- **The categories of a categorical are described with the dtype storage restores.** The
+  categories are read back from the Arrow dictionary: `object` categories `[1, 2]` read
+  back `int64`, and `string` categories read back `object`. So a categorical with `object`
+  categories `[1, 2]` and one with `int64` categories `[1, 2]` hash equal. The category
+  list, its order, unused categories and `ordered` are restored and count.
+- **A column is described with the dtype its Arrow schema restores.** A
+  `pd.ArrowDtype(pa.string())` column reads back as `string`, so the two hash equal. An
+  Arrow decimal column reads back as `object` holding `Decimal` values and is hashed in
+  that form. Other `pd.ArrowDtype` columns are restored as they are, with their exact Arrow type.
+- **A column that reads back as Arrow `null` is digested as an all-null `large_string`
+  column.** Starfix refuses a `null` column, and storage cannot restore the type of a column
+  with no value: an all-null or empty `pd.ArrowDtype` decimal column reads back as `object`
+  holding `None`, exactly like a plain `object` column of `None`. Every column whose
+  restored Arrow type is `null` is therefore digested as an all-null `large_string` column
+  of the same length (a cast of a null array holds no value, so nothing is inferred), for a
+  value and for its read-back alike. The dtype descriptor of both the all-null or empty
+  decimal column and the all-null or empty `object` column is `{"numpy": "object"}`, so they
+  **hash equal**; the height still counts, and a `string`-dtype column of `None` (descriptor
+  `"string"`) stays different. Other all-null or empty columns (Arrow string, timestamp,
+  integer, list or struct, `Int64`, `string`, categorical) keep their own types and are
+  unchanged.
+  A `pd.ArrowDtype` of a non-nested Arrow type is described by its Arrow type text, so
+  `pd.ArrowDtype(pa.null())` (`{"arrow": "null"}`) never hashes like a
+  `pd.ArrowDtype(pa.large_string())` column of `None`, and `binary` and `large_binary`
+  columns (which storage restores as themselves, although D unifies large and non-large
+  variants) hash differently. A decimal column is the exception that shows the rule: storage
+  restores it as `object`, so two precisions hash equal. A nested `pd.ArrowDtype` (list,
+  struct, map, union), a dictionary or a run-end type keeps the bare term `"arrow"`; none
+  reads back today, and ITL-1054 decides what identifies one (so a `list` and a `large_list`
+  column hash equal until then).
+  A `pd.ArrowDtype` of a nested type with a `null` child (`list<null>`, `struct<a: null>`)
+  is still refused by the hash, as before.
+- **A timezone is the text storage writes for it** (`"UTC"`, `"Europe/Berlin"`,
+  `"+01:00"`), whatever class holds it: `datetime.timezone(timedelta(hours=1))` is read
+  back as another class of the same offset, and both hash equal.
+
+The descriptor holds the column labels, `columns.names`, a Series' name and the index names
+as read from the frame storage builds for the value's Arrow schema. The value's own labels
+and names must still be in the grammar: a label of another type raises `ValueError`.
+
+**`attrs` must be JSON.** Storage writes `attrs` as JSON. A key that is not text is written
+as text (`{1: "x"}` reads back `{"1": "x"}`, and hashes like it), and a tuple reads back as
+a list. `attrs` with an entry JSON cannot write (a `set`, an arbitrary object, a tuple as a
+key) are refused: the hash and `python_to_storage` raise `ValueError` naming the key, on
+every supported pyarrow version (pyarrow itself would drop the whole `attrs` with a
+warning, or raise `TypeError`, depending on its version). With `attrs` in the ignore list
+the hash does not read them (it never copies them either, so `attrs` that cannot be copied
+do not matter then).
+
+Storage refuses a value it would corrupt. Column labels and index names that collide
+once written as text (the index name `1` with a column `"1"`; integer names of MultiIndex
+levels) would be written as two fields of one name, and the value read back would have lost
+its index. Distinct labels that read back equal (the labels `True` and `False` both read
+back `True`) would come back as duplicates. `python_to_storage` raises `ValueError` in both
+cases.
+
+A label or dtype outside the grammar raises `ValueError` naming it (a dtype error names its
+column). A value that cannot be converted to Arrow raises `ValueError`.
+
+**What a data context can make the hash ignore.** Nothing is ignored by default. The
+registration file (`orcapod/contexts/logical_types.json`, `hash_ignore`) can name, per type,
+properties the hash ignores. The list is saved in the logical type's extension metadata, so
+two lists are two logical types, and a column stored under another list is refused on read.
+The preimage keeps its shape: an ignored property is hashed with a fixed value.
+
+| Option | Type | When ignored |
+|---|---|---|
+| `column_order` | DataFrame | the columns are hashed sorted by the canonical JSON of their typed labels |
+| `series_name` | Series | `name` is hashed as `null` |
+| `struct_field_order` | both | starfix's `ordered_struct_fields` option is off for `D` |
+| `attrs` | both | `attrs` is hashed as `{}` |
+
+Every other property always counts, and the properties storage does not restore never do;
+neither kind is an option.
+
+**Names.** The logical types are `orcapod.pandas.dataframe` and `orcapod.pandas.series`
+with metadata `{"ignore":[],"version":1}` (the version and the ignore list). Before v0.3 they were stored as `pandas.dataframe` /
+`pandas.series`; those names are not registered any more, and a column stored under them is
+refused on read. Before v0.3 a pandas value was also hashed as an Arrow table (§9, order
+ignored), so a frame and the same frame with its columns reordered shared a hash, and a
+cached pod could be served the result computed for the other one (ITL-897, ITL-887).
+
+```python
+import pandas as pd
+from orcapod.contexts import get_default_context
+
+semantic_hasher = get_default_context().semantic_hasher
+frame = pd.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+print(semantic_hasher.hash_object(frame).method)
+# pandas_dataframe_v1
+print(semantic_hasher.hash_object(frame) == semantic_hasher.hash_object(frame.copy()))
+# True
+print(semantic_hasher.hash_object(frame) == semantic_hasher.hash_object(frame[["b", "a"]]))
+# False
+print(semantic_hasher.hash_object(frame["a"]).method)
+# pandas_series_v1
 ```

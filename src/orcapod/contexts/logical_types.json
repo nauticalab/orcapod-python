@@ -2,6 +2,8 @@
     "description": "Logical types registered in every data context, with the value handlers that hash their Python values. This file is not frozen: a logical type is versioned by its own identifier (Arrow extension name and metadata), not by the data context version, so adding one edits this file and no released data context manifest. hash_ignore lists, per extension name, the property names the value hash of a library value type ignores (empty: every property the storage keeps is part of the hash); the list is written into the type's extension metadata, so changing it changes the type's identifier. The logical type entry and the value handler entry of such a type both refer to their list as hash_ignore:<extension name>.",
     "hash_ignore": {
         "orcapod.numpy.ndarray": [],
+        "orcapod.pandas.dataframe": [],
+        "orcapod.pandas.series": [],
         "orcapod.polars.dataframe": [],
         "orcapod.polars.series": [],
         "orcapod.torch.tensor": []
@@ -40,11 +42,11 @@
                 },
                 {
                     "_class": "orcapod.logical_types.pandas_type.LogicalPandasDataFrame",
-                    "_config": {}
+                    "_config": {"ignore": {"_ref": "hash_ignore:orcapod.pandas.dataframe"}}
                 },
                 {
                     "_class": "orcapod.logical_types.pandas_type.LogicalPandasSeries",
-                    "_config": {}
+                    "_config": {"ignore": {"_ref": "hash_ignore:orcapod.pandas.series"}}
                 },
                 {
                     "_class": "orcapod.logical_types.polars_type.LogicalPolarsDataFrame",
@@ -180,7 +182,7 @@
             },
             {
                 "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasDataFrameHandler",
-                "_config": {}
+                "_config": {"ignore": {"_ref": "hash_ignore:orcapod.pandas.dataframe"}}
             }
         ],
         [
@@ -189,7 +191,7 @@
             },
             {
                 "_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PandasSeriesHandler",
-                "_config": {}
+                "_config": {"ignore": {"_ref": "hash_ignore:orcapod.pandas.series"}}
             }
         ],
         [

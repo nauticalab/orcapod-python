@@ -487,7 +487,7 @@ def test_delta_polars_read_delta(tmp_path: Path) -> None:
 def test_builtin_dataframe_round_trip(
     storage_backend: _StorageBackend, tmp_path: Path
 ) -> None:
-    """pd.DataFrame round-trips through storage with extension name ``pandas.dataframe``."""
+    """pd.DataFrame round-trips through storage with extension name ``orcapod.pandas.dataframe``."""
     import pandas as pd
 
     df = pd.DataFrame(
@@ -505,7 +505,7 @@ def test_builtin_dataframe_round_trip(
     assert hasattr(field.type, "extension_name"), (
         f"Expected extension type on field 'frame', got plain type {field.type!r}"
     )
-    assert field.type.extension_name == "pandas.dataframe"
+    assert field.type.extension_name == "orcapod.pandas.dataframe"
 
     rows = read_converter.arrow_table_to_python_dicts(result)
     assert len(rows) == 1
@@ -562,7 +562,7 @@ def test_builtin_polars_dataframe_round_trip(
 def test_builtin_series_round_trip(
     storage_backend: _StorageBackend, tmp_path: Path
 ) -> None:
-    """pd.Series round-trips through storage with extension name ``pandas.series``."""
+    """pd.Series round-trips through storage with extension name ``orcapod.pandas.series``."""
     import pandas as pd
 
     s = pd.Series(
@@ -579,7 +579,7 @@ def test_builtin_series_round_trip(
     assert hasattr(field.type, "extension_name"), (
         f"Expected extension type on field 'series', got plain type {field.type!r}"
     )
-    assert field.type.extension_name == "pandas.series"
+    assert field.type.extension_name == "orcapod.pandas.series"
 
     rows = read_converter.arrow_table_to_python_dicts(result)
     assert len(rows) == 1

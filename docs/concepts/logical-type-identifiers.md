@@ -79,8 +79,8 @@ Orcapod's own types follow the same contract as yours. Their metadata is the JSO
 | `orcapod.Directory` | `orcapod.directory` | `{"version":1}` |
 | `numpy.ndarray` | `orcapod.numpy.ndarray` | `{"ignore":[],"version":1}` |
 | `torch.Tensor` (optional, needs PyTorch) | `orcapod.torch.tensor` | `{"ignore":[],"version":1}` |
-| `pandas.DataFrame` | `pandas.dataframe` | `{"version":1}` |
-| `pandas.Series` | `pandas.series` | `{"version":1}` |
+| `pandas.DataFrame` | `orcapod.pandas.dataframe` | `{"ignore":[],"version":1}` |
+| `pandas.Series` | `orcapod.pandas.series` | `{"ignore":[],"version":1}` |
 | `polars.DataFrame` | `orcapod.polars.dataframe` | `{"ignore":[],"version":1}` |
 | `polars.Series` | `orcapod.polars.series` | `{"ignore":[],"version":1}` |
 

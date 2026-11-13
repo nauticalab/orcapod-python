@@ -14,33 +14,93 @@ the DataFrame round-trip.
 from __future__ import annotations
 
 import io
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
-import polars as pl
 import pyarrow as pa
 import pyarrow.ipc
 
-from orcapod.logical_types.base_logical_type import BaseLogicalType
-from orcapod.logical_types.identifier import version_metadata
-from orcapod.logical_types.registry import (
-    make_arrow_extension_type,
-    make_polars_extension_type,
+from orcapod.hashing.pandas_value_hash import (
+    PANDAS_DATAFRAME_OPTIONS,
+    PANDAS_SERIES_OPTIONS,
+    PANDAS_UNNAMED_SERIES_COLUMN,
+    pandas_attrs_as_stored,
 )
+from orcapod.logical_types.ignore_list import IgnoreListLogicalType
 
 if TYPE_CHECKING:
     from orcapod.logical_types.protocols import TypeConverterProtocol
 
 
-_SERIES_UNNAMED_SENTINEL = "__pandas_series_unnamed__"
+_SERIES_UNNAMED_SENTINEL = PANDAS_UNNAMED_SERIES_COLUMN
 
 
-_IDENTIFIER_METADATA = version_metadata(1)
-"""Extension metadata of the types in this module: version 1 of their stored layout."""
+_LAYOUT_VERSION = 1
+"""Version of the stored layout and hashing of the types in this module.
 
-_LEGACY_METADATA = (b"",)
-"""Metadata written before identifiers existed (ITL-935). The layout was already
-version 1, so data stored with empty metadata is read as version 1."""
+The extension metadata is ``{"ignore":[...],"version":1}``: the version, and the property
+names the data context configures the value hash to ignore (none by default).
+
+Before v0.3 these types were stored under the names ``pandas.dataframe`` and
+``pandas.series`` (with empty metadata). Those names are not registered any more, so a
+column stored under them is refused on read, never read as the current types.
+"""
+
+
+def _require_restorable_axes(table: pa.Table, frame: pd.DataFrame) -> None:
+    """Raise if the frame read back from ``table`` would not have ``frame``'s axes.
+
+    Arrow writes some column labels and every index level name as text. Two cases corrupt
+    a value silently, so they are refused before anything is written:
+
+    - Two fields get one name: the index name ``1`` beside the column ``"1"``, or integer
+      names of MultiIndex levels. The frame read back has lost its index (the levels come
+      back as columns).
+    - Distinct labels read back equal: the labels ``True`` and ``False`` are written as
+      text and both read back ``True``.
+
+    The check builds the frame storage would restore for the table's schema; no rows are
+    converted.
+
+    Args:
+        table: ``pa.Table.from_pandas(frame, preserve_index=True)``.
+        frame: The frame about to be stored.
+
+    Raises:
+        ValueError: If a field name occurs twice (the message lists the names), or the
+            frame read back would have another number of columns or index levels, or
+            duplicate column labels the frame does not have.
+    """
+    counts = Counter(table.schema.names)
+    repeated = sorted(name for name, count in counts.items() if count > 1)
+    if repeated:
+        raise ValueError(
+            f"column labels and index names collide once written as text: {repeated}. "
+            "Storage could not restore the index. Rename the index levels (integer "
+            "level names are a common cause) or the columns."
+        )
+    try:
+        restored = table.schema.empty_table().to_pandas()
+    except (TypeError, ValueError, NotImplementedError, pa.ArrowException):
+        return  # Not a case this check is about; reading reports it.
+    if (
+        restored.shape[1] != frame.shape[1]
+        or restored.index.nlevels != frame.index.nlevels
+    ):
+        raise ValueError(
+            "the value read back from storage would have "
+            f"{restored.shape[1]} column(s) and {restored.index.nlevels} index "
+            f"level(s), not {frame.shape[1]} and {frame.index.nlevels}. Rename the "
+            "columns or the index levels."
+        )
+    if frame.columns.is_unique and not restored.columns.is_unique:
+        labels = sorted({repr(label) for label in restored.columns})
+        raise ValueError(
+            "distinct column labels would read back from storage as duplicates: "
+            f"{labels}. Rename the columns (labels of mixed or bool type are written "
+            "as text)."
+        )
 
 
 def _table_to_ipc_bytes(table: pa.Table) -> bytes:
@@ -71,7 +131,7 @@ def _ipc_bytes_to_table(data: Any) -> pa.Table:
     return pa.ipc.open_stream(buf).read_all()
 
 
-class LogicalPandasDataFrame(BaseLogicalType):
+class LogicalPandasDataFrame(IgnoreListLogicalType):
     """Logical type for ``pd.DataFrame``.
 
     Stores DataFrames as Arrow ``large_binary`` using Arrow IPC stream format.
@@ -82,7 +142,7 @@ class LogicalPandasDataFrame(BaseLogicalType):
     nullable integer, boolean, datetime, categorical) is supported. Columns with
     truly mixed Python types that Arrow cannot infer raise ``ValueError``.
 
-    The extension name ``"pandas.dataframe"`` is library-qualified.
+    The extension name ``"orcapod.pandas.dataframe"`` names the library, under Orcapod's own prefix.
 
     Example:
         >>> lt = LogicalPandasDataFrame()
@@ -92,45 +152,11 @@ class LogicalPandasDataFrame(BaseLogicalType):
         True
     """
 
-    _arrow_ext_class = make_arrow_extension_type(
-        "pandas.dataframe",
-        pa.large_binary(),
-        _IDENTIFIER_METADATA,
-        also_reads=_LEGACY_METADATA,
-    )
-    _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type(
-        "pandas.dataframe", pa.large_binary(), _IDENTIFIER_METADATA.decode()
-    )
-    _polars_ext: pl.BaseExtension | None = None
-
-    logical_type_name: str = "pandas.dataframe"
+    EXTENSION_NAME = "orcapod.pandas.dataframe"
+    STORAGE_TYPE = pa.large_binary()
+    VERSION = _LAYOUT_VERSION
+    OPTIONS = PANDAS_DATAFRAME_OPTIONS
     python_type: type = pd.DataFrame
-
-    def get_arrow_extension_type(self) -> pa.ExtensionType:
-        """Return the cached Arrow extension type for ``pd.DataFrame``.
-
-        Returns:
-            A ``pa.ExtensionType`` instance with extension name
-            ``"pandas.dataframe"`` and storage type ``pa.large_binary()``.
-        """
-        if LogicalPandasDataFrame._arrow_ext is None:
-            LogicalPandasDataFrame._arrow_ext = (
-                LogicalPandasDataFrame._arrow_ext_class()
-            )
-        return LogicalPandasDataFrame._arrow_ext
-
-    def get_polars_extension_type(self) -> pl.BaseExtension:
-        """Return the cached Polars extension type for ``pd.DataFrame``.
-
-        Returns:
-            A ``pl.BaseExtension`` instance registered under ``"pandas.dataframe"``.
-        """
-        if LogicalPandasDataFrame._polars_ext is None:
-            LogicalPandasDataFrame._polars_ext = (
-                LogicalPandasDataFrame._polars_ext_class()
-            )
-        return LogicalPandasDataFrame._polars_ext
 
     def python_to_storage(
         self, value: Any, converter: TypeConverterProtocol | None = None
@@ -149,8 +175,11 @@ class LogicalPandasDataFrame(BaseLogicalType):
             schema, index, and data.
 
         Raises:
-            ValueError: If any column cannot be converted to an Arrow type.
+            ValueError: If any column cannot be converted to an Arrow type, column
+                labels and index names would not read back as they are (they collide
+                once written as text), or ``attrs`` cannot be written as JSON.
         """
+        pandas_attrs_as_stored(value.attrs)  # refuses attrs that are not JSON
         try:
             table = pa.Table.from_pandas(value, preserve_index=True)
         except pa.lib.ArrowInvalid as exc:
@@ -159,6 +188,7 @@ class LogicalPandasDataFrame(BaseLogicalType):
                 f"Check for columns with mixed or non-Arrow-serialisable types. "
                 f"Original error: {exc}"
             ) from exc
+        _require_restorable_axes(table, value)
         return _table_to_ipc_bytes(table)
 
     def storage_to_python(
@@ -176,7 +206,7 @@ class LogicalPandasDataFrame(BaseLogicalType):
         return _ipc_bytes_to_table(storage_value).to_pandas()
 
 
-class LogicalPandasSeries(BaseLogicalType):
+class LogicalPandasSeries(IgnoreListLogicalType):
     """Logical type for ``pd.Series``.
 
     Stores Series as Arrow ``large_binary`` using Arrow IPC stream format.
@@ -187,7 +217,7 @@ class LogicalPandasSeries(BaseLogicalType):
     ``"__pandas_series_unnamed__"`` to distinguish it from a Series named with
     an empty string.
 
-    The extension name ``"pandas.series"`` is library-qualified.
+    The extension name ``"orcapod.pandas.series"`` names the library, under Orcapod's own prefix.
 
     Example:
         >>> lt = LogicalPandasSeries()
@@ -197,41 +227,11 @@ class LogicalPandasSeries(BaseLogicalType):
         True
     """
 
-    _arrow_ext_class = make_arrow_extension_type(
-        "pandas.series",
-        pa.large_binary(),
-        _IDENTIFIER_METADATA,
-        also_reads=_LEGACY_METADATA,
-    )
-    _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type(
-        "pandas.series", pa.large_binary(), _IDENTIFIER_METADATA.decode()
-    )
-    _polars_ext: pl.BaseExtension | None = None
-
-    logical_type_name: str = "pandas.series"
+    EXTENSION_NAME = "orcapod.pandas.series"
+    STORAGE_TYPE = pa.large_binary()
+    VERSION = _LAYOUT_VERSION
+    OPTIONS = PANDAS_SERIES_OPTIONS
     python_type: type = pd.Series
-
-    def get_arrow_extension_type(self) -> pa.ExtensionType:
-        """Return the cached Arrow extension type for ``pd.Series``.
-
-        Returns:
-            A ``pa.ExtensionType`` instance with extension name
-            ``"pandas.series"`` and storage type ``pa.large_binary()``.
-        """
-        if LogicalPandasSeries._arrow_ext is None:
-            LogicalPandasSeries._arrow_ext = LogicalPandasSeries._arrow_ext_class()
-        return LogicalPandasSeries._arrow_ext
-
-    def get_polars_extension_type(self) -> pl.BaseExtension:
-        """Return the cached Polars extension type for ``pd.Series``.
-
-        Returns:
-            A ``pl.BaseExtension`` instance registered under ``"pandas.series"``.
-        """
-        if LogicalPandasSeries._polars_ext is None:
-            LogicalPandasSeries._polars_ext = LogicalPandasSeries._polars_ext_class()
-        return LogicalPandasSeries._polars_ext
 
     def python_to_storage(
         self, value: Any, converter: TypeConverterProtocol | None = None
@@ -250,8 +250,10 @@ class LogicalPandasSeries(BaseLogicalType):
             Raw bytes in Arrow IPC stream format.
 
         Raises:
-            ValueError: If ``value.name`` equals the reserved sentinel, or if
-                the Series values cannot be converted to an Arrow type.
+            ValueError: If ``value.name`` equals the reserved sentinel, the Series
+                values cannot be converted to an Arrow type, the name and the index
+                names collide once written as text, or ``attrs`` cannot be written as
+                JSON.
         """
         if value.name == _SERIES_UNNAMED_SENTINEL:
             raise ValueError(
@@ -260,6 +262,7 @@ class LogicalPandasSeries(BaseLogicalType):
                 "Rename the Series before storing it."
             )
         col_name = value.name if value.name is not None else _SERIES_UNNAMED_SENTINEL
+        pandas_attrs_as_stored(value.attrs)  # refuses attrs that are not JSON
         df = value.to_frame(name=col_name)
         try:
             table = pa.Table.from_pandas(df, preserve_index=True)
@@ -269,6 +272,7 @@ class LogicalPandasSeries(BaseLogicalType):
                 f"Check for non-Arrow-serialisable values. "
                 f"Original error: {exc}"
             ) from exc
+        _require_restorable_axes(table, df)
         return _table_to_ipc_bytes(table)
 
     def storage_to_python(

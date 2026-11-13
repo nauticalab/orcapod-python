@@ -392,6 +392,29 @@ SEMANTIC_VALUES: dict[str, Any] = {
     "dict.type_key": {"__type__": "tuple", "items": [1, 2]},
     "namedtuple.xy": _POINT_XY(x=1, y=2),
     "namedtuple.yx": _POINT_YX(y=2, x=1),
+    # Added by ITL-897: pandas value hashes (pandas_dataframe_v1 / pandas_series_v1).
+    "dataframe.reordered": pd.DataFrame({"b": ["x", "y"], "a": [1, 2]}),
+    "dataframe.categorical": pd.DataFrame(
+        {"c": pd.Categorical(["x", "y", "x"], categories=["y", "x", "z"])}
+    ),
+    "dataframe.multiindex": pd.DataFrame(
+        {"a": [1, 2]},
+        index=pd.MultiIndex.from_tuples([(0, "p"), (1, "q")], names=["i", "j"]),
+    ),
+    "series.named": pd.Series([1.5, 2.5], name="metric"),
+    "series.unnamed": pd.Series([1, 2, 3]),
+    # Added by ITL-897 (review round 6): columns whose restored Arrow type is null hash as an
+    # all-null large_string column; a decimal and an object column of None hash equal.
+    "series.null_decimal": pd.Series(
+        pd.array([None, None], dtype=pd.ArrowDtype(pa.decimal128(5, 2)))
+    ),
+    "dataframe.null_object": pd.DataFrame({"c": pd.Series([None, None], dtype=object)}),
+    "series.null_arrow_null": pd.Series(
+        pd.array([None, None], dtype=pd.ArrowDtype(pa.null()))
+    ),
+    "series.null_arrow_large_string": pd.Series(
+        pd.array([None, None], dtype=pd.ArrowDtype(pa.large_string()))
+    ),
 }
 
 

@@ -59,13 +59,20 @@ BUILTINS_WITH_EMPTY_LEGACY: list[tuple[Any, str]] = [
     (uuid.UUID, "orcapod.uuid"),
     (op.File, "orcapod.file"),
     (op.Directory, "orcapod.directory"),
-    (pd.DataFrame, "pandas.dataframe"),
-    (pd.Series, "pandas.series"),
 ]
 ALL_BUILTINS = [*BUILTINS_WITH_EMPTY_LEGACY, (np.ndarray, "orcapod.numpy.ndarray")]
 
 # A library value type writes its ignore list beside the version (ITL-981).
 BUILTIN_METADATA = {"orcapod.numpy.ndarray": b'{"ignore":[],"version":1}'}
+
+# Library value types whose identifier carries an ignore list (ITL-981). pandas values
+# were stored under ``pandas.dataframe`` / ``pandas.series`` before v0.3; the current
+# names never carried empty metadata (ITL-897).
+BUILTINS_WITH_IGNORE_LIST: list[tuple[Any, str]] = [
+    (pd.DataFrame, "orcapod.pandas.dataframe"),
+    (pd.Series, "orcapod.pandas.series"),
+]
+VERSION_1_NOTHING_IGNORED = b'{"ignore":[],"version":1}'
 
 
 def _converter(context: DataContext | None = None) -> UniversalTypeConverter:
@@ -173,6 +180,21 @@ def test_builtin_identifier_is_declared_by_the_extension_type(
     assert logical_type is not None
     assert logical_type_identifier(logical_type) == LogicalTypeIdentifier(
         name, BUILTIN_METADATA.get(name, VERSION_1)
+    )
+
+
+@pytest.mark.parametrize(("python_type", "name"), BUILTINS_WITH_IGNORE_LIST)
+def test_builtin_type_with_ignore_list_writes_version_1_and_its_list(
+    python_type: Any, name: str
+) -> None:
+    """A library value type writes its version and its (default: empty) ignore list."""
+    arrow_type = _extension_type(python_type)
+    assert arrow_type.extension_name == name
+    assert arrow_type.__arrow_ext_serialize__() == VERSION_1_NOTHING_IGNORED
+    logical_type = _converter().get_logical_type(python_type)
+    assert logical_type is not None
+    assert logical_type_identifier(logical_type) == LogicalTypeIdentifier(
+        name, VERSION_1_NOTHING_IGNORED
     )
 
 
@@ -430,8 +452,6 @@ _LEGACY_STORAGE = {
     "orcapod.uuid": pa.array([uuid.UUID(int=7).bytes], pa.large_binary()),
     "orcapod.file": pa.array(["/a/f.txt"], pa.large_string()),
     "orcapod.directory": pa.array(["/a/d"], pa.large_string()),
-    "pandas.dataframe": pa.array([b"x"], pa.large_binary()),
-    "pandas.series": pa.array([b"x"], pa.large_binary()),
 }
 
 
@@ -469,6 +489,38 @@ def test_array_without_metadata_is_refused() -> None:
     )
     with pytest.raises(LogicalTypeIdentifierError):
         converter.load_logical_types(table)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "pandas.dataframe",
+        "pandas.series",
+        "orcapod.pandas.dataframe",
+        "orcapod.pandas.series",
+    ],
+)
+@pytest.mark.parametrize("metadata", [b"", None])
+def test_pandas_without_metadata_is_refused(name: str, metadata: bytes | None) -> None:
+    """A pandas column without metadata is refused under the old and the current names.
+
+    Before v0.3 pandas values were stored as ``pandas.dataframe`` / ``pandas.series`` with
+    empty metadata. Those names are no longer registered, and the current names never
+    wrote empty metadata, so neither is read as the current type or as raw bytes.
+    """
+    table = _stored_column(name.encode(), metadata, pa.array([b"x"], pa.large_binary()))
+    with pytest.raises(ValueError):
+        _converter().load_logical_types(table)
+
+
+@pytest.mark.parametrize("name", ["pandas.dataframe", "pandas.series"])
+def test_pandas_stored_under_the_old_name_with_version_1_is_refused(name: str) -> None:
+    """What an unreleased v0.3 build wrote (old name, ``{"version":1}``) is refused."""
+    table = _stored_column(
+        name.encode(), b'{"version":1}', pa.array([b"x"], pa.large_binary())
+    )
+    with pytest.raises(ValueError):
+        _converter().load_logical_types(table)
 
 
 def test_third_party_type_reads_only_what_it_declares() -> None:

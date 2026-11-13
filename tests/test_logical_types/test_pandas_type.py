@@ -19,7 +19,7 @@ class TestLogicalPandasDataFrameProtocol:
     def test_logical_type_name(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
 
-        assert LogicalPandasDataFrame().logical_type_name == "pandas.dataframe"
+        assert LogicalPandasDataFrame().logical_type_name == "orcapod.pandas.dataframe"
 
     def test_python_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
@@ -31,7 +31,7 @@ class TestLogicalPandasDataFrameProtocol:
 
         assert (
             LogicalPandasDataFrame().get_arrow_extension_type().extension_name
-            == "pandas.dataframe"
+            == "orcapod.pandas.dataframe"
         )
 
     def test_arrow_ext_storage_type(self):
@@ -48,11 +48,11 @@ class TestLogicalPandasDataFrameProtocol:
         lt = LogicalPandasDataFrame()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
-    def test_polars_ext_is_cached(self):
+    def test_polars_ext_is_the_same_type_every_time(self):
         from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
 
         lt = LogicalPandasDataFrame()
-        assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
+        assert lt.get_polars_extension_type() == lt.get_polars_extension_type()
 
 
 class TestLogicalPandasDataFrameStorage:
@@ -72,6 +72,61 @@ class TestLogicalPandasDataFrameStorage:
         df = pd.DataFrame({"bad": [_Opaque(), _Opaque()]})
         with pytest.raises(ValueError, match="cannot convert"):
             LogicalPandasDataFrame().python_to_storage(df)
+
+
+class TestNamesThatCollideAsText:
+    """Storage writes column labels and index names as text; a collision is refused.
+
+    Arrow would write two fields of one name, and the frame read back would have lost its
+    index (the levels come back as columns). So the write raises.
+    """
+
+    @pytest.mark.parametrize(
+        "frame",
+        [
+            pd.DataFrame(
+                {"a": [5]},
+                index=pd.MultiIndex.from_tuples([(0, 9)], names=[1, 2]),
+            ),
+            pd.DataFrame(
+                {"a": [5]},
+                index=pd.MultiIndex.from_tuples([(0, 9)], names=[1, "1"]),
+            ),
+            pd.DataFrame({"1": [5]}, index=pd.Index([0], name=1)),
+        ],
+        ids=["integer level names", "level names 1 and '1'", "column '1', index 1"],
+    )
+    def test_frame_is_refused(self, frame: pd.DataFrame):
+        """Index level names, or an index name and a column label, with one text."""
+        from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
+        with pytest.raises(ValueError, match="'1'"):
+            LogicalPandasDataFrame().python_to_storage(frame)
+
+    def test_labels_read_back_as_duplicates_are_refused(self):
+        """The labels ``True`` and ``False`` are written as text and both read back ``True``."""
+        from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
+        frame = pd.DataFrame({True: [1], False: [2]})
+        with pytest.raises(ValueError, match="True"):
+            LogicalPandasDataFrame().python_to_storage(frame)
+
+    def test_series_is_refused(self):
+        """A Series named ``"1"`` whose index is named ``1``: one field name twice."""
+        from orcapod.logical_types.pandas_type import LogicalPandasSeries
+
+        series = pd.Series([5], name="1", index=pd.Index([0], name=1))
+        with pytest.raises(ValueError, match="'1'"):
+            LogicalPandasSeries().python_to_storage(series)
+
+    def test_index_named_like_a_column_is_stored(self):
+        """Not a collision: Arrow gives the index its own field name."""
+        from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
+        logical = LogicalPandasDataFrame()
+        frame = pd.DataFrame({"a": [5]}, index=pd.Index([0], name="a"))
+        back = logical.storage_to_python(logical.python_to_storage(frame))
+        pd.testing.assert_frame_equal(back, frame)
 
 
 class TestLogicalPandasDataFrameRoundTrip:
@@ -140,7 +195,7 @@ class TestLogicalPandasSeriesProtocol:
     def test_logical_type_name(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
 
-        assert LogicalPandasSeries().logical_type_name == "pandas.series"
+        assert LogicalPandasSeries().logical_type_name == "orcapod.pandas.series"
 
     def test_python_type(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
@@ -152,7 +207,7 @@ class TestLogicalPandasSeriesProtocol:
 
         assert (
             LogicalPandasSeries().get_arrow_extension_type().extension_name
-            == "pandas.series"
+            == "orcapod.pandas.series"
         )
 
     def test_arrow_ext_storage_type(self):
@@ -169,11 +224,11 @@ class TestLogicalPandasSeriesProtocol:
         lt = LogicalPandasSeries()
         assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
-    def test_polars_ext_is_cached(self):
+    def test_polars_ext_is_the_same_type_every_time(self):
         from orcapod.logical_types.pandas_type import LogicalPandasSeries
 
         lt = LogicalPandasSeries()
-        assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
+        assert lt.get_polars_extension_type() == lt.get_polars_extension_type()
 
 
 class TestLogicalPandasSeriesRoundTrip:
