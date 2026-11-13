@@ -21,7 +21,7 @@ import contextlib
 import logging
 import uuid
 from abc import abstractmethod
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from orcapod import contexts
@@ -29,7 +29,16 @@ from orcapod.channels import Channel, ReadableChannel, WritableChannel
 from orcapod.config import OrcapodConfig
 from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.base import (
+    StreamBase,
+    check_head_size,
+    head_column_config,
+)
+from orcapod.core.streams.head import (
+    BLUEPRINT_NOTE,
+    HeadStatus,
+    StreamHead,
+)
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.core.datagrams.tag_data import EmptyData, Tag
 from orcapod.errors import (
@@ -224,6 +233,11 @@ class FunctionNodeBase(StreamBase):
     Carries all non-DB state: identity, schema, upstreams, and properties
     shared by both the blueprint and the execution variant.
     """
+
+    # Set by each subclass's ``__init__``: the output table and content hashes that
+    # ``as_table`` builds once.
+    _cached_output_table: "pa.Table | None"
+    _cached_content_hash_column: "pa.Array[Any] | None"
 
     def __init__(
         self,
@@ -510,29 +524,18 @@ class FunctionNodeBase(StreamBase):
             self._cached_output_table = self._table_from_pairs(list(self.iter_data()))
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        output_table = arrow_utils.apply_column_config(
-            self._cached_output_table, column_config, self.keys()[0]
-        )
 
-        if column_config.content_hash:
+        def all_content_hashes() -> "pa.Array[Any]":
             if self._cached_content_hash_column is None:
-                content_hashes = []
-                for tag, data in self.iter_data():
-                    content_hashes.append(data.content_hash().to_string())
                 self._cached_content_hash_column = pa.array(
-                    content_hashes, type=pa.large_string()
+                    [data.content_hash().to_string() for _, data in self.iter_data()],
+                    type=pa.large_string(),
                 )
-            assert self._cached_content_hash_column is not None
-            hash_column_name = (
-                "_content_hash"
-                if column_config.content_hash is True
-                else column_config.content_hash
-            )
-            output_table = output_table.append_column(
-                hash_column_name, self._cached_content_hash_column
-            )
+            return self._cached_content_hash_column
 
-        return output_table
+        return self._shape_table(
+            self._cached_output_table, column_config, all_content_hashes
+        )
 
     def _table_from_pairs(
         self, pairs: "list[tuple[TagProtocol, DataProtocol]]"
@@ -575,6 +578,90 @@ class FunctionNodeBase(StreamBase):
         except InputValidationError as exc:
             raise InputValidationError(f"Function node {self.label!r}: {exc}") from exc
         return arrow_utils.hstack_tables(tag_table, data_table)
+
+    def _shape_table(
+        self,
+        table: "pa.Table",
+        column_config: ColumnConfig,
+        content_hashes: "Callable[[], pa.Array[Any]]",
+    ) -> "pa.Table":
+        """Return ``table`` with the column groups of ``column_config``.
+
+        Args:
+            table: Output rows with every column group (``_table_from_pairs``).
+            column_config: The column groups to keep.
+            content_hashes: Returns the content hash of each row of ``table``; called
+                only when ``column_config`` asks for them.
+        """
+        output_table = arrow_utils.apply_column_config(
+            table, column_config, self.keys()[0]
+        )
+        if column_config.content_hash:
+            hash_column_name = (
+                "_content_hash"
+                if column_config.content_hash is True
+                else column_config.content_hash
+            )
+            output_table = output_table.append_column(
+                hash_column_name, content_hashes()
+            )
+        return output_table
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return no rows: a node of this kind holds no data. See ``StreamBase.head``."""
+        check_head_size(n)
+        return self._head_without_rows(
+            head_column_config(columns, all_info),
+            HeadStatus.UNAVAILABLE,
+            note=BLUEPRINT_NOTE,
+        )
+
+    def _head_of_pairs(
+        self,
+        pairs: "Sequence[tuple[TagProtocol, DataProtocol | None]]",
+        n: int,
+        config: ColumnConfig,
+        origin: str,
+    ) -> StreamHead:
+        """Return the first ``n`` of ``pairs`` as this node's head.
+
+        A ``None`` output (a filtered input) is not a row. An ``EmptyData`` placeholder
+        (a result kept in an ephemeral store that is gone) has no values to show: it is
+        left out and counted in the note.
+        """
+        rows = [
+            (t, d) for t, d in pairs if d is not None and not isinstance(d, EmptyData)
+        ]
+        missing = sum(1 for _, d in pairs if isinstance(d, EmptyData))
+        shown = rows[:n]
+        table = self._shape_table(
+            self._table_from_pairs(shown),
+            config,
+            lambda: pa.array(
+                [data.content_hash().to_string() for _, data in shown],
+                type=pa.large_string(),
+            ),
+        )
+        note = None
+        if missing:
+            note = (
+                f"{missing:,} {'result' if missing == 1 else 'results'} not shown: "
+                "kept in an ephemeral store that is gone"
+            )
+        return StreamHead.of_rows(
+            self,
+            table,
+            tag_columns=self.keys(columns=config)[0],
+            total_rows=len(rows),
+            origin=origin,
+            note=note,
+        )
 
     def __repr__(self) -> str:
         return (
@@ -2901,6 +2988,81 @@ class FunctionJobNode(FunctionNodeBase):
             ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
+
+    # ------------------------------------------------------------------
+    # Head
+    # ------------------------------------------------------------------
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first rows the node holds or has stored; never runs the function.
+
+        After a run (or ``execute``) the rows are the node's results in memory, the
+        first of what ``as_table`` returns. Otherwise they are the first of its stored
+        rows: the node's whole stored slice is read and nothing is kept on the node.
+        With nothing stored, there are no rows. See ``StreamBase.head``.
+
+        Raises:
+            RuntimeError: If the node was loaded and the attached store does not hold
+                the records its saved run stored (the wrong store).
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        status = self.load_status
+        if status == LoadStatus.UNAVAILABLE:
+            return self._head_without_rows(
+                config, HeadStatus.UNAVAILABLE, note="no store attached"
+            )
+        current = status == LoadStatus.CACHE_ONLY or not self.is_stale
+        if current and self._cached_output_datas:
+            return self._head_of_pairs(
+                list(self._cached_output_datas.values()), n, config, origin="held"
+            )
+        return self._head_from_store(n, config)
+
+    def _head_from_store(self, n: int, config: ColumnConfig) -> StreamHead:
+        """Return the first ``n`` of this node's stored rows.
+
+        Reads the node's whole stored slice (pipeline table joined with the result
+        table; no bounded read exists yet) and keeps nothing on the node.
+        """
+        if self._function_pod is None:
+            # A loaded node: its table is built from the stored Arrow records.
+            self._require_expected_records()
+            fetched = self._fetch_joined_records()
+            stored = None if fetched is None else self._stored_rows_stream(fetched)
+            stored_ids = set(stored[0]) if stored is not None else set()
+            missing = 0
+            if fetched is not None:
+                missing = sum(
+                    1 for k in fetched.empty_data_tokens if k not in stored_ids
+                )
+            note = (
+                f"{missing:,} {'result' if missing == 1 else 'results'} not shown: kept "
+                "in an ephemeral store, which is not saved with the job"
+                if missing
+                else None
+            )
+            if stored is not None:
+                return (
+                    stored[1]
+                    .head(n, columns=config)
+                    .for_stream(self, origin="stored", note=note)
+                )
+            return self._head_without_rows(config, HeadStatus.NOTHING_STORED, note=note)
+        if self._cached_function_pod is None:
+            return self._head_without_rows(config, HeadStatus.NOT_COMPUTED)
+        entries = list(self._load_cached_entries().values())
+        if not any(data is not None for _, data in entries):
+            return self._head_without_rows(config, HeadStatus.NOTHING_STORED)
+        return self._head_of_pairs(entries, n, config, origin="stored")
 
     # ------------------------------------------------------------------
     # Iteration

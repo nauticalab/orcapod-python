@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import itertools
 import logging
 from collections.abc import Collection, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
 from orcapod.core.datagrams import Data, Tag
-from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.base import (
+    StreamBase,
+    check_head_size,
+    head_column_config,
+)
+from orcapod.core.streams.head import StreamHead
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
@@ -224,14 +230,55 @@ class ArrowTableStream(StreamBase):
         This is useful for converting the stream to a table format.
         """
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        return self._assemble_table(columns_config, limit=None)
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first ``n`` rows of the table this stream holds.
+
+        Only those rows are assembled: content hashes, when asked for, are computed for
+        them alone. See ``StreamBase.head``.
+        """
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        return StreamHead.of_rows(
+            self,
+            self._assemble_table(config, limit=n),
+            tag_columns=self.keys(columns=config)[0],
+            total_rows=self._table.num_rows,
+        )
+
+    def _assemble_table(
+        self, columns_config: ColumnConfig, limit: int | None
+    ) -> "pa.Table":
+        """Return the stream's rows with the column groups of ``columns_config``.
+
+        Args:
+            columns_config: The column groups to include, and whether to sort by tags.
+            limit: Assemble only the first ``limit`` rows; ``None`` for all of them.
+        """
         output_table = self._table
+        data_context_table = self._data_context_table
+        source_info_table = self._source_info_table
+        if limit is not None:
+            output_table = output_table.slice(0, limit)
+            data_context_table = data_context_table.slice(0, limit)
+            source_info_table = source_info_table.slice(0, limit)
         if columns_config.content_hash:
             hash_column_name = (
                 "_content_hash"
                 if columns_config.content_hash is True
                 else columns_config.content_hash
             )
-            content_hashes = [str(data.content_hash()) for _, data in self.iter_data()]
+            rows = self.iter_data()
+            if limit is not None:
+                rows = itertools.islice(rows, limit)
+            content_hashes = [str(data.content_hash()) for _, data in rows]
             output_table = output_table.append_column(
                 pa.field(hash_column_name, pa.large_string(), nullable=False),
                 pa.array(content_hashes, type=pa.large_string()),
@@ -241,9 +288,9 @@ class ArrowTableStream(StreamBase):
             output_table = output_table.drop_columns(list(self._system_tag_columns))
         table_stack = (output_table,)
         if columns_config.context:
-            table_stack += (self._data_context_table,)
+            table_stack += (data_context_table,)
         if columns_config.source:
-            table_stack += (self._source_info_table,)
+            table_stack += (source_info_table,)
 
         table = arrow_utils.hstack_tables(*table_stack)
 

@@ -16,6 +16,44 @@ if TYPE_CHECKING:
     from orcapod.protocols.core_protocols.pod import PodProtocol
 
 
+class StreamHeadProtocol(Protocol):
+    """The readily available first rows of a stream, as ``head`` returns them.
+
+    ``orcapod.core.streams.head.StreamHead`` is the implementation.
+    """
+
+    @property
+    def table(self) -> "pa.Table":
+        """The rows, with the exact Arrow types the stream gives them."""
+        ...
+
+    @property
+    def status(self) -> str:
+        """Where the rows came from, or why there are none (a ``HeadStatus``)."""
+        ...
+
+    @property
+    def total_rows(self) -> int | None:
+        """The stream's row count when it is known without computing."""
+        ...
+
+    def header(self) -> str:
+        """The one-line description shown above the rows."""
+        ...
+
+    def as_table(self) -> "pa.Table":
+        """The rows as a PyArrow table."""
+        ...
+
+    def as_polars_df(self) -> "pl.DataFrame":
+        """The rows as a Polars DataFrame."""
+        ...
+
+    def _repr_html_(self) -> str:
+        """The notebook preview of the rows."""
+        ...
+
+
 @runtime_checkable
 class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
     """
@@ -154,6 +192,25 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
 
         Returns:
             pa.Table: Complete stream data as a PyArrow Table
+        """
+        ...
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "StreamHeadProtocol":
+        """Return at most ``n`` readily available rows, without computing.
+
+        The rows are ones the stream already holds, has cached from an earlier
+        computation, has stored, or can read with a bounded read. It never calls a
+        function, runs an operator, delivers a side effect, polls or writes.
+
+        Returns:
+            StreamHead: The rows, and a status that tells an empty result from one
+            that is not computed.
         """
         ...
 

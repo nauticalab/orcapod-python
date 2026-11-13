@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from datetime import datetime, timezone
 from collections.abc import Iterator
@@ -9,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import FunctionPodStream, WrappedFunctionPod
+from orcapod.core.streams.head import StreamHead
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 from orcapod.contexts.stored import StaleTables
@@ -451,12 +453,35 @@ class _CachedFunctionPodStream(FunctionPodStream):
     """
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-        keep = CachedFunctionPod.RESULT_COMPUTED_FLAG
         for tag, data in super().iter_data():
-            stored = [name for name in data.meta_columns if name != keep]
-            if stored:
-                data = data.drop_meta_columns(*stored)
-            yield tag, data
+            yield tag, _without_stored_meta(data)
+
+    def _computed_prefix(
+        self, limit: int
+    ) -> tuple[list[tuple[TagProtocol, DataProtocol]], int]:
+        shown, total = super()._computed_prefix(limit)
+        return [(tag, _without_stored_meta(data)) for tag, data in shown], total
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first computed rows, with the columns ``as_table`` gives.
+
+        The pod's result store is not looked up: that needs the input rows' hashes,
+        i.e. reading the input. See ``FunctionPodStream.head``.
+        """
+        head = super().head(n, columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.meta or column_config.all_info:
+            return head
+        table = head.table.drop_columns(
+            [n for n in head.table.column_names if n.startswith(constants.META_PREFIX)]
+        )
+        return dataclasses.replace(head, table=table)
 
     def as_table(
         self,
@@ -471,3 +496,10 @@ class _CachedFunctionPodStream(FunctionPodStream):
         return table.drop_columns(
             [n for n in table.column_names if n.startswith(constants.META_PREFIX)]
         )
+
+
+def _without_stored_meta(data: DataProtocol) -> DataProtocol:
+    """Return ``data`` with only the ``__computed`` meta column of its stored ones."""
+    keep = CachedFunctionPod.RESULT_COMPUTED_FLAG
+    stored = [name for name in data.meta_columns if name != keep]
+    return data.drop_meta_columns(*stored) if stored else data

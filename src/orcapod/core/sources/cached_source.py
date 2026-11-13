@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
@@ -8,6 +9,12 @@ from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.core.streams.base import check_head_size, schema_requires_io
+from orcapod.core.streams.head import (
+    HeadStatus,
+    StreamHead,
+    head_of,
+)
 from orcapod.contexts.stored import (
     keep_rows_of_data_context,
     require_same_data_context,
@@ -404,6 +411,43 @@ class CachedSource(RootSource):
         self._ensure_stream()
         assert self._cached_stream is not None
         return self._cached_stream.as_table(columns=columns, all_info=all_info)
+
+    def _schema_requires_io(self, config: ColumnConfig) -> bool:
+        """Whether reading the schema with ``config`` would poll: as for the wrapped source."""
+        return schema_requires_io(self._source, config)
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first rows without reading or writing the cache.
+
+        Once the source has been used, its merged stream is in memory and this is a slice
+        of it. Before that its rows are not known: they are the cache's earlier rows
+        merged with the wrapped source's, and reading them writes the cache. The head
+        then has the wrapped source's columns, no rows and ``NOT_COMPUTED`` (or the
+        wrapped source's own reason when it has none to give).
+        """
+        check_head_size(n)
+        if self._cached_stream is not None and not self.is_stale:
+            return head_of(
+                self._cached_stream.head(n, columns=columns, all_info=all_info), self
+            )
+        wrapped = head_of(
+            self._source.head(0, columns=columns, all_info=all_info), self
+        )
+        if wrapped.status is not HeadStatus.ROWS:
+            return wrapped
+        return StreamHead.without_rows(
+            self,
+            HeadStatus.NOT_COMPUTED,
+            wrapped.table,
+            tag_columns=wrapped.tag_columns,
+            note="not read yet; as_table() or iter_data() reads and updates the cache",
+        )
 
     def get_all_records(
         self,

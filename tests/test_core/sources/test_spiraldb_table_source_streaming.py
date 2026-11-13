@@ -608,15 +608,33 @@ class TestNotebookPreview:
         return [scan.kwargs.get("limit") for scan in fake_pyspiral.scan_log]
 
     def test_display_reads_one_head_of_ten_rows(self, big):
-        """``_repr_html_`` reads one 10-row head, headed with the table's size."""
+        """The notebook display is ``head()``: one 10-row scan, headed with the size."""
         source = SpiralDBTableSource(_PROJECT, "big", label="big")
 
         html = source._repr_html_()
 
         assert self._scan_limits() == [10]
-        assert html.startswith("SpiralDBTableSource[big] — first 10 rows of about 25\n")
+        assert "SpiralDBTableSource[big] — first 10 rows of about 25" in html
         assert "shape: (10, 3)" in html
-        assert "*subject_id" in html and "*timestamp" in html
+        assert "tags: subject_id, timestamp" in html
+
+    def test_head_reads_one_bounded_scan(self, big):
+        """``head()`` reads one scan of at most 10 rows and says the table's size."""
+        source = SpiralDBTableSource(_PROJECT, "big", label="big")
+
+        head = source.head()
+
+        assert self._scan_limits() == [10]
+        assert head.header() == "SpiralDBTableSource[big] — first 10 rows of about 25"
+        assert (head.total_rows, head.total_is_estimate) == (25, True)
+        assert len(head) == 10
+
+    def test_an_unlabelled_source_is_shown_by_its_table_name(self, big):
+        """With no label, the header names the table; the label itself is unchanged."""
+        source = SpiralDBTableSource(_PROJECT, "big")
+
+        assert source.head().header().startswith("SpiralDBTableSource[big] — ")
+        assert source.label == "SpiralDBTableSource"
 
     def test_a_table_above_the_cap_previews_without_raising(self, big):
         """A source refused by its cap still previews a 10-row head."""
@@ -632,68 +650,57 @@ class TestNotebookPreview:
 
     def test_a_small_table_shows_all_its_rows(self, project):
         """A table of fewer than 10 rows is shown whole, saying so."""
-        html = SpiralDBTableSource(_PROJECT, "event")._repr_html_()
+        head = SpiralDBTableSource(_PROJECT, "event").head()
 
         assert self._scan_limits() == [10]
-        assert " — all 5 rows\n" in html
-        assert "shape: (5, 3)" in html
+        assert head.header().endswith(" — all 5 rows")
+        assert len(head) == 5
 
     def test_the_sources_own_limit_bounds_the_head(self, big):
         """A ``limit`` below 10 bounds the head, shown as all rows."""
-        html = SpiralDBTableSource(_PROJECT, "big", limit=3)._repr_html_()
+        head = SpiralDBTableSource(_PROJECT, "big", limit=3).head()
 
         assert self._scan_limits() == [3]
-        assert " — all 3 rows\n" in html
+        assert head.header().endswith(" — all 3 rows")
 
     def test_a_limit_above_the_head_is_the_row_count_shown(self, big):
         """A ``limit`` above 10 reads 10 rows and is shown as the row count."""
-        html = SpiralDBTableSource(_PROJECT, "big", limit=15)._repr_html_()
+        head = SpiralDBTableSource(_PROJECT, "big", limit=15).head()
 
         assert self._scan_limits() == [10]
-        assert " — first 10 rows of about 15\n" in html
+        assert head.header().endswith(" — first 10 rows of about 15")
 
     def test_where_is_applied_and_named(self, big):
         """A ``where`` restricts the head and is named in the header."""
-        html = SpiralDBTableSource(
-            _PROJECT, "big", where={"subject_id": "m1"}
-        )._repr_html_()
+        head = SpiralDBTableSource(_PROJECT, "big", where={"subject_id": "m1"}).head()
 
         assert self._scan_limits() == [10]
-        assert (
+        assert head.header().endswith(
             " — first 10 matching rows (where subject_id='m1'); "
-            "the table has about 25 rows\n"
-        ) in html
+            "the table has about 25 rows"
+        )
 
-    def test_the_header_is_escaped_in_both_displays(self, project):
+    def test_the_header_is_escaped_in_the_display(self, project):
         """A ``where`` value with markup characters is shown as text, not markup."""
         project.create_table("default.marked", key_schema=_KEYS).write(
             _rows(list(range(1, 26)), subject="<b>")
         )
         source = SpiralDBTableSource(_PROJECT, "marked", where={"subject_id": "<b>"})
 
-        for shown in (source._repr_html_(), source.view()._repr_html_()):
-            header = shown.splitlines()[0]
-            assert header.endswith(
-                "first 10 matching rows (where subject_id='&lt;b&gt;'); "
-                "the table has about 25 rows"
-            )
+        html = source._repr_html_()
 
-    def test_view_reads_the_same_head(self, big):
-        """``view()`` reads the same 10-row head as the notebook display."""
-        source = SpiralDBTableSource(_PROJECT, "big", label="big")
+        assert (
+            "first 10 matching rows (where subject_id='&lt;b&gt;'); "
+            "the table has about 25 rows"
+        ) in html
+        assert "<b>'" not in html
 
-        html = source.view()._repr_html_()
-
-        assert self._scan_limits() == [10]
-        assert html.startswith("SpiralDBTableSource[big] — first 10 rows of about 25\n")
-        assert "shape: (10, 3)" in html
-
-    def test_view_with_all_info_shows_system_columns(self, big):
-        """``view(all_info=True)`` shows the system tag columns."""
-        html = SpiralDBTableSource(_PROJECT, "big").view(all_info=True)._repr_html_()
+    def test_head_with_all_info_shows_system_columns(self, big):
+        """``head(all_info=True)`` shows the system tag columns, from the same scan."""
+        head = SpiralDBTableSource(_PROJECT, "big").head(all_info=True)
 
         assert self._scan_limits() == [10]
-        assert "_tag_record_id::" in html
+        assert any(c.startswith("_tag_record_id::") for c in head.table.column_names)
 
     def test_repr_reads_nothing(self, big):
         """``repr`` is the class name and scans nothing."""
@@ -706,17 +713,17 @@ class TestNotebookPreview:
         self, big, monkeypatch
     ):
         # About the non-public switch: the fallback kept for the ITL-991 ruling.
-        """With the preview off, both displays show the empty schema, unscanned."""
+        """With the preview off, ``head()`` shows the empty schema, unscanned."""
         monkeypatch.setattr(SpiralDBTableSource, "_preview_reads_rows", False)
         source = SpiralDBTableSource(_PROJECT, "big", label="big")
 
+        head = source.head()
         html = source._repr_html_()
-        view = source.view()._repr_html_()
 
         assert fake_pyspiral.scan_log == []
-        for shown in (html, view):
-            assert shown.startswith(
-                "SpiralDBTableSource[big] — rows not read; the table has about 25 rows\n"
-            )
-            assert "shape: (0, 3)" in shown
-        assert "*subject_id" in html
+        assert head.header() == (
+            "SpiralDBTableSource[big] — rows not read; the table has about 25 rows"
+        )
+        assert head.table.num_rows == 0
+        assert head.table.num_columns == 3
+        assert "tags: subject_id, timestamp" in html

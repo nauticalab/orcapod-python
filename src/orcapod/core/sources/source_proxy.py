@@ -13,6 +13,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
+from orcapod.core.streams.head import (
+    HeadStatus,
+    StreamHead,
+    head_of,
+)
+from orcapod.core.streams.base import (
+    check_head_size,
+    head_column_config,
+)
 from orcapod.protocols.core_protocols import SourceProtocol
 from orcapod.types import ContentHash, Schema
 
@@ -201,6 +210,26 @@ class SourceProxy(RootSource):
         all_info: bool = False,
     ) -> pa.Table:
         return self._require_delegate().as_table(columns=columns, all_info=all_info)
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the bound source's head, or no rows when no live source is bound."""
+        if self._delegate is not None:
+            return head_of(
+                self._delegate.head(n, columns=columns, all_info=all_info), self
+            )
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        return self._head_without_rows(
+            config,
+            HeadStatus.UNAVAILABLE,
+            note="source not available; bind a live source",
+        )
 
     def resolve_field(self, record_id: str, field_name: str) -> Any:
         """Delegate to bound source, or raise."""

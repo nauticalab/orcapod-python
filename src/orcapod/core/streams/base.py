@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import html
+import dataclasses
 import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping
@@ -8,6 +8,13 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import TraceableBase
+from orcapod.core.streams.head import (
+    SCHEMA_NEEDS_POLL_NOTE,
+    HeadStatus,
+    StreamHead,
+    default_note,
+    render_error_html,
+)
 from orcapod.protocols.core_protocols import (
     DataProtocol,
     PodProtocol,
@@ -15,6 +22,7 @@ from orcapod.protocols.core_protocols import (
     TagProtocol,
 )
 from orcapod.types import ColumnConfig, Schema
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -31,6 +39,59 @@ else:
 # from types import MappingProxyType
 
 logger = logging.getLogger(__name__)
+
+
+def schema_requires_io(stream: object, config: ColumnConfig) -> bool:
+    """Whether reading ``stream``'s schema with ``config`` would read or poll a source.
+
+    A stream that does not say (``_schema_requires_io``) is taken not to.
+
+    Args:
+        stream: The stream whose schema would be read.
+        config: The column groups the schema would be read with: source info, meta,
+            context and content hashes may be known only from rows.
+    """
+    check = getattr(stream, "_schema_requires_io", None)
+    return bool(check(config)) if callable(check) else False
+
+
+def check_head_size(n: int) -> None:
+    """Check the row count given to ``head``.
+
+    Raises:
+        TypeError: If ``n`` is not an ``int``.
+        ValueError: If ``n`` is negative.
+    """
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise TypeError(f"head() takes an int number of rows, got {type(n).__name__}")
+    if n < 0:
+        raise ValueError(f"head() takes a non-negative number of rows n, got {n}")
+
+
+def head_column_config(
+    columns: ColumnConfig | dict[str, Any] | None, all_info: bool
+) -> ColumnConfig:
+    """Return the column configuration ``head`` uses for ``columns`` and ``all_info``.
+
+    The column groups mean what they mean for ``as_table``. ``head`` returns rows in
+    stream order, so ``all_info`` does not sort, and asking for ``sort_by_tags`` raises.
+
+    Raises:
+        ValueError: If ``columns`` asks for ``sort_by_tags``.
+    """
+    if isinstance(columns, ColumnConfig):
+        asked_to_sort = bool(columns.sort_by_tags)
+    elif isinstance(columns, Mapping):
+        asked_to_sort = bool(columns.get("sort_by_tags", False))
+    else:
+        asked_to_sort = False
+    if asked_to_sort:
+        raise ValueError(
+            "head() returns the first rows in stream order and cannot sort them by "
+            "tags; sort the result of as_table() instead"
+        )
+    config = ColumnConfig.handle_config(columns, all_info=all_info)
+    return dataclasses.replace(config, sort_by_tags=False)
 
 
 class StreamBase(TraceableBase):
@@ -441,66 +502,88 @@ class StreamBase(TraceableBase):
         """
         return [e for e in self.iter_data()]
 
-    def _preview(
+    def head(
         self,
+        n: int = 10,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "tuple[pl.DataFrame, str | None]":
-        """Return the rows a notebook display of the stream shows, and a note on them.
+    ) -> StreamHead:
+        """Return at most ``n`` rows that are readily available, without computing.
 
-        ``_repr_html_`` and ``view`` show what this returns. The default is every row of
-        the stream and no note. A stream whose rows are costly to read overrides it to
-        show fewer, and says so in the note.
+        The rows are ones the stream already holds, has cached from an earlier
+        computation, has stored, or can read with a bounded read of its table. ``head``
+        never calls a function, runs an operator, delivers a side effect, polls a source
+        or writes anything. When rows are shown, they are the first ``n`` rows that
+        ``as_table()`` would return. The notebook preview of a stream is its ``head()``.
+
+        This default shows no rows: a stream class that can serve rows without computing
+        overrides it. The zero-row table then has the stream's columns, typed from its
+        declared (Python) schema, so a column's Arrow width can differ from the one the
+        computed stream will have (``int`` shows as ``int64``).
 
         Args:
-            columns: Column configuration, as for ``as_table``.
-            all_info: Include all column groups, as for ``as_table``.
+            n: The largest number of rows to return.
+            columns: Column groups to include, as for ``as_table``. ``sort_by_tags`` is
+                not accepted: the rows come in stream order.
+            all_info: Include every column group, as for ``as_table`` (without sorting).
 
         Returns:
-            The rows to show and a note for the header line, or ``None`` for no note.
-        """
-        return self.as_polars_df(columns=columns, all_info=all_info), None
+            A ``StreamHead`` with the rows and a ``status`` that tells an empty result
+            from one that is not computed.
 
-    def _preview_header(self, note: str | None) -> str:
-        """Return the header line a notebook display puts above the rows, HTML-escaped."""
-        header = f"{self.__class__.__name__}[{self.label}]"
-        return html.escape(
-            header if note is None else f"{header} — {note}", quote=False
+        Raises:
+            TypeError: If ``n`` is not an ``int``.
+            ValueError: If ``n`` is negative or ``columns`` asks for ``sort_by_tags``.
+        """
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        return self._head_without_rows(config, HeadStatus.NOT_COMPUTED)
+
+    def _head_without_rows(
+        self,
+        config: ColumnConfig,
+        status: HeadStatus,
+        note: str | None = None,
+    ) -> StreamHead:
+        """Return a head with no rows: the stream's columns from its declared schema.
+
+        When reading the schema would poll a source (``schema_requires_io``), the head
+        has no columns either, and the note says so.
+        """
+        if schema_requires_io(self, config):
+            return StreamHead.without_rows(
+                self,
+                status,
+                pa.table({}),
+                tag_columns=(),
+                note=f"{note or default_note(status)}; {SCHEMA_NEEDS_POLL_NOTE}",
+            )
+        tag_schema, data_schema = self.output_schema(columns=config)
+        table = arrow_utils.make_empty_table(
+            {**tag_schema, **data_schema}, self.data_context.type_converter
+        )
+        return StreamHead.without_rows(
+            self, status, table, tag_columns=tuple(tag_schema.keys()), note=note
         )
 
-    def _repr_html_(self) -> str:
-        df, note = self._preview()
-        # reorder columns
-        new_column_order = [c for c in df.columns if c in self.keys()[0]] + [
-            c for c in df.columns if c not in self.keys()[0]
-        ]
-        df = df[new_column_order]
-        tag_map = {t: f"*{t}" for t in self.keys()[0]}
-        # TODO: construct repr html better
-        df = df.rename(tag_map)
-        return self._preview_header(note) + "\n" + df._repr_html_()
+    def _display_name(self) -> str:
+        """The name a preview header shows: the label. Never used as an identity."""
+        return self.label
 
-    def view(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "StreamView":
-        df, note = self._preview(columns=columns, all_info=all_info)
-        tag_map = {t: f"*{t}" for t in self.keys()[0]}
-        # TODO: construct repr html better
-        df = df.rename(tag_map)
-        return StreamView(self, df, self._preview_header(note))
+    def _schema_requires_io(self, config: ColumnConfig) -> bool:
+        """Whether reading this stream's schema with ``config`` would read or poll a source.
 
-
-class StreamView:
-    def __init__(
-        self, stream: StreamBase, view_df: "pl.DataFrame", header: str
-    ) -> None:
-        self._stream = stream
-        self._view_df = view_df
-        self._header = header
+        True when an upstream's would: a ``PollingSource`` that has not polled yet
+        answers its schema only by polling when it declared no schema, or when
+        ``config`` asks for a column group known only from rows.
+        """
+        return any(schema_requires_io(upstream, config) for upstream in self.upstreams)
 
     def _repr_html_(self) -> str:
-        return self._header + "\n" + self._view_df._repr_html_()
+        """Render ``head()`` for a notebook; never computes."""
+        try:
+            head = self.head()
+        except Exception as error:  # noqa: BLE001 - a display hook must not raise
+            return render_error_html(self, error)
+        return head._repr_html_()

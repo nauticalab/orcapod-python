@@ -534,23 +534,22 @@ class TestArrowTableStreamNullablePreservation:
 
 
 class TestNotebookDisplay:
-    """A stream shown in a notebook renders every row, tag columns first and marked."""
+    """A stream shown in a notebook renders its ``head()``: the first rows, tags first."""
 
-    def test_repr_html_is_the_header_and_every_row(self):
+    def test_repr_html_is_the_rendered_head(self):
+        """The display is ``head()`` rendered: header, tag names, the first 10 rows."""
         stream = make_table_stream(n_rows=25)
         stream.label = "numbers"
 
         html = stream._repr_html_()
 
-        frame = stream.as_polars_df()
-        expected = frame.select(["id", "value"]).rename({"id": "*id"})
-        assert html == "ArrowTableStream[numbers]\n" + expected._repr_html_()
+        assert html == stream.head()._repr_html_()
+        assert "ArrowTableStream[numbers] — first 10 of 25 rows" in html
+        assert "tags: id" in html
+        assert "shape: (10, 2)" in html
 
-    def test_view_is_the_header_and_every_row(self):
+    def test_head_is_the_first_rows_of_the_table(self):
+        """``head(n)`` holds the first ``n`` rows of ``as_table()``."""
         stream = make_table_stream(n_rows=25)
-        stream.label = "numbers"
 
-        html = stream.view()._repr_html_()
-
-        expected = stream.as_polars_df().rename({"id": "*id"})
-        assert html == "ArrowTableStream[numbers]\n" + expected._repr_html_()
+        assert stream.head(5).table.equals(stream.as_table().slice(0, 5))

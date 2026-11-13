@@ -16,9 +16,21 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
+from orcapod.core.streams.base import schema_requires_io
+from orcapod.core.streams.head import (
+    HeadStatus,
+    StreamHead,
+    head_of,
+    render_error_html,
+)
+from orcapod.core.streams.base import (
+    check_head_size,
+    head_column_config,
+)
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
+from orcapod.utils import arrow_utils
 from orcapod.utils.arrow_utils import system_tag_column_names
 from orcapod.utils.schema_utils import compute_source_schema_hash
 
@@ -290,6 +302,44 @@ class SourceNodeBase(TraceableBase, ABC):
             f"SourceNode '{self._name}' is not bound to a concrete source. "
             "Use PipelineJob.bind() to attach data before calling as_table()."
         )
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return no rows: an input slot holds no data until a source is bound.
+
+        See ``StreamBase.head``.
+        """
+        check_head_size(n)
+        return self._head_without_rows(
+            head_column_config(columns, all_info),
+            HeadStatus.UNAVAILABLE,
+            note="input slot; bind a source",
+        )
+
+    def _head_without_rows(
+        self, config: ColumnConfig, status: HeadStatus, note: str | None = None
+    ) -> StreamHead:
+        """Return a head with no rows: the slot's columns from its declared schema."""
+        tag_schema, data_schema = self.output_schema(columns=config)
+        table = arrow_utils.make_empty_table(
+            {**tag_schema, **data_schema}, self.data_context.type_converter
+        )
+        return StreamHead.without_rows(
+            self, status, table, tag_columns=tuple(tag_schema.keys()), note=note
+        )
+
+    def _repr_html_(self) -> str:
+        """Render ``head()`` for a notebook; never computes."""
+        try:
+            head = self.head()
+        except Exception as error:  # noqa: BLE001 - a display hook must not raise
+            return render_error_html(self, error)
+        return head._repr_html_()
 
     async def async_iter_data(self):
         """Asynchronous iterator over (tag, data) pairs.
@@ -569,6 +619,31 @@ class SourceJobNode(SourceNodeBase):
                 "Call job.bind(sources={'<name>': source}) before running."
             )
         return self._bound_source.iter_data()
+
+    def _schema_requires_io(self, config: ColumnConfig) -> bool:
+        """Whether reading the schema with ``config`` would poll: as for the bound source."""
+        return self._bound_source is not None and schema_requires_io(
+            self._bound_source, config
+        )
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the bound source's head, or no rows when no source is bound."""
+        if self._bound_source is None:
+            check_head_size(n)
+            return self._head_without_rows(
+                head_column_config(columns, all_info),
+                HeadStatus.UNAVAILABLE,
+                note="no source bound",
+            )
+        return head_of(
+            self._bound_source.head(n, columns=columns, all_info=all_info), self
+        )
 
     async def async_iter_data(
         self,

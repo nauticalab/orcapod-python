@@ -17,7 +17,16 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.core.base import TraceableBase
 from orcapod.core.nodes.function_node import _build_record_id_preimage
-from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.base import (
+    StreamBase,
+    check_head_size,
+    head_column_config,
+)
+from orcapod.core.streams.head import (
+    SIDE_EFFECTS_NOTE,
+    HeadStatus,
+    StreamHead,
+)
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.errors import (
     StoreError,
@@ -147,6 +156,20 @@ class SideEffectPodStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return self._input_stream.keys(columns=columns, all_info=all_info)
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return no rows: showing this stream must never deliver its side effects."""
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        return self._head_without_rows(
+            config, HeadStatus.NOT_COMPUTED, note=SIDE_EFFECTS_NOTE
+        )
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         for tag, data in self._input_stream.iter_data():
@@ -729,6 +752,20 @@ class SideEffectNode(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return self._input_stream.keys(columns=columns, all_info=all_info)
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return no rows: showing this stream must never deliver its side effects."""
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        return self._head_without_rows(
+            config, HeadStatus.NOT_COMPUTED, note=SIDE_EFFECTS_NOTE
+        )
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         """Standalone iteration — executes delivery with no DB logging."""

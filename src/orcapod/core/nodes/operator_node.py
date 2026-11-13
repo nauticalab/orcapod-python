@@ -27,7 +27,18 @@ from orcapod.channels import Channel, ReadableChannel, WritableChannel
 from orcapod.config import OrcapodConfig
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.base import (
+    StreamBase,
+    check_head_size,
+    head_column_config,
+)
+from orcapod.core.streams.head import (
+    STALE_NOTE,
+    BLUEPRINT_NOTE,
+    HeadStatus,
+    StreamHead,
+    head_of,
+)
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.errors import (
     PipelineJobRequiredError,
@@ -380,6 +391,21 @@ class OperatorNode(OperatorNodeBase):
         # the expected ``Iterator`` return-type contract.
         return  # pragma: no cover
         yield  # pragma: no cover
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return no rows: a blueprint node holds no data."""
+        check_head_size(n)
+        return self._head_without_rows(
+            head_column_config(columns, all_info),
+            HeadStatus.UNAVAILABLE,
+            note=BLUEPRINT_NOTE,
+        )
 
     def as_table(
         self,
@@ -1291,6 +1317,66 @@ class OperatorJobNode(OperatorNodeBase):
         empty_stream = ArrowTableStream(empty_records, tag_columns=tag_keys)
         return empty_stream.as_table(columns=columns, all_info=all_info)
 
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first rows the node holds or has stored; never runs the operator.
+
+        After a run (or ``execute``) the rows are the node's output in memory. Before
+        that, a node in ``CacheMode.REPLAY`` shows the first of its stored rows, read
+        from its whole stored table; in ``LOG`` and ``OFF`` it shows none, as
+        ``as_table`` does. A loaded node never raises here. See ``StreamBase.head``.
+        """
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        if self._cached_output_stream is not None:
+            if not self._loaded and self.is_stale:
+                # run() would recompute; the kept rows are not the current result.
+                return self._head_without_rows(
+                    config, HeadStatus.NOT_COMPUTED, note=STALE_NOTE
+                )
+            return head_of(self._cached_output_stream.head(n, columns=config), self)
+        if self._cache_mode == CacheMode.REPLAY and self._pipeline_database is not None:
+            return self._head_from_store(n, config)
+        if self._loaded:
+            return self._head_without_rows(
+                config,
+                HeadStatus.UNAVAILABLE,
+                note=(
+                    "loaded node whose results are not stored (cache mode OFF)"
+                    if self._cache_mode == CacheMode.OFF
+                    else "loaded node whose stored results are not replayed "
+                    f"(cache mode {self._cache_mode.value.upper()})"
+                ),
+            )
+        if self._cache_mode == CacheMode.LOG and self._pipeline_database is not None:
+            note = (
+                "not run in this session; rows of earlier runs are stored but not "
+                "replayed (cache mode LOG)"
+            )
+        else:
+            note = "not run; cache mode OFF stores nothing"
+        return self._head_without_rows(config, HeadStatus.NOT_COMPUTED, note=note)
+
+    def _head_from_store(self, n: int, config: ColumnConfig) -> StreamHead:
+        """Return the first ``n`` of this node's stored rows.
+
+        Reads the node's whole stored slice (no bounded read exists yet) through the
+        same path as ``as_table`` and keeps nothing on the node.
+
+        Raises:
+            RuntimeError: If the node was loaded and its cache table is absent from
+                the attached store (the wrong store).
+        """
+        stream = self._load_cached_stream_from_db()
+        if stream is None or stream.as_table().num_rows == 0:
+            return self._head_without_rows(config, HeadStatus.NOTHING_STORED)
+        return stream.head(n, columns=config).for_stream(self, origin="stored")
+
     # ------------------------------------------------------------------
     # DB retrieval
     # ------------------------------------------------------------------
@@ -1483,12 +1569,20 @@ class OperatorJobNode(OperatorNodeBase):
             # does, and store it in LOG mode (sync DB write, post-hoc). A run
             # with no rows replaces an earlier run's output too: the node then
             # reads as a zero-row table.
-            self._cached_output_stream = None
             if collected:
                 stream = StaticOutputOperatorPod._materialize_to_stream(collected)
                 self._cached_output_stream = stream
                 if should_store:
                     self._store_output_stream(stream)
+            else:
+                # A completed run with no rows keeps a typed zero-row result, as the
+                # sync path does, so the node reads as computed and empty (not as
+                # never run). Nothing is stored for it.
+                self._cached_output_stream = ArrowTableStream(
+                    self._make_empty_table(),
+                    tag_columns=self.keys()[0],
+                    data_context=self.data_context,
+                )
 
             self._update_modified_time()
 

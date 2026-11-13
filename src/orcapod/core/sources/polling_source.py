@@ -20,6 +20,14 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.core.streams.head import (
+    HeadStatus,
+    StreamHead,
+)
+from orcapod.core.streams.base import (
+    check_head_size,
+    head_column_config,
+)
 from orcapod.errors import (
     CursorInvalidatedError,
     InputValidationError,
@@ -435,6 +443,71 @@ class PollingSource(RootSource, Generic[T]):
             return self._batches[0].keys(columns=columns, all_info=all_info)
         self._sync_poll_and_commit()
         return self._get_combined_stream().keys(columns=columns, all_info=all_info)
+
+    def _schema_requires_io(self, config: ColumnConfig) -> bool:
+        """Whether reading the schema with ``config`` would poll.
+
+        True while nothing was polled and either no schema was declared, or ``config``
+        asks for a column group known only from rows (source info, meta, context,
+        content hashes): only a poll tells those columns then.
+        """
+        if self._batches:
+            return False
+        if self._tag_schema is None or self._data_schema is None:
+            return True
+        return bool(
+            config.meta or config.source or config.context or config.content_hash
+        )
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first rows already polled; never polls.
+
+        Before the first poll there are no rows. The columns are the declared schema's,
+        or none when the source declared no schema (finding it would mean polling).
+        """
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        batches = list(self._batches)  # snapshot: the list is append-only
+        if batches:
+            # Combine only the batches that hold the first n rows; count the rest.
+            sizes = [batch.head(0).total_rows or 0 for batch in batches]
+            needed, covered = 0, 0
+            while needed < len(batches) and (covered < n or needed == 0):
+                covered += sizes[needed]
+                needed += 1
+            prefix = batches[0]
+            for batch in batches[1:needed]:
+                prefix = self._combine(prefix, batch)
+            return dataclasses.replace(
+                prefix.head(n, columns=config).for_stream(self),
+                total_rows=sum(sizes),
+            )
+        if self._tag_schema is not None and self._data_schema is not None:
+            # The declared schema answers without a fetch, system tags included; the
+            # column groups that need data (source info, context, ...) are left out.
+            tag_schema, data_schema = self.output_schema(
+                columns=ColumnConfig(system_tags=config.system_tags)
+            )
+            table = arrow_utils.make_empty_table(
+                {**tag_schema, **data_schema}, self.data_context.type_converter
+            )
+            tag_columns = tuple(tag_schema.keys())
+        else:
+            table = pa.table({})
+            tag_columns = ()
+        return StreamHead.without_rows(
+            self,
+            HeadStatus.NOT_COMPUTED,
+            table,
+            tag_columns=tag_columns,
+            note="nothing polled yet; iterating it or a job run polls it",
+        )
 
     def iter_data(self):
         """Iterate over (tag, data) pairs from the current snapshot."""

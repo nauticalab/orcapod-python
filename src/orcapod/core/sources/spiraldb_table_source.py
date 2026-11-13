@@ -34,6 +34,7 @@ Example::
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime
 from collections.abc import AsyncIterator, Collection, Generator, Iterator, Mapping
 from contextlib import contextmanager
@@ -43,6 +44,8 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.derived_source import validate_tags_as_data
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.core.streams.base import check_head_size, head_column_config
+from orcapod.core.streams.head import HeadStatus, StreamHead
 from orcapod.databases.spiraldb_connector import SpiralDBConnector
 from orcapod.errors import InputValidationError, SourceTooLargeError
 from orcapod.types import ColumnConfig
@@ -162,9 +165,9 @@ class SpiralDBTableSource(RootSource):
     ``as_table`` and the dataframe methods hold every row they return. Nothing is
     cached: every read scans again.
 
-    Display. Shown in a notebook (``_repr_html_``, ``view``), the source reads only its
-    first ``PREVIEW_ROWS`` rows (10), in one scan to which ``max_rows`` does not apply,
-    and the header says how many rows the table has.
+    Display. ``head(n)`` and the notebook display (its ``head()``) read only the first
+    ``n`` rows (``PREVIEW_ROWS``, 10, by default), in one scan to which ``max_rows`` does
+    not apply, and the header says how many rows the table has.
 
     Identity. The source is identified by where the table is, never by its rows. The
     default ``source_id`` is ``<project_id>/<dataset>.<table_name>@<table id>``, where
@@ -674,15 +677,49 @@ class SpiralDBTableSource(RootSource):
             )
         return f"first {shown:,} rows of about {head.total_rows:,}"
 
-    def _preview(
+    def head(
         self,
+        n: int = PREVIEW_ROWS,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "tuple[pl.DataFrame, str | None]":
-        """Return the first ``PREVIEW_ROWS`` rows for a notebook display, and the note."""
-        head = self._head(PREVIEW_ROWS, columns=columns, all_info=all_info)
-        return pl.DataFrame(head.rows), self._head_note(head)
+    ) -> StreamHead:
+        """Return the source's first ``n`` rows, read in one bounded scan.
+
+        At most ``n`` rows are read (fewer when the source's ``limit`` is smaller), with
+        ``where`` and the pinned version applied and ``max_rows`` not, so a table of any
+        size can be looked at. The total is exact when these are all the rows the
+        source reads, else the table's recorded row count (an estimate). The notebook
+        preview is this head. See ``StreamBase.head``.
+        """
+        check_head_size(n)
+        config = head_column_config(columns, all_info)
+        head = self._head(n, columns=config)
+        tag_columns = self.keys(columns=config)[0]
+        if not head.rows_read:
+            empty = StreamHead.without_rows(
+                self, HeadStatus.NOT_COMPUTED, head.rows, tag_columns=tag_columns
+            )
+            return dataclasses.replace(
+                empty,
+                total_rows=head.total_rows,
+                total_is_estimate=True,
+                description=self._head_note(head),
+            )
+        return StreamHead.of_rows(
+            self,
+            head.rows,
+            tag_columns=tag_columns,
+            total_rows=head.total_rows,
+            total_is_estimate=head.total_is_estimate,
+            origin="read",
+            description=self._head_note(head),
+        )
+
+    def _display_name(self) -> str:
+        """The name a preview header shows: the label when one was given, else the
+        table's name (the default source id also carries the table's id)."""
+        return self.label if self.has_assigned_label else self._table_name
 
     # -------------------------------------------------------------------------
     # Serialization

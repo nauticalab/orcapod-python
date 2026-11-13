@@ -100,6 +100,77 @@ df = table.to_pandas()
 
 Streams also have direct shortcuts: `as_pandas_df()`, `as_polars_df()` and `as_lazy_frame()`.
 
+## Looking at data
+
+In a notebook, a stream, source or job node shown at the end of a cell renders a short
+table: its first rows, with a line saying what they are. That preview is `head()` rendered,
+and `head(n)` gives the same rows to work with. Neither ever computes anything: they show
+only what is readily available, and never call a function, run an operator, deliver a side
+effect, poll a source or write to a database.
+
+```python
+from orcapod import function_pod
+from orcapod.sources import DictSource
+
+subjects = DictSource(
+    data=[
+        {"subject_id": f"mouse_{i:02d}", "age": 8 + i, "weight": 20.0 + i}
+        for i in range(1, 26)
+    ],
+    tag_columns=["subject_id"],
+    label="subjects",
+)
+
+head = subjects.head()
+print(head.header())
+# DictSource[subjects] — first 10 of 25 rows
+print(head.status.value, len(head))
+# rows 10
+print(subjects.head(3).as_table().column("age").to_pylist())
+# [9, 10, 11]
+```
+
+`head()` returns a `StreamHead`: the rows as a PyArrow table (`.table`, `.as_table()`,
+`.as_polars_df()`), the row count when it is known without computing (`.total_rows`), and a
+`.status` that says where the rows came from. A stream downstream of a computation shows rows
+only once they are computed:
+
+```python
+@function_pod(output_keys="age_months")
+def to_months(age: int) -> int:
+    return age * 12
+
+
+months = to_months.pod(subjects, label="months")
+print(months.head().header())
+# FunctionPodStream[months] — not computed; as_table(), iter_data() or a job run computes it
+print(months.head().status.value, months.head().table.column_names)
+# not_computed ['subject_id', 'age_months']
+
+table = months.as_table()  # computes every row
+print(months.head(3).header())
+# FunctionPodStream[months] — first 3 of 25 computed rows
+```
+
+What each kind of object shows:
+
+| Object | `head()` shows |
+|---|---|
+| A source | its first rows (a bounded read for a source that reads its table lazily) |
+| An operator's or function pod's output stream | the rows already computed, or none with status `not_computed` |
+| A job node | the rows it holds after `job.run()`, else the first of its stored rows, else none (`nothing_stored`) |
+| A pipeline blueprint node, an unbound input slot | none (`unavailable`) |
+| A side-effect stream | none: showing it never delivers its side effects |
+
+A head of an operator is never the operator applied to the heads of its inputs: a group over
+the first ten rows has the wrong members. So an uncomputed stream shows its columns and
+"not computed" until `as_table()`, `iter_data()` or a job run computes it. An empty result
+shows status `rows` with zero rows, so it is never mistaken for "not computed".
+
+In the preview, large cells are summarised (an array as `ndarray float64 (2, 3)`, bytes as
+`bytes (300 B)`, long text and long lists shortened); `head().table` keeps the full values.
+In a terminal, `print(stream.head())` prints the same preview as text.
+
 ## Controlling column visibility with `ColumnConfig`
 
 By default, streams only expose user-facing tag and data columns. Orcapod also maintains

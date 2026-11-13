@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.head import StreamHead
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 
@@ -185,6 +186,32 @@ class RootSource(StreamBase):
     ) -> "pa.Table":
         """Delegate to the underlying stream's as_table."""
         return self._stream.as_table(columns=columns, all_info=all_info)
+
+    def _display_name(self) -> str:
+        """The name a preview header shows: the label when one was given, else the
+        source id (a source id is the source's name), e.g. a table's name. The label
+        itself is not changed."""
+        if self.has_assigned_label or self._source_id is None:
+            return self.label
+        return self._source_id
+
+    def head(
+        self,
+        n: int = 10,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> StreamHead:
+        """Return the first ``n`` rows of the table the source holds, without computing.
+
+        A source that reads its table when it is built holds it in memory, so this is a
+        slice of it. A source that reads its table later overrides this with a bounded
+        read. See ``StreamBase.head``.
+        """
+        # _stream is set by each concrete subclass (see the class docstring), as for
+        # the other delegating methods here.
+        stream = self._stream  # pyright: ignore[reportAttributeAccessIssue]
+        return stream.head(n, columns=columns, all_info=all_info).for_stream(self)
 
     # -------------------------------------------------------------------------
     # Convenience — caching
