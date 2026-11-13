@@ -1833,16 +1833,29 @@ def apply_column_config(
         )
     output_table = table.drop([c for c in drop_columns if c in table.column_names])
     if column_config.sort_by_tags:
-        import polars as pl
-
-        output_table_schema = output_table.schema
-        output_table = (
-            pl.DataFrame(output_table)
-            .sort(by=list(tag_keys), descending=False)
-            .to_arrow()
-        )
-        output_table = restore_schema_nullability(output_table, output_table_schema)
+        output_table = sort_by_tag_columns(output_table, tag_keys)
     return output_table
+
+
+def sort_by_tag_columns(table: "pa.Table", tag_keys: tuple[str, ...]) -> "pa.Table":
+    """Return ``table`` with its rows sorted ascending by the tag columns ``tag_keys``.
+
+    Whole rows move together: a column added to ``table`` before the sort stays with
+    its row. Column types and nullability are those of ``table``.
+
+    Args:
+        table: The table to sort.
+        tag_keys: Names of the regular (non-system) tag columns, in sort priority.
+
+    Returns:
+        A new table with the same columns, rows in tag order.
+    """
+    import polars as pl
+
+    sorted_table = (
+        pl.DataFrame(table).sort(by=list(tag_keys), descending=False).to_arrow()
+    )
+    return restore_schema_nullability(sorted_table, table.schema)
 
 
 if __name__ == "__main__":

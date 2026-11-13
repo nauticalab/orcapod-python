@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import uuid
 from abc import abstractmethod
@@ -587,14 +588,18 @@ class FunctionNodeBase(StreamBase):
     ) -> "pa.Table":
         """Return ``table`` with the column groups of ``column_config``.
 
+        The content hashes are attached before the rows are sorted by tag
+        (``sort_by_tags``), so every row keeps its own hash (ITL-1029).
+
         Args:
             table: Output rows with every column group (``_table_from_pairs``).
             column_config: The column groups to keep.
-            content_hashes: Returns the content hash of each row of ``table``; called
-                only when ``column_config`` asks for them.
+            content_hashes: Returns the content hash of each row of ``table``, in the
+                order of ``table``; called only when ``column_config`` asks for them.
         """
+        tag_keys = self.keys()[0]
         output_table = arrow_utils.apply_column_config(
-            table, column_config, self.keys()[0]
+            table, dataclasses.replace(column_config, sort_by_tags=False), tag_keys
         )
         if column_config.content_hash:
             hash_column_name = (
@@ -605,6 +610,8 @@ class FunctionNodeBase(StreamBase):
             output_table = output_table.append_column(
                 hash_column_name, content_hashes()
             )
+        if column_config.sort_by_tags:
+            output_table = arrow_utils.sort_by_tag_columns(output_table, tag_keys)
         return output_table
 
     def head(
