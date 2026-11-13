@@ -251,6 +251,53 @@ def _as_delta_writer_stores(schema: pa.Schema) -> pa.Schema:
     )
 
 
+def _merge_source_in_stored_layout(
+    delta_table: deltalake.DeltaTable, batch: pa.Table
+) -> pa.Table:
+    """Return ``batch`` with its list columns in the layout the table stores.
+
+    Delta stores ``large_list<large_binary>`` as ``list<binary>``, and the MERGE
+    cannot plan a ``CASE WHEN`` over the two (ITL-984). A list column, a logical
+    list included, is therefore handed to the MERGE as its storage type cast to
+    the stored type. The values are unchanged and the stored field metadata stays
+    as it is; every other column, and a list column the table does not have yet,
+    is passed as it is.
+
+    Args:
+        delta_table: The loaded stored table.
+        batch: The rows about to be merged.
+
+    Returns:
+        ``batch``, with the cast list columns.
+    """
+    stored = _stored_arrow_schema(delta_table)
+    for index, field in enumerate(batch.schema):
+        column = batch.column(index)
+        if isinstance(field.type, pa.ExtensionType):
+            plain = column.combine_chunks().storage  # pyright: ignore[reportAttributeAccessIssue]  # an extension array
+            is_list = pa.types.is_large_list(plain.type) or pa.types.is_list(plain.type)
+        else:
+            plain = column
+            is_list = pa.types.is_large_list(field.type) or pa.types.is_list(field.type)
+        if not is_list or field.name not in stored.names:
+            continue
+        target = stored.field(field.name).type
+        if arrow_utils.normalize_to_large_types(
+            plain.type
+        ) != arrow_utils.normalize_to_large_types(target):
+            # More than the layout differs (a timestamp unit, a width, an evolved
+            # struct): the MERGE decides, and no cast may change a value.
+            continue
+        batch = batch.set_column(
+            index,
+            pa.field(field.name, target, nullable=field.nullable),
+            pa.chunked_array([plain]).cast(target)
+            if isinstance(plain, pa.Array)
+            else plain.cast(target),
+        )
+    return batch
+
+
 def _without_field_metadata(delta_type: Any) -> Any:
     """Return a Delta type with the metadata of every nested field dropped.
 
@@ -1716,7 +1763,9 @@ class DeltaTableDatabase:
                 else:
                     # Some pending ids are stored already: insert only the others.
                     delta_table.merge(
-                        source=combined_table,
+                        source=_merge_source_in_stored_layout(
+                            delta_table, combined_table
+                        ),
                         predicate=f"target.{self.RECORD_ID_COLUMN} = source.{self.RECORD_ID_COLUMN}",
                         source_alias="source",
                         target_alias="target",
@@ -1796,8 +1845,18 @@ class DeltaTableDatabase:
         Returns:
             Whether an append stores ``batch`` exactly as the MERGE would.
         """
+        # Delta stores a logical column as its storage type (ITL-984): compare that,
+        # or a batch with a logical list never equals the stored plain list.
+        schema = pa.schema(
+            [
+                f.with_type(f.type.storage_type)
+                if isinstance(f.type, pa.ExtensionType)
+                else f
+                for f in batch.schema
+            ]
+        )
         try:
-            incoming = _as_delta_writer_stores(batch.schema)
+            incoming = _as_delta_writer_stores(schema)
         except Exception:
             # A type Delta cannot store directly (null): leave it to the MERGE.
             return False
