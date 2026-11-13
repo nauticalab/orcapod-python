@@ -20,6 +20,11 @@ Example::
         "my-project-123456", "spike_event", where={"unit_id": 106}
     )
 
+    # The spike time is a key column (a tag); also offer it as data
+    source = SpiralDBTableSource(
+        "my-project-123456", "spike_event", tags_as_data={"timestamp": "spike_time_us"}
+    )
+
     # Explicit dataset, tag columns overridden
     source = SpiralDBTableSource(
         "my-project-123456", "spike_event", dataset="prod", tag_columns=["unit_id"]
@@ -35,10 +40,11 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.derived_source import validate_tags_as_data
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases.spiraldb_connector import SpiralDBConnector
-from orcapod.errors import SourceTooLargeError
+from orcapod.errors import InputValidationError, SourceTooLargeError
 from orcapod.types import ColumnConfig
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -165,7 +171,18 @@ class SpiralDBTableSource(RootSource):
     the table id is SpiralDB's own: a table dropped and created again under the same
     name is a different source, and a renamed table gets a new source id too.
     ``where``, ``limit`` and ``asof`` choose which rows are read and are not part of
-    the source's identity.
+    the source's identity. ``tags_as_data`` is: it decides what a data column holds,
+    so its sorted items enter the content hash (when it is given), and its copies
+    are columns of the schema, so they enter both the content and the pipeline hash.
+    The source id and every row's record ID do not depend on it.
+
+    Key columns as data. A function pod never sees tags, so a key it needs (a
+    spike's time) is offered as data too with ``tags_as_data={"timestamp":
+    "spike_time_us"}``. The tag keeps its name; the copy is a data column of the
+    given name, after the table's own data columns in mapping order, with the key
+    column's Arrow type and field metadata, non-nullable (a key is never null). It is
+    copied in Arrow as each batch is read, and its source-info value has the form of
+    every data column's, ``<source id>::<row token>::<copy name>``.
 
     Record identity. A row is identified by its primary key: the row's token is the
     data context's Arrow hash of its key columns (in key order, as non-nullable
@@ -199,11 +216,17 @@ class SpiralDBTableSource(RootSource):
         config: OrcaPod configuration.
         overrides: Optional pyspiral client config overrides passed through to
             ``SpiralDBConnector``, e.g. ``{"server.url": "http://api.spiraldb.dev"}``.
+        tags_as_data: Maps a key column that is a tag column of this source to the
+            name of a data column that receives a copy of it, as in
+            ``DerivedSource``. ``None`` (default) or an empty mapping copies nothing.
 
     Raises:
         ValueError: If the table is not found, has no key schema, a tag column or a
             ``where`` column is not in the table, or ``limit``, ``max_rows`` or
             ``batch_rows`` is not a positive integer.
+        InputValidationError: If ``tags_as_data`` names a column that is not a tag
+            column or not a key column, or a new name that is already a column, is
+            given twice, or is reserved for system columns.
     """
 
     # Whether a notebook display reads the first rows. False shows the schema and the
@@ -228,6 +251,7 @@ class SpiralDBTableSource(RootSource):
         data_context: "str | contexts.DataContext | None" = None,
         config: "OrcapodConfig | None" = None,
         overrides: dict[str, str] | None = None,
+        tags_as_data: Mapping[str, str] | None = None,
     ) -> None:
         for name, value in (("limit", limit), ("max_rows", max_rows)):
             if value is not None and not _is_positive_int(value):
@@ -251,6 +275,7 @@ class SpiralDBTableSource(RootSource):
         self._max_rows = max_rows
         self._batch_rows = batch_rows
         self._given_asof = asof
+        self._tags_as_data: dict[str, str] = dict(tags_as_data) if tags_as_data else {}
         location = f"SpiralDB project {project_id!r}, dataset {dataset!r}"
 
         with self._connector() as connector:
@@ -301,13 +326,63 @@ class SpiralDBTableSource(RootSource):
             )
         except ValueError as exc:
             raise ValueError(f"{location}, table {table_name!r}: {exc}") from exc
+        self._table_schema: pa.Schema = arrow_utils.drop_system_columns(
+            schema.empty_table()
+        ).schema
+        if self._tags_as_data:
+            try:
+                self._check_tags_as_data(template.stream.keys())
+            except InputValidationError as exc:
+                raise InputValidationError(
+                    f"{location}, table {table_name!r}: {exc}"
+                ) from exc
+            # The copies are columns of the schema: build the template with them.
+            template = self._builder.build(
+                self._with_tag_copies(self._table_schema.empty_table()),
+                tag_columns=template.tag_columns,
+                source_id=self._source_id,
+                system_tag_columns=template.system_tag_columns,
+            )
         self._stream = template.stream
         self._schema_hash = template.schema_hash
         self._tag_columns = template.tag_columns
         self._system_tag_columns = template.system_tag_columns
-        self._table_schema: pa.Schema = arrow_utils.drop_system_columns(
-            schema.empty_table()
-        ).schema
+
+    def _check_tags_as_data(
+        self, keys: tuple[tuple[str, ...], tuple[str, ...]]
+    ) -> None:
+        """Check ``tags_as_data`` against the source's tag and data columns.
+
+        Args:
+            keys: The source's tag and data columns, without the copies.
+
+        Raises:
+            InputValidationError: If the mapping fails ``DerivedSource``'s rule, or a
+                tag it names is not a key column of the table.
+        """
+        tag_keys, data_keys = keys
+        validate_tags_as_data(self._tags_as_data, tag_keys, data_keys)
+        for tag in self._tags_as_data:
+            if tag not in self._key_columns:
+                raise InputValidationError(
+                    f"tags_as_data: {tag!r} is not a key column, so it may hold a "
+                    f"null. Key columns, which can be copied: {list(self._key_columns)}."
+                )
+
+    def _with_tag_copies(self, table: "pa.Table") -> "pa.Table":
+        """Return ``table`` with each ``tags_as_data`` copy appended, in mapping order.
+
+        A copy is the key column's own Arrow column under a field of the new name,
+        with the key's type and field metadata and declared non-nullable (a key is
+        never null; a read checks it before copying).
+        """
+        for tag, name in self._tags_as_data.items():
+            key = table.schema.field(tag)
+            table = table.append_column(
+                pa.field(name, key.type, nullable=False, metadata=key.metadata),
+                table.column(tag),
+            )
+        return table
 
     # -------------------------------------------------------------------------
     # Identity
@@ -327,10 +402,20 @@ class SpiralDBTableSource(RootSource):
         return None
 
     def identity_structure(self) -> Any:
-        """Identity from the class, the schema and the source id (the table's locator)."""
-        base = super().identity_structure()
+        """Identity from the class, the schema and the source id (the table's locator).
+
+        With ``tags_as_data`` given, its sorted items follow: two mappings can give
+        the same schema (two key columns of one type copied to one name) while the
+        copy holds different values. Without it the structure is the plain one.
+        """
+        extra: list[Any] = []
         restriction = self._restriction_identity()
-        return base if restriction is None else (*base, restriction)
+        if restriction is not None:
+            extra.append(restriction)
+        if self._tags_as_data:
+            extra.append(("tags_as_data", tuple(sorted(self._tags_as_data.items()))))
+        base = super().identity_structure()
+        return (*base, *extra) if extra else base
 
     # -------------------------------------------------------------------------
     # Reading
@@ -470,13 +555,16 @@ class SpiralDBTableSource(RootSource):
                     seen += rows.num_rows
                     if max_rows is not None and seen > max_rows:
                         raise self._too_large("the read returned more rows")
+                    # Tokens first: they refuse a null key before it is copied into
+                    # a non-nullable column.
+                    tokens = self._key_tokens(rows)
                     yield self._builder.attach_provenance(
-                        rows,
+                        self._with_tag_copies(rows),
                         tag_columns=self._tag_columns,
                         system_tag_columns=self._system_tag_columns,
                         schema_hash=self._schema_hash,
                         source_id=self.source_id,
-                        provenance_tokens=self._key_tokens(rows),
+                        provenance_tokens=tokens,
                     )
 
     def iter_data(self) -> Iterator["tuple[TagProtocol, DataProtocol]"]:
@@ -622,6 +710,7 @@ class SpiralDBTableSource(RootSource):
             "asof": self._given_asof,
             "max_rows": self._max_rows,
             "batch_rows": self._batch_rows,
+            "tags_as_data": dict(self._tags_as_data) or None,
             "source_id": self.source_id,
             **self._identity_config(),
         }
@@ -654,6 +743,7 @@ class SpiralDBTableSource(RootSource):
             asof=config.get("asof"),
             max_rows=config.get("max_rows", DEFAULT_MAX_ROWS),
             batch_rows=config.get("batch_rows", DEFAULT_BATCH_ROWS),
+            tags_as_data=config.get("tags_as_data"),
             source_id=config.get("source_id"),
             label=config.get("label"),
             data_context=config.get("data_context"),

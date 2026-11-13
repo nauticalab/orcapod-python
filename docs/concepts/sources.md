@@ -174,6 +174,41 @@ built, so rows added to the Spiral table afterwards are seen only by a new sourc
 the source (and the job around it) again, and the added rows are new keys, the only rows
 computed.
 
+**Key columns as data.** A function pod never receives a tag, and in a time-series table the
+time is part of the key, so it is a tag. `tags_as_data` also offers named key columns as data
+columns, copied as each batch is read (so the source still reads no rows when built, and
+`limit=`, `where=`, `max_rows` and the notebook preview work as before). The tag keeps its
+name; you name the copy, which comes after the table's data columns, with the key column's
+type, never null:
+
+<!-- docs-test: skip -->
+```python
+spikes = SpiralDBTableSource(
+    "edi-tutorial-v1-841226", "spike_event", tags_as_data={"timestamp": "spike_time_us"}
+)
+unit_key = [
+    "spike_extraction_hash", "subject_id", "session_start_datetime",
+    "recording_index", "probe_index", "unit_id",
+]
+per_unit = spikes.group_by(unit_key).drop_tag_columns("timestamp")
+print(per_unit.keys())
+# (('spike_extraction_hash', 'subject_id', 'session_start_datetime', 'recording_index', 'probe_index', 'unit_id'), ('spike_amplitude_uv', 'spike_time_us'))
+```
+
+`per_unit` has one row per unit, and its `spike_time_us` list is in time order: `group_by`
+orders the members of a group by the tags outside the group key, and on the full unit key
+the only such tag is `timestamp`. `group_by(["unit_id"])` alone sorts by
+`spike_extraction_hash`, subject, session, recording, probe, then `timestamp`, so time order
+holds only within one session and probe; group on the full unit key.
+
+The copies are data columns, so they are part of the schema, the `content_hash` and the
+`pipeline_hash`; the mapping itself is part of the `content_hash` too, because two mappings
+can give the same schema while the copy holds different values. The `source_id` and every
+row's record id are the same as without the option. Compared with
+`DerivedSource(spikes, tags_as_data=...)`, which reads the whole table as soon as its schema
+or rows are asked for (building a job asks for the schema), the option keeps a Spiral source,
+whose schema is known without a scan.
+
 **Known limitations.**
 
 - Each row's key is hashed with one call, about 0.2 ms per row (about 18 s per 100,000

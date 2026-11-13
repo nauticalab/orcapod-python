@@ -131,6 +131,31 @@ def test_an_async_job_over_a_limited_read(tmp_path: Path):
     assert calls == []
 
 
+def test_tags_as_data_gives_each_unit_its_spike_times_in_time_order():
+    """Grouped on the unit key, each unit's copied spike times are in time order (ITL-996).
+
+    ``timestamp`` is the only key column outside the unit key, so it alone orders the
+    members of a group.
+    """
+    _require_a_large_table()
+    spikes = SpiralDBTableSource(
+        PROJECT,
+        "spike_event",
+        tags_as_data={"timestamp": "spike_time_us"},
+        limit=20_000,
+    )
+    unit_key = [c for c in spikes.keys()[0] if c != "timestamp"]
+
+    per_unit = spikes.group_by(unit_key).drop_tag_columns("timestamp")
+
+    assert "spike_time_us" in per_unit.keys()[1]
+    rows = per_unit.as_table().to_pylist()
+    assert len(rows) > 1
+    assert sum(len(r["spike_time_us"]) for r in rows) == spikes.as_table().num_rows
+    for row in rows:
+        assert row["spike_time_us"] == sorted(row["spike_time_us"])
+
+
 @pytest.mark.skipif(
     not WRITE, reason="Set ORCAPOD_SPIRAL_LIVE_WRITE=1 to write a scratch table"
 )

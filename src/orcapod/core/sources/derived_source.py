@@ -58,20 +58,22 @@ def _derivation_hash(
     )
 
 
-def _validate_tags_as_data(
+def validate_tags_as_data(
     tags_as_data: Mapping[str, str],
     tag_keys: tuple[str, ...],
     data_keys: tuple[str, ...],
 ) -> None:
-    """Check a ``tags_as_data`` mapping against the origin's columns.
+    """Check a ``tags_as_data`` mapping against the columns it copies from.
+
+    The one rule for ``DerivedSource`` and ``SpiralDBTableSource``.
 
     Args:
-        tags_as_data: Maps a tag column of the origin to the name of its data copy.
-        tag_keys: The origin's user tag columns.
-        data_keys: The origin's data columns.
+        tags_as_data: Maps a tag column to the name of its data copy.
+        tag_keys: The user tag columns of the stream copied from.
+        data_keys: The data columns of the stream copied from.
 
     Raises:
-        InputValidationError: If a key is not a tag column of the origin, or a new
+        InputValidationError: If a key is not a tag column, or a new
             name is already a column, is used twice, or starts with the prefix
             reserved for system columns.
     """
@@ -80,13 +82,13 @@ def _validate_tags_as_data(
         if tag not in tag_keys:
             kind = "a data column" if tag in data_keys else "not a column"
             raise InputValidationError(
-                f"tags_as_data: {tag!r} is {kind} of the origin, not a tag column. "
+                f"tags_as_data: {tag!r} is {kind}, not a tag column. "
                 f"Tag columns: {list(tag_keys)}."
             )
         if name in tag_keys or name in data_keys:
             raise InputValidationError(
                 f"tags_as_data: cannot copy tag {tag!r} to {name!r}, which is "
-                "already a column of the origin. Choose a new name."
+                "already a column. Choose a new name."
             )
         if name in seen:
             raise InputValidationError(
@@ -233,7 +235,7 @@ class DerivedSource(RootSource):
         else:
             self._tags_as_data = dict(tags_as_data)
             tag_keys, data_keys = origin.keys()
-            _validate_tags_as_data(self._tags_as_data, tag_keys, data_keys)
+            validate_tags_as_data(self._tags_as_data, tag_keys, data_keys)
             kwargs.setdefault("data_context", origin.data_context_key)
 
         self._explicit_source_id = source_id
