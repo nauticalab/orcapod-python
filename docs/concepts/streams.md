@@ -207,6 +207,10 @@ run: `head()`, `as_table()` and `iter_data()` serve them from memory, without re
 store (a function node whose run left no rows in memory reads its stored rows). Likewise, once a chain of streams such as `g.pod(f.pod(source))` has been read to the
 end, reading it again computes nothing. A change upstream (`clear_cache()`) makes every stream
 after it out of date, and its next read computes it again.
+Two reads of one stream open at the same time, or a read that picks up one left partway, share
+the stream's results: each row is computed once and every read yields the same rows, whatever
+feeds the stream. An upstream finishing its first computation during the read is not a change;
+a `clear_cache()` upstream between the reads is, and the next read starts again.
 
 In the preview, large cells are summarised (an array as `ndarray float64 (2, 3)`, bytes as
 `bytes (300 B)`, long text and long lists shortened); `head().table` keeps the full values.
