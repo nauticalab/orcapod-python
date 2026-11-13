@@ -31,13 +31,25 @@ N_ROWS = 250
 
 # Runs one job over N_ROWS rows. Arguments: store path, calls file, commit_every_rows,
 # orchestrator ("sync" or "async"), crash ("none", "fn:<x>" or "flush:<n>").
-# "fn:<x>" exits while computing row x; "flush:<n>" exits on the n-th store-wide
-# flush. The run's first flush commits what was pending before it; each later one is
-# a node's commit, called right after the node committed its result table.
+# "fn:<x>" exits while computing row x, once the batches of the rows before x are
+# committed; "flush:<n>" exits on the n-th store-wide flush. The run's first flush
+# commits what was pending before it; each later one is a node's commit, called right
+# after the node committed its result table.
+#
+# The async orchestrator computes rows on a thread pool ahead of the stage that records
+# them and commits every commit_every_rows rows, so without a wait row x could be
+# computed before the batches before it are committed (ITL-1001). Row x and every row
+# after it wait until the store has finished the run's first flush and one flush per
+# batch before x, so the crash falls in the batch that holds x, after the earlier
+# batches are committed and before the result of any row from x on is stored. On the
+# sync path the rows come in order and the wait returns at once. The wait is bounded: if
+# the commits never come, the job exits with code 4, which run_job rejects, so the test
+# fails instead of hanging.
 JOB_SCRIPT = textwrap.dedent(
     """
     import os
     import sys
+    import threading
     from typing import Any
 
     from orcapod import PipelineJob, function_pod
@@ -47,14 +59,29 @@ JOB_SCRIPT = textwrap.dedent(
 
     store_path, calls_path, every, orchestrator, crash = sys.argv[1:6]
     crash_kind, _, crash_arg = crash.partition(":")
+    earlier_batches_committed = threading.Event()
+    if crash_kind == "fn":
+        flushes_before_crash = 1 + int(crash_arg) // int(every)
+
+
+    def wait_for_earlier_batches() -> None:
+        if not earlier_batches_committed.wait(timeout=120):
+            print(
+                "the batches before the crash row were never committed",
+                file=sys.stderr,
+                flush=True,
+            )
+            os._exit(4)
 
 
     @function_pod(output_keys="y")
     def double(x: int) -> int:
         with open(calls_path, "a") as calls:
             calls.write(f"{x}\\n")
-        if crash_kind == "fn" and x == int(crash_arg):
-            os._exit(3)
+        if crash_kind == "fn" and x >= int(crash_arg):
+            wait_for_earlier_batches()
+            if x == int(crash_arg):
+                os._exit(3)
         return 2 * x
 
 
@@ -71,6 +98,8 @@ JOB_SCRIPT = textwrap.dedent(
             if crash_kind == "flush" and self._state["n"] == int(crash_arg):
                 os._exit(3)
             self._inner.flush()
+            if crash_kind == "fn" and self._state["n"] >= flushes_before_crash:
+                earlier_batches_committed.set()
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self._inner, name)
