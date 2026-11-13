@@ -41,7 +41,7 @@ from orcapod.core.streams.head import (
     StreamHead,
 )
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.core.datagrams.tag_data import EmptyData, Tag
+from orcapod.core.datagrams.tag_data import Data, EmptyData, Tag
 from orcapod.errors import (
     EphemeralResultMissingError,
     InputValidationError,
@@ -215,6 +215,26 @@ def _bare_digest(hash_string: str) -> str:
 # its original (tag, input_data) pair. Stripped from output tags in
 # record_and_forward() before downstream emission.
 _TAG_NODE_INPUT_REF = "_tag_node_input_ref"
+
+
+def _with_datagram_id(data: Data, datagram_id: uuid.UUID) -> Data:
+    """Return ``data`` rebuilt with ``datagram_id`` as its datagram id.
+
+    A stored row read back is built by a stream, which gives every row a fresh id.
+    The rebuilt datagram has the same columns, types, source info and data context.
+
+    Args:
+        data: The datagram a stream built from a stored row.
+        datagram_id: The id the row was stored under.
+
+    Returns:
+        A datagram equal to ``data`` whose ``datagram_uuid`` is ``datagram_id``.
+    """
+    return Data(
+        data.as_table(columns={"source": True}),
+        record_uuid=datagram_id,
+        data_context=data.data_context_key,
+    )
 
 
 def _executor_supports_concurrent(
@@ -2890,7 +2910,7 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _stored_rows_stream(
         self, fetched: _JoinedRecords
-    ) -> tuple[list[bytes], ArrowTableStream] | None:
+    ) -> tuple[list[bytes], ArrowTableStream, list[uuid.UUID]] | None:
         """Return the persistent stored rows of *fetched* as a stream.
 
         The stream is built over the stored Arrow records with the internal
@@ -2899,8 +2919,9 @@ class FunctionJobNode(FunctionNodeBase):
         greatest recomputation index.
 
         Returns:
-            The base entry ID of each row, in stream order, and the stream; or
-            ``None`` when no persistent row is stored.
+            The base entry ID of each row, in stream order, the stream, and the
+            stored ``__data_id`` of each row (the id of the result record, in
+            stream order); or ``None`` when no persistent row is stored.
         """
         joined = fetched.table
         if joined.num_rows == 0:
@@ -2941,10 +2962,14 @@ class FunctionJobNode(FunctionNodeBase):
             if c.startswith(constants.META_PREFIX)
             or c == constants.NODE_CONTENT_HASH_COL
         ]
+        data_ids = [
+            uuid.UUID(bytes=bytes(cast(bytes, record_id)))
+            for record_id in joined.column(constants.DATA_RECORD_ID).to_pylist()
+        ]
         stream = ArrowTableStream(
             joined.drop(drop_cols), tag_columns=self._stored_tag_keys(fetched)
         )
-        return base_entry_ids, stream
+        return base_entry_ids, stream, data_ids
 
     def _load_cached_entries(
         self,
@@ -2986,9 +3011,13 @@ class FunctionJobNode(FunctionNodeBase):
         # --- Process normal (fully matched) rows ---
         stored = self._stored_rows_stream(fetched)
         if stored is not None:
-            base_entry_ids_col, stream = stored
-            for base_eid, (tag, data) in zip(base_entry_ids_col, stream.iter_data()):
-                loaded[base_eid] = (tag, data)
+            base_entry_ids_col, stream, data_ids = stored
+            for base_eid, data_id, (tag, data) in zip(
+                base_entry_ids_col, data_ids, stream.iter_data(), strict=True
+            ):
+                # A stored result is the datagram its own provenance names: it
+                # carries the stored ``__data_id`` as its datagram id (ITL-1060).
+                loaded[base_eid] = (tag, _with_datagram_id(data, data_id))
 
         # --- Process EmptyData tokens (ephemeral misses) ---
         for base_eid, empty_data in fetched.empty_data_tokens.items():
