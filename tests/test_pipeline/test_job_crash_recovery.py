@@ -5,7 +5,9 @@ results before pipeline records. These tests kill a job hard (``os._exit`` in a
 subprocess, as a power loss or ``kill -9`` would) on a ``DeltaTableDatabase``:
 
 - in the middle of a batch: exactly the committed batches are stored, and the rerun
-  computes only the rows that were not;
+  computes only the rows that were not. On the async path rows finish, and so are
+  recorded and committed, in any order: a batch holds the rows that finished first, not
+  the first rows of the input;
 - between a batch's result commit and its pipeline-record commit, also in a batch that
   starts with rows whose results were already stored: the results are kept, the rerun
   computes nothing for them and writes their pipeline records.
@@ -19,7 +21,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import deltalake
 import pyarrow as pa
@@ -30,11 +32,11 @@ from orcapod.databases.storage_utils import delta_to_pyarrow_dataset
 N_ROWS = 250
 
 # Runs one job over N_ROWS rows. Arguments: store path, calls file, commit_every_rows,
-# orchestrator ("sync" or "async"), crash ("none", "fn:<x>" or "flush:<n>").
-# "fn:<x>" exits while computing row x, once the batches of the rows before x are
-# committed; "flush:<n>" exits on the n-th store-wide flush. The run's first flush
-# commits what was pending before it; each later one is a node's commit, called right
-# after the node committed its result table.
+# orchestrator ("sync" or "async"), crash ("none", "fn:<x>" or "flush:<n>"), late row
+# ("none" or a row number). "fn:<x>" exits while computing row x, once the batches of the
+# rows before x are committed; "flush:<n>" exits on the n-th store-wide flush. The run's
+# first flush commits what was pending before it; each later one is a node's commit,
+# called right after the node committed its result table.
 #
 # The async orchestrator computes rows on a thread pool ahead of the stage that records
 # them and commits every commit_every_rows rows, so without a wait row x could be
@@ -42,9 +44,17 @@ N_ROWS = 250
 # after it wait until the store has finished the run's first flush and one flush per
 # batch before x, so the crash falls in the batch that holds x, after the earlier
 # batches are committed and before the result of any row from x on is stored. On the
-# sync path the rows come in order and the wait returns at once. The wait is bounded: if
-# the commits never come, the job exits with code 4, which run_job rejects, so the test
-# fails instead of hanging.
+# sync path the rows come in order and the wait returns at once.
+#
+# The pool's rows also finish in any order, and the node records them in the order they
+# finish. A late row (with "fn:<x>" only, async only) waits for the same commits, so it
+# finishes after the batches before x are committed without it: a row of the input's
+# first batches that a loaded machine finishes late, made deterministic.
+#
+# The wait has no time bound, because it cannot deadlock: the pool starts rows in input
+# order, so rows from x on only take threads once every row before x has started, and
+# all of those return except the one late row. run_job's subprocess timeout is the hang
+# guard if a change ever breaks that.
 JOB_SCRIPT = textwrap.dedent(
     """
     import os
@@ -57,7 +67,7 @@ JOB_SCRIPT = textwrap.dedent(
     from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
     from orcapod.sources import DictSource
 
-    store_path, calls_path, every, orchestrator, crash = sys.argv[1:6]
+    store_path, calls_path, every, orchestrator, crash, late = sys.argv[1:7]
     crash_kind, _, crash_arg = crash.partition(":")
     earlier_batches_committed = threading.Event()
     if crash_kind == "fn":
@@ -65,13 +75,7 @@ JOB_SCRIPT = textwrap.dedent(
 
 
     def wait_for_earlier_batches() -> None:
-        if not earlier_batches_committed.wait(timeout=120):
-            print(
-                "the batches before the crash row were never committed",
-                file=sys.stderr,
-                flush=True,
-            )
-            os._exit(4)
+        earlier_batches_committed.wait()
 
 
     @function_pod(output_keys="y")
@@ -82,6 +86,8 @@ JOB_SCRIPT = textwrap.dedent(
             wait_for_earlier_batches()
             if x == int(crash_arg):
                 os._exit(3)
+        if crash_kind == "fn" and late != "none" and x == int(late):
+            wait_for_earlier_batches()
         return 2 * x
 
 
@@ -125,7 +131,12 @@ JOB_SCRIPT = textwrap.dedent(
 
 
 def run_job(
-    tmp_path: Path, store: Path, every: int, orchestrator: str, crash: str = "none"
+    tmp_path: Path,
+    store: Path,
+    every: int,
+    orchestrator: str,
+    crash: str = "none",
+    late: int | None = None,
 ) -> tuple[int, list[int]]:
     """Run the job in a subprocess; return its exit code and the rows it computed."""
     script = tmp_path / "job.py"
@@ -134,7 +145,7 @@ def run_job(
     calls.write_text("")
     done = subprocess.run(
         [sys.executable, str(script), str(store), str(calls), str(every)]
-        + [orchestrator, crash],
+        + [orchestrator, crash, "none" if late is None else str(late)],
         capture_output=True,
         text=True,
         timeout=600,
@@ -163,6 +174,21 @@ def row_count(store: Path, kind: str) -> int:
     """Committed rows of the ``kind`` table (0 if it does not exist)."""
     table = read(tables(store).get(kind))
     return 0 if table is None else table.num_rows
+
+
+def stored_rows(store: Path, kind: str) -> list[int]:
+    """The input rows (``x``) of the committed rows of the ``kind`` table, sorted.
+
+    A pipeline record names its row by the tag ``k``, which equals ``x``; a result
+    holds ``y = 2 * x``.
+    """
+    table = read(tables(store).get(kind))
+    if table is None:
+        return []
+    # Both columns are non-null int64; to_pylist is typed as possibly None.
+    if kind == "pipeline":
+        return sorted(cast("list[int]", table["k"].to_pylist()))
+    return sorted(y // 2 for y in cast("list[int]", table["y"].to_pylist()))
 
 
 def stable(store: Path) -> dict[str, list[tuple[object, ...]]]:
@@ -205,27 +231,45 @@ def uninterrupted(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[An
     return stable(tmp / "store")
 
 
-@pytest.mark.parametrize("orchestrator", ["sync", "async"])
+@pytest.mark.parametrize(
+    ("orchestrator", "late"),
+    [("sync", None), ("async", None), ("async", 199)],
+    ids=["sync", "async", "async-late-row"],
+)
 def test_crash_mid_batch_keeps_committed_batches(
-    tmp_path: Path, orchestrator: str, uninterrupted: dict[str, list[Any]]
+    tmp_path: Path,
+    orchestrator: str,
+    late: int | None,
+    uninterrupted: dict[str, list[Any]],
 ) -> None:
-    """Killed at row 234 with 100 rows per commit: 200 rows stored, 50 recomputed."""
+    """Killed at row 234 with 100 rows per commit: two whole batches stored.
+
+    The rerun computes exactly the rows without a committed result. On the async path
+    the two batches are the 200 rows that finished first, whichever they are; the
+    late-row case makes row 199 finish after the second commit.
+    """
     store = tmp_path / "store"
-    code, _ = run_job(tmp_path, store, 100, orchestrator, crash="fn:234")
+    code, _ = run_job(tmp_path, store, 100, orchestrator, crash="fn:234", late=late)
     assert code == 3
-    results, records = row_count(store, "result"), row_count(store, "pipeline")
+    recorded = stored_rows(store, "pipeline")
+    computed = stored_rows(store, "result")
+    # Two whole batches: 200 rows with a pipeline record, each with a committed result
+    # (results are committed before their pipeline records).
+    assert len(set(recorded)) == len(recorded) == 200
+    assert set(recorded) <= set(computed)
+    assert len(set(computed)) == len(computed)
+    # Nothing from the crash row on is stored.
+    assert max(computed) < 234
     if orchestrator == "sync":
-        assert (results, records) == (200, 200)
-    else:
-        # Results are committed before their pipeline records, so results of rows
-        # still on their way to being recorded may be committed too.
-        assert records == 200 and 200 <= results < 234
+        assert recorded == computed == list(range(200))
+    if late is not None:
+        # The late row finished after the second commit, so neither is stored.
+        assert late not in computed
 
     code, calls = run_job(tmp_path, store, 100, orchestrator)
     assert code == 0
-    # Only rows without a committed result are computed again.
-    assert len(calls) == N_ROWS - results
-    assert min(calls) == results if orchestrator == "sync" else min(calls) >= 200
+    # Exactly the rows without a committed result are computed again.
+    assert sorted(calls) == sorted(set(range(N_ROWS)) - set(computed))
     assert stable(store) == uninterrupted
 
 
