@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pyarrow as pa
 
+from orcapod.core.operators import MapTags
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 
@@ -34,6 +35,18 @@ def _make_source(tag_col: str, data_cols: dict, tag_data: list) -> ArrowTableSou
     return ArrowTableSource(
         pa.table(columns), tag_columns=[tag_col], infer_nullable=True
     )
+
+
+def _make_two_tag_stream() -> ArrowTableStream:
+    """A stream with tags ``k`` and ``other`` and one data column ``a``."""
+    table = pa.table(
+        {
+            "k": pa.array(["x", "y"], type=pa.large_string()),
+            "other": pa.array(["p", "q"], type=pa.large_string()),
+            "a": pa.array([1, 2], type=pa.int64()),
+        }
+    )
+    return ArrowTableStream(table, tag_columns=["k", "other"])
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +126,28 @@ class TestMapTagsConvenience:
         assert "key" in tag_keys
         assert "k" not in tag_keys
 
+    def test_map_tags_keeps_unmapped_tags_by_default(self):
+        s = _make_two_tag_stream()
+        tag_keys, data_keys = s.map_tags({"k": "key"}).keys()
+        assert tag_keys == ("key", "other")
+        assert data_keys == ("a",)
+
+    def test_map_tags_drop_unmapped_true_drops_other_tags(self):
+        s = _make_two_tag_stream()
+        tag_keys, _ = s.map_tags({"k": "key"}, drop_unmapped=True).keys()
+        assert tag_keys == ("key",)
+
+    def test_map_tags_explicit_true_is_the_pre_change_behaviour(self):
+        s = _make_two_tag_stream()
+        assert (
+            s.map_tags({"k": "key"}, drop_unmapped=True).content_hash()
+            == MapTags({"k": "key"}, drop_unmapped=True)(s).content_hash()
+        )
+        assert (
+            s.map_tags({"k": "key"}).content_hash()
+            == MapTags({"k": "key"}, drop_unmapped=False)(s).content_hash()
+        )
+
     def test_map_tags_with_label(self):
         s = _make_stream("k", {"a": [1]}, ["x"])
         result = s.map_tags({"k": "key"}, label="rename_tag")
@@ -133,12 +168,15 @@ class TestMapDataConvenience:
         assert "alpha" in data_keys
         assert "a" not in data_keys
 
-    def test_map_data_drop_unmapped_false(self):
+    def test_map_data_keeps_unmapped_data_by_default(self):
         s = _make_stream("k", {"a": [1], "b": [2]}, ["x"])
-        result = s.map_data({"a": "alpha"}, drop_unmapped=False)
-        _, data_keys = result.keys()
-        assert "alpha" in data_keys
-        assert "b" in data_keys
+        _, data_keys = s.map_data({"a": "alpha"}).keys()
+        assert data_keys == ("alpha", "b")
+
+    def test_map_data_drop_unmapped_true_drops_other_data(self):
+        s = _make_stream("k", {"a": [1], "b": [2]}, ["x"])
+        _, data_keys = s.map_data({"a": "alpha"}, drop_unmapped=True).keys()
+        assert data_keys == ("alpha",)
 
     def test_map_data_with_label(self):
         s = _make_stream("k", {"a": [1]}, ["x"])

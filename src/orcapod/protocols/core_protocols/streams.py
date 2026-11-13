@@ -315,22 +315,24 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
     def map_tags(
         self,
         name_map: Mapping[str, str],
-        drop_unmapped: bool = True,
+        drop_unmapped: bool = False,
         label: str | None = None,
     ) -> "StreamProtocol":
         """
         Map tag names in this stream to new names based on the provided mapping.
+        Tags not in the mapping are kept unless ``drop_unmapped`` is True.
         """
         ...
 
     def map_data(
         self,
         name_map: Mapping[str, str],
-        drop_unmapped: bool = True,
+        drop_unmapped: bool = False,
         label: str | None = None,
     ) -> "StreamProtocol":
         """
         Map data names in this stream to new names based on the provided mapping.
+        Data columns not in the mapping are kept unless ``drop_unmapped`` is True.
         """
         ...
 

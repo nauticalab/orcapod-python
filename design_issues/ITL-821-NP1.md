@@ -21,7 +21,9 @@ newcomer. Re-checked on `b197544e` (v0.2.0 + #291):
    `side_effect_function_pod` `"v1.0"` (the major version is in the data function's `uri`, so
    it moves identity hashes and the result-store path); `MapData`/`MapTags`
    `drop_unmapped=False` vs `stream.map_data`/`map_tags` `True` (in the operator identity).
-   **Open:** awaiting the developer's choice of default.
+   **Fix (ITL-1027):** the `drop_unmapped` default is now `False` everywhere (the fluent
+   methods and the protocol changed). The version-default disagreement stays open.
+   **Open:** awaiting the developer's choice of default for `version`.
 5. `examples/save_and_load_pipelines.py` passed a database to `Pipeline()` and failed.
    **Fix:** rewritten around `PipelineJob`; `tests/test_examples/test_examples.py` runs every
    example in a subprocess so an example cannot break silently again.

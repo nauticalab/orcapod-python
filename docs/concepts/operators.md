@@ -625,9 +625,8 @@ for tag, data in adults.iter_data():
 ```
 
 !!! note
-    The fluent `map_tags` and `map_data` methods default to `drop_unmapped=True`, the
-    opposite of the `MapTags` and `MapData` operator classes. Pass `drop_unmapped`
-    explicitly when you rename only some of the columns.
+    The fluent `map_tags` and `map_data` methods and the `MapTags` and `MapData` operator
+    classes all keep the columns they do not rename. Pass `drop_unmapped=True` to drop them.
 
 ## How it connects to other concepts
 

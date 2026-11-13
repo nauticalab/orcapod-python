@@ -1675,7 +1675,7 @@ def pipeline_drop_nulls_job() -> dict[str, Any]:
         present = (
             _nullable_readings()
             .drop_nulls(["x", "y"], label="present")
-            .map_data({"x": "age", "y": "weight"}, label="renamed")
+            .map_data({"x": "age", "y": "weight"}, drop_unmapped=True, label="renamed")
         )
         golden_ratio.pod(present, label="ratio")
     job.run()
