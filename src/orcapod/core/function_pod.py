@@ -1335,6 +1335,12 @@ class FunctionPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table:
+        # A stale cache is cleared before any of it is used: the table and the content
+        # hashes are then built from the same rows, and they are the current ones
+        # (ITL-1045). ``iter_data`` clears a stale cache too, but only after the
+        # cached table would already have been read.
+        if self.is_stale:
+            self.clear_cache()
         if self._cached_output_table is None:
             self._cached_output_table = self._table_from_pairs(list(self.iter_data()))
         assert self._cached_output_table is not None, (
