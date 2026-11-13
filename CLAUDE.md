@@ -227,6 +227,19 @@ resolves several issues uses its primary issue's id).
   (see `RELEASING.md`). Entries already in `CHANGELOG.md` on `main` stay there.
 - `changelog.d/README.md` is the full statement of the convention.
 
+## Releasing and the public repository
+
+Developer decisions, November 12, 2026 (ITL-1007); the full procedure is `RELEASING.md`.
+
+- All development, review and CI happen on `metamorphic-labs/orcapod-python`. The public
+  `nauticalab/orcapod-python` receives `main` only at release points, by **fast-forward push**
+  (never a squash, never a pull request), and runs the Release workflow.
+- An agent never pushes to `nauticalab`, adds a remote for it, creates or pushes a tag, runs the
+  Release workflow, or touches a setting, secret or environment there. The push happens only on
+  the developer's explicit go. The `v0.2.0` tag is never pushed.
+- Linear, Codecov and SpiralDB jobs run only when
+  `github.repository == 'metamorphic-labs/orcapod-python'`; `lint.yml` runs only on `nauticalab`.
+
 ## Lint, format and type checks
 
 Every pull request must pass the metamorphic-labs required CI, which runs exactly these

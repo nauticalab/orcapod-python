@@ -7,6 +7,8 @@ on:
 
 jobs:
   sync:
+    # Linear is wired to the development repository only (ITL-1007).
+    if: github.repository == 'metamorphic-labs/orcapod-python'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

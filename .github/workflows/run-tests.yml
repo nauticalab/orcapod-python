@@ -37,6 +37,7 @@ jobs:
         run: uv run --python ${{ matrix.python-version }} pytest -v -m "not postgres" --cov=src --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage reports to Codecov
+        if: github.repository == 'metamorphic-labs/orcapod-python'
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -46,8 +47,11 @@ jobs:
     # Only run on push/manual trigger — not on PRs — to avoid consuming SpiralDB
     # resources on every review cycle.
     # Requires SPIRAL_WORKLOAD_ID secret; fails loudly if absent so missing
-    # credentials don't silently drop coverage.
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # credentials don't silently drop coverage. Runs only on the development repository:
+    # the public repository has no SpiralDB credentials, so the job is skipped there (ITL-1007).
+    if: >-
+      github.repository == 'metamorphic-labs/orcapod-python'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: test
     permissions:
       id-token: write  # required to request a GitHub OIDC token for SpiralDB auth

@@ -38,10 +38,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/metamorphic-labs/orcapod-python"
-Repository = "https://github.com/metamorphic-labs/orcapod-python"
-Changelog = "https://github.com/metamorphic-labs/orcapod-python/blob/main/CHANGELOG.md"
-Issues = "https://github.com/metamorphic-labs/orcapod-python/issues"
+Homepage = "https://github.com/nauticalab/orcapod-python"
+Repository = "https://github.com/nauticalab/orcapod-python"
+Changelog = "https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md"
+Issues = "https://github.com/nauticalab/orcapod-python/issues"
 
 [project.optional-dependencies]
 redis = ["redis>=6.2.0"]

@@ -1,0 +1,44 @@
+name: Lint and type check
+
+# The public repository (nauticalab/orcapod-python) has no organization-level required checks, so
+# the checks CLAUDE.md lists under "Lint, format and type checks" run here. pytest is covered by
+# run-tests.yml. The job does not run on the development repository, whose required CI runs the
+# same commands (ITL-1007).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Ruff and basedpyright
+    if: github.repository == 'nauticalab/orcapod-python'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0   # required: hatch-vcs needs full tag history
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev --python "3.11"
+
+      - name: Ruff check
+        run: uv run --with ruff ruff check .
+
+      - name: Ruff format check
+        run: uv run --with ruff ruff format --check .
+
+      - name: Basedpyright
+        run: uv run --with basedpyright basedpyright

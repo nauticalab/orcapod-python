@@ -35,7 +35,7 @@ SpikeInterface support lives in a separate package,
 [`orcapod-extension-spikeinterface`](https://github.com/nauticalab/orcapod-extension-spikeinterface).
 It is not published on PyPI; install it from its repository.
 
-See [CHANGELOG.md](https://github.com/metamorphic-labs/orcapod-python/blob/main/CHANGELOG.md)
+See [CHANGELOG.md](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md)
 for release notes, including the migration steps for databases written by an earlier
 release.
 
@@ -45,13 +45,13 @@ Releases are cut by running the GitHub Actions **Release** workflow by hand. It 
 tests and the license check, creates and pushes the version tag, builds the wheel and
 sdist, and publishes them to TestPyPI and then PyPI through trusted publishing. The version
 comes from the tag via `hatch-vcs`, so there is no version number to bump in the source
-tree. See [RELEASING.md](https://github.com/metamorphic-labs/orcapod-python/blob/main/RELEASING.md)
+tree. See [RELEASING.md](https://github.com/nauticalab/orcapod-python/blob/main/RELEASING.md)
 for the full workflow.
 
 ## License
 
 Orcapod is released under the
-[MIT License](https://github.com/metamorphic-labs/orcapod-python/blob/main/LICENSE).
+[MIT License](https://github.com/nauticalab/orcapod-python/blob/main/LICENSE).
 
 ## Continuous Integration
 
