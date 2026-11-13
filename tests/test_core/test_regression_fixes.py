@@ -146,7 +146,11 @@ class TestAsyncExecuteChannelCloseOnError:
         await feed_stream_to_channel(stream, input_ch)
 
         with pytest.raises(Exception):
-            await op.async_execute([input_ch.reader], output_ch.writer)
+            await op.async_execute(
+                [input_ch.reader],
+                output_ch.writer,
+                input_pipeline_hashes=[stream.pipeline_hash()],
+            )
 
         # Channel should be closed — collect should not hang.
         results = await output_ch.reader.collect()
@@ -166,8 +170,13 @@ class TestAsyncExecuteChannelCloseOnError:
 
         await input_ch.writer.close()  # empty input
 
-        # Streaming async_execute handles empty input gracefully.
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        # Streaming async_execute handles empty input gracefully. An input
+        # that delivers no rows still has a pipeline hash.
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[make_stream(3).pipeline_hash()],
+        )
 
         # Channel should be closed and empty.
         results = await output_ch.reader.collect()

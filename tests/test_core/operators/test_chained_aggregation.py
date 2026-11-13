@@ -211,7 +211,11 @@ def _run_async(op: Any, upstream: StreamProtocol) -> Rows:
         for row in upstream.iter_data():
             await source.writer.send(row)
         await source.writer.close()
-        await op.async_execute([source.reader], sink.writer)
+        await op.async_execute(
+            [source.reader],
+            sink.writer,
+            input_pipeline_hashes=[upstream.pipeline_hash()],
+        )
         return await sink.reader.collect()
 
     return asyncio.run(run())

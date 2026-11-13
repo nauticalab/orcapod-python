@@ -7,7 +7,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -127,9 +127,18 @@ class MapData(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
-        """Streaming: rename data columns per row without materializing."""
+        """Streaming: rename data columns per row without materializing.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
         try:
             rename_map: dict[str, str] | None = None
             unmapped: list[str] | None = None
@@ -267,9 +276,18 @@ class MapTags(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
-        """Streaming: rename tag columns per row without materializing."""
+        """Streaming: rename tag columns per row without materializing.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
         try:
             rename_map: dict[str, str] | None = None
             unmapped: list[str] | None = None

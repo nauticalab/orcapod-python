@@ -471,7 +471,11 @@ async def _run_async(op: UnaryOperator, source: StreamProtocol) -> list[Row]:
     for tag, data in source.iter_data():
         await input_ch.writer.send((tag, data))
     await input_ch.writer.close()
-    await op.async_execute([input_ch.reader], output_ch.writer)
+    await op.async_execute(
+        [input_ch.reader],
+        output_ch.writer,
+        input_pipeline_hashes=[source.pipeline_hash()],
+    )
     return await output_ch.reader.collect()
 
 
@@ -694,7 +698,11 @@ async def test_row_time_code_never_reads_a_context(
     for row in source.iter_data():
         await input_ch.writer.send(row)
     await input_ch.writer.close()
-    await op.async_execute([input_ch.reader], output_ch.writer)
+    await op.async_execute(
+        [input_ch.reader],
+        output_ch.writer,
+        input_pipeline_hashes=[source.pipeline_hash()],
+    )
     async_rows = await output_ch.reader.collect()
     assert len(sync_rows) == len(async_rows) == 2
 

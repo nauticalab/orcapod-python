@@ -335,6 +335,263 @@ def test_async_rows_equal_sync_rows(case: Case) -> None:
     )
 
 
+# ── inputs that are not root sources (ITL-906) ──────────────────────────────
+
+
+def after_operator(source: StreamProtocol) -> StreamProtocol:
+    """``source`` behind an operator that keeps every row: ``DropNulls`` on tag ``k``.
+
+    Every source of the matrix has the non-nullable tag ``k``, so the rows and columns
+    are those of ``source``; only the pipeline hash differs, as it does after any
+    operator or function pod.
+    """
+    stream = DropNulls("k")(source)
+    assert stream.pipeline_hash() != source.pipeline_hash()
+    return stream
+
+
+def _after_operator_case(case: Case) -> Case:
+    """``case`` with every input behind ``after_operator``."""
+
+    def make_sources() -> tuple[StreamProtocol, ...]:
+        return tuple(after_operator(s) for s in case.make_sources())
+
+    return Case(case.label, case.make_op, make_sources)
+
+
+def _first_after_operator_case(case: Case) -> Case:
+    """``case`` with only its first input behind ``after_operator``."""
+
+    def make_sources() -> tuple[StreamProtocol, ...]:
+        first, *rest = case.make_sources()
+        return (after_operator(first), *rest)
+
+    return Case(case.label, case.make_op, make_sources)
+
+
+AFTER_OPERATOR_CASES = [
+    pytest.param(_after_operator_case(c), id=f"{c.label}-all") for c in CASES
+] + [
+    pytest.param(_first_after_operator_case(c), id=f"{c.label}-first")
+    for c in CASES
+    if len(c.make_sources()) > 1
+]
+
+
+@pytest.mark.parametrize("case", AFTER_OPERATOR_CASES)
+def test_async_rows_equal_sync_rows_after_an_operator(case: Case) -> None:
+    """Every operator's async path equals its sync path when an input is not a source.
+
+    System-tag column names of ``MergeJoin`` (name-extending), ``Batch`` and ``GroupBy``
+    (reducing) end in the input's pipeline hash; the async path must use the hash of the
+    stream the rows came from, not that of the rows rebuilt into a table.
+    """
+    sources = case.make_sources()
+    assert_equivalent(
+        sync_rows(case.make_op(), *sources), async_rows(case.make_op(), *sources)
+    )
+
+
+def function_pod_stream(source_id: str, offset: int) -> StreamProtocol:
+    """A function pod's output on tag ``k: int16``: ``x = a + offset`` as ``int``."""
+    source = _source(
+        {"k": pa.array([1, 2, 3], pa.int16()), "a": pa.array([1, 2, 3], pa.int8())},
+        tags=("k",),
+        source_id=source_id,
+    )
+
+    def shift(a: int) -> int:
+        return a + offset
+
+    pod = FunctionPod(
+        PythonDataFunction(shift, output_keys="x", function_name=f"shift_{source_id}")  # pyright: ignore[reportArgumentType]  # PythonDataFunction is not yet typed as matching DataFunctionProtocol (baselined in other tests); it works at runtime
+    )
+    return pod(source)
+
+
+FUNCTION_POD_CASES = [
+    Case(
+        "merge_join",
+        MergeJoin,
+        lambda: (function_pod_stream("p", 0), function_pod_stream("q", 10)),
+    ),
+    Case(
+        "merge_join_with_source",
+        MergeJoin,
+        lambda: (
+            function_pod_stream("p", 0),
+            _source(
+                {
+                    "k": pa.array([1, 2, 3], pa.int16()),
+                    "x": pa.array([7, 8, 9], pa.int64()),
+                },
+                tags=("k",),
+                source_id="r",
+            ),
+        ),
+    ),
+    Case("join", Join, lambda: (function_pod_stream("p", 0), source_b())),
+    Case("semijoin", SemiJoin, lambda: (function_pod_stream("p", 0), source_b())),
+    Case(
+        "batch_2", lambda: Batch(batch_size=2), lambda: (function_pod_stream("p", 0),)
+    ),
+    Case("batch_all", Batch, lambda: (function_pod_stream("p", 0),)),
+    Case("group_by", lambda: GroupBy(["k"]), lambda: (function_pod_stream("p", 0),)),
+    Case(
+        "polars_filter",
+        lambda: PolarsFilter(constraints={"k": 1}),
+        lambda: (function_pod_stream("p", 0),),
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case", FUNCTION_POD_CASES, ids=[c.label for c in FUNCTION_POD_CASES]
+)
+def test_async_rows_equal_sync_rows_after_a_function_pod(case: Case) -> None:
+    """The async path equals the sync path when an input is a function pod's output."""
+    sources = case.make_sources()
+    assert_equivalent(
+        sync_rows(case.make_op(), *sources), async_rows(case.make_op(), *sources)
+    )
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [lambda: Batch(batch_size=2), Batch, lambda: GroupBy(["ta"])],
+    ids=["batch_2", "batch_all", "group_by"],
+)
+def test_reducing_operator_names_system_tags_after_its_input(
+    make_op: Callable[[], StaticOutputOperatorPod],
+) -> None:
+    """A folded system-tag column name ends in the input's pipeline hash on both paths.
+
+    System tag rule 3: ``Batch`` and ``GroupBy`` append ``::{pipeline_hash}`` of their
+    input. The input here is an operator's output, whose pipeline hash is not the
+    schema-only hash of its rows.
+    """
+    op = make_op()
+    stream = after_operator(source_a())
+    suffix = stream.pipeline_hash().to_hex(op.orcapod_config.hashing.system_tag_n_char)
+    for rows in (sync_rows(make_op(), stream), async_rows(make_op(), stream)):
+        for tag, _ in rows:
+            names = list(tag.system_tags())
+            assert names
+            assert all(name.endswith(f"::{suffix}") for name in names), names
+
+
+@CASE
+def test_async_execute_requires_input_pipeline_hashes(case: Case) -> None:
+    """Every operator's ``async_execute`` takes the input pipeline hashes, always.
+
+    Without them a barrier path would name system tags after a schema-only hash,
+    unlike the sync path (ITL-906), so there is no default to fall back on.
+    """
+    channels: list[Channel[Row]] = [Channel() for _ in case.make_sources()]
+    output: Channel[Row] = Channel()
+    with pytest.raises(TypeError, match="input_pipeline_hashes"):
+        case.make_op().async_execute(  # pyright: ignore[reportCallIssue]  # the missing keyword is the point
+            [channel.reader for channel in channels], output.writer
+        )
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        c
+        for c in CASES
+        if c.label
+        in (
+            "join_2",
+            "join_3",
+            "merge_join",
+            "batch_2",
+            "batch_all",
+            "group_by",
+            "polars_filter",
+        )
+    ],
+    ids=lambda c: c.label,
+)
+def test_barrier_async_rejects_wrong_number_of_pipeline_hashes(case: Case) -> None:
+    """An ``async_execute`` that uses the hashes needs one per input channel."""
+    sources = case.make_sources()
+    n_inputs = len(sources)
+
+    async def run() -> None:
+        channels: list[Channel[Row]] = [Channel(buffer_size=64) for _ in sources]
+        for stream, channel in zip(sources, channels):
+            for row in stream.iter_data():
+                await channel.writer.send(row)
+            await channel.writer.close()
+        output: Channel[Row] = Channel(buffer_size=64)
+        await case.make_op().async_execute(
+            [channel.reader for channel in channels],
+            output.writer,
+            input_pipeline_hashes=[s.pipeline_hash() for s in sources] * 2,
+        )
+
+    message = rf"length \({2 * n_inputs}\) must match inputs length \({n_inputs}\)"
+    with pytest.raises(ValueError, match=message):
+        asyncio.run(run())
+
+
+# ── inputs that deliver no rows (ITL-865) ───────────────────────────────────
+
+
+def no_rows(source: StreamProtocol) -> StreamProtocol:
+    """``source`` behind a filter that matches no row (every source has ``k`` in 1..3)."""
+    stream = PolarsFilter(constraints={"k": 0})(source)
+    assert list(stream.iter_data()) == []
+    return stream
+
+
+def _zero_row_cases() -> list[Any]:
+    """Every case with all inputs empty, and each multi-input case with one input empty."""
+    params: list[Any] = []
+    for case in CASES:
+        n_inputs = len(case.make_sources())
+        empty_sets = [tuple(range(n_inputs))]
+        if n_inputs > 1:
+            empty_sets += [(i,) for i in range(n_inputs)]
+        for empty in empty_sets:
+
+            def make_sources(
+                case: Case = case, empty: tuple[int, ...] = empty
+            ) -> tuple[StreamProtocol, ...]:
+                return tuple(
+                    no_rows(s) if i in empty else s
+                    for i, s in enumerate(case.make_sources())
+                )
+
+            suffix = "all" if len(empty) == n_inputs else f"input_{empty[0]}"
+            params.append(
+                pytest.param(
+                    Case(case.label, case.make_op, make_sources),
+                    id=f"{case.label}-empty_{suffix}",
+                )
+            )
+    return params
+
+
+@pytest.mark.parametrize("case", _zero_row_cases())
+def test_async_rows_equal_sync_rows_when_an_input_has_no_rows(case: Case) -> None:
+    """An input with no rows gives the sync path's rows on the async path, never an error.
+
+    The operator is applied to its inputs first, ``op(...)``, as an operator node does when
+    the graph is built: ``SemiJoin`` with an empty right input reads the common keys that
+    application recorded, because a channel with no rows says nothing about its columns
+    (ITL-858).
+    """
+    sources = case.make_sources()
+    expected = sync_rows(case.make_op(), *sources)
+    op = case.make_op()
+    _ = op(*sources)
+    actual = async_rows(op, *sources)
+    assert len(actual) == len(expected)
+    assert_equivalent(expected, actual)
+
+
 def test_drop_nulls_without_tag_columns() -> None:
     """A stream without tag columns: the async path drops the same rows, in order.
 
@@ -523,8 +780,7 @@ def _meta_case(case: Case) -> Case:
 # Join-style fix. Strict, so a fix flags them.
 _MATERIALIZE_DROPS_META = (
     "ITL-846: barrier-mode async_execute rebuilds its input with "
-    "_materialize_to_stream, which drops Data meta columns; the rebuilt stream's "
-    "pipeline hash then differs, so system-tag names and canonical order differ too"
+    "_materialize_to_stream, which drops Data meta columns"
 )
 _SYNC_DROPS_META = (
     "ITL-846: the sync path drops Data meta columns that the async path keeps (a raw "

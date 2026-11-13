@@ -196,6 +196,10 @@ class TestAsynchronousPipeline:
                 join_op.async_execute(
                     [ch_students.reader, ch_grades.reader],
                     ch_joined.writer,
+                    input_pipeline_hashes=[
+                        make_students().pipeline_hash(),
+                        make_grades().pipeline_hash(),
+                    ],
                 )
             )
 
@@ -204,6 +208,9 @@ class TestAsynchronousPipeline:
                 filter_op.async_execute(
                     [ch_joined.reader],
                     ch_filtered.writer,
+                    input_pipeline_hashes=[
+                        join_op(make_students(), make_grades()).pipeline_hash()
+                    ],
                 )
             )
 
@@ -253,12 +260,19 @@ class TestAsynchronousPipeline:
                 join_op.async_execute(
                     [ch_students.reader, ch_grades.reader],
                     ch_joined.writer,
+                    input_pipeline_hashes=[
+                        make_students().pipeline_hash(),
+                        make_grades().pipeline_hash(),
+                    ],
                 )
             )
             tg.create_task(
                 filter_op.async_execute(
                     [ch_joined.reader],
                     ch_filtered.writer,
+                    input_pipeline_hashes=[
+                        join_op(make_students(), make_grades()).pipeline_hash()
+                    ],
                 )
             )
             tg.create_task(
@@ -322,9 +336,24 @@ class TestSyncAsyncEquivalence:
             tg.create_task(push(make_students(), ch_s))
             tg.create_task(push(make_grades(), ch_g))
             tg.create_task(
-                join_op.async_execute([ch_s.reader, ch_g.reader], ch_j.writer)
+                join_op.async_execute(
+                    [ch_s.reader, ch_g.reader],
+                    ch_j.writer,
+                    input_pipeline_hashes=[
+                        make_students().pipeline_hash(),
+                        make_grades().pipeline_hash(),
+                    ],
+                )
             )
-            tg.create_task(filter_op.async_execute([ch_j.reader], ch_f.writer))
+            tg.create_task(
+                filter_op.async_execute(
+                    [ch_j.reader],
+                    ch_f.writer,
+                    input_pipeline_hashes=[
+                        join_op(make_students(), make_grades()).pipeline_hash()
+                    ],
+                )
+            )
             tg.create_task(grade_pod.async_execute([ch_f.reader], ch_o.writer))
 
         return {

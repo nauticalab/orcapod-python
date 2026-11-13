@@ -8,7 +8,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -114,9 +114,18 @@ class SelectTagColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
-        """Streaming: select tag columns per row without materializing."""
+        """Streaming: select tag columns per row without materializing.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
         try:
             tags_to_drop: list[str] | None = None
             async for tag, data in inputs[0]:
@@ -233,9 +242,18 @@ class SelectDataColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
-        """Streaming: select data columns per row without materializing."""
+        """Streaming: select data columns per row without materializing.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
         try:
             pkts_to_drop: list[str] | None = None
             async for tag, data in inputs[0]:
@@ -347,9 +365,18 @@ class DropTagColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
-        """Streaming: drop tag columns per row without materializing."""
+        """Streaming: drop tag columns per row without materializing.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
         try:
             effective_drops: list[str] | None = None
             async for tag, data in inputs[0]:
@@ -468,9 +495,18 @@ class DropDataColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
-        """Streaming: drop data columns per row without materializing."""
+        """Streaming: drop data columns per row without materializing.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
         try:
             effective_drops: list[str] | None = None
             async for tag, data in inputs[0]:

@@ -404,6 +404,66 @@ MERGE_JOIN_AFTER_OPERATOR = Case(
 )
 
 
+def _no_match(stream: StreamProtocol) -> StreamProtocol:
+    """``stream`` behind a filter that matches no row."""
+    return PolarsFilter(constraints={"grp": "none"})(stream)
+
+
+AFTER_NO_ROWS_CASES = [
+    Case(
+        "group_by_after_no_rows",
+        lambda a, b, c: GroupBy(by=["grp"])(_no_match(a), label="op"),
+        0,
+    ),
+    Case(
+        "polars_filter_after_no_rows",
+        lambda a, b, c: PolarsFilter(constraints={"grp": "g1"})(
+            _no_match(a), label="op"
+        ),
+        0,
+    ),
+    Case(
+        "batch_after_no_rows",
+        lambda a, b, c: Batch(batch_size=2)(_no_match(a), label="op"),
+        0,
+    ),
+    Case(
+        "batch_all_after_no_rows", lambda a, b, c: Batch()(_no_match(a), label="op"), 0
+    ),
+    # Both inputs empty: a zero-row operator node reads back types built from Python
+    # types (ITL-912), so one empty and one non-empty input disagree on ``id`` on sync.
+    Case(
+        "merge_join_after_no_rows",
+        lambda a, b, c: MergeJoin()(_no_match(a), _no_match(c), label="op"),
+        0,
+    ),
+    Case(
+        "function_pod_after_no_rows",
+        lambda a, b, c: double_x.pod(_no_match(c), label="op"),
+        0,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "case", AFTER_NO_ROWS_CASES, ids=[case.name for case in AFTER_NO_ROWS_CASES]
+)
+@pytest.mark.parametrize("orchestrator", list(ORCHESTRATORS))
+def test_node_after_an_input_with_no_rows_completes_the_run(
+    case: Case, orchestrator: str, tmp_path: Path
+) -> None:
+    """A filter that matches no row upstream: the job completes with zero rows (ITL-865).
+
+    On the async path a barrier operator whose input delivered no rows emits none, as the
+    sync path returns an empty stream; it does not raise.
+    """
+    job = _run_job(case, orchestrator, "in_memory", tmp_path)
+    node: object = job.nodes["op"]
+    assert isinstance(node, StreamProtocol)
+    assert list(node.iter_data()) == []
+    assert node.as_table().num_rows == 0
+
+
 def _sync_and_async_nodes(
     case: Case, tmp_path: Path
 ) -> tuple[OperatorJobNode, OperatorJobNode]:
@@ -431,7 +491,7 @@ def test_operator_node_with_no_rows_reads_back_empty_after_async_run(
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "ITL-858/ITL-865: no row reaches the async node, so it reads back the table "
+        "ITL-858/ITL-912: no row reaches the async node, so it reads back the table "
         "built from the Python output schema: int8 becomes int64, and the system-tag "
         "and source-info columns are missing"
     ),
@@ -447,21 +507,48 @@ def test_operator_node_with_no_rows_keeps_columns_and_types_after_async_run(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ITL-906: the async MergeJoin names system-tag columns from the schema-only "
-        "hash of its materialized inputs, not from its upstreams' pipeline hashes"
+AFTER_OPERATOR_CASES = [
+    MERGE_JOIN_AFTER_OPERATOR,
+    Case(
+        "batch_after_operator",
+        lambda a, b, c: Batch(batch_size=2)(SelectDataColumns(["x"])(a), label="op"),
+        2,
     ),
-)
-def test_merge_join_after_an_operator_reads_back_same_system_tags_after_async_run(
-    tmp_path: Path,
-) -> None:
-    """Async ``MergeJoin`` after an operator should name system tags as sync does."""
-    sync_node, async_node = _sync_and_async_nodes(MERGE_JOIN_AFTER_OPERATOR, tmp_path)
+    Case(
+        "group_by_after_operator",
+        lambda a, b, c: GroupBy(by=["grp"])(SelectDataColumns(["x"])(a), label="op"),
+        2,
+    ),
+    Case(
+        "group_by_after_function_pod",
+        lambda a, b, c: GroupBy(by=["grp"])(double_x.pod(c), label="op"),
+        2,
+    ),
+]
 
-    assert async_node.as_table(all_info=True).column_names == (
-        sync_node.as_table(all_info=True).column_names
+
+@pytest.mark.parametrize(
+    "case", AFTER_OPERATOR_CASES, ids=[case.name for case in AFTER_OPERATOR_CASES]
+)
+def test_operator_after_an_operator_reads_back_same_system_tags_after_async_run(
+    case: Case, tmp_path: Path
+) -> None:
+    """An async run names system tags as sync does when the input is not a source (ITL-906).
+
+    ``MergeJoin``, ``Batch`` and ``GroupBy`` put their inputs' pipeline hashes into
+    system-tag column names; the async path must use the upstream node's hash.
+    """
+    sync_node, async_node = _sync_and_async_nodes(case, tmp_path)
+
+    sync_table = sync_node.as_table(all_info=True)
+    async_table = async_node.as_table(all_info=True)
+    assert async_table.column_names == sync_table.column_names
+    assert async_table.num_rows == sync_table.num_rows == case.expected_rows
+    assert _row_hashes(async_node) == _row_hashes(sync_node)
+    assert sorted(
+        repr(sorted(tag.system_tags().items())) for tag, _ in async_node.iter_data()
+    ) == sorted(
+        repr(sorted(tag.system_tags().items())) for tag, _ in sync_node.iter_data()
     )
 
 

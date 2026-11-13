@@ -391,7 +391,12 @@ class TestAsyncOperatorsKeepPerRowSourceInfo:
             empty: Channel[Row] = Channel(buffer_size=4)
             await empty.writer.close()
             output: Channel[Row] = Channel(buffer_size=4)
-            await make_op().async_execute([empty.reader], output.writer)
+            # An input that delivers no rows still has a pipeline hash.
+            await make_op().async_execute(
+                [empty.reader],
+                output.writer,
+                input_pipeline_hashes=[_source().pipeline_hash()],
+            )
             return await output.reader.collect()
 
         # The generic barrier path (e.g. ``PolarsFilter``) still raises on zero rows,

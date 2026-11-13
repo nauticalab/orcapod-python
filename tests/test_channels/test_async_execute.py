@@ -228,7 +228,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -244,7 +248,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -262,7 +270,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -288,7 +300,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 2
@@ -306,7 +322,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -323,7 +343,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -341,7 +365,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 1
@@ -358,7 +386,11 @@ class TestUnaryOperatorAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[stream.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3  # 6 rows / batch_size=2
@@ -390,7 +422,11 @@ class TestBinaryOperatorAsyncExecute:
         await feed_stream_to_channel(left, left_ch)
         await feed_stream_to_channel(right, right_ch)
 
-        await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [left_ch.reader, right_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[left.pipeline_hash(), right.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         ids = sorted(tag.as_dict()["id"] for tag, _ in results)
@@ -422,7 +458,11 @@ class TestBinaryOperatorAsyncExecute:
         await feed_stream_to_channel(left, left_ch)
         await feed_stream_to_channel(right, right_ch)
 
-        await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [left_ch.reader, right_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[left.pipeline_hash(), right.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 2
@@ -460,7 +500,11 @@ class TestJoinAsyncExecute:
         await feed_stream_to_channel(left, left_ch)
         await feed_stream_to_channel(right, right_ch)
 
-        await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [left_ch.reader, right_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[left.pipeline_hash(), right.pipeline_hash()],
+        )
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -674,7 +718,13 @@ class TestEndToEndPipeline:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source())
-            tg.create_task(filter_op.async_execute([ch1.reader], ch2.writer))
+            tg.create_task(
+                filter_op.async_execute(
+                    [ch1.reader],
+                    ch2.writer,
+                    input_pipeline_hashes=[stream.pipeline_hash()],
+                )
+            )
             tg.create_task(func_pod.async_execute([ch2.reader], ch3.writer))
 
         results = await ch3.reader.collect()
@@ -727,7 +777,12 @@ class TestEndToEndPipeline:
             tg.create_task(push(right_stream, ch_right))
             tg.create_task(
                 join_op.async_execute(
-                    [ch_left.reader, ch_right.reader], ch_joined.writer
+                    [ch_left.reader, ch_right.reader],
+                    ch_joined.writer,
+                    input_pipeline_hashes=[
+                        left_stream.pipeline_hash(),
+                        right_stream.pipeline_hash(),
+                    ],
                 )
             )
             tg.create_task(func_pod.async_execute([ch_joined.reader], ch_out.writer))

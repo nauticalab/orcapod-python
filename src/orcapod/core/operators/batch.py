@@ -8,7 +8,7 @@ from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig
+from orcapod.types import ColumnConfig, ContentHash
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -152,7 +152,8 @@ class Batch(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
         """Streaming batch: emit full batches as they accumulate.
 
@@ -160,13 +161,29 @@ class Batch(UnaryOperator):
         materialized and emitted immediately, allowing downstream consumers
         to start processing before all input is consumed.  When
         ``batch_size == 0`` (batch everything), falls back to barrier mode.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: The input stream's pipeline hash, as a
+                one-element sequence. Every rebuilt batch reports it, so the
+                folded system-tag names end in it as on the sync path (ITL-906).
+
+        Raises:
+            ValueError: If ``input_pipeline_hashes`` does not have one hash per input.
         """
         try:
+            if len(input_pipeline_hashes) != len(inputs):
+                raise ValueError(
+                    f"input_pipeline_hashes length ({len(input_pipeline_hashes)}) "
+                    f"must match inputs length ({len(inputs)})"
+                )
+            pipeline_hash = input_pipeline_hashes[0]
             if self.batch_size == 0:
                 # Must collect all rows — barrier fallback
                 rows = await inputs[0].collect()
                 if rows:
-                    stream = self._materialize_to_stream(rows)
+                    stream = self._materialize_input_stream(rows, pipeline_hash)
                     result = self.unary_static_process(stream)
                     for tag, data in result.iter_data():
                         await output.send((tag, data))
@@ -176,7 +193,7 @@ class Batch(UnaryOperator):
             async for tag, data in inputs[0]:
                 batch.append((tag, data))
                 if len(batch) >= self.batch_size:
-                    stream = self._materialize_to_stream(batch)
+                    stream = self._materialize_input_stream(batch, pipeline_hash)
                     result = self.unary_static_process(stream)
                     for out_tag, out_data in result.iter_data():
                         await output.send((out_tag, out_data))
@@ -184,7 +201,7 @@ class Batch(UnaryOperator):
 
             # Flush partial batch
             if batch and not self.drop_partial_batch:
-                stream = self._materialize_to_stream(batch)
+                stream = self._materialize_input_stream(batch, pipeline_hash)
                 result = self.unary_static_process(stream)
                 for out_tag, out_data in result.iter_data():
                     await output.send((out_tag, out_data))

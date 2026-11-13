@@ -11,6 +11,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import OrcapodConfig
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow as pa
+
+    from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -245,9 +248,12 @@ class StaticOutputOperatorPod(TraceableBase):
     ) -> StreamProtocol:
         """Materialize a list of (Tag, Data) pairs into an ArrowTableStream.
 
-        Used by the barrier-mode ``async_execute`` to convert collected
-        channel items back into a stream suitable for ``static_process``.
-        Every row keeps its own source info (see ``_rows_to_table``).
+        Holds an operator's or a node's OUTPUT rows, whose stream identity is
+        given by whoever holds them (the node, the ``DynamicPodStream``), so the
+        stream has no producer and its own pipeline hash is never read. Rows
+        that stand for an operator's INPUT go through
+        ``_materialize_input_stream``. Every row keeps its own source info (see
+        ``_rows_to_table``).
 
         Args:
             rows: Non-empty sequence of (Tag, Data) pairs.
@@ -258,41 +264,124 @@ class StaticOutputOperatorPod(TraceableBase):
         Raises:
             ValueError: If ``rows`` is empty.
         """
-        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-
         table, tag_keys = StaticOutputOperatorPod._rows_to_table(rows)
         # No ``source_info`` argument: the table's own ``_source_*`` columns
         # pass through, one value per row.
         return ArrowTableStream(table, tag_columns=tag_keys)
+
+    @staticmethod
+    def _materialize_input_stream(
+        rows: Sequence[tuple[TagProtocol, DataProtocol]],
+        pipeline_hash: ContentHash,
+    ) -> StreamProtocol:
+        """Rebuild an input stream from the rows a barrier ``async_execute`` collected.
+
+        The rebuilt stream reports ``pipeline_hash`` as its own, so an operator
+        that names system-tag columns after its input's pipeline hash
+        (``MergeJoin``, ``Batch``, ``GroupBy``) names them as the sync path
+        does (ITL-906). Every row keeps its own source info (see
+        ``_rows_to_table``).
+
+        Args:
+            rows: Non-empty sequence of (Tag, Data) pairs.
+            pipeline_hash: The pipeline hash of the stream the rows came from.
+
+        Returns:
+            A stream over the rows, in order.
+
+        Raises:
+            ValueError: If ``rows`` is empty.
+        """
+        table, tag_keys = StaticOutputOperatorPod._rows_to_table(rows)
+        return _RowsOfStream(table, tag_columns=tag_keys, pipeline_hash=pipeline_hash)
 
     async def async_execute(
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
-        input_pipeline_hashes: Sequence[ContentHash] | None = None,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
         """Default barrier-mode async execution.
 
         Collects all inputs, runs ``static_process``, emits results.
-        Subclasses override for streaming or incremental strategies.
+        Subclasses override for streaming or incremental strategies. When an
+        input has no rows, nothing is emitted (ITL-865): an operator whose
+        result is not empty then must override this method.
+
+        Every operator's ``async_execute`` takes ``input_pipeline_hashes``, with
+        no default: the operator node passes it for every operator alike.
 
         Args:
             inputs: Readable channels, one per upstream node.
             output: Writable channel for downstream consumption.
             input_pipeline_hashes: Pipeline hash for each input stream,
-                positionally matching ``inputs``.  Multi-input operators
-                (e.g. Join) use these to compute canonical system-tag
-                column names.  Ignored by single-input operators.
+                positionally matching ``inputs``. Each rebuilt input stream
+                reports its hash, so system-tag column names equal the sync
+                path's (ITL-906).
+
+        Raises:
+            ValueError: If ``input_pipeline_hashes`` does not have one hash per input.
         """
         try:
+            if len(input_pipeline_hashes) != len(inputs):
+                raise ValueError(
+                    f"input_pipeline_hashes length ({len(input_pipeline_hashes)}) "
+                    f"must match inputs length ({len(inputs)})"
+                )
             all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
-            streams = [self._materialize_to_stream(rows) for rows in all_rows]
+            if not all(all_rows):
+                # Every barrier operator that exists gives no rows when an input has
+                # none. The typed empty stream the sync path returns needs a schema
+                # the channels do not carry (ITL-858), so nothing is emitted (ITL-865).
+                return
+            streams = [
+                self._materialize_input_stream(rows, pipeline_hash)
+                for rows, pipeline_hash in zip(all_rows, input_pipeline_hashes)
+            ]
             result = self.static_process(*streams)
             for tag, data in result.iter_data():
                 await output.send((tag, data))
         finally:
             await output.close()
+
+
+class _RowsOfStream(ArrowTableStream):
+    """Rows collected from a channel, standing in for the stream they came from.
+
+    The barrier-mode ``async_execute`` rebuilds each input from its rows. A
+    rebuilt ``ArrowTableStream`` has no producer, so its own pipeline hash is
+    the schema-only hash of a root; this stream reports the pipeline hash of
+    the stream the rows came from instead, as the operator node passes it
+    (``input_pipeline_hashes``). Its content hash is that of its table, as for
+    any ``ArrowTableStream`` without a producer.
+    """
+
+    def __init__(
+        self,
+        table: pa.Table,
+        *,
+        tag_columns: Collection[str],
+        pipeline_hash: ContentHash,
+    ) -> None:
+        super().__init__(table, tag_columns=tag_columns)
+        self._input_pipeline_hash: ContentHash = pipeline_hash
+
+    def pipeline_hash(
+        self, hasher: SemanticHasherProtocol | None = None
+    ) -> ContentHash:
+        """The pipeline hash of the stream the rows came from.
+
+        It was computed by the operator node with the hasher of its data
+        context, so it is returned whatever ``hasher`` is given.
+
+        Args:
+            hasher: Not used.
+
+        Returns:
+            The input pipeline hash the operator node passed.
+        """
+        return self._input_pipeline_hash
 
 
 class DynamicPodStream(StreamBase):

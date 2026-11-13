@@ -393,7 +393,7 @@ class Pick(UnaryOperator):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
-        input_pipeline_hashes: Sequence[ContentHash] | None = None,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
         """Process packets one at a time as they arrive (true streaming).
 
@@ -403,7 +403,9 @@ class Pick(UnaryOperator):
         Args:
             inputs: Single-element sequence of readable channels.
             output: Channel to send transformed packets to.
-            input_pipeline_hashes: Ignored; present for protocol compliance.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
         """
         try:
             async for tag, data in inputs[0]:

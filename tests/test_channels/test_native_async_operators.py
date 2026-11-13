@@ -40,7 +40,9 @@ from orcapod.core.operators import (
     SemiJoin,
 )
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
+from orcapod.types import ContentHash
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +157,21 @@ def make_disjoint_stream() -> ArrowTableStream:
     return ArrowTableStream(table, tag_columns=["animal"])
 
 
+def hashes(*streams: StreamProtocol) -> list[ContentHash]:
+    """The pipeline hash of each input stream, as the operator node passes them."""
+    return [stream.pipeline_hash() for stream in streams]
+
+
+def root_hash(tag: str, data: str) -> ContentHash:
+    """The pipeline hash of a root stream with one int64 tag and one int64 data column.
+
+    For an input channel fed by hand, or one that delivers no rows: the operator
+    node passes every input's pipeline hash, so the tests do too.
+    """
+    table = pa.table({tag: pa.array([0], pa.int64()), data: pa.array([0], pa.int64())})
+    return ArrowTableStream(table, tag_columns=[tag]).pipeline_hash()
+
+
 async def feed(stream: ArrowTableStream, ch: Channel) -> None:
     """Push all (tag, data) from a stream into a channel, then close."""
     for tag, data in stream.iter_data():
@@ -167,7 +184,9 @@ async def run_unary(op, stream: ArrowTableStream) -> list[tuple]:
     input_ch = Channel(buffer_size=1024)
     output_ch = Channel(buffer_size=1024)
     await feed(stream, input_ch)
-    await op.async_execute([input_ch.reader], output_ch.writer)
+    await op.async_execute(
+        [input_ch.reader], output_ch.writer, input_pipeline_hashes=hashes(stream)
+    )
     return await output_ch.reader.collect()
 
 
@@ -180,7 +199,11 @@ async def run_binary(
     output_ch = Channel(buffer_size=1024)
     await feed(left, left_ch)
     await feed(right, right_ch)
-    await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+    await op.async_execute(
+        [left_ch.reader, right_ch.reader],
+        output_ch.writer,
+        input_pipeline_hashes=hashes(left, right),
+    )
     return await output_ch.reader.collect()
 
 
@@ -237,7 +260,11 @@ class TestSelectTagColumnsStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = SelectTagColumns(columns=["region"])
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -326,7 +353,11 @@ class TestSelectDataColumnsStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = SelectDataColumns(columns=["weight"])
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -411,7 +442,11 @@ class TestDropTagColumnsStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = DropTagColumns(columns=["region"])
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -473,7 +508,11 @@ class TestDropDataColumnsStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = DropDataColumns(columns=["legs"])
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -569,7 +608,11 @@ class TestMapTagsStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = MapTags(name_map={"region": "area"})
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -682,7 +725,11 @@ class TestMapDataStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = MapData(name_map={"weight": "mass"})
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -773,7 +820,11 @@ class TestBatchStreaming:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = Batch(batch_size=2)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -919,7 +970,11 @@ class TestSemiJoinBuildProbe:
         await feed(right, right_ch)
 
         op = SemiJoin()
-        await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [left_ch.reader, right_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value"), right.pipeline_hash()],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -937,7 +992,11 @@ class TestSemiJoinBuildProbe:
         await right_ch.writer.close()
 
         op = SemiJoin()
-        await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [left_ch.reader, right_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[left.pipeline_hash(), root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         # With empty right and no schema information available,
         # the implementation falls back to passing left through
@@ -998,7 +1057,9 @@ class TestJoinNativeAsync:
         input_ch = Channel(buffer_size=64)
         output_ch = Channel(buffer_size=64)
         await feed(stream, input_ch)
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader], output_ch.writer, input_pipeline_hashes=hashes(stream)
+        )
         results = await output_ch.reader.collect()
 
         assert len(results) == 3
@@ -1077,7 +1138,11 @@ class TestJoinNativeAsync:
         await feed(s1, ch1)
         await feed(s2, ch2)
         await feed(s3, ch3)
-        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out.writer,
+            input_pipeline_hashes=hashes(s1, s2, s3),
+        )
         results = await out.reader.collect()
 
         assert len(results) == 2
@@ -1114,7 +1179,11 @@ class TestJoinNativeAsync:
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
         op = Join()
-        await op.async_execute([input_ch.reader], output_ch.writer)
+        await op.async_execute(
+            [input_ch.reader],
+            output_ch.writer,
+            input_pipeline_hashes=[root_hash("id", "value")],
+        )
         results = await output_ch.reader.collect()
         assert results == []
 
@@ -1171,7 +1240,11 @@ class TestJoinNativeAsync:
         await feed(s1, ch1)
         await feed(s2, ch2)
         await feed(s3, ch3)
-        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out.writer,
+            input_pipeline_hashes=hashes(s1, s2, s3),
+        )
         async_results = await out.reader.collect()
 
         assert len(async_results) == len(sync_results)
@@ -1197,7 +1270,15 @@ class TestJoinNativeAsync:
 
         # Start the join in the background
         join_task = asyncio.create_task(
-            op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+            op.async_execute(
+                [ch1.reader, ch2.reader, ch3.reader],
+                out.writer,
+                input_pipeline_hashes=[
+                    root_hash("id", "a"),
+                    root_hash("id", "b"),
+                    root_hash("id", "c"),
+                ],
+            )
         )
 
         # Send one matching row from each side
@@ -1235,7 +1316,11 @@ class TestJoinNativeAsync:
         out = Channel(buffer_size=64)
         for s, ch in zip(streams, channels):
             await feed(s, ch)
-        await op.async_execute([ch.reader for ch in channels], out.writer)
+        await op.async_execute(
+            [ch.reader for ch in channels],
+            out.writer,
+            input_pipeline_hashes=hashes(*streams),
+        )
         results = await out.reader.collect()
 
         assert len(results) == 2
@@ -1255,7 +1340,15 @@ class TestJoinNativeAsync:
         from orcapod.core.datagrams import Data, Tag
 
         join_task = asyncio.create_task(
-            op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+            op.async_execute(
+                [ch1.reader, ch2.reader, ch3.reader],
+                out.writer,
+                input_pipeline_hashes=[
+                    root_hash("id", "a"),
+                    root_hash("id", "b"),
+                    root_hash("id", "c"),
+                ],
+            )
         )
 
         # Send matching rows from only 2 of 3 sides
@@ -1299,7 +1392,11 @@ class TestJoinNativeAsync:
         await feed(s1, ch1)
         await feed(s2, ch2)
         await ch3.writer.close()  # empty third input
-        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out.writer,
+            input_pipeline_hashes=[*hashes(s1, s2), root_hash("id", "c")],
+        )
         results = await out.reader.collect()
         assert results == []
 
@@ -1333,7 +1430,11 @@ class TestJoinNativeAsync:
         await feed(s1, ch1)
         await feed(s2, ch2)
         await feed(s3, ch3)
-        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out_ch.writer)
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out_ch.writer,
+            input_pipeline_hashes=hashes(s1, s2, s3),
+        )
         results = await out_ch.reader.collect()
 
         # 2 × 1 × 2 = 4 cartesian product
@@ -1372,7 +1473,9 @@ class TestJoinNativeAsync:
         out = Channel(buffer_size=64)
         await feed(s1, ch1)
         await feed(s2, ch2)
-        await op.async_execute([ch1.reader, ch2.reader], out.writer)
+        await op.async_execute(
+            [ch1.reader, ch2.reader], out.writer, input_pipeline_hashes=hashes(s1, s2)
+        )
         async_results = await out.reader.collect()
 
         assert len(async_results) == 6
@@ -1424,7 +1527,11 @@ class TestJoinNativeAsync:
         await feed(s1, ch1)
         await feed(s2, ch2)
         await feed(s3, ch3)
-        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out.writer,
+            input_pipeline_hashes=hashes(s1, s2, s3),
+        )
         async_results = await out.reader.collect()
 
         assert len(async_results) == 4
@@ -1537,7 +1644,11 @@ class TestJoinNativeAsync:
         from orcapod.core.datagrams import Data, Tag
 
         join_task = asyncio.create_task(
-            op.async_execute([ch1.reader, ch2.reader], out.writer)
+            op.async_execute(
+                [ch1.reader, ch2.reader],
+                out.writer,
+                input_pipeline_hashes=[root_hash("id", "a"), root_hash("id", "b")],
+            )
         )
 
         # Buffer 2 rows on side 0 before side 1 sends anything
@@ -1588,8 +1699,18 @@ class TestStreamingPipelineIntegration:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source())
-            tg.create_task(select_op.async_execute([ch1.reader], ch2.writer))
-            tg.create_task(map_op.async_execute([ch2.reader], ch3.writer))
+            tg.create_task(
+                select_op.async_execute(
+                    [ch1.reader], ch2.writer, input_pipeline_hashes=hashes(stream)
+                )
+            )
+            tg.create_task(
+                map_op.async_execute(
+                    [ch2.reader],
+                    ch3.writer,
+                    input_pipeline_hashes=hashes(select_op(stream)),
+                )
+            )
 
         results = await ch3.reader.collect()
         assert len(results) == 3
@@ -1633,9 +1754,19 @@ class TestStreamingPipelineIntegration:
             tg.create_task(push(left, ch_l))
             tg.create_task(push(right, ch_r))
             tg.create_task(
-                join_op.async_execute([ch_l.reader, ch_r.reader], ch_joined.writer)
+                join_op.async_execute(
+                    [ch_l.reader, ch_r.reader],
+                    ch_joined.writer,
+                    input_pipeline_hashes=hashes(left, right),
+                )
             )
-            tg.create_task(select_op.async_execute([ch_joined.reader], ch_out.writer))
+            tg.create_task(
+                select_op.async_execute(
+                    [ch_joined.reader],
+                    ch_out.writer,
+                    input_pipeline_hashes=hashes(join_op(left, right)),
+                )
+            )
 
         results = await ch_out.reader.collect()
         assert len(results) == 3
@@ -1666,9 +1797,19 @@ class TestStreamingPipelineIntegration:
             tg.create_task(push(left, ch_l))
             tg.create_task(push(right, ch_r))
             tg.create_task(
-                semi_op.async_execute([ch_l.reader, ch_r.reader], ch_semi.writer)
+                semi_op.async_execute(
+                    [ch_l.reader, ch_r.reader],
+                    ch_semi.writer,
+                    input_pipeline_hashes=hashes(left, right),
+                )
             )
-            tg.create_task(batch_op.async_execute([ch_semi.reader], ch_out.writer))
+            tg.create_task(
+                batch_op.async_execute(
+                    [ch_semi.reader],
+                    ch_out.writer,
+                    input_pipeline_hashes=hashes(semi_op(left, right)),
+                )
+            )
 
         results = await ch_out.reader.collect()
         # SemiJoin produces 2 rows (id=[2,3]), Batch(2) → 1 batch
@@ -1699,9 +1840,25 @@ class TestStreamingPipelineIntegration:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source())
-            tg.create_task(drop_op.async_execute([ch1.reader], ch2.writer))
-            tg.create_task(map_op.async_execute([ch2.reader], ch3.writer))
-            tg.create_task(select_op.async_execute([ch3.reader], ch4.writer))
+            tg.create_task(
+                drop_op.async_execute(
+                    [ch1.reader], ch2.writer, input_pipeline_hashes=hashes(stream)
+                )
+            )
+            tg.create_task(
+                map_op.async_execute(
+                    [ch2.reader],
+                    ch3.writer,
+                    input_pipeline_hashes=hashes(drop_op(stream)),
+                )
+            )
+            tg.create_task(
+                select_op.async_execute(
+                    [ch3.reader],
+                    ch4.writer,
+                    input_pipeline_hashes=hashes(map_op(drop_op(stream))),
+                )
+            )
 
         results = await ch4.reader.collect()
         assert len(results) == 3

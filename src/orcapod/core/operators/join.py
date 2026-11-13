@@ -343,7 +343,7 @@ class Join(NonZeroInputOperator):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
-        input_pipeline_hashes: Sequence[ContentHash] | None = None,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
         """Async streaming join with pairwise iterative semantics.
 
@@ -363,26 +363,25 @@ class Join(NonZeroInputOperator):
             inputs: Readable channels, one per upstream.
             output: Writable channel for downstream.
             input_pipeline_hashes: Pipeline hash for each input,
-                positionally matching ``inputs``.  Required for
-                correct system-tag renaming with 2+ inputs.
+                positionally matching ``inputs``. With 2+ inputs, each input's
+                system-tag columns are renamed after its hash, as on the sync
+                path.
+
+        Raises:
+            ValueError: If ``input_pipeline_hashes`` does not have one hash per input.
         """
         try:
+            if len(input_pipeline_hashes) != len(inputs):
+                raise ValueError(
+                    f"input_pipeline_hashes length ({len(input_pipeline_hashes)}) "
+                    f"must match inputs length ({len(inputs)})"
+                )
             if len(inputs) == 1:
                 async for tag, data in inputs[0]:
                     await output.send((tag, data))
                 return
 
-            n = len(inputs)
-            if input_pipeline_hashes is not None and len(input_pipeline_hashes) != n:
-                raise ValueError(
-                    f"input_pipeline_hashes length ({len(input_pipeline_hashes)}) "
-                    f"must match inputs length ({n})"
-                )
-            suffixes = (
-                self._compute_system_tag_suffixes(input_pipeline_hashes)
-                if input_pipeline_hashes is not None
-                else [str(i) for i in range(n)]
-            )
+            suffixes = self._compute_system_tag_suffixes(input_pipeline_hashes)
             await self._streaming_join(inputs, output, suffixes)
         finally:
             await output.close()

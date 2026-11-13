@@ -7,7 +7,7 @@ from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_typ
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -195,7 +195,8 @@ class SemiJoin(BinaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
-        **kwargs: Any,
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
     ) -> None:
         """Build-probe: collect right input, then stream left through a hash lookup.
 
@@ -211,6 +212,13 @@ class SemiJoin(BinaryOperator):
         of each input, since channels carry no schema. When either input is
         empty there is nothing to check, so a key type mismatch the sync path
         reports gives an empty result here (as in ``Join``'s async path).
+
+        Args:
+            inputs: The left and right readable input channels.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: the left rows pass through with
+                their system-tag names, so no column is named after an
+                input's pipeline hash.
         """
         try:
             left_ch, right_ch = inputs[0], inputs[1]
