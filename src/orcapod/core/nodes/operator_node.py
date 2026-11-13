@@ -49,8 +49,10 @@ from orcapod.contexts.stored import (
     keep_rows_of_data_context,
     require_same_data_context,
     account_for_stale_tables,
+    describe_store_table,
     find_stale_tables,
     report_rows_of_other_data_contexts,
+    report_unexpected_row_count,
     with_data_context,
 )
 from orcapod.protocols.core_protocols import (
@@ -83,6 +85,21 @@ else:
 # ---------------------------------------------------------------------------
 
 
+class _LoadedCacheUnreadableError(RuntimeError):
+    """A loaded operator node in REPLAY cannot read its run's stored rows.
+
+    ``as_table()`` and ``iter_data()`` raise it; ``head()``, which never raises on a
+    loaded node, shows no rows with ``head_note`` as the reason.
+
+    Attributes:
+        head_note: The short reason a head shows.
+    """
+
+    def __init__(self, message: str, head_note: str) -> None:
+        super().__init__(message)
+        self.head_note = head_note
+
+
 class OperatorNodeBase(StreamBase):
     """Shared base for ``OperatorNode`` and ``OperatorJobNode``.
 
@@ -92,6 +109,10 @@ class OperatorNodeBase(StreamBase):
 
     node_type = "operator"
     HASH_COLUMN_NAME = "_record_hash"
+    # The content hash a saved job recorded for this node's run (ITL-1043); set only
+    # on a node rebuilt by ``OperatorJobNode.from_descriptor``. A class default, so
+    # nodes built without ``__init__`` have it too.
+    _saved_run_content_hash: str | None = None
 
     def __init__(
         self,
@@ -184,14 +205,28 @@ class OperatorNodeBase(StreamBase):
     # ------------------------------------------------------------------
 
     def content_hash(self, hasher=None) -> ContentHash:
-        """Return the content hash, using stored value in read-only mode."""
+        """Return the content hash: the run's when a loaded job recorded it.
+
+        A node of a job loaded from a file that records its run's content hash returns
+        that: the rows the run stored carry it, and inputs rebuilt from the file (an
+        in-memory source is not saved) cannot reproduce it (ITL-1043). Otherwise a
+        read-only node returns its descriptor's value, and any other node computes it.
+        """
+        if self._saved_run_content_hash is not None:
+            return ContentHash.from_string(self._saved_run_content_hash)
         if self._operator is None and self._stored_content_hash is not None:
             return ContentHash.from_string(self._stored_content_hash)
         return super().content_hash(hasher)
 
     def pipeline_hash(self, hasher=None) -> ContentHash:
-        """Return the pipeline hash, using stored value in read-only mode."""
-        if self._operator is None and self._stored_pipeline_hash is not None:
+        """Return the pipeline hash; a node rebuilt from a descriptor returns the saved one.
+
+        A node rebuilt with its operator still returns the saved value: its inputs are
+        rebuilt from the saved schemas, which do not keep every property that the run's
+        inputs hashed (ITL-1043: a column's nullability), so recomputing could give
+        another value and another table path than the run's.
+        """
+        if self._stored_pipeline_hash is not None:
             return ContentHash.from_string(self._stored_pipeline_hash)
         return super().pipeline_hash(hasher)
 
@@ -481,6 +516,8 @@ class OperatorNode(OperatorNodeBase):
                 table_scope=table_scope,
             )
             node._descriptor = descriptor
+            # The run's pipeline hash, not one recomputed from the rebuilt inputs.
+            node._stored_pipeline_hash = descriptor.get("pipeline_hash")
             node._load_status = LoadStatus.FULL
             return node
 
@@ -606,6 +643,10 @@ class OperatorJobNode(OperatorNodeBase):
     _skipped_rows_reported: bool = False
     # Set once a table found at the older layout has been accounted for.
     _stale_tables_checked: bool = False
+    # The job file's expected row count for a loaded node, and whether it was checked
+    # against the attached store (ITL-1043). Advisory: a mismatch only warns.
+    _expected_row_count: int | None = None
+    _row_count_checked: bool = False
 
     @property
     def _stored_table_path(self) -> tuple[str, ...]:
@@ -722,6 +763,7 @@ class OperatorJobNode(OperatorNodeBase):
         # Another store has its own tables of other generations to account for.
         self._stale_tables_checked = False
         self._skipped_rows_reported = False
+        self._row_count_checked = False
         self._pipeline_database = pipeline_database
         self._cache_mode = cache_mode
 
@@ -742,6 +784,8 @@ class OperatorJobNode(OperatorNodeBase):
         operator: OperatorPodProtocol | None,
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         databases: dict[str, Any],
+        job_content_hash: str | None = None,
+        expected_row_count: int | None = None,
     ) -> OperatorJobNode:
         """Construct an OperatorJobNode from a serialized descriptor.
 
@@ -759,6 +803,12 @@ class OperatorJobNode(OperatorNodeBase):
                 for read-only mode.
             databases: Mapping of database role names (``"pipeline"``)
                 to database instances.
+            job_content_hash: The content hash of the node in the saved job's run,
+                which its stored rows carry; ``None`` when the file does not record it.
+            expected_row_count: How many rows the store held under the run's key when
+                the job was saved, from the job file's optional ``run.expected_rows``;
+                ``None`` when not recorded. Advisory: a read returns what the store
+                holds and only warns (``StoreContentWarning``) when it differs.
 
         Returns:
             A new ``OperatorJobNode`` instance.
@@ -800,6 +850,11 @@ class OperatorJobNode(OperatorNodeBase):
                     cache_mode=cache_mode,
                 )
             node._descriptor = descriptor
+            # The run's pipeline hash, not one recomputed from the rebuilt inputs: it
+            # names the table the run's rows are stored in.
+            node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+            node._saved_run_content_hash = job_content_hash
+            node._expected_row_count = expected_row_count
             node._load_status = LoadStatus.FULL
             node._loaded = True
             return node
@@ -851,6 +906,8 @@ class OperatorJobNode(OperatorNodeBase):
         node._descriptor = descriptor
         node._stored_schema = descriptor.get("output_schema", {})
         node._stored_content_hash = descriptor.get("content_hash")
+        node._saved_run_content_hash = job_content_hash
+        node._expected_row_count = expected_row_count
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
         node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
         node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
@@ -871,6 +928,55 @@ class OperatorJobNode(OperatorNodeBase):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _run_content_hash(self) -> ContentHash | None:
+        """Return the content hash this node's run stores its rows under, if known.
+
+        A node that runs computes it. A loaded node knows it only when its saved job
+        recorded it (ITL-1043); otherwise ``None``, because the hash it recomputes from
+        inputs rebuilt from the file is not the run's.
+        """
+        if not self._loaded:
+            return self.content_hash()
+        if self._saved_run_content_hash is None:
+            return None
+        return ContentHash.from_string(self._saved_run_content_hash)
+
+    def _expected_row_count_to_save(self, run_finished: bool) -> int | None:
+        """Return the count ``PipelineJob.save`` records for this node, if certain.
+
+        A loaded node keeps the count its file recorded, or none. A node of a job whose
+        last run finished (its writes committed) records the rows the store holds under
+        its run's content hash; otherwise nothing is certain.
+
+        Args:
+            run_finished: Whether the job's last run finished and committed.
+        """
+        if self._loaded:
+            return self._expected_row_count
+        if not run_finished or self._pipeline_database is None:
+            return None
+        records = self._read_stored_records()
+        return 0 if records is None else records.num_rows
+
+    def _check_expected_rows(self, found: int) -> None:
+        """Warn, once per store, if a loaded node finds another number of rows than recorded.
+
+        The store is the source of truth: the read returns what it holds (ITL-1043).
+
+        Args:
+            found: The rows the store holds under the node's run key.
+        """
+        if self._expected_row_count is None or self._row_count_checked:
+            return
+        self._row_count_checked = True
+        if found != self._expected_row_count and self._pipeline_database is not None:
+            report_unexpected_row_count(
+                f"OperatorJobNode {self.label!r}",
+                describe_store_table(self._pipeline_database, self._stored_table_path),
+                self._expected_row_count,
+                found,
+            )
 
     def _no_stored_results_error(self) -> RuntimeError:
         """Return the error for reading a loaded operator node with nothing to serve.
@@ -1030,6 +1136,21 @@ class OperatorJobNode(OperatorNodeBase):
             still present and without the ``__data_context`` column, or ``None``
             when the table does not exist.
         """
+        records = self._read_current_context_records()
+        if records is None:
+            return None
+        return self._filter_by_content_hash(records)
+
+    def _read_current_context_records(self) -> "pa.Table | None":
+        """Read every row of this node's stored table written under the current data context.
+
+        The rows of every run that shares the table, before ``_filter_by_content_hash``
+        keeps this node's. Rows of another data context are left out and reported once.
+
+        Returns:
+            The rows, with ``HASH_COLUMN_NAME`` and ``NODE_CONTENT_HASH_COL`` and without
+            the ``__data_context`` column, or ``None`` when the table does not exist.
+        """
         assert self._pipeline_database is not None
         self._account_for_stale_tables()
         records = self._pipeline_database.get_all_records(
@@ -1045,7 +1166,7 @@ class OperatorJobNode(OperatorNodeBase):
                 self._pipeline_database.base_path + self._stored_table_path,
                 stored_rows - records.num_rows,
             )
-        return self._filter_by_content_hash(records.drop([constants.DATA_CONTEXT_COL]))
+        return records.drop([constants.DATA_CONTEXT_COL])
 
     def _make_empty_table(self) -> "pa.Table":
         """Build a zero-row PyArrow table matching this node's full output schema.
@@ -1080,22 +1201,49 @@ class OperatorJobNode(OperatorNodeBase):
             - Returns ``None`` if ``_cache_mode != CacheMode.REPLAY``
               (LOG/OFF modes may have stale historical records in the DB).
 
+        The store is the source of truth: a loaded node whose job file records its
+        run's content hash reads exactly as a node that runs does, so an absent table or
+        a table with no rows under that hash is an empty result.
+
         Raises:
-            RuntimeError: If a loaded REPLAY node's cache table is absent.
+            RuntimeError: If a loaded REPLAY node's job file does not record its run's
+                content hash and the store holds no rows under the hash the loaded job
+                computes: the node cannot name its run's rows, so an empty result would
+                make stored results look dropped.
         """
         if self._pipeline_database is None:
             return None
         if self._cache_mode != CacheMode.REPLAY:
             return None
-        records = self._read_stored_records()
+        stored = self._read_current_context_records()
+        records = None if stored is None else self._filter_by_content_hash(stored)
+        if (
+            self._loaded
+            and self._saved_run_content_hash is None
+            and (records is None or records.num_rows == 0)
+        ):
+            found = (
+                "is absent from the attached store"
+                if stored is None
+                else f"holds {stored.num_rows} stored rows, none of them under the "
+                f"content hash the loaded job computes ({self.content_hash().to_string()})"
+            )
+            raise _LoadedCacheUnreadableError(
+                f"OperatorJobNode {self.label!r}: the job file does not record the "
+                "content hash of this node's run (a file saved before Orcapod recorded "
+                "it), so the loaded job cannot name the run's rows, and its cache table "
+                f"({'/'.join(self._stored_table_path)}) {found}. Upgrading such files is "
+                "left to the migration tool after v0.3 (ITL-1048); until then build the "
+                "job from code and attach the node with CacheMode.REPLAY to read them.",
+                head_note=(
+                    "loaded node: the job file does not record its run's content hash "
+                    "(an older file; ITL-1048)"
+                ),
+            )
+        if self._loaded:
+            self._check_expected_rows(0 if records is None else records.num_rows)
         if records is None:
-            if self._loaded:
-                raise RuntimeError(
-                    f"OperatorJobNode {self.label!r}: the cache table is absent "
-                    f"({'/'.join(self._stored_table_path)}). Load with the store "
-                    "that holds the saved operator results."
-                )
-            if self._operator is None:
+            if self._operator is None and not self._loaded:
                 # Read-only (deserialized) node with no operator: cannot derive
                 # schema without a live operator. Return None so callers fall
                 # back to iter([]) / _make_empty_table() guarded paths.
@@ -1209,8 +1357,17 @@ class OperatorJobNode(OperatorNodeBase):
         """Load cached results from DB, skip computation.
 
         If no cached records exist yet, produces an empty stream with
-        the correct schema (zero rows, correct columns).
+        the correct schema (zero rows, correct columns). A loaded node reads through
+        ``_load_cached_stream_from_db``, which raises when its run's rows cannot be
+        read, so an unreadable cache is never kept as an empty stream.
         """
+        if self._loaded:
+            stream = self._load_cached_stream_from_db()
+            if stream is None:
+                raise self._no_stored_results_error()
+            self._cached_output_stream = stream
+            self._update_modified_time()
+            return
         records = self._read_stored_records()
         if records is None:
             records = self._make_empty_table()
@@ -1366,15 +1523,23 @@ class OperatorJobNode(OperatorNodeBase):
         """Return the first ``n`` of this node's stored rows.
 
         Reads the node's whole stored slice (no bounded read exists yet) through the
-        same path as ``as_table`` and keeps nothing on the node.
-
-        Raises:
-            RuntimeError: If the node was loaded and its cache table is absent from
-                the attached store (the wrong store).
+        same path as ``as_table`` and keeps nothing on the node. A loaded node whose
+        run's rows cannot be read (its cache table is absent, or none of its rows is the
+        run's) shows no rows and says why, where ``as_table`` raises.
         """
-        stream = self._load_cached_stream_from_db()
+        try:
+            stream = self._load_cached_stream_from_db()
+        except _LoadedCacheUnreadableError as exc:
+            return self._head_without_rows(
+                config, HeadStatus.UNAVAILABLE, note=exc.head_note
+            )
         if stream is None or stream.as_table().num_rows == 0:
-            return self._head_without_rows(config, HeadStatus.NOTHING_STORED)
+            return self._head_without_rows(
+                config,
+                HeadStatus.NOTHING_STORED,
+                # A loaded job cannot run: say what the store holds instead.
+                note="the store holds no rows for its run" if self._loaded else None,
+            )
         return stream.head(n, columns=config).for_stream(self, origin="stored")
 
     # ------------------------------------------------------------------
@@ -1397,6 +1562,9 @@ class OperatorJobNode(OperatorNodeBase):
             return None
 
         results = self._read_stored_records()
+        if self._loaded:
+            # The advisory check of every read of a loaded node (ITL-1043).
+            self._check_expected_rows(0 if results is None else results.num_rows)
         if results is None:
             return None
 

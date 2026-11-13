@@ -367,6 +367,18 @@ class RowFailuresWarning(UserWarning):
     """
 
 
+class StoreContentWarning(UserWarning):
+    """A loaded node's store holds another number of rows than the saved run recorded.
+
+    A job file may record, in its optional ``run.expected_rows`` section, how many rows
+    the store held under each node's run key when the job was saved. Reading a loaded
+    node always returns what the attached store holds, which is the source of truth;
+    when that differs from the recorded number, this warning is issued once per node.
+    The store may not be the one the run wrote, or it may have changed since. A file
+    without the section, or without a node's entry, is not checked.
+    """
+
+
 class EmptyDataAccessError(Exception):
     """Raised when a payload-access method is called on an ``EmptyData`` instance.
 

@@ -691,23 +691,51 @@ A loaded job is for reading stored results. It cannot be run again: function pod
 saved with the job, so `loaded.run()` raises. To compute again, build the job from your code
 as before.
 
+The store is the source of truth: a loaded job shows what the store holds for it. The job
+file names each run's rows by the content hash the run stored them under, so a loaded node
+reads exactly what the same node built from your code would read from that store, and no
+rows under that key is an empty result, not an error.
+
 - A function node's `as_table()`, `iter_data()` and `get_all_records()` return the rows the
   saved run stored, with the types they were stored with. Rows come in the order the store
   returns them; sort them if order matters.
 - Operators (a join, a filter) store outputs only when caching is enabled, under `odb_v1`.
-  A loaded operator without a readable cache raises from `as_table()` and `iter_data()`.
-  Read its input nodes instead (an in-memory input source must be bound first, see below).
-  Saved descriptors do not yet preserve all runtime identity and cache configuration needed
-  for operator readback without reconstruction (follow-up ITL-977).
+  The saved file does not record an operator's cache mode (follow-up ITL-977), so attach a
+  loaded operator node in `CacheMode.REPLAY` to read the rows its run stored:
+  `loaded.nodes["joined"].attach_databases(pipeline_database=store.at("<job name>"),
+  cache_mode=CacheMode.REPLAY)`. A loaded operator node reads exactly as the same node built
+  from your code and attached in `CacheMode.REPLAY`; when the store holds no rows under the
+  node's key (no table, or none of its rows), the answer is an empty result, as for that
+  node. A loaded operator not attached in `REPLAY` has no readable cache and raises from
+  `as_table()` and `iter_data()`; read its input nodes instead (an in-memory input source
+  must be bound first, see below), or build the job from your code.
+- A loaded node has the pipeline hash, content hash, table path and output schema its run
+  had (a source node whose data was not saved gets its run's content hash once its source is
+  bound). The file records which columns may be null (`T | None`), because the Arrow type text
+  of a schema cannot say it, and the content hash of each node's run, which the stored rows
+  carry. Whether a file has these records is decided by the records themselves, not by the
+  file's format version: a file without them (format `0.1.0`, or a `0.2.0` file written
+  before they existed) still loads, but lossy: its schemas read every column as non-null,
+  and a loaded operator node cannot name its run's rows. When the store holds none under the
+  content hash the loaded job computes, `as_table()` and `iter_data()` raise, and `head()`
+  shows no rows and says why, rather than presenting stored rows as none. An empty record is
+  not a missing one: it says that no column may be null. Saving such a loaded job again does
+  not record what its file did not. Upgrading such files is left to a migration tool after
+  v0.3.
 - Sources that read files, such as `CSVSource` and `DeltaTableSource`, are rebuilt from their
   paths. In-memory sources (`DictSource`, `ListSource`, `ArrowTableSource`,
   `DataFrameSource`) keep their data only in memory, so they are not saved; loading logs
   this at INFO level. This does not affect reading the other nodes. To read such a source
   node itself, bind a source to it: `loaded.bind(sources={"mice": source})`.
 - The results are read from the store recorded in the file. Pass
-  `PipelineJob.load(path, store=...)` if the store has moved. If the store you give lacks
-  results the saved run stored, reading the node raises an error naming the store, instead
-  of returning no rows.
+  `PipelineJob.load(path, store=...)` if the store has moved.
+- The job file may also hold an optional, advisory section, `run.expected_rows`: for each
+  node, how many rows the store held under its run's key when the job was saved (written
+  only when that is certain: after a run that finished). Reading a loaded node always
+  returns what the store holds; when the store holds another number of rows, the read
+  issues one `StoreContentWarning` per node, naming the node, both numbers and the store:
+  the store may not be the one the run wrote, or it may have changed since. Deleting the
+  section from the file changes nothing but this check.
 
 Logical types in saved schema text carry their complete identifier, written as
 `extension<name;hex-metadata>`, including inside nested containers. The loader checks the

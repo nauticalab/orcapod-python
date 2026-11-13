@@ -89,3 +89,12 @@ latest-index selection (persistent wins equal indices). Loaded REPLAY operators 
 when their cache table is absent; loaded function `run()` rejects computation, and
 loaded jobs report `is_runnable()` as false even after binding sources. Source-schema
 restoration uses the saved context converter in both normal and fallback branches.
+
+**Superseded in part (ITL-1043, developer decision, November 12, 2026):** the store is the
+source of truth, with one rule for function and operator nodes. `run.node_has_stored_records`
+is no longer written, and is ignored when an older file has it: a loaded function node no
+longer raises on a store without its run's records; it returns what the store holds. The job
+file's optional, advisory `run.expected_rows` makes a difference one `StoreContentWarning`
+per node. Likewise, a loaded REPLAY operator whose job file records its run's content hash
+reads an absent cache table as no rows instead of raising. See
+`design_issues/ITL-1043-LJ1.md`.

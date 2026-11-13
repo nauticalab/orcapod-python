@@ -30,13 +30,15 @@ Example:
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Collection
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
 
 from orcapod.errors import (
     InputValidationError,
     SideEffectLogDataContextError,
+    StoreContentWarning,
     TableListingNotSupportedError,
 )
 from orcapod.system_constants import (
@@ -182,6 +184,68 @@ def report_rows_of_other_data_contexts(
         skipped,
         "row" if skipped == 1 else "rows",
         "/".join(record_path),
+    )
+
+
+class _DescribedStore(Protocol):
+    """The part of ``ArrowDatabaseProtocol`` that names a store (no import cycle)."""
+
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        """Path of this store's view from the root of the underlying store."""
+        ...
+
+    def to_config(self) -> dict[str, Any]:
+        """Return the store's configuration, with its location when it has one."""
+        ...
+
+
+def describe_store_table(
+    database: _DescribedStore, record_path: tuple[str, ...]
+) -> str:
+    """Name a stored table for a message: the store's location and the table's path.
+
+    Args:
+        database: The store, or a view of it.
+        record_path: Path of the table relative to ``database``.
+
+    Returns:
+        For example ``"store at '/data/store' (table 'job/node/...')"``.
+    """
+    store_config = database.to_config()
+    location = store_config.get("root_uri")
+    store = (
+        f"store at {location!r}"
+        if location
+        else f"{store_config.get('type', 'attached')} store"
+    )
+    table = "/".join(database.base_path + record_path)
+    return f"{store} (table {table!r})"
+
+
+def report_unexpected_row_count(
+    node: str, location: str, expected: int, found: int
+) -> None:
+    """Warn that a loaded node's store holds another number of rows than its run's.
+
+    The store is the source of truth: the read returns what it holds. The warning says
+    that it differs from what the job file recorded (ITL-1043).
+
+    Args:
+        node: The node, as messages name it (``"FunctionJobNode 'dbl'"``).
+        location: The store and table, from ``describe_store_table``.
+        expected: The rows the job file records for the node's run.
+        found: The rows the store holds under the node's run key.
+    """
+    warnings.warn(
+        StoreContentWarning(
+            f"{node}: the job file records {expected} "
+            f"{'row' if expected == 1 else 'rows'} for its run, but the {location} "
+            f"holds {found} under the run's key. The read returns what the store "
+            "holds; the store may not be the one the run wrote, or it may have "
+            "changed since."
+        ),
+        stacklevel=3,
     )
 
 

@@ -56,8 +56,10 @@ from orcapod.contexts.stored import (
     keep_rows_of_data_context,
     require_same_data_context,
     account_for_stale_tables,
+    describe_store_table,
     find_stale_tables,
     report_rows_of_other_data_contexts,
+    report_unexpected_row_count,
 )
 from orcapod.utils.store_errors import commit_best_effort, keep_store_error
 from orcapod.protocols.core_protocols import (
@@ -999,6 +1001,10 @@ class FunctionJobNode(FunctionNodeBase):
     # Set once a read has reported the stored rows it skipped (rows of another data
     # context); a class default so nodes rebuilt from a saved descriptor start unset.
     _skipped_rows_reported: bool = False
+    # The job file's expected row count and whether it was checked (ITL-1043); class
+    # defaults so a node attached before ``from_descriptor`` sets them has them.
+    _expected_row_count: int | None = None
+    _row_count_checked: bool = False
     # Set once stored rows of other generations have been accounted for. A node
     # that delivers side effects unsets it at the start of every run.
     _stale_tables_checked: bool = False
@@ -1048,9 +1054,11 @@ class FunctionJobNode(FunctionNodeBase):
         # .node_config setter or PipelineJob.apply_node_config().
         self._node_config: NodeConfig = NodeConfig()
 
-        # Set by from_descriptor() for a loaded node whose saved run had stored
-        # records; a live node computes its own results.
-        self._expects_stored_records: bool = False
+        # Set by from_descriptor() for a loaded node whose job file records how many
+        # pipeline records its run had in the store (ITL-1043); checked once per
+        # store, with a warning only: the store is the source of truth.
+        self._expected_row_count: int | None = None
+        self._row_count_checked: bool = False
         # Batched commits, set only while PipelineJob.run runs the node (ITL-919).
         self._commit_every_rows: int | None = None
         self._rows_since_commit = 0
@@ -1236,6 +1244,8 @@ class FunctionJobNode(FunctionNodeBase):
         self._current_tables_checked = False
         self._unlisted_store_reported = False
         self._skipped_rows_reported = False
+        # ... and its own rows to compare with the job file's expected count.
+        self._row_count_checked = False
         if pipeline_database is not None:
             if result_database is None:
                 # Default result database is pipeline_database scoped to "_result"
@@ -1284,7 +1294,7 @@ class FunctionJobNode(FunctionNodeBase):
         input_stream: StreamProtocol | None = None,
         databases: dict[str, Any] | None = None,
         job_content_hash: str | None = None,
-        expect_stored_records: bool = False,
+        expected_row_count: int | None = None,
     ) -> "FunctionJobNode":
         """Create a read-only ``FunctionJobNode`` stub from a serialized descriptor.
 
@@ -1311,11 +1321,11 @@ class FunctionJobNode(FunctionNodeBase):
                 column written to the DB at execution time.  Required for
                 ``get_all_records()`` to correctly filter DB rows when
                 ``table_scope="pipeline_hash"`` (the default).
-            expect_stored_records: Whether the store held at least one pipeline
-                record of this node (one with this node's content hash) when the
-                job was saved. When ``True``, reading the node from a store with
-                none of them raises instead of returning zero rows, because the
-                store is not the one the job ran against.
+            expected_row_count: How many pipeline records of this node (with its
+                run's content hash) the store held when the job was saved, from the
+                job file's optional ``run.expected_rows``; ``None`` when not recorded.
+                Advisory: a read always returns what the store holds and only warns
+                (``StoreContentWarning``) when the store holds another number.
 
         Returns:
             A ``FunctionJobNode`` in read-only stub mode
@@ -1414,7 +1424,8 @@ class FunctionJobNode(FunctionNodeBase):
 
         # FunctionJobNode — orchestrator config
         node._node_config = NodeConfig()
-        node._expects_stored_records = expect_stored_records
+        node._expected_row_count = expected_row_count
+        node._row_count_checked = False
         node._commit_every_rows = None
         node._rows_since_commit = 0
         node._commit_failed = False
@@ -1518,17 +1529,17 @@ class FunctionJobNode(FunctionNodeBase):
             "as_table() or iter_data()."
         )
 
-    def _has_stored_records(self) -> bool:
-        """Return whether the attached store holds a pipeline record of this node.
+    def _stored_record_count(self) -> int:
+        """Return how many pipeline records of this node the attached store holds.
 
         A record belongs to this node when its ``_node_content_hash`` is this
         node's content hash: the rows ``iter_data()`` and ``get_all_records()``
         read back. Records of other runs or data contexts do not count.
         """
         if self._pipeline_database is None:
-            return False
+            return 0
         if not self._pipeline_database.table_exists(self._versioned_pipeline_path):
-            return False
+            return 0
         own_records = self._pipeline_database.get_records_with_column_value(
             self._versioned_pipeline_path,
             {
@@ -1536,51 +1547,57 @@ class FunctionJobNode(FunctionNodeBase):
                 constants.DATA_CONTEXT_COL: self._stored_data_context_key,
             },
         )
-        return own_records is not None and own_records.num_rows > 0
+        return 0 if own_records is None else own_records.num_rows
+
+    def _expected_row_count_to_save(self, run_finished: bool) -> int | None:
+        """Return the count ``PipelineJob.save`` records for this node, if certain.
+
+        A loaded node keeps the count its file recorded, or none. A node of a job
+        whose last run finished (its writes committed) records the pipeline records
+        the store holds under its run's key; otherwise nothing is certain.
+
+        Args:
+            run_finished: Whether the job's last run finished and committed.
+        """
+        if self._function_pod is None:
+            return self._expected_row_count
+        if not run_finished or self._pipeline_database is None:
+            return None
+        return self._stored_record_count()
 
     def _require_readable_stub(self) -> None:
         """Raise unless this loaded node can read its stored results.
 
         Raises:
-            RuntimeError: If no store is attached, or the saved run stored records
-                that the attached store does not have.
+            RuntimeError: If no store is attached.
         """
         from orcapod.pipeline.serialization import LoadStatus
 
         if self.load_status == LoadStatus.UNAVAILABLE:
             raise self._no_store_error()
-        self._require_expected_records()
+        self._check_expected_rows()
 
-    def _require_expected_records(self) -> None:
-        """Raise if the saved run stored this node's records but the store has none.
+    def _check_expected_rows(self) -> None:
+        """Warn, once per store, if the store holds another number of rows than recorded.
 
-        A loaded node reads only what its store holds. When the job was saved
-        with records of this node in the store and the attached store has none
-        of them, the store is not the one the job ran against; reading zero rows
-        would make the stored results look lost.
-
-        Raises:
-            RuntimeError: If the saved run stored records for this node and the
-                attached store has none of them.
+        The store is the source of truth: the read goes on and returns what it holds
+        (ITL-1043). Only a job file that records the node's count is checked.
         """
-        if not self._expects_stored_records or self._has_stored_records():
+        if self._expected_row_count is None or self._row_count_checked:
             return
-        assert self._pipeline_database is not None  # attached: status is READ_ONLY
-        store_config = self._pipeline_database.to_config()
-        location = store_config.get("root_uri")
-        store = (
-            f"store at {location!r}"
-            if location
-            else f"{store_config.get('type', 'attached')} store"
-        )
-        table = "/".join(
-            self._pipeline_database.base_path + self._versioned_pipeline_path
-        )
-        raise RuntimeError(
-            f"FunctionJobNode {self.label!r}: the saved run stored results for this "
-            f"node, but the attached {store} has none of them (table {table!r}). Load "
-            "the job with the store it ran against: PipelineJob.load(path, store=...)."
-        )
+        self._row_count_checked = True
+        if self._pipeline_database is None:
+            return
+        found = self._stored_record_count()
+        if found != self._expected_row_count:
+            report_unexpected_row_count(
+                f"FunctionJobNode {self.label!r}",
+                describe_store_table(
+                    self._pipeline_database, self._versioned_pipeline_path
+                ),
+                self._expected_row_count,
+                found,
+            )
 
     def _require_pipeline_database(self) -> ArrowDatabaseProtocol:
         """Return the attached pipeline database, raising if there is none.
@@ -2503,8 +2520,12 @@ class FunctionJobNode(FunctionNodeBase):
 
         Raises:
             RuntimeError: If the node was loaded by ``PipelineJob.load`` and no
-                store is attached, or its saved run stored records that the
-                attached store does not have.
+                store is attached.
+
+        Warns:
+            StoreContentWarning: Once per store, if the node was loaded from a job file
+                that records another number of pipeline records for its run than the
+                store holds. The store is the source of truth.
         """
         if self._function_pod is None:
             self._require_readable_stub()
@@ -3019,9 +3040,8 @@ class FunctionJobNode(FunctionNodeBase):
         rows: the node's whole stored slice is read and nothing is kept on the node.
         With nothing stored, there are no rows. See ``StreamBase.head``.
 
-        Raises:
-            RuntimeError: If the node was loaded and the attached store does not hold
-                the records its saved run stored (the wrong store).
+        Warns:
+            StoreContentWarning: As for ``as_table``.
         """
         from orcapod.pipeline.serialization import LoadStatus
 
@@ -3047,7 +3067,7 @@ class FunctionJobNode(FunctionNodeBase):
         """
         if self._function_pod is None:
             # A loaded node: its table is built from the stored Arrow records.
-            self._require_expected_records()
+            self._check_expected_rows()
             fetched = self._fetch_joined_records()
             stored = None if fetched is None else self._stored_rows_stream(fetched)
             stored_ids = set(stored[0]) if stored is not None else set()
@@ -3094,10 +3114,14 @@ class FunctionJobNode(FunctionNodeBase):
         table has zero rows and the node's columns.
 
         Raises:
-            RuntimeError: If the node was loaded and no store is attached, its
-                saved run stored records the attached store does not have, or
-                some of its results were kept in an ephemeral store, which is
-                not saved with the job.
+            RuntimeError: If the node was loaded and no store is attached, or some of
+                its results were kept in an ephemeral store, which is not saved with
+                the job.
+
+        Warns:
+            StoreContentWarning: Once per store, if the node was loaded from a job file
+                that records another number of pipeline records for its run than the
+                store holds. The read returns what the store holds.
         """
         if self._function_pod is None:
             self._require_readable_stub()
@@ -3158,7 +3182,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         if self._function_pod is None:
             # A loaded node: its rows can come only from the store.
-            self._require_expected_records()
+            self._check_expected_rows()
         if not self._cached_output_datas and self._cached_function_pod is not None:
             # Hot-load from DB on the first call when store is empty.
             loaded = self._load_cached_entries()

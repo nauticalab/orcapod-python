@@ -118,7 +118,10 @@ class RootSource(StreamBase):
         cannot be reconstructed from config, preserving identity hashes and
         schemas for downstream consumers.
         """
-        from orcapod.pipeline.serialization import serialize_schema
+        from orcapod.pipeline.serialization import (
+            serialize_nullability,
+            serialize_schema,
+        )
 
         tag_schema, data_schema = self.output_schema()
         type_converter = self.data_context.type_converter
@@ -127,6 +130,7 @@ class RootSource(StreamBase):
             "pipeline_hash": self.pipeline_hash().to_string(),
             "tag_schema": serialize_schema(tag_schema, type_converter),
             "data_schema": serialize_schema(data_schema, type_converter),
+            "nullable": serialize_nullability(tag_schema, data_schema, type_converter),
         }
 
     def pipeline_identity_structure(self) -> Any:

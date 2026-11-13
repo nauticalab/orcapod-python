@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json as _json
 import logging
+from collections.abc import Collection
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -506,12 +507,14 @@ def _source_proxy_from_config(
         output_schema = node_descriptor.get("output_schema", {})
         tag_schema_dict = output_schema.get("tag", {})
         data_schema_dict = output_schema.get("data", {})
+        saved_nullable = output_schema.get("nullable")
     else:
         # Inner sources (e.g. inside CachedSource) embed identity via _identity_config()
         content_hash = config.get("content_hash")
         pipeline_hash_val = config.get("pipeline_hash")
         tag_schema_dict = config.get("tag_schema", {})
         data_schema_dict = config.get("data_schema", {})
+        saved_nullable = config.get("nullable")
 
     if not content_hash or not pipeline_hash_val:
         raise ValueError(
@@ -527,8 +530,19 @@ def _source_proxy_from_config(
     if source_type and source_type in SOURCE_REGISTRY:
         expected_class_name = SOURCE_REGISTRY[source_type].__name__
 
-    tag_schema = Schema(deserialize_schema(tag_schema_dict))
-    data_schema = Schema(deserialize_schema(data_schema_dict))
+    # A config without the nullability record (written before ITL-1043) is lossy.
+    tag_schema = Schema(
+        deserialize_schema(
+            tag_schema_dict,
+            nullable=None if saved_nullable is None else saved_nullable["tag"],
+        )
+    )
+    data_schema = Schema(
+        deserialize_schema(
+            data_schema_dict,
+            nullable=None if saved_nullable is None else saved_nullable["data"],
+        )
+    )
 
     return SourceProxy(
         source_id=config.get("source_id", "unknown"),
@@ -670,9 +684,87 @@ def serialize_schema(schema: Any, type_converter: Any | None = None) -> dict[str
     }
 
 
+def nullable_column_names(schema: Any, type_converter: Any) -> list[str]:
+    """Return the names of the columns of ``schema`` whose values may be null.
+
+    A column may be null when its type is ``T | None``, by the rule
+    ``type_converter.python_schema_to_arrow_schema`` uses to set a field's
+    nullability. ``serialize_schema`` writes an Arrow type, which carries no field
+    nullability, so a saved schema records these names beside its type strings
+    (ITL-1043). A column whose type has no Arrow type is left out: its saved type text
+    cannot be restored either.
+
+    Args:
+        schema: A Schema-like mapping from column name to Python type.
+        type_converter: The type converter that writes the schema's type strings.
+
+    Returns:
+        The names, in the schema's column order.
+    """
+    names: list[str] = []
+    for name, python_type in schema.items():
+        try:
+            arrow_schema = type_converter.python_schema_to_arrow_schema(
+                {name: python_type}
+            )
+        except Exception:
+            continue
+        if arrow_schema.field(name).nullable:
+            names.append(name)
+    return names
+
+
+def serialize_nullability(
+    tag_schema: Any, data_schema: Any, type_converter: Any
+) -> dict[str, list[str]]:
+    """Return the saved record of which tag and data columns may be null.
+
+    Written next to the type strings of a saved ``(tag, data)`` schema pair, as
+    ``{"tag": [...], "data": [...]}``. An empty list records that no column of that
+    group may be null; a schema saved without the record has unknown nullability.
+
+    Args:
+        tag_schema: The tag schema, a mapping from column name to Python type.
+        data_schema: The data schema, a mapping from column name to Python type.
+        type_converter: The type converter that writes the schemas' type strings.
+
+    Returns:
+        The nullable tag and data column names.
+    """
+    return {
+        "tag": nullable_column_names(tag_schema, type_converter),
+        "data": nullable_column_names(data_schema, type_converter),
+    }
+
+
+def _python_type_of_saved_column(
+    name: str, arrow_type: Any, nullable: bool, type_converter: Any
+) -> Any:
+    """Return the Python type of a saved column: its Arrow type, ``T | None`` if nullable.
+
+    Goes through ``arrow_schema_to_python_schema``, the converter's own rule for a
+    field's nullability, so a restored type hashes as the running node's does.
+    """
+    import pyarrow as pa
+
+    field = pa.field(name, arrow_type, nullable=nullable)
+    return type_converter.arrow_schema_to_python_schema(pa.schema([field]))[name]
+
+
+def _check_nullable_names(columns: Any, nullable: Any) -> None:
+    """Raise ``ValueError`` if a saved nullable column name is not a saved column."""
+    unknown = sorted(set(nullable) - set(columns))
+    if unknown:
+        raise ValueError(
+            f"The saved nullable columns {unknown} are not among the saved columns "
+            f"{list(columns)}."
+        )
+
+
 def deserialize_schema(
     schema_dict: dict[str, str],
     type_converter: Any | None = None,
+    nullable: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Reconstruct a Python-type schema from Arrow type string values.
 
@@ -686,21 +778,34 @@ def deserialize_schema(
             produced by `serialize_schema`.
         type_converter: Optional type converter for Arrow→Python conversion.
             When ``None``, the default data context's converter is used.
+        nullable: The columns saved as nullable (one group of
+            ``serialize_nullability``); each becomes ``T | None``. ``None`` when the
+            file records no nullability: every column is then restored as ``T``.
 
     Returns:
         A dict mapping field names to Python types (or raw strings if
         parsing fails).
+
+    Raises:
+        ValueError: If ``nullable`` names a column that is not in ``schema_dict``.
     """
     if type_converter is None:
         from orcapod.contexts import resolve_context
 
         type_converter = resolve_context(None).type_converter
+    if nullable is not None:
+        _check_nullable_names(schema_dict, nullable)
 
     result: dict[str, Any] = {}
     for name, type_str in schema_dict.items():
         try:
             arrow_type = parse_arrow_type_string(type_str, type_converter)
-            result[name] = type_converter.arrow_type_to_python_type(arrow_type)
+            result[name] = _python_type_of_saved_column(
+                name,
+                arrow_type,
+                nullable is not None and name in nullable,
+                type_converter,
+            )
         except LogicalTypeIdentifierError as exc:
             raise exc.for_column(name) from exc
         except SavedSchemaVersionError:
@@ -710,16 +815,39 @@ def deserialize_schema(
     return result
 
 
+def serialize_output_schema(
+    tag_schema: Any, data_schema: Any, type_converter: Any
+) -> dict[str, Any]:
+    """Return a node's saved ``output_schema`` entry.
+
+    ``{"tag": {...}, "data": {...}, "nullable": {"tag": [...], "data": [...]}}``: the
+    type strings of `serialize_schema` and the record of `serialize_nullability`.
+
+    Args:
+        tag_schema: The node's tag schema.
+        data_schema: The node's data schema.
+        type_converter: The node's type converter.
+
+    Returns:
+        The entry, ready for JSON.
+    """
+    return {
+        "tag": serialize_schema(tag_schema, type_converter),
+        "data": serialize_schema(data_schema, type_converter),
+        "nullable": serialize_nullability(tag_schema, data_schema, type_converter),
+    }
+
+
 def deserialize_output_schema(
-    output_schema: dict[str, dict[str, str]],
+    output_schema: dict[str, Any],
     type_converter: Any,
 ) -> tuple[Schema, Schema]:
     """Reconstruct a node's ``(tag, data)`` output schema from its saved descriptor.
 
     Args:
-        output_schema: The descriptor's ``output_schema`` entry: ``{"tag": {...},
-            "data": {...}}``, each mapping a column name to an Arrow type string as
-            written by `serialize_schema`.
+        output_schema: The descriptor's ``output_schema`` entry, as written by
+            `serialize_output_schema`. An entry without ``"nullable"`` (a file written
+            before it was recorded) restores every column as ``T``: lossy.
         type_converter: The node's type converter, used to turn each Arrow type back
             into the Python type that ``output_schema()`` reports.
 
@@ -728,16 +856,24 @@ def deserialize_output_schema(
 
     Raises:
         ValueError: If a column's saved type cannot be restored to a Python type,
-            such as an unregistered logical type. The message names
-            the column and its saved type string.
+            such as an unregistered logical type, or a saved nullable column name is
+            not a saved column. The message names the column and its saved type string.
     """
+    saved_nullable: dict[str, list[str]] | None = output_schema.get("nullable")
 
-    def restore(columns: dict[str, str]) -> Schema:
+    def restore(columns: dict[str, str], nullable: list[str] | None) -> Schema:
+        if nullable is not None:
+            _check_nullable_names(columns, nullable)
         restored: dict[str, Any] = {}
         for name, type_str in columns.items():
             try:
                 arrow_type = parse_arrow_type_string(type_str, type_converter)
-                restored[name] = type_converter.arrow_type_to_python_type(arrow_type)
+                restored[name] = _python_type_of_saved_column(
+                    name,
+                    arrow_type,
+                    nullable is not None and name in nullable,
+                    type_converter,
+                )
             except LogicalTypeIdentifierError as exc:
                 raise exc.for_column(name) from exc
             except SavedSchemaVersionError as exc:
@@ -749,7 +885,16 @@ def deserialize_output_schema(
                 ) from exc
         return Schema(restored)
 
-    return restore(output_schema.get("tag", {})), restore(output_schema.get("data", {}))
+    return (
+        restore(
+            output_schema.get("tag", {}),
+            None if saved_nullable is None else saved_nullable["tag"],
+        ),
+        restore(
+            output_schema.get("data", {}),
+            None if saved_nullable is None else saved_nullable["data"],
+        ),
+    )
 
 
 def parse_arrow_type_string(type_str: str, type_converter: Any | None = None) -> Any:

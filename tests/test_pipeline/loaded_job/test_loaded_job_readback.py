@@ -16,6 +16,7 @@ import pathlib
 import subprocess
 import sys
 import uuid
+import warnings
 from collections.abc import Callable
 from typing import Any
 
@@ -27,6 +28,7 @@ import pytest
 from orcapod import PipelineJob, function_pod
 from orcapod.core.operators import Join
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
+from orcapod.errors import StoreContentWarning
 from orcapod.pipeline.serialization import LoadStatus
 from orcapod.sources import DictSource
 from orcapod.types import NodeConfig
@@ -157,7 +159,8 @@ def test_datetime_output_with_nothing_stored_returns_typed_zero_rows(
 
     path = _save_small_job(tmp_path, record)
     data = json.loads(pathlib.Path(path).read_text())
-    data["run"]["node_has_stored_records"]["stamp"] = False
+    # Without the advisory count, an empty store is read without any check.
+    data["run"].pop("expected_rows", None)
     _ = pathlib.Path(path).write_text(json.dumps(data))
     table = (
         PipelineJob.load(path, store=InMemoryArrowDatabase()).nodes["stamp"].as_table()
@@ -346,7 +349,7 @@ def _record_double() -> None:
 def test_other_context_records_do_not_satisfy_saved_expectation(
     tmp_path: pathlib.Path, read_method: str
 ) -> None:
-    """Matching node hashes from another context cannot hide missing saved results."""
+    """Records of another data context are not the run's: none is read, with a warning."""
     path = _save_small_job(tmp_path, _record_double)
     written = DeltaTableDatabase(str(tmp_path / "store"))
     other = InMemoryArrowDatabase()
@@ -364,10 +367,12 @@ def test_other_context_records_do_not_satisfy_saved_expectation(
     other.flush()
 
     node = PipelineJob.load(path, store=other).nodes["dbl"]
-    with pytest.raises(RuntimeError, match="saved run stored results.*has none"):
+    # The store is the source of truth (ITL-1043): it holds none of the run's
+    # records, so none is read; the job file's count makes it a warning.
+    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
         result = getattr(node, read_method)()
-        if read_method == "iter_data":
-            list(result)
+        rows = list(result) if read_method == "iter_data" else result
+    assert rows is None or len(rows) == 0
 
 
 def test_recomputed_entry_is_read_once_with_its_latest_result(
@@ -484,43 +489,53 @@ def test_newer_unavailable_result_does_not_expose_old_persistent_result(
 # ---------------------------------------------------------------------------
 
 
-def test_loaded_function_node_saved_with_records_raises_on_a_store_without_them(
+def test_loaded_function_node_warns_once_on_a_store_without_its_runs_records(
     saved: pathlib.Path,
 ) -> None:
-    """A store lacking the saved run's records raises, on every read method."""
-    # The saved run stored this node's records, so a store without them is not the
-    # store the job ran against: zero rows would make the results look lost.
+    """A store lacking the run's records is read as it is, with one warning.
+
+    The store is the source of truth (ITL-1043): every read returns what it holds.
+    The job file's advisory count makes the difference a ``StoreContentWarning``,
+    issued once per node.
+    """
     node = _load(saved, store=InMemoryArrowDatabase()).nodes["dbl"]
-    reads = (node.as_table, lambda: list(node.iter_data()), node.get_all_records)
-    for read in reads:
-        with pytest.raises(RuntimeError) as excinfo:
-            _ = read()
-        message = str(excinfo.value)
-        assert message.startswith(
-            "FunctionJobNode 'dbl': the saved run stored results for this node, but "
-            "the attached in_memory store has none of them (table 'loaded_demo/double/"
-        )
-        assert message.endswith(
-            "Load the job with the store it ran against: "
-            "PipelineJob.load(path, store=...)."
-        )
+    with pytest.warns(StoreContentWarning) as record:
+        table = node.as_table()
+        rows = list(node.iter_data())
+        records = node.get_all_records()
+        head = node.head()
+    assert table.num_rows == 0
+    assert table.column_names == ["id", "dbl"]
+    assert rows == []
+    assert records is None
+    assert head.table.num_rows == 0
+    messages = [str(w.message) for w in record if w.category is StoreContentWarning]
+    assert len(messages) == 1
+    assert messages[0].startswith(
+        "FunctionJobNode 'dbl': the job file records 2 rows for its run, but the "
+        "in_memory store (table 'loaded_demo/double/"
+    )
+    assert messages[0].endswith(
+        "holds 0 under the run's key. The read returns what the store holds; the "
+        "store may not be the one the run wrote, or it may have changed since."
+    )
 
 
-def test_mismatched_delta_store_error_names_the_store_location(
+def test_store_content_warning_names_a_delta_stores_location(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """The mismatched-store error names a Delta store's location."""
+    """The warning names a Delta store's location."""
     other = tmp_path / "other_store"
     node = _load(saved, store=DeltaTableDatabase(str(other))).nodes["dbl"]
-    with pytest.raises(RuntimeError, match="the attached store at '") as excinfo:
+    with pytest.warns(StoreContentWarning, match="the store at '") as record:
         _ = node.as_table()
-    assert str(other) in str(excinfo.value)
+    assert str(other) in str(record[0].message)
 
 
-def test_store_with_only_another_runs_records_is_a_mismatched_store(
+def test_store_with_only_another_runs_records_reads_none_with_a_warning(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A shared table holding another run's records, not this node's, raises."""
+    """A shared table holding another run's records, not this node's, reads none."""
 
     def record_other_source() -> None:
         """Record ``double`` over another source: same table, other records."""
@@ -545,37 +560,41 @@ def test_store_with_only_another_runs_records_is_a_mismatched_store(
     other_store = DeltaTableDatabase(str(tmp_path / "other_run" / "store"))
     node = PipelineJob.load(path, store=other_store).nodes["dbl"]
     # Non-public on purpose: confirm the shared table exists, so this test checks
-    # the per-record test, not the missing-table case.
+    # the per-record count, not the missing-table case.
     assert node._pipeline_database is not None
     assert node._pipeline_database.table_exists(node._versioned_pipeline_path)
-    with pytest.raises(RuntimeError, match="the saved run stored results"):
-        _ = node.as_table()
+    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
+        assert node.as_table().num_rows == 0
 
 
-def test_saved_file_records_which_nodes_had_stored_records(
+def test_saved_file_records_the_rows_each_node_had_in_the_store(
     saved: pathlib.Path,
 ) -> None:
-    """``save()`` records, per function node, that its records were stored."""
+    """``save()`` records, per job node, the rows its run left in the store."""
     run = json.loads((saved / "job.json").read_text())["run"]
-    assert run["node_has_stored_records"] == {
-        "dbl": True,
-        "inc": True,
-        "half": True,
-        "sq": True,
+    # The join is not cached (cache mode OFF): its run stored nothing.
+    assert run["expected_rows"] == {
+        "dbl": 2,
+        "inc": 2,
+        "half": 2,
+        "sq": 2,
+        "joined": 0,
     }
+    assert "node_has_stored_records" not in run
 
 
-def test_saving_a_loaded_job_keeps_the_stored_record_flags(
+def test_saving_a_loaded_job_keeps_the_expected_rows(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """Re-saving a job loaded with the wrong store keeps the saved expectations."""
+    """Re-saving a job loaded with another store keeps the saved counts."""
     resaved = tmp_path / "resaved.json"
     _load(saved, store=InMemoryArrowDatabase()).save(str(resaved))
+    original = json.loads((saved / "job.json").read_text())["run"]["expected_rows"]
     run = json.loads(resaved.read_text())["run"]
-    assert run["node_has_stored_records"]["dbl"] is True
+    assert run["expected_rows"] == original
     node = PipelineJob.load(str(resaved), store=InMemoryArrowDatabase()).nodes["dbl"]
-    with pytest.raises(RuntimeError, match="the saved run stored results"):
-        _ = node.as_table()
+    with pytest.warns(StoreContentWarning, match="records 2 rows"):
+        assert node.as_table().num_rows == 0
 
 
 def test_loaded_function_node_with_nothing_stored_returns_zero_rows(
@@ -585,30 +604,51 @@ def test_loaded_function_node_with_nothing_stored_returns_zero_rows(
 
     def nothing_stored(data: dict[str, Any]) -> None:
         """Mark the node as saved with nothing stored."""
-        data["run"]["node_has_stored_records"]["dbl"] = False
+        data["run"]["expected_rows"]["dbl"] = 0
 
     path = _rewrite_job_file(saved, tmp_path, nothing_stored)
     node = PipelineJob.load(path, store=InMemoryArrowDatabase()).nodes["dbl"]
-    table = node.as_table()
+    with warnings.catch_warnings():
+        # Zero expected and zero found: nothing to warn about.
+        warnings.simplefilter("error", StoreContentWarning)
+        table = node.as_table()
     assert table.num_rows == 0
     assert table.column_names == ["id", "dbl"]
     assert list(node.iter_data()) == []
 
 
-def test_file_saved_without_the_stored_records_field_reads_zero_rows(
+def test_file_without_the_expected_rows_section_reads_without_a_check(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """A file saved before the field existed loads as before."""
+    """The section is optional: deleting it changes nothing but the check."""
 
-    # A store without the node's records gives zero rows.
-    def drop_field(data: dict[str, Any]) -> None:
-        """Remove the stored-records field, as in an older file."""
-        del data["run"]["node_has_stored_records"]
+    def drop_section(data: dict[str, Any]) -> None:
+        """Remove the advisory section, by hand."""
+        del data["run"]["expected_rows"]
 
-    path = _rewrite_job_file(saved, tmp_path, drop_field)
-    job = PipelineJob.load(path, store=InMemoryArrowDatabase())
-    assert job.nodes["dbl"].as_table().num_rows == 0
-    assert PipelineJob.load(path).nodes["dbl"].as_table().num_rows == 2
+    path = _rewrite_job_file(saved, tmp_path, drop_section)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", StoreContentWarning)
+        job = PipelineJob.load(path, store=InMemoryArrowDatabase())
+        assert job.nodes["dbl"].as_table().num_rows == 0
+        assert PipelineJob.load(path).nodes["dbl"].as_table().num_rows == 2
+
+
+def test_a_file_with_the_old_stored_records_flag_loads_without_a_check(
+    saved: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    """The ITL-904 flag of an earlier file is not used: it never raises or warns."""
+
+    def old_flag(data: dict[str, Any]) -> None:
+        """Write the file as before ITL-1043: the flag, no section."""
+        del data["run"]["expected_rows"]
+        data["run"]["node_has_stored_records"] = {"dbl": True}
+
+    path = _rewrite_job_file(saved, tmp_path, old_flag)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", StoreContentWarning)
+        node = PipelineJob.load(path, store=InMemoryArrowDatabase()).nodes["dbl"]
+        assert node.as_table().num_rows == 0
 
 
 def test_loaded_function_node_without_store_says_how_to_attach_one(
@@ -867,18 +907,24 @@ def test_in_memory_source_node_is_readable_after_bind(saved: pathlib.Path) -> No
 
 
 @pytest.mark.parametrize("method", ["as_table", "iter_data"])
-def test_loaded_replay_operator_reports_absent_cache_table(
+def test_loaded_replay_operator_reads_an_absent_cache_table_as_no_rows(
     tmp_path: pathlib.Path, method: str
 ) -> None:
-    """A missing REPLAY table must not look like a successful zero-row result."""
+    """The store is the source of truth: no table under the node's key is no rows.
+
+    The job file records the operator's run content hash (ITL-1043), so the loaded node
+    knows its key and reads as a running node does. A file without that hash raises
+    instead; see ``test_loaded_operator_cache.py``.
+    """
     from orcapod.types import CacheMode
 
     node = _loaded_operator_only_job(tmp_path).nodes["joined"]
     node.attach_databases(InMemoryArrowDatabase(), cache_mode=CacheMode.REPLAY)
-    with pytest.raises(RuntimeError, match="joined.*cache table is absent"):
-        result = getattr(node, method)()
-        if method == "iter_data":
-            list(result)
+    result = getattr(node, method)()
+    if method == "iter_data":
+        assert list(result) == []
+    else:
+        assert result.num_rows == 0
 
 
 def test_loaded_job_is_never_runnable(tmp_path: pathlib.Path) -> None:
