@@ -505,11 +505,14 @@ class ColumnConfig:
             all_info: If True, override config to include all columns.
 
         Returns:
-            Normalized ColumnConfig instance.
+            Normalized ColumnConfig instance. When ``all_info`` is set, by the
+            keyword or inside ``config`` (``{"all_info": True}`` or
+            ``ColumnConfig(all_info=True)``), every group is on, whatever else
+            ``config`` says; an embedded ``all_info=True`` is not cancelled by a
+            ``False`` keyword.
         """
         if all_info:
             return cls.all()
-        # TODO: properly handle non-boolean values when using all_info
 
         if config is None:
             column_config = cls()
@@ -523,6 +526,8 @@ class ColumnConfig:
                 "Expected ColumnConfig instance or dict."
             )
 
+        if column_config.all_info and column_config != cls.all():
+            return cls.all()
         return column_config
 
 
