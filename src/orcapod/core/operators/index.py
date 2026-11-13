@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
+from orcapod.system_constants import constants
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
-from orcapod.types import ColumnConfig, ContentHash, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema, SourceInfoValue
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -286,7 +287,15 @@ class Index(UnaryOperator):
             )
 
         old_src = data.source_info().get(self.column)
-        new_src = f"{old_src}[{self.i}]" if old_src else None
+        new_src: SourceInfoValue
+        if isinstance(old_src, list):
+            # A many->one operator (Batch, GroupBy) left one token per member: the
+            # element's provenance is its own token, one list level removed (the
+            # inner list after two aggregations). ``effective_i`` is in range for
+            # the value, and a token list holds one entry per member.
+            new_src = old_src[effective_i] if effective_i < len(old_src) else None
+        else:
+            new_src = f"{old_src}[{self.i}]" if old_src else None
 
         element_field = pa.field(
             self.out or self.column,
@@ -354,8 +363,11 @@ class Index(UnaryOperator):
             # The schema is the input's Arrow schema (large-normalized, as for
             # a non-empty result) with only the projected column changed.
             tag_columns, _ = stream.keys()
+            # The source-info columns are part of it: the projected column's token
+            # type is the input's with one list level removed, as for a non-empty
+            # result (ITL-1046), and every other token column keeps its input type.
             input_schema = arrow_utils.normalize_schema_to_large_types(
-                stream.as_table().schema
+                stream.as_table(columns={"source": True}).schema
             )
             element_field = pa.field(
                 self.out or self.column,
@@ -364,11 +376,28 @@ class Index(UnaryOperator):
                 ),
                 nullable=self._output_nullable(),
             )
+            token_name = f"{constants.SOURCE_PREFIX}{self.column}"
+            input_token = input_schema.field(token_name)
+            input_token_type = input_token.type
+            token_type = (
+                input_token_type.value_type
+                if pa.types.is_large_list(input_token_type)
+                else input_token_type
+            )
+            token_field = pa.field(
+                f"{constants.SOURCE_PREFIX}{self.out or self.column}",
+                token_type,
+                nullable=input_token.nullable,
+            )
             if self.out is None:
                 position = input_schema.get_field_index(self.column)
                 output_schema = input_schema.set(position, element_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+                output_schema = output_schema.set(
+                    output_schema.get_field_index(token_name), token_field
+                )  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
             else:
                 output_schema = input_schema.append(element_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+                output_schema = output_schema.append(token_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
             return ArrowTableStream(
                 output_schema.empty_table(),
                 tag_columns=tag_columns,
