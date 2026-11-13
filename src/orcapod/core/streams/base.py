@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping
@@ -13,7 +12,7 @@ from orcapod.core.streams.head import (
     HeadStatus,
     StreamHead,
     default_note,
-    render_error_html,
+    preview_html,
 )
 from orcapod.protocols.core_protocols import (
     DataProtocol,
@@ -66,32 +65,6 @@ def check_head_size(n: int) -> None:
         raise TypeError(f"head() takes an int number of rows, got {type(n).__name__}")
     if n < 0:
         raise ValueError(f"head() takes a non-negative number of rows n, got {n}")
-
-
-def head_column_config(
-    columns: ColumnConfig | dict[str, Any] | None, all_info: bool
-) -> ColumnConfig:
-    """Return the column configuration ``head`` uses for ``columns`` and ``all_info``.
-
-    The column groups mean what they mean for ``as_table``. ``head`` returns rows in
-    stream order, so ``all_info`` does not sort, and asking for ``sort_by_tags`` raises.
-
-    Raises:
-        ValueError: If ``columns`` asks for ``sort_by_tags``.
-    """
-    if isinstance(columns, ColumnConfig):
-        asked_to_sort = bool(columns.sort_by_tags)
-    elif isinstance(columns, Mapping):
-        asked_to_sort = bool(columns.get("sort_by_tags", False))
-    else:
-        asked_to_sort = False
-    if asked_to_sort:
-        raise ValueError(
-            "head() returns the first rows in stream order and cannot sort them by "
-            "tags; sort the result of as_table() instead"
-        )
-    config = ColumnConfig.handle_config(columns, all_info=all_info)
-    return dataclasses.replace(config, sort_by_tags=False)
 
 
 class StreamBase(TraceableBase):
@@ -514,8 +487,16 @@ class StreamBase(TraceableBase):
         The rows are ones the stream already holds, has cached from an earlier
         computation, has stored, or can read with a bounded read of its table. ``head``
         never calls a function, runs an operator, delivers a side effect, polls a source
-        or writes anything. When rows are shown, they are the first ``n`` rows that
-        ``as_table()`` would return. The notebook preview of a stream is its ``head()``.
+        or writes anything. ``head`` takes the column configuration of ``as_table``,
+        sorting included, and applies it to the rows the stream has, then takes the first
+        ``n``. The default configuration does not sort, as ``as_table()`` does not, so
+        the rows are the first ``n`` that ``as_table()`` would return. With
+        ``sort_by_tags`` (or ``all_info``) a stream that has all of its rows (a node's
+        stored slice, a computed stream, an in-memory source) returns the first ``n``
+        of ``as_table`` with that configuration. A stream that has read or computed only
+        part of its rows (a source's bounded read, a partly computed stream) sorts those
+        rows: the rows read, in tag order, not the first ``n`` in tag order. The
+        notebook preview of a stream is its ``head()`` asked for ``sort_by_tags``.
 
         This default shows no rows: a stream class that can serve rows without computing
         overrides it. The zero-row table then has the stream's columns, typed from its
@@ -527,9 +508,9 @@ class StreamBase(TraceableBase):
 
         Args:
             n: The largest number of rows to return.
-            columns: Column groups to include, as for ``as_table``. ``sort_by_tags`` is
-                not accepted: the rows come in stream order.
-            all_info: Include every column group, as for ``as_table`` (without sorting).
+            columns: Column groups to include and whether to sort by tags, exactly as
+                for ``as_table``.
+            all_info: Include every column group and sort by tags, as for ``as_table``.
 
         Returns:
             A ``StreamHead`` with the rows and a ``status`` that tells an empty result
@@ -537,10 +518,10 @@ class StreamBase(TraceableBase):
 
         Raises:
             TypeError: If ``n`` is not an ``int``.
-            ValueError: If ``n`` is negative or ``columns`` asks for ``sort_by_tags``.
+            ValueError: If ``n`` is negative.
         """
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         return self._head_without_rows(config, HeadStatus.NOT_COMPUTED)
 
     def _head_without_rows(
@@ -584,9 +565,5 @@ class StreamBase(TraceableBase):
         return any(schema_requires_io(upstream, config) for upstream in self.upstreams)
 
     def _repr_html_(self) -> str:
-        """Render ``head()`` for a notebook; never computes."""
-        try:
-            head = self.head()
-        except Exception as error:  # noqa: BLE001 - a display hook must not raise
-            return render_error_html(self, error)
-        return head._repr_html_()
+        """Render ``head()`` in tag order for a notebook; never computes."""
+        return preview_html(self)

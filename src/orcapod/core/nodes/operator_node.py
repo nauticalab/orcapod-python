@@ -30,7 +30,6 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
-    head_column_config,
 )
 from orcapod.core.streams.head import (
     STALE_NOTE,
@@ -437,7 +436,7 @@ class OperatorNode(OperatorNodeBase):
         """Return no rows: a blueprint node holds no data."""
         check_head_size(n)
         return self._head_without_rows(
-            head_column_config(columns, all_info),
+            ColumnConfig.handle_config(columns, all_info=all_info),
             HeadStatus.UNAVAILABLE,
             note=BLUEPRINT_NOTE,
         )
@@ -1489,7 +1488,7 @@ class OperatorJobNode(OperatorNodeBase):
         ``as_table`` does. A loaded node never raises here. See ``StreamBase.head``.
         """
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         if self._cached_output_stream is not None:
             if not self._loaded and self.is_stale:
                 # run() would recompute; the kept rows are not the current result.

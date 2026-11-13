@@ -459,9 +459,9 @@ class _CachedFunctionPodStream(FunctionPodStream):
             yield tag, _without_stored_meta(data)
 
     def _computed_prefix(
-        self, limit: int
+        self, limit: int, contiguous: bool = True
     ) -> tuple[list[tuple[TagProtocol, DataProtocol]], int]:
-        shown, total = super()._computed_prefix(limit)
+        shown, total = super()._computed_prefix(limit, contiguous)
         return [(tag, _without_stored_meta(data)) for tag, data in shown], total
 
     def head(

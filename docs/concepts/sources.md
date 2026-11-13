@@ -154,12 +154,15 @@ with `max_rows=None`, but it cannot yet be run through a job on a laptop.
 **Looking at a table in a notebook.** A Spiral source shown at the end of a notebook cell
 (its `head()`, see [Looking at data](streams.md#looking-at-data)) reads only its first 10
 rows, in one scan to which the row cap does not apply, so a table of any size can be looked
-at; `head(n)` reads `n`. The header line says what is shown, for
-example `SpiralDBTableSource[spike_event] — first 10 rows of about 63,349` (the table's
-recorded row count, read without scanning), `all 4 rows` when the source reads no more than
-that, or `first 10 matching rows (where unit_id=106); the table has about 63,349 rows` with
-`where=`. Tag columns come first, and the line above the table names them. To see more rows, use `as_df()` with a
-`limit=` or `where=` source.
+at; `head(n)` reads `n`. The preview shows the rows it read in tag order (it asks for
+`sort_by_tags`, as does `head(columns={"sort_by_tags": True})` or `all_info=True`): the rows
+read, sorted, not the first `n` of the table in tag order. The header line says what is
+shown, for example `SpiralDBTableSource[spike_event] — 10 rows read, sorted by tags, of
+about 63,349` (the table's recorded row count, read without scanning), `all 4 rows, sorted
+by tags` when the source reads no more than that, or `10 matching rows read, sorted by tags
+(where unit_id=106); the table has about 63,349 rows` with `where=`. The unsorted `head()`
+says `first 10 rows of about 63,349`. Tag columns come first, and the line above the table
+names them. To see more rows, use `as_df()` with a `limit=` or `where=` source.
 
 **Restrictions are not part of identity.** `where`, `limit` and `asof` choose rows of the
 same table, so two sources on one table have the same `source_id` and `content_hash`

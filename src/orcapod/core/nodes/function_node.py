@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import logging
 import uuid
 from abc import abstractmethod
@@ -33,7 +32,6 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
-    head_column_config,
 )
 from orcapod.core.streams.head import (
     BLUEPRINT_NOTE,
@@ -651,21 +649,15 @@ class FunctionNodeBase(StreamBase):
                 order of ``table``; called only when ``column_config`` asks for them.
         """
         tag_keys = self.keys()[0]
-        output_table = arrow_utils.apply_column_config(
-            table, dataclasses.replace(column_config, sort_by_tags=False), tag_keys
+        # The sort sees the hash column and the system tags (they break ties).
+        return arrow_utils.with_content_hash_column(
+            table,
+            column_config.content_hash,
+            content_hashes,
+            lambda carried: arrow_utils.apply_column_config(
+                carried, column_config, tag_keys
+            ),
         )
-        if column_config.content_hash:
-            hash_column_name = (
-                "_content_hash"
-                if column_config.content_hash is True
-                else column_config.content_hash
-            )
-            output_table = output_table.append_column(
-                hash_column_name, content_hashes()
-            )
-        if column_config.sort_by_tags:
-            output_table = arrow_utils.sort_by_tag_columns(output_table, tag_keys)
-        return output_table
 
     def head(
         self,
@@ -677,7 +669,7 @@ class FunctionNodeBase(StreamBase):
         """Return no rows: a node of this kind holds no data. See ``StreamBase.head``."""
         check_head_size(n)
         return self._head_without_rows(
-            head_column_config(columns, all_info),
+            ColumnConfig.handle_config(columns, all_info=all_info),
             HeadStatus.UNAVAILABLE,
             note=BLUEPRINT_NOTE,
         )
@@ -699,7 +691,11 @@ class FunctionNodeBase(StreamBase):
             (t, d) for t, d in pairs if d is not None and not isinstance(d, EmptyData)
         ]
         missing = sum(1 for _, d in pairs if isinstance(d, EmptyData))
-        shown = rows[:n]
+        # With sorting, every row is shaped and sorted (each keeps its own content
+        # hash), then the first n are taken: the head is ``as_table(config)[:n]``.
+        # At least one row is shaped even for n == 0, so that the empty head has the
+        # columns of the rows' own table (the context column among them).
+        shown = rows if config.sort_by_tags else rows[: max(n, 1)]
         table = self._shape_table(
             self._table_from_pairs(shown),
             config,
@@ -707,7 +703,7 @@ class FunctionNodeBase(StreamBase):
                 [data.content_hash().to_string() for _, data in shown],
                 type=pa.large_string(),
             ),
-        )
+        ).slice(0, n)
         note = None
         if missing:
             note = (
@@ -3093,7 +3089,10 @@ class FunctionJobNode(FunctionNodeBase):
         After a run (or ``execute``) the rows are the node's results in memory, the
         first of what ``as_table`` returns. Otherwise they are the first of its stored
         rows: the node's whole stored slice is read and nothing is kept on the node.
-        With nothing stored, there are no rows. See ``StreamBase.head``.
+        With nothing stored, there are no rows. The node has all of its rows, so with
+        ``sort_by_tags`` (or ``all_info``) the head is exactly
+        ``as_table(...).slice(0, n)``, whatever order the rows were computed in. See
+        ``StreamBase.head``.
 
         Warns:
             StoreContentWarning: As for ``as_table``.
@@ -3101,7 +3100,7 @@ class FunctionJobNode(FunctionNodeBase):
         from orcapod.pipeline.serialization import LoadStatus
 
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         status = self.load_status
         if status == LoadStatus.UNAVAILABLE:
             return self._head_without_rows(

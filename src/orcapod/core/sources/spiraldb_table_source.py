@@ -44,7 +44,7 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.derived_source import validate_tags_as_data
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.core.streams.base import check_head_size, head_column_config
+from orcapod.core.streams.base import check_head_size
 from orcapod.core.streams.head import HeadStatus, StreamHead
 from orcapod.databases.spiraldb_connector import SpiralDBConnector
 from orcapod.errors import InputValidationError, SourceTooLargeError
@@ -662,19 +662,31 @@ class SpiralDBTableSource(RootSource):
             recorded = min(self._limit, recorded)
         return _Head(rows, True, recorded, True)
 
-    def _head_note(self, head: "_Head") -> str:
-        """Return the words a notebook display puts after the header: the one place."""
+    def _head_note(self, head: "_Head", sorted_by_tags: bool = False) -> str:
+        """Return the words a notebook display puts after the header: the one place.
+
+        With ``sorted_by_tags`` the rows read are in tag order, which is not the first
+        rows of the table in tag order, and the words say so.
+        """
         shown = head.rows.num_rows
         if not head.rows_read:
             return f"rows not read; the table has about {head.total_rows:,} rows"
         if not head.total_is_estimate:
-            return f"all {shown:,} row{'' if shown == 1 else 's'}"
+            all_rows = f"all {shown:,} row{'' if shown == 1 else 's'}"
+            return f"{all_rows}, sorted by tags" if sorted_by_tags else all_rows
         if self._where:
             condition = ", ".join(f"{c}={v!r}" for c, v in self._where.items())
+            read = (
+                f"{shown:,} matching rows read, sorted by tags"
+                if sorted_by_tags
+                else f"first {shown:,} matching rows"
+            )
             return (
-                f"first {shown:,} matching rows (where {condition}); the table has "
+                f"{read} (where {condition}); the table has "
                 f"about {head.total_rows:,} rows"
             )
+        if sorted_by_tags:
+            return f"{shown:,} rows read, sorted by tags, of about {head.total_rows:,}"
         return f"first {shown:,} rows of about {head.total_rows:,}"
 
     def head(
@@ -693,7 +705,7 @@ class SpiralDBTableSource(RootSource):
         preview is this head. See ``StreamBase.head``.
         """
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         head = self._head(n, columns=config)
         tag_columns = self.keys(columns=config)[0]
         if not head.rows_read:
@@ -713,7 +725,9 @@ class SpiralDBTableSource(RootSource):
             total_rows=head.total_rows,
             total_is_estimate=head.total_is_estimate,
             origin="read",
-            description=self._head_note(head),
+            description=self._head_note(
+                head, config.sort_by_tags and bool(self._tag_columns)
+            ),
         )
 
     def _display_name(self) -> str:

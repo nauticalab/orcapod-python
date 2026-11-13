@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict
-from collections.abc import Mapping, Collection, Sequence
+from collections.abc import Callable, Mapping, Collection, Sequence
 from typing import Any, TYPE_CHECKING, cast
 
 from orcapod.system_constants import constants
@@ -1831,17 +1831,82 @@ def apply_column_config(
             if c.startswith(constants.META_PREFIX)
             and not any(c.startswith(p) for p in normalized_meta_prefixes)
         )
-    output_table = table.drop([c for c in drop_columns if c in table.column_names])
-    if column_config.sort_by_tags:
-        output_table = sort_by_tag_columns(output_table, tag_keys)
-    return output_table
+    if column_config.sort_by_tags and tag_keys:
+        # Before the system tags are dropped: they break ties between equal tags.
+        table = sort_by_tag_columns(table, tag_keys)
+    return table.drop([c for c in drop_columns if c in table.column_names])
+
+
+def unused_column_name(table: "pa.Table", base: str) -> str:
+    """Return ``base``, with underscores added until no column of ``table`` has that name."""
+    name = base
+    while name in table.column_names:
+        name += "_"
+    return name
+
+
+def with_content_hash_column(
+    table: "pa.Table",
+    content_hash: bool | str,
+    hashes: "Callable[[], pa.Array[Any]]",
+    shape: "Callable[[pa.Table], pa.Table]",
+    nullable: bool = True,
+) -> "pa.Table":
+    """Return ``shape(table)`` with the requested content-hash column attached.
+
+    The ONE mechanism by which a requested content-hash column is added while rows are
+    sorted or columns are filtered (ITL-1029, ITL-1053). The hash column is attached to
+    ``table`` before ``shape`` runs, so a sort moves every hash with its own row, and it
+    travels under a reserved temporary name that belongs to no column group, so that
+    neither the sort (a name starting with the system tag prefix is not a tie-break key)
+    nor the filtering (a name equal to ``_context_key`` or ``_source_y``) can mistake or
+    drop it. It gets its requested name last.
+
+    Args:
+        table: The rows, with every column ``shape`` needs.
+        content_hash: The column configuration's ``content_hash``: ``False`` for none,
+            ``True`` for ``_content_hash``, or the name of the column.
+        hashes: Returns the content hash of each row of ``table``, in its order, as a
+            ``large_string`` array. Called only when a content hash is requested.
+        shape: Sorts and filters the table (it must keep every column it does not drop
+            by its own rules, and must not read the hash column).
+        nullable: Whether the hash column's field is nullable.
+
+    Returns:
+        The shaped table, the content-hash column last under its requested name.
+    """
+    if not content_hash:
+        return shape(table)
+    name = content_hash if isinstance(content_hash, str) else "_content_hash"
+    carrier = unused_column_name(table, "row content hash")
+    carried = table.append_column(
+        pa.field(carrier, pa.large_string(), nullable=nullable),
+        hashes(),
+    )
+    shaped = shape(carried)
+    return shaped.rename_columns(
+        [name if column == carrier else column for column in shaped.column_names]
+    )
 
 
 def sort_by_tag_columns(table: "pa.Table", tag_keys: tuple[str, ...]) -> "pa.Table":
-    """Return ``table`` with its rows sorted ascending by the tag columns ``tag_keys``.
+    """Return ``table`` with its rows in tag order: the sort every presentation uses.
 
-    Whole rows move together: a column added to ``table`` before the sort stays with
-    its row. Column types and nullability are those of ``table``.
+    This is the order of ``as_table(sort_by_tags=True)``, ``head`` and the notebook
+    preview. It is not a hash input: a stream's identity keeps its own ordering
+    (``ArrowTableStream._identity_table``).
+
+    The rows are ordered ascending by the tag columns ``tag_keys``, nulls last. Rows with
+    equal tags are then ordered by the system tag columns ``table`` has (they hold the
+    record ids), in column order, and rows still equal keep their input order, so the
+    result does not depend on the order the rows arrived in whenever the table has system
+    tags. A table with neither is returned as it is. A caller that must keep the order of
+    a stream with no regular tag column does not call this for it. A tag type Arrow cannot
+    order (a list) is ordered with Polars, nulls last.
+
+    Whole rows move together: a column added to ``table`` before the sort (a content hash)
+    stays with its row. Column types and nullability are those of ``table``. Sort before
+    dropping the system tag columns, or the tiebreak is lost.
 
     Args:
         table: The table to sort.
@@ -1850,12 +1915,23 @@ def sort_by_tag_columns(table: "pa.Table", tag_keys: tuple[str, ...]) -> "pa.Tab
     Returns:
         A new table with the same columns, rows in tag order.
     """
-    import polars as pl
-
-    sorted_table = (
-        pl.DataFrame(table).sort(by=list(tag_keys), descending=False).to_arrow()
+    system_tags = (
+        c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
     )
-    return restore_schema_nullability(sorted_table, table.schema)
+    keys = list(dict.fromkeys([*tag_keys, *system_tags]))
+    if not keys:
+        return table
+    try:
+        return table.sort_by([(key, "ascending") for key in keys])
+    except (pa.ArrowNotImplementedError, pa.ArrowTypeError):
+        import polars as pl
+
+        sorted_table = (
+            pl.DataFrame(table)
+            .sort(by=keys, descending=False, nulls_last=True, maintain_order=True)
+            .to_arrow()
+        )
+        return restore_schema_nullability(sorted_table, table.schema)
 
 
 if __name__ == "__main__":

@@ -18,9 +18,9 @@ from orcapod.core.streams.head import (
     StreamHead,
     head_of,
 )
+from orcapod.types import ColumnConfig
 from orcapod.core.streams.base import (
     check_head_size,
-    head_column_config,
 )
 from orcapod.protocols.core_protocols import SourceProtocol
 from orcapod.types import ContentHash, Schema
@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
-    from orcapod.types import ColumnConfig
 
 
 class SourceProxy(RootSource):
@@ -224,7 +223,7 @@ class SourceProxy(RootSource):
                 self._delegate.head(n, columns=columns, all_info=all_info), self
             )
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         return self._head_without_rows(
             config,
             HeadStatus.UNAVAILABLE,

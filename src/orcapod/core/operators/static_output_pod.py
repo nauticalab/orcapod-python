@@ -15,7 +15,6 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
-    head_column_config,
 )
 from orcapod.core.streams.head import (
     STALE_NOTE,
@@ -536,7 +535,7 @@ class DynamicPodStream(StreamBase):
         or after an input changed, there are no rows. See ``StreamBase.head``.
         """
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         had_result = self._cached_stream is not None
         self._update_cache_status()
         if self._cached_stream is not None and self._cached_time is not None:

@@ -543,8 +543,12 @@ class TestNotebookDisplay:
 
         html = stream._repr_html_()
 
-        assert html == stream.head()._repr_html_()
-        assert "ArrowTableStream[numbers] — first 10 of 25 rows" in html
+        sorted_head = stream.head(columns={"sort_by_tags": True})
+        assert (
+            html.split("</strong>")[1:]
+            == sorted_head._repr_html_().split("</strong>")[1:]
+        )
+        assert "ArrowTableStream[numbers] — first 10 of 25 rows, sorted by tags" in html
         assert "tags: id" in html
         assert "shape: (10, 2)" in html
 

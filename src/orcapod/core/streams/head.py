@@ -111,6 +111,10 @@ class StreamHead:
         description: When given, the whole text after the name in the header, written
             by a stream that words its own rows (a table-backed source naming its
             ``where``); otherwise the header is built from the fields above.
+        sorted_by_tags: ``True`` when the rows were asked for in tag order (the notebook
+            preview): the header then says so, and for a bounded read or a partial
+            computation says they are the rows read or computed so far, in tag order.
+            A ``description`` words its own sorting.
     """
 
     table: pa.Table
@@ -123,6 +127,7 @@ class StreamHead:
     origin: str = "held"
     note: str | None = None
     description: str | None = None
+    sorted_by_tags: bool = False
 
     @classmethod
     def of_rows(
@@ -216,10 +221,11 @@ class StreamHead:
             text = self._describe_rows(shown)
         elif self.status is HeadStatus.PARTIAL:
             total = self.total_rows if self.total_rows is not None else shown
+            suffix = ", sorted by tags" if self.sorted_by_tags else ""
             if shown == total:
-                text = f"{total:,} {_rows(total)} computed so far"
+                text = f"{total:,} {_rows(total)} computed so far{suffix}"
             else:
-                text = f"first {shown:,} of {total:,} rows computed so far"
+                text = f"first {shown:,} of {total:,} rows computed so far{suffix}"
             text += " (computation incomplete)"
         else:
             return self.note or _DEFAULT_NOTES[self.status]
@@ -233,13 +239,19 @@ class StreamHead:
         noun = _ORIGIN_NOUNS.get(self.origin, "rows")
         if shown == 0 and (total is None or total == 0):
             return "computed: no rows" if self.origin == "computed" else f"no {noun}"
+        suffix = ", sorted by tags" if self.sorted_by_tags else ""
         if total is None:
-            return f"first {shown:,} {_rows(shown)}"
+            return f"first {shown:,} {_rows(shown)}{suffix}"
         if self.total_is_estimate:
+            if self.sorted_by_tags:
+                # A bounded read: the rows read, in tag order, not the first in tag order.
+                return (
+                    f"{shown:,} {_rows(shown)} read, sorted by tags, of about {total:,}"
+                )
             return f"first {shown:,} {_rows(shown)} of about {total:,}"
         if shown == total:
-            return f"all {total:,} {noun if total != 1 else noun[:-1]}"
-        return f"first {shown:,} of {total:,} {noun}"
+            return f"all {total:,} {noun if total != 1 else noun[:-1]}{suffix}"
+        return f"first {shown:,} of {total:,} {noun}{suffix}"
 
     def _display_frame(self) -> pl.DataFrame:
         """Return a Polars frame of the rows for display: tag columns first, large cells
@@ -312,6 +324,24 @@ def display_name(stream: Any) -> str:
     if len(name) > _MAX_NAME:
         name = f"{name[:30]}…{name[-12:]}"
     return name
+
+
+def preview_html(stream: Any) -> str:
+    """Return the notebook preview of ``stream``: its head with the rows in tag order.
+
+    The preview asks ``head`` for ``sort_by_tags`` (developer, November 12, 2026), so the
+    rows shown do not depend on the order they were computed in. For a bounded read or a
+    partial computation they are the rows read or computed so far, in tag order. A stream
+    with no tag column shows its rows in stream order. It never computes anything more
+    than ``head`` does.
+    """
+    try:
+        head = stream.head(columns={"sort_by_tags": True})
+    except Exception as error:  # noqa: BLE001 - a display hook must not raise
+        return render_error_html(stream, error)
+    if head.tag_columns and head.table.num_rows:
+        head = dataclasses.replace(head, sorted_by_tags=True)
+    return head._repr_html_()
 
 
 def head_of(

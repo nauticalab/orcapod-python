@@ -14,7 +14,6 @@ from orcapod.core.streams.head import (
 )
 from orcapod.core.streams.base import (
     check_head_size,
-    head_column_config,
     schema_requires_io,
 )
 from orcapod.errors import InputValidationError
@@ -477,10 +476,13 @@ class DerivedSource(RootSource):
         The records are the ones this source already read. Otherwise, an origin source
         gives its own ``head(n)`` (so a polling or caching origin is never polled or
         written), and an origin job node gives its stored rows, read now and not kept.
-        An origin job node that has not run gives no rows.
+        An origin job node that has not run gives no rows. With ``sort_by_tags`` (or
+        ``all_info``), the rows are sorted by tag as ``as_table`` sorts them: all the
+        stored rows of an origin job node, but only the rows an origin source reads for
+        its head (see ``StreamBase.head``).
         """
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         origin_kind = "held" if isinstance(self._origin, RootSource) else "stored"
         if self._tags_as_data is not None and self._cached_stream is not None:
             return self._cached_stream.head(n, columns=config).for_stream(
@@ -493,6 +495,18 @@ class DerivedSource(RootSource):
             return stream.head(n, columns=config).for_stream(self, origin=origin_kind)
         if isinstance(self._origin, RootSource):
             origin_head = self._origin.head(n)
+            if (
+                config.sort_by_tags
+                and origin_head.status is HeadStatus.ROWS
+                and not origin_head.total_is_estimate
+                and origin_head.total_rows is not None
+                and origin_head.total_rows > n
+            ):
+                # The origin has all its rows (its total is exact): sorting needs them
+                # all, and the system tags this source adds follow the origin's row
+                # order, so the origin is not sorted first. A bounded origin (an
+                # estimated total) is sorted among the rows it read.
+                origin_head = self._origin.head(origin_head.total_rows)
             if origin_head.status is not HeadStatus.ROWS:
                 if origin_head.table.num_columns == 0:
                     # The origin's columns are not known without polling it.
@@ -530,8 +544,11 @@ class DerivedSource(RootSource):
                 tag_columns=stream.keys(columns=config)[0],
                 note="nothing stored: its origin has not run",
             )
-        # Only the shown rows are enriched; the total is the whole stored count.
-        head = self._stream_over(records.slice(0, n)).head(n, columns=config)
+        # Without sorting only the shown rows are enriched. With sorting every stored
+        # row is (they are all read already), so the head is as_table cut to n rows.
+        # The total is the whole stored count.
+        rows = records if config.sort_by_tags else records.slice(0, n)
+        head = self._stream_over(rows).head(n, columns=config)
         return dataclasses.replace(
             head.for_stream(self, origin="stored"), total_rows=records.num_rows
         )

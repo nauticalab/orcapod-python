@@ -26,7 +26,6 @@ from orcapod.core.streams.head import (
 )
 from orcapod.core.streams.base import (
     check_head_size,
-    head_column_config,
 )
 from orcapod.errors import (
     CursorInvalidatedError,
@@ -472,13 +471,18 @@ class PollingSource(RootSource, Generic[T]):
         or none when the source declared no schema (finding it would mean polling).
         """
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         batches = list(self._batches)  # snapshot: the list is append-only
         if batches:
-            # Combine only the batches that hold the first n rows; count the rest.
+            # Combine only the batches that hold the first n rows (every batch when
+            # sorting); count the rest.
             sizes = [batch.head(0).total_rows or 0 for batch in batches]
             needed, covered = 0, 0
-            while needed < len(batches) and (covered < n or needed == 0):
+            # A sorted head orders every polled batch: the first n in tag order can lie
+            # in any of them. The batches are already in memory; nothing is polled.
+            while needed < len(batches) and (
+                covered < n or needed == 0 or config.sort_by_tags
+            ):
                 covered += sizes[needed]
                 needed += 1
             prefix = batches[0]

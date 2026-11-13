@@ -103,8 +103,9 @@ Streams also have direct shortcuts: `as_pandas_df()`, `as_polars_df()` and `as_l
 ## Looking at data
 
 In a notebook, a stream, source or job node shown at the end of a cell renders a short
-table: its first rows, with a line saying what they are. That preview is `head()` rendered,
-and `head(n)` gives the same rows to work with. Neither ever computes anything: they show
+table: its first rows in tag order, with a line saying what they are. That preview is
+`head()` asked for `sort_by_tags` and rendered, and `head(n, columns={"sort_by_tags": True})`
+gives the same rows to work with. Neither ever computes anything: they show
 only what is readily available, and never call a function, run an operator, deliver a side
 effect, poll a source or write to a database.
 
@@ -161,6 +162,36 @@ What each kind of object shows:
 | A job node | the rows it holds after `job.run()`, else the first of its stored rows, else none (`nothing_stored`) |
 | A pipeline blueprint node, an unbound input slot | none (`unavailable`) |
 | A side-effect stream | none: showing it never delivers its side effects |
+
+`head(n, columns=..., all_info=...)` takes the same column configuration as `as_table`,
+sorting included, and applies it to the rows it has before taking the first `n`. The default
+does not sort, as `as_table()` does not, so `head()` shows rows in the order the stream
+holds them. The notebook preview asks for the sorted head, so it shows the same rows
+whatever order they were computed in. With `sort_by_tags=True`, or `all_info=True`, rows are
+sorted by tag first (nulls last; rows with equal tags are ordered by their system tags):
+
+```python
+from orcapod.sources import DictSource
+
+unordered = DictSource(
+    data=[{"subject_id": f"mouse_{i:02d}", "age": 8 + i} for i in (3, 1, 2)],
+    tag_columns=["subject_id"],
+    label="unordered",
+)
+print(unordered.head(2).as_table().column("subject_id").to_pylist())
+# ['mouse_03', 'mouse_01']
+print(unordered.head(2, all_info=True).as_table().column("subject_id").to_pylist())
+# ['mouse_01', 'mouse_02']
+```
+
+A stream that has all of its rows (a job node's stored rows, a computed stream, an in-memory
+source) then gives exactly the first `n` rows of `as_table` with the same configuration,
+whatever order the rows were computed in. A stream that has only some of its rows sorts
+those: a source that reads a bounded number of rows (such as a `SpiralDBTableSource`) shows
+the rows it read, in tag order, and a stream computed only in part shows the rows computed so
+far in tag order. It is not "the first `n` rows in tag order" of rows it never read, and the
+preview's header line says so ("10 rows read, sorted by tags, of about 63,349"). A stream
+with no tag columns previews its rows in stream order.
 
 A head of an operator is never the operator applied to the heads of its inputs: a group over
 the first ten rows has the wrong members. So an uncomputed stream shows its columns and

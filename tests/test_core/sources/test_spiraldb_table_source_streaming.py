@@ -614,7 +614,10 @@ class TestNotebookPreview:
         html = source._repr_html_()
 
         assert self._scan_limits() == [10]
-        assert "SpiralDBTableSource[big] — first 10 rows of about 25" in html
+        assert (
+            "SpiralDBTableSource[big] — 10 rows read, sorted by tags, of about 25"
+            in html
+        )
         assert "shape: (10, 3)" in html
         assert "tags: subject_id, timestamp" in html
 
@@ -628,6 +631,29 @@ class TestNotebookPreview:
         assert head.header() == "SpiralDBTableSource[big] — first 10 rows of about 25"
         assert (head.total_rows, head.total_is_estimate) == (25, True)
         assert len(head) == 10
+
+    def test_a_sorted_head_sorts_only_the_rows_it_read(self, project):
+        """``sort_by_tags`` reorders the one bounded read and reads no more (ITL-1053).
+
+        The table is read in key order (subject, then timestamp) but tagged by
+        ``timestamp``, so the first ten rows read are not in tag order.
+        """
+        table = project.create_table("default.mixed", key_schema=_KEYS)
+        table.write(_rows([10, 20, 30, 40, 50], subject="m1"))
+        table.write(_rows([1, 2, 3, 4, 5, 6], subject="m2"))
+        fake_pyspiral.scan_log.clear()
+        source = SpiralDBTableSource(
+            _PROJECT, "mixed", tag_columns=["timestamp"], label="mixed"
+        )
+
+        unsorted_head = source.head()
+        sorted_head = source.head(columns={"sort_by_tags": True})
+
+        assert self._scan_limits() == [10, 10]
+        read = cast(list[int], unsorted_head.table.column("timestamp").to_pylist())
+        assert read == [10, 20, 30, 40, 50, 1, 2, 3, 4, 5]
+        assert sorted_head.table.column("timestamp").to_pylist() == sorted(read)
+        assert "10 rows read, sorted by tags" in sorted_head.header()
 
     def test_an_unlabelled_source_is_shown_by_its_table_name(self, big):
         """With no label, the header names the table; the label itself is unchanged."""
@@ -646,7 +672,7 @@ class TestNotebookPreview:
         html = source._repr_html_()
 
         assert self._scan_limits() == [10]
-        assert "first 10 rows of about 25" in html
+        assert "10 rows read, sorted by tags, of about 25" in html
 
     def test_a_small_table_shows_all_its_rows(self, project):
         """A table of fewer than 10 rows is shown whole, saying so."""
@@ -690,7 +716,7 @@ class TestNotebookPreview:
         html = source._repr_html_()
 
         assert (
-            "first 10 matching rows (where subject_id='&lt;b&gt;'); "
+            "10 matching rows read, sorted by tags (where subject_id='&lt;b&gt;'); "
             "the table has about 25 rows"
         ) in html
         assert "<b>'" not in html

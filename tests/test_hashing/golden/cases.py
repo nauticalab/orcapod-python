@@ -1884,3 +1884,62 @@ def torch_datagram() -> dict[str, Any]:
     return stream_summary(
         DictSource(data=rows, tag_columns=["k"], source_id="golden_torch_tensor")
     )
+
+
+@case("pipeline", "tagless_producerless_stream")
+def pipeline_tagless_producerless_stream() -> dict[str, Any]:
+    """Pin the content hash of a stream with no tag column and no producer (ITL-1053).
+
+    Its identity hashes the rows sorted by their system tags, so the hash is the same
+    for rows given in any order.
+
+    Returns:
+        The content hash for two orders of the same rows.
+    """
+    from orcapod.core.streams import ArrowTableStream
+
+    def table(record_ids: list[str], xs: list[int]) -> pa.Table:
+        return pa.table(
+            [pa.array(record_ids, pa.string()), pa.array(xs, pa.int64())],
+            names=["record_id", "x"],
+        )
+
+    rows = table(["b", "c", "a"], [1, 2, 3])
+    reordered = table(["c", "a", "b"], [2, 3, 1])
+    return {
+        "as_given": ArrowTableStream(
+            rows, tag_columns=[], system_tag_columns=["record_id"]
+        )
+        .content_hash()
+        .to_string(),
+        "reordered": ArrowTableStream(
+            reordered, tag_columns=[], system_tag_columns=["record_id"]
+        )
+        .content_hash()
+        .to_string(),
+    }
+
+
+@case("pipeline", "list_tag_producerless_stream")
+def pipeline_list_tag_producerless_stream() -> dict[str, Any]:
+    """Pin the content hash of a stream with a list-valued tag and no producer (ITL-1053).
+
+    Arrow cannot order a list column, so the stream's identity hashes its rows in the
+    order given: the hash of the same rows in two orders differs.
+
+    Returns:
+        The content hash for two orders of the same rows.
+    """
+    from orcapod.core.streams import ArrowTableStream
+
+    def stream(ks: list[list[int]], xs: list[int]) -> ArrowTableStream:
+        table = pa.table(
+            [pa.array(ks, pa.large_list(pa.int64())), pa.array(xs, pa.int64())],
+            names=["k", "x"],
+        )
+        return ArrowTableStream(table, tag_columns=["k"])
+
+    return {
+        "as_given": stream([[2], [1]], [20, 10]).content_hash().to_string(),
+        "reversed": stream([[1], [2]], [10, 20]).content_hash().to_string(),
+    }

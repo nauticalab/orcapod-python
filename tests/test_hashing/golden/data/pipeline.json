@@ -367,6 +367,8 @@
     "_tag_source_id::ddc871a1c97cfa92d4eeb46d3ad5a45900283dab98580b108a93c386f802982c::ddc871a1c97cfa92d4eeb46d3ad5a45900283dab98580b108a93c386f802982c:1",
     "_tag_record_id::ddc871a1c97cfa92d4eeb46d3ad5a45900283dab98580b108a93c386f802982c::ddc871a1c97cfa92d4eeb46d3ad5a45900283dab98580b108a93c386f802982c:1"
   ],
+  "list_tag_producerless_stream.as_given": "semantic_v1:13bcfc176f286f93f6e726f100d484889b970f27ab9faa68e815d126e33f9ad9",
+  "list_tag_producerless_stream.reversed": "semantic_v1:9bb1d6d7a8958dfb76562fa48854acff9b95b72a735631dce0b2cf583aae53a3",
   "map_data.content_hash": "semantic_v1:7ed964c988b138e57d33b6db445eb9322babdd11dd9d16ef09b7a618efc16b4b",
   "map_data.pipeline_hash": "semantic_v1:e7b348a99246e0f719402540be0b77865bf2c0fe8de25e3355b707f1aa3fe2d7",
   "map_data.row[{\"subject\":\"s1\"}]._tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "e8e02084627f5e1aad83839e421538e8",
@@ -591,5 +593,7 @@
   "sources.subjects.system_tag_columns": [
     "_tag_source_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5",
     "_tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5"
-  ]
+  ],
+  "tagless_producerless_stream.as_given": "semantic_v1:8910e1f5088e3a86be550c356c8127e4dcd302c99378942f30bc34a982b1a108",
+  "tagless_producerless_stream.reordered": "semantic_v1:8910e1f5088e3a86be550c356c8127e4dcd302c99378942f30bc34a982b1a108"
 }

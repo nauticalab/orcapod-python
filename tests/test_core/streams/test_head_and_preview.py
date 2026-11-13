@@ -86,23 +86,25 @@ def test_head_of_a_short_source_says_all_rows() -> None:
 
 
 def test_head_with_every_column_group_is_the_prefix_of_as_table() -> None:
-    """With every column group, head is the prefix of as_table, in stream order."""
+    """With every column group, head is the prefix of as_table (ITL-1053)."""
     source = _source()
     head = source.head(4, columns=ALL_COLUMNS)
     assert head.table.equals(source.as_table(columns=ALL_COLUMNS).slice(0, 4))
-    # all_info means every column group; head returns rows in stream order.
+    # all_info sorts by tag, as it does for as_table.
     assert source.head(4, all_info=True).table.equals(
-        source.as_table(columns=ALL_COLUMNS).slice(0, 4)
+        source.as_table(all_info=True).slice(0, 4)
     )
 
 
-def test_head_refuses_negative_n_and_sorting() -> None:
-    """A negative n and sort_by_tags are refused."""
+def test_head_refuses_a_negative_n_and_accepts_sorting() -> None:
+    """A negative n is refused; sort_by_tags is a column option, as for as_table."""
     source = _source()
     with pytest.raises(ValueError, match="n"):
         source.head(-1)
-    with pytest.raises(ValueError, match="sort"):
-        source.head(columns={"sort_by_tags": True})
+    head = source.head(3, columns={"sort_by_tags": True})
+    assert head.table.equals(
+        source.as_table(columns={"sort_by_tags": True}).slice(0, 3)
+    )
 
 
 def test_head_of_zero_rows_keeps_the_columns() -> None:
@@ -135,11 +137,18 @@ def test_other_in_memory_sources_serve_their_first_rows(make: Any) -> None:
 
 
 def test_preview_is_the_rendered_head() -> None:
-    """The notebook preview is head() rendered."""
+    """The notebook preview is head() rendered, with the rows in tag order (ITL-1053)."""
     source = _source()
     html = source._repr_html_()
-    assert "ArrowTableSource[readings] — first 10 of 25 rows" in html
-    assert html == source.head()._repr_html_()
+    assert "ArrowTableSource[readings] — first 10 of 25 rows, sorted by tags" in html
+    assert (
+        html.split("</strong>")[1:]
+        == (
+            source.head(columns={"sort_by_tags": True})
+            ._repr_html_()
+            .split("</strong>")[1:]
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

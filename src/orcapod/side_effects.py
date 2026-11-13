@@ -20,7 +20,6 @@ from orcapod.core.nodes.function_node import _build_record_id_preimage
 from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
-    head_column_config,
 )
 from orcapod.core.streams.head import (
     SIDE_EFFECTS_NOTE,
@@ -48,6 +47,7 @@ from orcapod.system_constants import (
     OLD_TRACKING_DB_SCHEMA_VERSIONS,
     TRACKING_DB_SCHEMA_VERSION,
 )
+from orcapod.types import ColumnConfig
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -62,7 +62,7 @@ if TYPE_CHECKING:
     )
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
-    from orcapod.types import ColumnConfig, ContentHash, Schema
+    from orcapod.types import ContentHash, Schema
 else:
     pa = LazyModule("pyarrow")
 
@@ -166,7 +166,7 @@ class SideEffectPodStream(StreamBase):
     ) -> StreamHead:
         """Return no rows: showing this stream must never deliver its side effects."""
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         return self._head_without_rows(
             config, HeadStatus.NOT_COMPUTED, note=SIDE_EFFECTS_NOTE
         )
@@ -762,7 +762,7 @@ class SideEffectNode(StreamBase):
     ) -> StreamHead:
         """Return no rows: showing this stream must never deliver its side effects."""
         check_head_size(n)
-        config = head_column_config(columns, all_info)
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
         return self._head_without_rows(
             config, HeadStatus.NOT_COMPUTED, note=SIDE_EFFECTS_NOTE
         )
