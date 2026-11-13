@@ -4,6 +4,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod.core.operators.match_keys import frozen_scalar
 from orcapod.core.operators.base import (
     NonZeroInputOperator,
     require_shared_arrow_type,
@@ -638,19 +639,17 @@ class Join(NonZeroInputOperator):
                         needs_reindex = False
                         for buf_side in (0, 1):
                             for j, (bt, _bp) in enumerate(buffers[buf_side]):
-                                btd = bt.as_dict()
-                                k = (
-                                    tuple(btd[sk] for sk in shared_keys)
-                                    if shared_keys
-                                    else (0,)
-                                )
-                                indexes[buf_side].setdefault(k, []).append(j)
+                                k = self._match_key(bt, shared_keys)
+                                if k is not None:
+                                    indexes[buf_side].setdefault(k, []).append(j)
 
                     # Index the new row
-                    td = tag.as_dict()
-                    key = tuple(td[sk] for sk in shared_keys) if shared_keys else (0,)
+                    key = self._match_key(tag, shared_keys)
                     row_idx = len(buffers[side])
                     buffers[side].append((tag, pkt))
+                    if key is None:
+                        # A null key never matches, as in the sync join.
+                        continue
                     indexes[side].setdefault(key, []).append(row_idx)
 
                     # Probe the opposite side for matches
@@ -662,6 +661,33 @@ class Join(NonZeroInputOperator):
                             await output.send(merge_fn(ot, op, tag, pkt))
         finally:
             await output.close()
+
+    @staticmethod
+    def _match_key(tag: TagProtocol, keys: Sequence[str]) -> tuple[object, ...] | None:
+        """Return a row's hashable key over the shared tag columns.
+
+        Values come from the tag's Arrow columns and are frozen, so list and
+        struct keys are hashable and compare as the sync path's Polars join
+        compares them (see ``match_keys``).
+
+        Args:
+            tag: The row's tag.
+            keys: The shared tag columns; empty means every row matches.
+
+        Returns:
+            The key, or ``None`` when a key value is a null primitive and the
+            row therefore matches nothing.
+        """
+        if not keys:
+            return (0,)
+        table = tag.as_table()
+        values: list[object] = []
+        for key in keys:
+            value = frozen_scalar(table.column(key)[0])
+            if value is None:
+                return None
+            values.append(value)
+        return tuple(values)
 
     @staticmethod
     def _check_shared_key_types(
@@ -731,8 +757,9 @@ class Join(NonZeroInputOperator):
         left lacks. The async path joins in canonical order, so this is the
         order ``_joined_user_schemas`` defines. A shared (join-key) column
         takes the right tag's field, as ``static_process`` does
-        (``restore_schema_nullability`` lets the last reference win); the
-        values are equal because the rows matched on it.
+        (``restore_schema_nullability`` lets the last reference win), and the
+        left tag's values, as its Polars join does (they are equal because the
+        rows matched on it, except ``0.0`` against ``-0.0``).
 
         Every column keeps the Arrow type it already has: nothing is
         re-inferred from Python values.
@@ -764,12 +791,19 @@ class Join(NonZeroInputOperator):
                     _ = require_shared_arrow_type("Join", name, types[name], arrow_type)
                 types[name] = arrow_type
                 fields[name] = table.schema.field(index)
-                arrays[name] = table.column(index)
+                # A shared column keeps the left tag's values (the sync join's
+                # Polars join does): rows that match on ``0.0`` and ``-0.0``
+                # keep the left spelling.
+                arrays.setdefault(name, table.column(index))
         if not fields:
             return None
-        return pa.Table.from_arrays(
-            list(arrays.values()), schema=pa.schema(list(fields.values()))
-        )
+        columns = [
+            arrays[name].cast(field.type)
+            if arrays[name].type != field.type
+            else arrays[name]
+            for name, field in fields.items()
+        ]
+        return pa.Table.from_arrays(columns, schema=pa.schema(list(fields.values())))
 
     @staticmethod
     def _build_tag(

@@ -59,7 +59,12 @@ N-ary inner join on shared tag columns. Requires that input streams have non-ove
 data columns (raises `InputValidationError` on collision). Join is **commutative** -- the
 order of input streams does not affect the result. Join drops its inputs' meta
 (`__`-prefixed) columns, such as a cached function pod's `__computed`, so they never collide
-and never appear in its output.
+and never appear in its output. Rows match on equality of every shared tag column, whatever
+its type (lists and structs compare element by element). A row with a null in any shared tag
+column matches nothing, a null list or struct included, and rows with null on both sides do
+not match each other (the SQL convention for nulls; `MergeJoin` and `SemiJoin` follow it too, on the sync and the async path, while `GroupBy` is the exception by design and puts null keys in one group); a null *inside* a list or struct is an ordinary element that equals
+another null, an empty list is not a null, and NaN equals NaN. The async path gives the same
+rows.
 
 A name is a tag or a data column, never both: if one input has `x` as a tag column and another has it as a data column, `Join` (and `MergeJoin`) raises `InputValidationError` when the graph is built; rename one with `map_tags` or `map_data`.
 

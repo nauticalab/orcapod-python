@@ -1,9 +1,9 @@
-import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_type
+from orcapod.core.operators.match_keys import frozen_scalar
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
@@ -19,33 +19,6 @@ else:
     pa = LazyModule("pyarrow")
     pc = LazyModule("pyarrow.compute")
     pl = LazyModule("polars")
-
-
-# The frozen form of a NaN key value: equal to itself, as NaN is in Polars.
-_NAN = object()
-
-
-def _freeze(value: object) -> object:
-    """Return a key value (from ``as_py``) in a hashable form.
-
-    Structs (dicts) become tuples of their items in field order, lists become
-    tuples, and NaN becomes one shared sentinel. Both inputs' key types are
-    checked equal first, so frozen values of different types never meet.
-
-    Args:
-        value: A Python value of an Arrow key column.
-
-    Returns:
-        The hashable form of ``value``.
-    """
-    if isinstance(value, float) and math.isnan(value):
-        return _NAN
-    if isinstance(value, dict):
-        items = cast("dict[str, object]", value)
-        return tuple((name, _freeze(item)) for name, item in items.items())
-    if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in cast("Sequence[object]", value))
-    return value
 
 
 class SemiJoin(BinaryOperator):
@@ -324,12 +297,10 @@ class SemiJoin(BinaryOperator):
         values: list[object] = []
         for key in keys:
             scalar = SemiJoin._key_table(tag, data, key).column(key)[0]
-            if isinstance(scalar, pa.ExtensionScalar):
-                scalar = scalar.value
-            value: object = scalar.as_py() if scalar is not None else None
+            value = frozen_scalar(scalar)
             if value is None:
                 return None
-            values.append(_freeze(value))
+            values.append(value)
         return tuple(values)
 
     def identity_structure(self) -> Any:
