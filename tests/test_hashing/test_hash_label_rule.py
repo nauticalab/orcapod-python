@@ -35,7 +35,11 @@ from orcapod.databases import InMemoryArrowDatabase
 from orcapod.hashing import directory_hashers
 from orcapod.hashing.file_hashers import FileHasher
 from orcapod.hashing.semantic_hashing import polars_expr
-from orcapod.hashing.semantic_hashing.builtin_handlers import NumpyArrayHandler
+from orcapod.hashing.semantic_hashing.builtin_handlers import (
+    NumpyArrayHandler,
+    PolarsDataFrameHandler,
+    PolarsSeriesHandler,
+)
 from orcapod.operators import Join
 from orcapod.sources import DictSource
 from orcapod.types import CacheMode, ContentHash
@@ -97,6 +101,9 @@ class TestLabelFormat:
         (tmp_path / "f.txt").write_text("hello")
         assert hasher.hash_object(np.arange(3)).method == "ndarray_v1"
         assert hasher.hash_object(pl.col("x") > 1).method == "polars_expr_v1"
+        frame = pl.DataFrame({"x": [1]})
+        assert hasher.hash_object(frame).method == "polars_dataframe_v1"
+        assert hasher.hash_object(frame["x"]).method == "polars_series_v1"
         assert hasher.hash_object(op.Directory(tmp_path)).method == "directory_v1"
 
     def test_file_hash_keeps_the_digest_function_name(self, tmp_path: Path) -> None:
@@ -118,6 +125,8 @@ class TestLabelFormat:
             context.arrow_hasher.hasher_id,
             context.semantic_hasher.hash_object(np.arange(3)).method,
             context.semantic_hasher.hash_object(pl.col("x") > 1).method,
+            context.semantic_hasher.hash_object(pl.DataFrame({"x": [1]})).method,
+            context.semantic_hasher.hash_object(pl.Series("x", [1])).method,
             context.semantic_hasher.hash_object(op.Directory(tmp_path)).method,
         }
         assert all(LABEL_FORMAT.fullmatch(label) for label in labels), labels
@@ -167,6 +176,8 @@ RENAMED = {
     "arrow_v1": "renamedarrow_v9",
     "ndarray_v1": "renamedndarray_v9",
     "polars_expr_v1": "renamedpolarsexpr_v9",
+    "polars_dataframe_v1": "renamedpolarsdataframe_v9",
+    "polars_series_v1": "renamedpolarsseries_v9",
     "directory_v1": "renameddirectory_v9",
 }
 
@@ -190,6 +201,10 @@ def renamed_labels(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, str]]:
     monkeypatch.setattr(
         polars_expr, "POLARS_EXPR_HASH_LABEL", RENAMED["polars_expr_v1"]
     )
+    monkeypatch.setattr(
+        PolarsDataFrameHandler, "HASH_LABEL", RENAMED["polars_dataframe_v1"]
+    )
+    monkeypatch.setattr(PolarsSeriesHandler, "HASH_LABEL", RENAMED["polars_series_v1"])
     monkeypatch.setattr(
         directory_hashers, "DIRECTORY_HASH_LABEL", RENAMED["directory_v1"]
     )
@@ -555,6 +570,8 @@ LABEL_DEFINITIONS = {
     "directory_v1": "hashing/directory_hashers.py",
     "ndarray_v1": "hashing/semantic_hashing/builtin_handlers.py",
     "polars_expr_v1": "hashing/semantic_hashing/polars_expr.py",
+    "polars_dataframe_v1": "hashing/semantic_hashing/builtin_handlers.py",
+    "polars_series_v1": "hashing/semantic_hashing/builtin_handlers.py",
 }
 
 

@@ -514,6 +514,51 @@ def test_builtin_dataframe_round_trip(
     pd.testing.assert_frame_equal(recovered, df)
 
 
+def test_builtin_polars_dataframe_round_trip(
+    storage_backend: _StorageBackend, tmp_path: Path
+) -> None:
+    """pl.DataFrame round-trips through storage with extension name ``orcapod.polars.dataframe``.
+
+    The frame read back has exactly the schema it was written with (ITL-578).
+    """
+    import datetime as dt
+
+    import polars as pl
+    from polars.testing import assert_frame_equal
+
+    df = pl.DataFrame(
+        {
+            "e": pl.Series(["b", "a"], dtype=pl.Enum(["b", "a", "c"])),
+            "t": pl.Series(
+                [dt.datetime(2020, 1, 1), None], dtype=pl.Datetime("ms", "UTC")
+            ),
+            "s": pl.Series(
+                [{"x": 1, "y": [1.5]}, None],
+                dtype=pl.Struct({"x": pl.UInt16, "y": pl.List(pl.Float32)}),
+            ),
+        }
+    )
+    result, read_converter = _write_and_read(
+        {"frame": pl.DataFrame},
+        [{"frame": df}],
+        storage_backend,
+        tmp_path,
+    )
+
+    field = result.schema.field("frame")
+    assert hasattr(field.type, "extension_name"), (
+        f"Expected extension type on field 'frame', got plain type {field.type!r}"
+    )
+    assert field.type.extension_name == "orcapod.polars.dataframe"
+
+    rows = read_converter.arrow_table_to_python_dicts(result)
+    assert len(rows) == 1
+    recovered = rows[0]["frame"]
+    assert isinstance(recovered, pl.DataFrame)
+    assert recovered.schema == df.schema
+    assert_frame_equal(recovered, df)
+
+
 def test_builtin_series_round_trip(
     storage_backend: _StorageBackend, tmp_path: Path
 ) -> None:

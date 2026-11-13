@@ -758,6 +758,79 @@ Each result row also records the full version string of the function that produc
 the column `__pf_var_function_version` (for example `v3.7`); only the major part is in the
 table path.
 
+## Value types
+
+A function pod's parameters and return values can be plain Python scalars (`int`, `float`,
+`str`, `bool`, `bytes`), lists, dataclasses, pydantic models, and the built-in logical types
+below. A logical type is stored as an Arrow extension type: the extension name is recorded
+in the stored schema, so a value read back from a database comes back as the same Python
+type.
+
+| Python type | Extension name | Arrow storage |
+|---|---|---|
+| `pathlib.Path` | `orcapod.path` | `large_string` |
+| `upath.UPath` | `orcapod.upath` | `large_string` |
+| `uuid.UUID` | `orcapod.uuid` | `large_binary` |
+| `orcapod.File` | `orcapod.file` | `large_string` |
+| `orcapod.Directory` | `orcapod.directory` | `large_string` |
+| `numpy.ndarray` | `orcapod.numpy.ndarray` | `large_binary` (`.npy` bytes, see [Arrays](arrays.md)) |
+| `pandas.DataFrame` | `pandas.dataframe` | `large_binary` (Arrow IPC stream) |
+| `pandas.Series` | `pandas.series` | `large_binary` (Arrow IPC stream) |
+| `polars.DataFrame` | `orcapod.polars.dataframe` | `large_binary` (Polars IPC file, `write_ipc`) |
+| `polars.Series` | `orcapod.polars.series` | `large_binary` (Polars IPC file, `write_ipc`) |
+
+A `polars.DataFrame` comes back with exactly the schema it was stored with: column order and
+names, integer and float widths, `Categorical`, `Enum` with its category order, `Decimal`
+precision and scale, `Datetime` unit and time zone, `Duration` unit, `List`, `Array` shape,
+`Struct` fields in their order and `Null`. A `polars.Series` keeps its name, dtype and values the same way.
+Dtypes that cannot be stored and read back exactly (`Object`, `Int128`, `UInt128`, and Polars
+extension dtypes) raise `ValueError` naming the column when the value is stored, so convert
+such a column explicitly before returning the frame.
+
+A Polars value's content hash, which is its cache key, covers the value's logical content: its
+row count, column names and their order, dtypes (struct fields and their order included) and
+values. So a pod that depends on column order, such as one returning `df.columns[0]`, gets a
+separate cache entry for each order. Physical properties are not part of the hash: chunking
+(`n_chunks()`) and sortedness flags (`Series.flags`, which are not stored either). A pod must
+not depend on them, because equal frames that differ only there share a cache entry. See
+[Polars DataFrame and Series values](../reference/hashing.md#1e-polars-dataframe-and-series-values)
+for the exact scheme.
+
+```python
+import polars as pl
+
+from orcapod import function_pod
+from orcapod.sources import DictSource
+
+@function_pod(output_keys="readings")
+def load_readings(n_samples: int) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "sample": pl.Series(range(n_samples), dtype=pl.UInt16),
+            "voltage": pl.Series([0.5] * n_samples, dtype=pl.Float32),
+        }
+    )
+
+@function_pod(output_keys="n_rows")
+def count_rows(readings: pl.DataFrame) -> int:
+    return readings.height
+
+recordings = DictSource(
+    data=[{"session": "s1", "n_samples": 2}, {"session": "s2", "n_samples": 3}],
+    tag_columns=["session"],
+)
+readings = load_readings.pod(recordings)
+for tag, data in readings.iter_data():
+    print(tag["session"], dict(data["readings"].schema))
+# s1 {'sample': UInt16, 'voltage': Float32}
+# s2 {'sample': UInt16, 'voltage': Float32}
+
+for tag, data in count_rows.pod(readings).iter_data():
+    print(tag["session"], data["n_rows"])
+# s1 2
+# s2 3
+```
+
 ## Multiple input streams
 
 If you pass multiple streams to a function pod, they are automatically joined (using

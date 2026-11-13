@@ -163,7 +163,10 @@ def test_v1_lists_no_logical_types() -> None:
 
 
 def test_logical_type_registration_is_unchanged_by_the_move() -> None:
-    """The default context registers exactly what the single file registered before."""
+    """The default context registers exactly what the single file registered before.
+
+    The Polars value types were added afterwards (ITL-578).
+    """
     context = contexts.create_registry().get_context()
     handlers = context.semantic_hasher.type_handler_registry
     assert isinstance(handlers, PythonTypeHandlerRegistry)
@@ -183,7 +186,9 @@ def test_logical_type_registration_is_unchanged_by_the_move() -> None:
         "orcapod.types.Schema=SchemaHandler",
         "pandas.core.frame.DataFrame=PandasDataFrameHandler",
         "pandas.core.series.Series=PandasSeriesHandler",
+        "polars.dataframe.frame.DataFrame=PolarsDataFrameHandler",
         "polars.expr.expr.Expr=PolarsExprHandler",
+        "polars.series.series.Series=PolarsSeriesHandler",
         "pyarrow.lib.RecordBatch=ArrowTableHandler",
         "pyarrow.lib.Table=ArrowTableHandler",
         "types.GenericAlias=GenericAliasHandler",
@@ -202,6 +207,8 @@ def test_logical_type_registration_is_unchanged_by_the_move() -> None:
         "orcapod.file",
         "orcapod.numpy.ndarray",
         "orcapod.path",
+        "orcapod.polars.dataframe",
+        "orcapod.polars.series",
         "orcapod.upath",
         "orcapod.uuid",
         "pandas.dataframe",

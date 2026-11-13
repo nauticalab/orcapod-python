@@ -606,6 +606,91 @@ class PolarsExprHandler:
         return polars_expr_content_hash(obj)
 
 
+class PolarsDataFrameHandler(IgnoreListHandler):
+    """Hasher for ``pl.DataFrame``: the ``polars_dataframe_v1`` value digest.
+
+    The algorithm is ``polars_frame_digest`` in ``orcapod.logical_types.polars_type``,
+    whose module docstring defines it. By default the hash is strict: it ignores chunking,
+    slice offsets and the bytes under null slots, which are not properties of the value,
+    and distinguishes column order, struct field order, a null struct from a struct of
+    nulls, and every dtype parameter. The ignore list can leave out ``column_order`` and
+    ``struct_field_order``.
+    """
+
+    OPTIONS = frozenset({"column_order", "struct_field_order"})
+    HASH_LABEL = "polars_dataframe_v1"
+    """``ContentHash.method`` of a ``pl.DataFrame`` hash."""
+
+    def digest(self, obj: Any, ignore: frozenset[str]) -> bytes:
+        """Return the value digest of ``obj``, ignoring the named properties.
+
+        Args:
+            obj: A ``pl.DataFrame`` instance.
+            ignore: A subset of ``OPTIONS``.
+
+        Returns:
+            The 32 digest bytes.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``pl.DataFrame``.
+            ValueError: If a column's dtype is outside the descriptor grammar.
+        """
+        import polars as _pl
+
+        from orcapod.logical_types.polars_type import polars_frame_digest
+
+        if not isinstance(obj, _pl.DataFrame):
+            raise TypeError(
+                f"PolarsDataFrameHandler: expected pl.DataFrame, got {type(obj)!r}"
+            )
+        return polars_frame_digest(
+            obj,
+            ignore_column_order="column_order" in ignore,
+            ignore_struct_field_order="struct_field_order" in ignore,
+        )
+
+
+class PolarsSeriesHandler(IgnoreListHandler):
+    """Hasher for ``pl.Series``: the ``polars_series_v1`` value digest.
+
+    The algorithm is ``polars_series_digest`` in ``orcapod.logical_types.polars_type``:
+    the Series' name, dtype and values. The ignore list can leave out ``series_name`` and
+    ``struct_field_order``.
+    """
+
+    OPTIONS = frozenset({"series_name", "struct_field_order"})
+    HASH_LABEL = "polars_series_v1"
+    """``ContentHash.method`` of a ``pl.Series`` hash."""
+
+    def digest(self, obj: Any, ignore: frozenset[str]) -> bytes:
+        """Return the value digest of ``obj``, ignoring the named properties.
+
+        Args:
+            obj: A ``pl.Series`` instance.
+            ignore: A subset of ``OPTIONS``.
+
+        Returns:
+            The 32 digest bytes.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``pl.Series``.
+            ValueError: If the dtype is outside the descriptor grammar.
+        """
+        import polars as _pl
+
+        from orcapod.logical_types.polars_type import polars_series_digest
+
+        if not isinstance(obj, _pl.Series):
+            raise TypeError(
+                f"PolarsSeriesHandler: expected pl.Series, got {type(obj)!r}"
+            )
+        return polars_series_digest(
+            obj,
+            ignore_name="series_name" in ignore,
+            ignore_struct_field_order="struct_field_order" in ignore,
+        )
+
+
 def register_builtin_python_type_handlers(
     registry: "HandlerRegistryProtocol",
     file_hasher: Any = None,
@@ -728,6 +813,8 @@ def register_builtin_python_type_handlers(
     import polars as _pl
 
     registry.register(_pl.Expr, PolarsExprHandler())
+    registry.register(_pl.DataFrame, PolarsDataFrameHandler())
+    registry.register(_pl.Series, PolarsSeriesHandler())
 
     logger.debug(
         "register_builtin_python_type_handlers: registered %d hashers",

@@ -33,6 +33,53 @@ if not _JSONSCHEMA_AVAILABLE:
     logger.info("jsonschema not available, skipping schema validation")
 
 
+def _object_without_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build one JSON object, refusing a key that occurs twice.
+
+    ``json.load`` alone keeps the last of two equal keys and drops the others. A merge of
+    two branches that each add the same object to a data context file can produce such a
+    file without a conflict, so the entries of one branch would vanish silently.
+
+    Args:
+        pairs: The object's members in file order, as ``json`` passes them to an
+            ``object_pairs_hook``.
+
+    Returns:
+        The object as a ``dict``.
+
+    Raises:
+        ValueError: If a key occurs more than once; the message names the key.
+    """
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"a JSON object repeats the key {key!r}")
+        result[key] = value
+    return result
+
+
+def _read_json_file(path: Path) -> Any:
+    """Read a data context JSON file, refusing duplicate keys at any depth.
+
+    Args:
+        path: The file to read.
+
+    Returns:
+        The parsed document.
+
+    Raises:
+        ContextValidationError: If an object in the file repeats a key; the message
+            names the file and the key.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f, object_pairs_hook=_object_without_duplicate_keys)
+        except ValueError as error:
+            if isinstance(error, json.JSONDecodeError):
+                raise
+            raise ContextValidationError(f"{path}: {error}") from error
+
+
 class JSONDataContextRegistry:
     """
     Registry that loads data contexts from JSON files with validation.
@@ -105,9 +152,11 @@ class JSONDataContextRegistry:
         """Load JSON schema for validation if available."""
         if self.schema_file and self.schema_file.exists():
             try:
-                with open(self.schema_file, "r") as f:
-                    self._schema = json.load(f)
+                self._schema = _read_json_file(self.schema_file)
                 logger.info(f"Loaded validation schema from {self.schema_file}")
+            except ContextValidationError:
+                # A schema file that repeats a key is refused like any other context file.
+                raise
             except Exception as e:
                 logger.warning(f"Failed to load schema from {self.schema_file}: {e}")
                 self._schema = None
@@ -140,8 +189,7 @@ class JSONDataContextRegistry:
         version = json_file.stem  # e.g., "v1" from "v1.json"
 
         # Load JSON
-        with open(json_file, "r") as f:
-            spec = json.load(f)
+        spec = _read_json_file(json_file)
 
         # Validate basic structure
         if not isinstance(spec, dict):
@@ -348,8 +396,7 @@ class JSONDataContextRegistry:
             ``hash_ignore`` object: per extension name, the property names the
             value hash of that type ignores.
         """
-        with open(self.logical_types_file, "r") as f:
-            return json.load(f)
+        return _read_json_file(self.logical_types_file)
 
     def _create_context_from_spec(self, spec: dict[str, Any]) -> DataContext:
         """Create DataContext instance from validated specification.
