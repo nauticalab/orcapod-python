@@ -194,22 +194,78 @@ class SideEffectPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table:
-        from orcapod.types import ColumnConfig as _ColumnConfig
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        return _table_of_rows(
+            self.iter_data(),
+            column_config,
+            tag_keys=lambda: self.keys()[0],
+            declared_schema=lambda: self.output_schema(all_info=True),
+            type_converter=self._pod.data_context.type_converter,
+        )
 
-        column_config = _ColumnConfig.handle_config(columns, all_info=all_info)
-        tag_tables = []
-        data_tables = []
-        for tag, data in self.iter_data():
-            tag_tables.append(tag.as_table(columns=column_config))
-            data_tables.append(data.as_table(columns=column_config))
-        if not tag_tables:
-            # Return an empty table preserving declared field nullability.
-            tag_schema, data_schema = self.output_schema(columns=column_config)
-            tc = self._pod.data_context.type_converter
-            return arrow_utils.make_empty_table({**tag_schema, **data_schema}, tc)
-        combined_tags = pa.concat_tables(tag_tables)
-        combined_data = pa.concat_tables(data_tables)
-        return arrow_utils.hstack_tables(combined_tags, combined_data)
+
+def _table_of_rows(
+    rows: Iterator[tuple[TagProtocol, DataProtocol]],
+    column_config: ColumnConfig,
+    *,
+    tag_keys: Callable[[], tuple[str, ...]],
+    declared_schema: Callable[[], tuple[Schema, Schema]],
+    type_converter: Any,
+) -> pa.Table:
+    """Return the delivered rows as one table with the column groups of ``column_config``.
+
+    The one place the side-effect stream and node build their table (ITL-1066). Every
+    requested column group is collected once per row (the tag's system tags, the data's
+    source info, meta and context) and the shared shaping helpers then choose the groups, sort
+    and attach the content hash, as the function pod streams do. A row's content hash is
+    that of its own data, and it stays with its row when the rows are sorted.
+
+    Args:
+        rows: The (tag, data) pairs to tabulate.
+        column_config: The column groups to keep, and whether to sort by tags.
+        tag_keys: Returns the names of the regular tag columns. Called after the rows were
+            read: asking a source for its keys can poll it.
+        declared_schema: Returns the declared (tag, data) schemas with every group. Called
+            only for the table of no rows: asking a source for its schema can poll it.
+        type_converter: The data context's type converter, to type the table of no rows.
+    """
+    tag_tables: list[pa.Table] = []
+    data_tables: list[pa.Table] = []
+    hashes: list[str] = []
+    for tag, data in rows:
+        tag_tables.append(tag.as_table(columns={"system_tags": True}))
+        # Only the requested auxiliary groups, so a group that is not shown cannot
+        # make the rows' tables differ; the hash is that of the data, whatever is shown.
+        data_tables.append(
+            data.as_table(
+                columns={
+                    "source": column_config.source,
+                    "meta": column_config.meta,
+                    "context": column_config.context,
+                }
+            )
+        )
+        hashes.append(data.content_hash().to_string())
+    if tag_tables:
+        full = arrow_utils.hstack_tables(
+            pa.concat_tables(tag_tables), pa.concat_tables(data_tables)
+        )
+    else:
+        # No rows: the declared columns, with the declared field nullability.
+        tag_schema, data_schema = declared_schema()
+        full = arrow_utils.make_empty_table(
+            {**tag_schema, **data_schema}, type_converter
+        )
+
+    def shape(carried: pa.Table) -> pa.Table:
+        return arrow_utils.apply_column_config(carried, column_config, tag_keys())
+
+    return arrow_utils.with_content_hash_column(
+        full,
+        column_config.content_hash,
+        lambda: pa.array(hashes, type=pa.large_string()),
+        shape,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -794,22 +850,13 @@ class SideEffectNode(StreamBase):
         all_info: bool = False,
     ) -> pa.Table:
         """Collect all rows from ``iter_data()`` into an Arrow table."""
-        from orcapod.types import ColumnConfig as _ColumnConfig
-
-        column_config = _ColumnConfig.handle_config(columns, all_info=all_info)
-        tag_tables = []
-        data_tables = []
-        for tag, data in self.iter_data():
-            tag_tables.append(tag.as_table(columns=column_config))
-            data_tables.append(data.as_table(columns=column_config))
-        if not tag_tables:
-            # Return an empty table preserving declared field nullability.
-            tag_schema, data_schema = self.output_schema(columns=column_config)
-            tc = self._pod.data_context.type_converter
-            return arrow_utils.make_empty_table({**tag_schema, **data_schema}, tc)
-        return arrow_utils.hstack_tables(
-            pa.concat_tables(tag_tables),
-            pa.concat_tables(data_tables),
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        return _table_of_rows(
+            self.iter_data(),
+            column_config,
+            tag_keys=lambda: self.keys()[0],
+            declared_schema=lambda: self.output_schema(all_info=True),
+            type_converter=self._pod.data_context.type_converter,
         )
 
     @property
