@@ -643,26 +643,9 @@ def test_drop_nulls_without_tag_columns() -> None:
         assert data.source_info() == sync_data.source_info()
 
 
-# Pre-existing provenance defects, not type re-inference: out of scope for
-# ITL-837 and tracked elsewhere. Strict, so a fix flags them.
-_DROPPED_SOURCE_INFO = (
-    "ITL-838: Data.select / Data.drop keep the dropped columns' source info, so the "
-    "async row's source-info schema lists columns it no longer has"
-)
-PROVENANCE_XFAIL = {
-    "select_data_columns": _DROPPED_SOURCE_INFO,
-    "drop_data_columns": _DROPPED_SOURCE_INFO,
-}
-PROVENANCE_CASES = [
-    pytest.param(
-        c,
-        id=c.label,
-        marks=[pytest.mark.xfail(strict=True, reason=PROVENANCE_XFAIL[c.label])]
-        if c.label in PROVENANCE_XFAIL
-        else [],
-    )
-    for c in CASES
-]
+# Every case: the async path carries the sync path's source info (ITL-838 / ITL-1040 fixed
+# the select and drop cases, whose dropped columns' source info used to survive).
+PROVENANCE_CASES = [pytest.param(c, id=c.label) for c in CASES]
 
 
 def test_group_by_keeps_non_key_tags_as_tags_on_both_paths() -> None:
