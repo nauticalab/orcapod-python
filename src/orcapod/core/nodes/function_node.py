@@ -132,6 +132,58 @@ def _build_record_id_preimage(
     )
 
 
+def _large_layout(table: "pa.Table") -> "pa.Table":
+    """Return ``table`` with every column in its large layout, ``null`` kept ``null``.
+
+    Args:
+        table: The table to normalize.
+
+    Returns:
+        The table with large-normalized column types; names, nullability and
+        metadata kept.
+    """
+    schema = pa.schema(
+        [
+            field.with_type(
+                arrow_utils.normalize_to_large_types(field.type, keep_null=True)
+            )
+            for field in table.schema
+        ]
+    )
+    return table if schema.equals(table.schema) else table.cast(schema)
+
+
+def _concat_row_tables(tables: "list[pa.Table]") -> "pa.Table":
+    """Concatenate one-row tables by column name, refusing a column whose types differ.
+
+    Rows never make a column of a type one of them does not have: two rows whose
+    Arrow types for one column differ (other than by their large variants) are an
+    error, never widened or cast.
+
+    Args:
+        tables: The rows' tables, in row order; not empty.
+
+    Returns:
+        The concatenated table, with the first table's column order.
+
+    Raises:
+        InputValidationError: If two rows give one column different Arrow types,
+            naming the column and both types.
+    """
+    # Large and non-large layouts of one type are one type: give every row the
+    # large layout, so they also concatenate. Layouts only: ``null`` stays ``null``.
+    tables = [_large_layout(t) for t in tables]
+    # The first type seen for each column, whichever row first has the column.
+    seen: dict[str, pa.DataType] = {}
+    for table in tables:
+        for name, row_type in zip(table.schema.names, table.schema.types):
+            expected = seen.setdefault(name, row_type)
+            if arrow_utils.shared_arrow_type(expected, row_type) is None:
+                message = f"Rows disagree on the Arrow type of column {name!r}: {expected} and {row_type}"
+                raise InputValidationError(message)
+    return arrow_utils.concat_tables_by_name(tables)
+
+
 def _bare_digest(hash_string: str) -> str:
     """Return the bare hex digest of a stored ``"<label>:<hex>"`` hash string.
 
@@ -455,52 +507,7 @@ class FunctionNodeBase(StreamBase):
         all_info: bool = False,
     ) -> "pa.Table":
         if self._cached_output_table is None:
-            all_tags: list[dict] = []
-            all_data: list[dict] = []
-            # Derive Arrow schemas from the declared output_schema upfront so that
-            # the cached table always has a consistent, well-formed schema regardless
-            # of whether any rows were produced.
-            tag_python_schema, data_python_schema = self.output_schema(all_info=True)
-            for tag, data in self.iter_data():
-                all_tags.append(tag.as_dict(all_info=True))
-                all_data.append(data.as_dict(all_info=True))
-
-            converter = self.data_context.type_converter
-            tag_arrow_schema = converter.python_schema_to_arrow_schema(
-                tag_python_schema
-            )
-            data_arrow_schema = converter.python_schema_to_arrow_schema(
-                data_python_schema
-            )
-
-            if not all_tags:
-                # No data was produced (node has not been run yet or produced zero
-                # outputs).  Build a zero-row table whose schema is derived from the
-                # pod's declared output so that callers always receive a well-formed
-                # schema regardless of whether the node has actually executed.
-                self._cached_output_table = pa.Table.from_pylist(
-                    [],
-                    schema=converter.python_schema_to_arrow_schema(
-                        tag_python_schema + data_python_schema
-                    ),
-                )
-            else:
-                struct_data = converter.python_dicts_to_struct_dicts(
-                    all_data, python_schema=data_python_schema
-                )
-                all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                    all_tags, schema=tag_arrow_schema
-                )
-                if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                    all_tags_as_tables = all_tags_as_tables.drop(
-                        [constants.CONTEXT_KEY]
-                    )
-                all_data_as_tables: pa.Table = pa.Table.from_pylist(
-                    struct_data, schema=data_arrow_schema
-                )
-                self._cached_output_table = arrow_utils.hstack_tables(
-                    all_tags_as_tables, all_data_as_tables
-                )
+            self._cached_output_table = self._table_from_pairs(list(self.iter_data()))
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         output_table = arrow_utils.apply_column_config(
@@ -526,6 +533,48 @@ class FunctionNodeBase(StreamBase):
             )
 
         return output_table
+
+    def _table_from_pairs(
+        self, pairs: "list[tuple[TagProtocol, DataProtocol]]"
+    ) -> "pa.Table":
+        """Return the output rows ``pairs`` as one table with every column group.
+
+        Built from each row's own Arrow tables, so every column keeps the type its
+        row has: a tag the type of the input's tag, never a type inferred from
+        Python values (ITL-928). A row's meta columns (a computed row's
+        ``__computed`` flag) are its own bookkeeping, not part of the node's
+        output, as for the pod's stream outside a job. With no rows the table has
+        the declared columns, typed from the declared output schema.
+
+        Raises:
+            InputValidationError: If two rows give one column different Arrow
+                types, naming this node, the column and both types.
+        """
+        if not pairs:
+            # No data was produced (node has not been run yet or produced zero
+            # outputs).  Build a zero-row table whose schema is derived from the
+            # pod's declared output so that callers always receive a well-formed
+            # schema regardless of whether the node has actually executed.
+            tag_python_schema, data_python_schema = self.output_schema(all_info=True)
+            return pa.Table.from_pylist(
+                [],
+                schema=self.data_context.type_converter.python_schema_to_arrow_schema(
+                    tag_python_schema + data_python_schema
+                ),
+            )
+        try:
+            tag_table = _concat_row_tables(
+                [tag.as_table(columns={"system_tags": True}) for tag, _ in pairs]
+            )
+            data_table = _concat_row_tables(
+                [
+                    data.as_table(columns={"source": True, "context": True})
+                    for _, data in pairs
+                ]
+            )
+        except InputValidationError as exc:
+            raise InputValidationError(f"Function node {self.label!r}: {exc}") from exc
+        return arrow_utils.hstack_tables(tag_table, data_table)
 
     def __repr__(self) -> str:
         return (

@@ -385,8 +385,11 @@ print("function calls:", len(calls))
     `InputValidationError`, which names the table, the column and both types, and nothing is
     written to that table. They are not converted to the stored type. `string` and
     `large_string`, and the other large and non-large layouts of one type, count as the same
-    type, and so do types the Delta writer converts on the way in (`uint64` is stored as
-    `int64`, every timestamp in microseconds). New columns and new struct fields pass this
+    type. A column of a type Delta Lake has no equivalent for (an unsigned integer, a
+    timestamp in seconds, milliseconds or nanoseconds or with a zone other than UTC, `date64`,
+    `time`, `duration`, at any depth) is written in a form Delta has, with its Arrow type
+    recorded in the table, and every read gives it back with that type and its exact values.
+    New columns and new struct fields pass this
     check; whether they are added follows
     the database's `allow_schema_evolution` setting. In a job run, a refused append fails the
     run as a `StoreWriteError` whose cause is the `InputValidationError`.

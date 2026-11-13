@@ -23,6 +23,12 @@ from orcapod.errors import (
     TableListingNotSupportedError,
     TypeIdentityError,
 )
+from orcapod.databases.delta_arrow_types import (
+    first_column_out_of_stored_range,
+    from_delta_layout,
+    recorded_type,
+    to_delta_layout,
+)
 from orcapod.databases.storage_utils import (
     delta_to_pyarrow_dataset,
     is_cloud_uri,
@@ -911,7 +917,9 @@ class DeltaTableDatabase:
             "pa_ds.FileSystemDataset",
             delta_to_pyarrow_dataset(delta_table, as_large_types=True),
         )
-        table = arrow_utils.normalize_table_view_types(dataset.to_table())
+        table = from_delta_layout(
+            arrow_utils.normalize_table_view_types(dataset.to_table())
+        )
         return table.combine_chunks(), frozenset(dataset.files), dataset.schema
 
     def _stored_ids(self, record_path: tuple[str, ...]) -> set[bytes]:
@@ -1396,6 +1404,7 @@ class DeltaTableDatabase:
                 raise
             except Exception as e:
                 raise self._read_failed(record_path) from e
+            delta_table_data = from_delta_layout(delta_table_data)
             if delta_table_data.num_rows > 0:
                 tables_to_combine.append(delta_table_data)
 
@@ -1693,9 +1702,12 @@ class DeltaTableDatabase:
         try:
             # Combine all tables in the batch. Convert view types so they never
             # reach storage (ENG-601).
-            combined_table = arrow_utils.normalize_table_view_types(
+            original_table = arrow_utils.normalize_table_view_types(
                 pending_batch.combine_chunks()
             )
+            # A column whose type Delta would not give back is written in its
+            # integer form with its type recorded (ITL-928).
+            combined_table = to_delta_layout(original_table)
 
             # Ensure parent directory exists (local only)
             if not self._is_cloud:
@@ -1732,15 +1744,35 @@ class DeltaTableDatabase:
                     f"Created new Delta table for {record_key} with {len(combined_table)} records"
                 )
             else:
-                mismatch = self._incompatible_append_column(delta_table, combined_table)
+                mismatch = self._incompatible_append_column(
+                    delta_table, original_table, combined_table
+                )
                 if mismatch is not None:
                     column, stored_type, incoming_type = mismatch
                     raise InputValidationError(
                         f"Cannot append to the stored table {table_uri!r}: column "
                         f"{column!r} is stored as {stored_type} but the new rows have "
                         f"{incoming_type} (input type "
-                        f"{combined_table.schema.field(column).type}). "
+                        f"{original_table.schema.field(column).type}). "
                         "The stored rows are unchanged and nothing was written."
+                    )
+                overflowing = first_column_out_of_stored_range(
+                    original_table,
+                    [
+                        f.name
+                        for f in delta_table.schema().fields
+                        if recorded_type(f.metadata) is None
+                    ],
+                )
+                if overflowing is not None:
+                    raise InputValidationError(
+                        f"Cannot append to the stored table {table_uri!r}: column "
+                        f"{overflowing!r} is stored as a signed integer with no "
+                        "recorded Arrow type (a table written before ITL-928), and "
+                        "the new rows have "
+                        f"{original_table.schema.field(overflowing).type} values it "
+                        "cannot hold. The stored rows are unchanged and nothing was "
+                        "written; rebuild the store."
                     )
                 base = self._snapshot_for_commit(
                     record_key, delta_table, table_uri, abs_path_components
@@ -1963,6 +1995,7 @@ class DeltaTableDatabase:
             if added
             else dataset.schema.empty_table()
         )
+        new_rows = from_delta_layout(new_rows)
         if not new_rows.schema.equals(base.rows.table.schema):
             return snapshot
         rows = base.rows
@@ -1974,7 +2007,7 @@ class DeltaTableDatabase:
 
     @staticmethod
     def _incompatible_append_column(
-        delta_table: deltalake.DeltaTable, batch: pa.Table
+        delta_table: deltalake.DeltaTable, batch: pa.Table, written: pa.Table
     ) -> tuple[str, pa.DataType, pa.DataType] | None:
         """Find a column whose type in ``batch`` differs from the stored table's.
 
@@ -1992,37 +2025,63 @@ class DeltaTableDatabase:
         see ``_types_conflict``. The stored schema comes from the loaded log; no
         data is read.
 
+        A stored column whose Arrow type is recorded (ITL-928, see
+        ``delta_arrow_types``) is compared by that type with the batch's own type
+        instead. A stored column without one was written before types were
+        recorded: besides the check above, the form the batch is written in
+        (``written``) must be the stored type, so a ``timestamp[ns]`` batch, now
+        written as ``int64``, is refused by a column stored as ``timestamp[us]``.
+
         Args:
             delta_table: The loaded stored table.
-            batch: The rows about to be merged into it.
+            batch: The rows about to be merged into it, with their own types.
+            written: ``batch`` as it is written (``to_delta_layout(batch)``).
 
         Returns:
             ``(column, stored_type, incoming_type)`` for the first column whose
             compared types differ, or ``None`` when the batch can be appended.
         """
         stored = _stored_arrow_schema(delta_table)
-        compared = [
-            (f.name, _without_null_types(_comparable_storage_type(f.type)))
-            for f in batch.schema
-        ]
-        incoming = _as_delta_writer_stores(
-            pa.schema([pa.field(name, t) for name, t in compared if t is not None])
-        )
-        for field in incoming:
-            index = stored.get_field_index(field.name)
-            if index < 0:
+        recorded = {
+            f.name: recorded_type(f.metadata) for f in delta_table.schema().fields
+        }
+
+        def comparable(arrow_type: pa.DataType) -> pa.DataType:
+            return _comparable_storage_type(
+                arrow_utils.normalize_to_large_types(arrow_type, keep_null=True)
+            )
+
+        def conflict(
+            stored_schema: pa.Schema, rows: pa.Schema
+        ) -> tuple[str, pa.DataType, pa.DataType] | None:
+            compared = [
+                (f.name, _without_null_types(_comparable_storage_type(f.type)))
+                for f in rows
+                if recorded.get(f.name) is None
+            ]
+            incoming = _as_delta_writer_stores(
+                pa.schema([pa.field(name, t) for name, t in compared if t is not None])
+            )
+            for field in incoming:
+                index = stored_schema.get_field_index(field.name)
+                if index < 0:
+                    continue
+                stored_type = comparable(stored_schema.field(index).type)
+                incoming_type = comparable(field.type)
+                if _types_conflict(stored_type, incoming_type):
+                    return field.name, stored_type, incoming_type
+            return None
+
+        for field in batch.schema:
+            stored_original = recorded.get(field.name)
+            if stored_original is None:
                 continue
-            stored_type = _comparable_storage_type(
-                arrow_utils.normalize_to_large_types(
-                    stored.field(index).type, keep_null=True
-                )
-            )
-            incoming_type = _comparable_storage_type(
-                arrow_utils.normalize_to_large_types(field.type, keep_null=True)
-            )
-            if _types_conflict(stored_type, incoming_type):
-                return field.name, stored_type, incoming_type
-        return None
+            reduced = _without_null_types(comparable(field.type))
+            if reduced is not None and _types_conflict(
+                comparable(stored_original), reduced
+            ):
+                return field.name, stored_original, field.type
+        return conflict(stored, batch.schema) or conflict(stored, written.schema)
 
     @property
     def base_path(self) -> tuple[str, ...]:

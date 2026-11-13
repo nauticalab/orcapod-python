@@ -178,17 +178,10 @@ LOGICAL_TYPES: dict[str, Any] = {
 # fail and the type join the guarded list.
 NOT_STORABLE: set[str] = {
     "float16",
-    "date64",
-    "time32[s]",
-    "time32[ms]",
-    "time64[us]",
-    "time64[ns]",
-    "duration[s]",
-    "duration[ms]",
-    "duration[us]",
-    "duration[ns]",
     "decimal256(40, 2)",
 }
+# ``date64``, ``time`` and ``duration`` are stored as their integer value with the
+# Arrow type recorded since ITL-928 (``orcapod.databases.delta_arrow_types``).
 
 # Types Delta stores but whose append Delta's own merge rejects, on main as on
 # this branch (not the append check): tracked in ITL-916.

@@ -706,7 +706,13 @@ def test_sync_and_async_runs_give_the_same_rows() -> None:
         tables.append(job.nodes["add"].as_table(all_info=True).sort_by("k"))
 
     assert tables[0].schema == tables[1].schema
-    assert tables[0].to_pylist() == tables[1].to_pylist()
+    # A source-info token names the result record, which each run makes anew.
+    source_info = [c for c in tables[0].column_names if c.startswith("_source_")]
+    assert source_info == ["_source_total"]
+    assert (
+        tables[0].drop(source_info).to_pylist()
+        == tables[1].drop(source_info).to_pylist()
+    )
     assert [row["total"] for row in tables[0].to_pylist()] == [5, 9]
 
 

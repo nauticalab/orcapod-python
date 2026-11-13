@@ -1096,6 +1096,44 @@ class FunctionPodStream(StreamBase):
             if data is not None:
                 yield tag, data
 
+    def _table_from_pairs(
+        self, pairs: list[tuple[TagProtocol, DataProtocol]]
+    ) -> pa.Table:
+        """Return the output rows ``pairs`` as one table with every column group."""
+        tag_tables: list[pa.Table] = []
+        all_data = []
+        data_schema = None
+        for tag, data in pairs:
+            if data_schema is None:
+                data_schema = data.arrow_schema(all_info=True)
+            # Tags are passed through untouched: each row's own Arrow table keeps
+            # the input's tag types, a logical type included (ITL-928).
+            tag_tables.append(tag.as_table(columns={"system_tags": True}))
+            all_data.append(data.as_dict(all_info=True))
+
+        # TODO: re-verify the implemetation of this conversion
+        converter = self.data_context.type_converter
+
+        # The data columns have declared types: convert each value as its column's
+        # type, never as the type the value happens to have. A subclass instance
+        # returned for a base-class column is then refused instead of being stored
+        # as the base without its own fields (ITL-972). Only the remaining columns
+        # (meta, source info) are typed from their values.
+        python_schema = dict(infer_python_schema_from_pylist_data(all_data))
+        python_schema.update(self.output_schema()[1])
+        struct_data = converter.python_dicts_to_struct_dicts(
+            all_data, python_schema=python_schema
+        )
+        if tag_tables:
+            all_tags_as_tables = arrow_utils.concat_tables_by_name(tag_tables)
+        else:
+            # An empty stream has no row to take a tag table from.
+            all_tags_as_tables = pa.Table.from_pylist([])
+        all_data_as_tables: pa.Table = pa.Table.from_pylist(
+            struct_data, schema=data_schema
+        )
+        return arrow_utils.hstack_tables(all_tags_as_tables, all_data_as_tables)
+
     def as_table(
         self,
         *,
@@ -1103,44 +1141,7 @@ class FunctionPodStream(StreamBase):
         all_info: bool = False,
     ) -> pa.Table:
         if self._cached_output_table is None:
-            all_tags = []
-            all_data = []
-            tag_schema, data_schema = None, None
-            for tag, data in self.iter_data():
-                if tag_schema is None:
-                    tag_schema = tag.arrow_schema(all_info=True)
-                if data_schema is None:
-                    data_schema = data.arrow_schema(all_info=True)
-                # TODO: make use of arrow_compat dict
-                all_tags.append(tag.as_dict(all_info=True))
-                all_data.append(data.as_dict(all_info=True))
-
-            # TODO: re-verify the implemetation of this conversion
-            converter = self.data_context.type_converter
-
-            # The data columns have declared types: convert each value as its column's
-            # type, never as the type the value happens to have. A subclass instance
-            # returned for a base-class column is then refused instead of being stored
-            # as the base without its own fields (ITL-972). Only the remaining columns
-            # (meta, source info) are typed from their values.
-            python_schema = dict(infer_python_schema_from_pylist_data(all_data))
-            python_schema.update(self.output_schema()[1])
-            struct_data = converter.python_dicts_to_struct_dicts(
-                all_data, python_schema=python_schema
-            )
-            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                all_tags, schema=tag_schema
-            )
-            # drop context key column from tags table (guard: column absent on empty stream)
-            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
-            all_data_as_tables: pa.Table = pa.Table.from_pylist(
-                struct_data, schema=data_schema
-            )
-
-            self._cached_output_table = arrow_utils.hstack_tables(
-                all_tags_as_tables, all_data_as_tables
-            )
+            self._cached_output_table = self._table_from_pairs(list(self.iter_data()))
         assert self._cached_output_table is not None, (
             "_cached_output_table should not be None here."
         )
