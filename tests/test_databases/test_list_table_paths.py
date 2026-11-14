@@ -384,9 +384,9 @@ class TestWrappers:
         assert store.list_table_paths(("job",)) == []
 
 
-@pytest.mark.minio
+@pytest.mark.s3
 def test_s3_lists_tables_and_nested_tables(s3_base_uri, s3_storage_options):
-    """A Delta store on a real S3 endpoint lists the tables under a prefix, nested ones
+    """A Delta store on an S3 endpoint lists the tables under a prefix, nested ones
     included.
     """
     store = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)

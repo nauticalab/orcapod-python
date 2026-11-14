@@ -1,11 +1,16 @@
 """
-MinIO / S3 integration tests for DeltaTableDatabase.
+S3 integration tests for DeltaTableDatabase.
 
-Requires a running MinIO instance — provided either by the minio_server
-fixture (testcontainers locally, env vars in CI).
+The S3 endpoint comes from the ``s3_server`` fixture in ``conftest.py``: a moto
+server started as a subprocess on a free localhost port (no Docker, nothing to
+install beyond the dev group). Setting ``MINIO_ENDPOINT``, ``MINIO_ACCESS_KEY`` and
+``MINIO_SECRET_KEY`` replaces it with a real S3-compatible endpoint (for example a
+MinIO instance you run yourself); the fixture then creates the test bucket there.
+
+These tests never skip for a missing server: if the moto server cannot start, the
+tests ERROR with the reason.
 
 Run with:  uv run pytest tests/test_databases/test_delta_table_database_s3.py -v
-Skip automatically if Docker is unavailable and MINIO_ENDPOINT is not set.
 """
 
 import pyarrow as pa
@@ -14,7 +19,7 @@ from upath import UPath
 
 from orcapod.databases import DeltaTableDatabase
 
-pytestmark = pytest.mark.minio
+pytestmark = pytest.mark.s3
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +74,7 @@ def test_s3_skip_duplicates(s3_base_uri, s3_storage_options):
 # ---------------------------------------------------------------------------
 
 
-def test_s3_upath_credentials(s3_base_uri, minio_server):
+def test_s3_upath_credentials(s3_base_uri, s3_server):
     """
     DeltaTableDatabase accepts a UPath with embedded S3 credentials (key/secret/endpoint_url).
     These are auto-translated from fsspec format to AWS_* keys.
@@ -77,16 +82,16 @@ def test_s3_upath_credentials(s3_base_uri, minio_server):
     AWS_REGION, AWS_ALLOW_HTTP, and AWS_S3_ALLOW_UNSAFE_RENAME cannot be embedded
     in UPath kwargs (they have no fsspec equivalent), so they are passed via the
     explicit storage_options argument. Explicit options are merged on top of
-    UPath-derived ones — neither alone is sufficient for MinIO.
+    UPath-derived ones — neither alone is sufficient for S3 emulators.
     """
-    bucket = minio_server["bucket"]
+    bucket = s3_server["bucket"]
     prefix = s3_base_uri.split(f"s3://{bucket}/")[1]
 
     upath = UPath(
         f"s3://{bucket}/{prefix}",
-        key=minio_server["access_key"],
-        secret=minio_server["secret_key"],
-        endpoint_url=minio_server["endpoint"],
+        key=s3_server["access_key"],
+        secret=s3_server["secret_key"],
+        endpoint_url=s3_server["endpoint"],
     )
     db = DeltaTableDatabase(
         upath,

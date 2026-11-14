@@ -87,6 +87,8 @@ in `testcontainers` 4.14.2 does not have (`AttributeError`; the endpoint must be
 `get_container_host_ip()` and `get_exposed_port(9000)`). The skip hid it. The image decision and this
 fixture fix are ITL-1079.
 
+**Resolved (ITL-1079, November 14, 2026):** the S3 tests now run against a moto server that the fixture starts as a subprocess (an in-process server deadlocks with deltalake); a fixture that cannot start errors instead of skipping. The text above is kept as history.
+
 ### 3.4 Wrong or closed issue named by an xfail
 - `test_delta_append_types.py` (4 xfails) cited ITL-916 (now ITL-1076), which is "A Delta table directory whose
   `_delta_log` is missing is treated as absent and then overwritten". The real failure is
