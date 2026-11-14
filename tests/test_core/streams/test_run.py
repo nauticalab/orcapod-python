@@ -193,7 +193,7 @@ def _source_job_node() -> Any:
 
 def _function_job_node() -> Any:
     """The ``triple`` function job node of a ``PipelineJob`` over ``_source()``, not run."""
-    job = PipelineJob(name="itl1081", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1081", database=InMemoryArrowDatabase())
     with job:
         _ = _counting_pod([]).pod(_source(), label="triple")
     return job.nodes["triple"]
@@ -201,7 +201,7 @@ def _function_job_node() -> Any:
 
 def _operator_job_node() -> Any:
     """The ``rename`` operator job node of a ``PipelineJob``, its upstream ``triple`` run."""
-    job = PipelineJob(name="itl1081", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1081", database=InMemoryArrowDatabase())
     with job:
         tripled = _counting_pod([]).pod(_source(), label="triple")
         _ = MapData({"y": "z"})(tripled, label="rename")
@@ -297,7 +297,7 @@ def _operator_job_node_replaying() -> Any:
 
 def _job_node_after_job_run(name: str) -> Any:
     """Node ``name`` (``triple`` or ``rename``) of a ``PipelineJob`` that has run."""
-    job = PipelineJob(name="itl1081", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1081", database=InMemoryArrowDatabase())
     with job:
         tripled = _counting_pod([]).pod(_source(), label="triple")
         _ = MapData({"y": "z"})(tripled, label="rename")
@@ -516,7 +516,7 @@ def test_blueprint_nodes_raise_what_as_table_raises() -> None:
 def test_function_job_node_run_computes_and_returns_the_view() -> None:
     """A job function node's ``run()`` computes as before and returns its view."""
     calls: list[int] = []
-    job = PipelineJob(name="itl1081", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1081", database=InMemoryArrowDatabase())
     with job:
         _ = _counting_pod(calls).pod(_source(), label="triple")
     node = job.nodes["triple"]
