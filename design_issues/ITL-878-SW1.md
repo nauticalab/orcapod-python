@@ -39,7 +39,8 @@ cannot be stored (a naive `datetime`, a value not matching the declared type, re
 `ResultCache.store` prepares the record, before any write) is a row failure governed by
 `error_policy` exactly like a function that raised, not a `StoreWriteError`: the value is
 specific to that row, the store is healthy, and every re-run would fail at the same row. The
-async orchestrator logs row failures at DEBUG and ignores `fail_fast` (ITL-879), unchanged here.
+async orchestrator ignored `fail_fast` for such rows (ITL-879), unchanged here and fixed since
+by ITL-879 (`ITL-879-EP1`).
 Regressions: `tests/test_pipeline/test_store_write_failure.py`. Related, not fixed here: the async
-orchestrator ignores `error_policy` (ITL-879); connector and Delta `flush` drop a batch whose
+orchestrator ignored `error_policy` (ITL-879, since fixed: `ITL-879-EP1`); connector and Delta `flush` drop a batch whose
 write fails (ITL-880).

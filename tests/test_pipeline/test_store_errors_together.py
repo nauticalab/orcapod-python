@@ -354,7 +354,7 @@ def test_store_error_inside_a_node_group_gets_the_node_label() -> None:
 
     async def main() -> None:
         async with asyncio.TaskGroup() as tg:
-            _start_node(tg, Node(), node_work())
+            _start_node(tg, {}, Node(), node_work())
 
     with pytest.raises(ExceptionGroup):
         asyncio.run(main())

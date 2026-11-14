@@ -713,14 +713,8 @@ def test_join_with_an_input_that_delivered_no_row_fails_alike_on_both_paths(
         lambda a, b, c: Join()(_no_match(a), b, label="op"),
         0,
     )
-    with pytest.raises((InputValidationError, ExceptionGroup)) as info:
+    with pytest.raises(InputValidationError, match="'id'"):
         _ = _run_job(case, orchestrator, "in_memory", tmp_path)
-    error = info.value
-    while isinstance(error, ExceptionGroup):
-        assert len(error.exceptions) == 1
-        error = error.exceptions[0]
-    assert isinstance(error, InputValidationError)
-    assert "'id'" in str(error)
 
 
 def test_rebuilt_upstream_keeps_the_upstream_data_context() -> None:

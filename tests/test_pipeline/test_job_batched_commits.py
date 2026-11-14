@@ -25,6 +25,7 @@ import pytest
 
 from orcapod import PipelineJob, function_pod
 from orcapod.core.cached_function_pod import CachedFunctionPod
+from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.contexts import get_default_context
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
@@ -32,10 +33,11 @@ from orcapod.databases.extension_aware_database import ExtensionAwareDatabase
 from orcapod.databases.storage_utils import delta_to_pyarrow_dataset
 from orcapod.errors import StoreWriteError
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
+from orcapod.pipeline.observer import NoOpObserver
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 from orcapod.databases.utils import as_table_committing
 from orcapod.sources import DictSource
-from orcapod.types import NodeConfig
+from orcapod.types import NodeConfig, PodConfig
 
 ORCHESTRATORS: dict[str, Callable[..., Any]] = {
     "sync": SyncPipelineOrchestrator,
@@ -239,21 +241,144 @@ def ephemeral_rows(path: Path) -> int:
     return stored_rows(table)
 
 
+@pytest.mark.parametrize("orchestrator", list(ORCHESTRATORS))
 def test_a_node_failing_on_a_row_commits_its_ephemeral_results(
-    tmp_path: Path,
+    tmp_path: Path, orchestrator: str
 ) -> None:
-    """A function error under ``fail_fast``: rows before it are in the ephemeral store."""
+    """A function error under ``fail_fast``: rows computed before it are in the ephemeral store."""
     job = build_job(DeltaTableDatabase(tmp_path / "store"), 10, pod=double_until_7)
     job.set_ephemeral_store(DeltaTableDatabase(tmp_path / "ephemeral"))
     job.apply_node_config(NodeConfig(is_result_ephemeral=True))
-    # The sync orchestrator only: the async one does not apply error_policy and
-    # skips a row whose function raised.
     with pytest.raises(ValueError, match="x is 7"):
         job.run(
-            orchestrator=SyncPipelineOrchestrator(error_policy="fail_fast"),
+            orchestrator=ORCHESTRATORS[orchestrator](error_policy="fail_fast"),
             commit_every_rows=100,
         )
-    assert ephemeral_rows(tmp_path / "ephemeral") == 7  # rows 0 to 6
+    committed = ephemeral_rows(tmp_path / "ephemeral")
+    if orchestrator == "sync":
+        assert committed == 7  # rows 0 to 6
+    else:
+        # Rows run concurrently: any of the other 9 rows may have been computed.
+        assert committed <= 9
+
+
+@function_pod(output_keys="y")
+def double_until_last(x: int) -> int:
+    """Return twice ``x``, failing for the last row of ``CANCEL_ROWS``."""
+    if x == CANCEL_ROWS - 1:
+        raise ValueError("last row")
+    return 2 * x
+
+
+@function_pod(output_keys="z")
+def plus_one(y: int) -> int:
+    """Return ``y + 1``."""
+    return y + 1
+
+
+CANCEL_ROWS = 30
+
+
+def delta_rows_named(root: Path, name: str) -> int:
+    """Rows committed to the Delta table under ``root`` whose path names ``name``.
+
+    Zero when no such table was committed.
+    """
+    tables = {
+        log.parent
+        for log in root.rglob("_delta_log")
+        if name in log.parent.relative_to(root).parts
+    }
+    if not tables:
+        return 0
+    (table,) = tables
+    return stored_rows(table)
+
+
+def test_a_node_cancelled_by_a_failure_commits_its_ephemeral_results(
+    tmp_path: Path,
+) -> None:
+    """A node cancelled because another node failed commits what it wrote first.
+
+    ``inc`` runs on the rows ``dbl`` sends it until ``dbl`` fails at its last row under
+    ``fail_fast``; the run then cancels ``inc``. The job commits the store's pipeline
+    records afterwards but not a node's ephemeral store, so the cancelled node must
+    commit its ephemeral results itself: every pipeline record it left must have its
+    result.
+    """
+    job = PipelineJob(name="batched", database=DeltaTableDatabase(tmp_path / "store"))
+    with job:
+        source = DictSource(
+            data=[{"k": i, "x": i} for i in range(CANCEL_ROWS)],
+            tag_columns=["k"],
+            source_id="src",
+        )
+        upstream = FunctionPod.from_fn(
+            double_until_last,
+            output_keys="y",
+            pod_config=PodConfig(max_concurrency=1),
+        )
+        plus_one.pod(upstream(source, label="dbl"), label="inc")
+    job.set_ephemeral_store(DeltaTableDatabase(tmp_path / "ephemeral"))
+    # Only the cancelled node keeps its results in the ephemeral store, so the failing
+    # node's own commit after its failure does not flush that store for it.
+    job.nodes["inc"].node_config = NodeConfig(is_result_ephemeral=True)
+
+    with pytest.raises(ValueError, match="last row"):
+        job.run(
+            orchestrator=AsyncPipelineOrchestrator(error_policy="fail_fast"),
+            commit_every_rows=100,
+        )
+
+    records = delta_rows_named(tmp_path / "store", "plus_one")
+    assert records > 0, "the downstream node recorded nothing; the test proves nothing"
+    assert delta_rows_named(tmp_path / "ephemeral", "plus_one") >= records
+
+
+class RaisingNodeEnd(NoOpObserver):
+    """An observer whose ``on_node_end`` raises for node ``dbl``."""
+
+    def on_node_end(self, node_label: str, node_hash: str) -> None:
+        """Raise for ``dbl``."""
+        if node_label == "dbl":
+            raise RuntimeError("observer failed")
+
+
+def test_a_failing_observer_does_not_skip_the_failed_nodes_commit(
+    tmp_path: Path,
+) -> None:
+    """An observer raising in ``on_node_end`` as a node fails still lets the node commit.
+
+    The node's failure under ``fail_fast`` ends it for the observer and then commits
+    its ephemeral results; the observer's own exception must not skip that commit, as
+    on the sync path, where it propagates to the handler that commits.
+    """
+    job = PipelineJob(name="batched", database=DeltaTableDatabase(tmp_path / "store"))
+    with job:
+        source = DictSource(
+            data=[{"k": i, "x": i} for i in range(CANCEL_ROWS)],
+            tag_columns=["k"],
+            source_id="src",
+        )
+        pod = FunctionPod.from_fn(
+            double_until_last,
+            output_keys="y",
+            pod_config=PodConfig(max_concurrency=1),
+        )
+        pod(source, label="dbl")
+    job.set_ephemeral_store(DeltaTableDatabase(tmp_path / "ephemeral"))
+    job.apply_node_config(NodeConfig(is_result_ephemeral=True))
+
+    with pytest.raises(RuntimeError, match="observer failed"):
+        job.run(
+            orchestrator=AsyncPipelineOrchestrator(error_policy="fail_fast"),
+            observer=RaisingNodeEnd(),
+            commit_every_rows=100,
+        )
+
+    records = delta_rows_named(tmp_path / "store", "double_until_last")
+    assert records == CANCEL_ROWS - 1
+    assert delta_rows_named(tmp_path / "ephemeral", "double_until_last") >= records
 
 
 class FailPipelineRecords:

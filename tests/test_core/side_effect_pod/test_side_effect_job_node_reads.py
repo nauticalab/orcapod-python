@@ -274,7 +274,7 @@ def test_rows_whose_delivery_failed_keep_todays_row_set(
 def test_a_run_that_raises_leaves_no_rows_to_read(orchestrator: Orchestrator) -> None:
     """After a run that raised, a read returns no rows and delivers nothing."""
     job, sent = _job(failing={3})
-    with pytest.raises(BaseException):  # noqa: B017  # sync raises RuntimeError, async an ExceptionGroup
+    with pytest.raises(RuntimeError):
         _run(job, orchestrator)
     count = len(sent)
     node = job.nodes["delivered"]

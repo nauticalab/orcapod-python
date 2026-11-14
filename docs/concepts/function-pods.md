@@ -215,9 +215,8 @@ Fix the function (`return round(weight / 2)`), or declare the type it really ret
 `OutputTypeError` is a `TypeError` (and a `ValueError`). Inside a `PipelineJob` it counts as
 a failure of the function for that row, like an exception the function raises itself. With
 the default `error_policy="continue"` the row is skipped and reported to the observer, and
-the other rows are computed and stored. With `error_policy="fail_fast"` the synchronous
-orchestrator stops the run; the asynchronous orchestrator does not stop for row failures yet
-(ITL-879, see below).
+the other rows are computed and stored. With `error_policy="fail_fast"` the run stops and
+raises it, on either orchestrator (see "Stopping at the first failed row" below).
 
 The function-output rule is: the returned value must be an instance of the declared type, or an exact numeric equivalent; a subclass stands in for its base. What is stored for a subclass instance is decided by the logical type of the declared class: a user class is stored as the base (the declared class's fields only), while a `torch.nn.Parameter` returned for `-> torch.Tensor` is stored, read back and hashed as an `nn.Parameter`.
 
@@ -521,8 +520,8 @@ print(summary)
 `job.last_run.print_traceback("bmi")` prints the full traceback of the node's first failed
 row, ending in the line of your function that raised. Fix the function and run the job
 again: the rows that succeeded before are read from the store, and only the failed ones
-are computed. To stop a run at the first failed row instead, pass
-`SyncPipelineOrchestrator(error_policy="fail_fast")` as the orchestrator.
+are computed. To stop a run at the first failed row instead, see "Stopping at the first
+failed row" below.
 
 The counts are also available one by one, for example in a test:
 
@@ -533,6 +532,60 @@ print(node.computed, node.reused, node.failed, type(node.first_error).__name__)
 print(summary.ok, summary.failed_rows)
 # False 3
 ```
+
+### Stopping at the first failed row
+
+Pass an orchestrator with `error_policy="fail_fast"` to stop the run at the first row whose
+function raises. The run raises that row's own exception, on either orchestrator: the same
+type and message, never an exception group. Nothing is skipped silently, no
+`RowFailuresWarning` is issued and no summary is returned (`job.last_run` keeps the previous
+run's).
+
+```python
+from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
+
+for orchestrator in (SyncPipelineOrchestrator, AsyncPipelineOrchestrator):
+    job = PipelineJob(name="bmi_typo_fast", database=InMemoryArrowDatabase())
+    with job:
+        source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
+        careless_bmi.pod(source, label="bmi")
+    try:
+        job.run(orchestrator=orchestrator(error_policy="fail_fast"))
+    except NameError as error:
+        print(type(error).__name__, error)
+# NameError name 'heigth' is not defined
+# NameError name 'heigth' is not defined
+```
+
+The synchronous orchestrator computes one row at a time, so it raises the first failing row
+in input order, and the rows before it are computed and stored; the nodes after it never
+start. The asynchronous orchestrator computes rows concurrently (up to the pod's
+`max_concurrency`) and nodes run side by side: it raises the first row *to fail*, which is the
+first in input order only with `max_concurrency=1`, cancels every row and node still running,
+and closes their channels before it raises. A function already running in a worker thread
+cannot be interrupted: its result is discarded, never stored, and `job.run()` returns once it
+has finished. When rows of several nodes fail before the run stops, one error is raised and
+the others are noted on it (`error.__notes__`): a store error first (see "When the store
+cannot be written" below), then a `TypeIdentityError`, and otherwise the error of the node
+that comes first in the pipeline. A node cancelled by the failure commits the results it
+wrote before it stops. A run that raised defines no rows: afterwards the failing node, and
+every node the run cancelled, reads as a node with no finished run, every row stored under
+its key.
+
+What is stored after such a run:
+
+After a fail_fast raise, every stored row is a correct, complete result of its own input
+row, written in the ITL-878 commit order (results before pipeline records; writes that
+succeeded are flushed before the raise). The failing row is never stored. Other rows of the
+failing node, before or after it in input order, rows that downstream nodes computed from its
+successful rows, and rows of other branches may be stored; the set stored is not specified
+beyond that. When the cancellation falls between a row's result write and its pipeline-record
+write, the result is stored without its record: a re-run reuses it without calling the
+function, as after a crash.
+
+A side-effect pod does not follow `error_policy`: its own `on_error` decides. With
+`on_error="raise"` (the default) the run raises the delivery's own exception, on either
+orchestrator; with `on_error="log"` the failure is logged at WARNING and the run goes on.
 
 ### When results are committed
 
@@ -650,8 +703,7 @@ prepared, before anything is written, and it is a *row failure*: it is handled e
 function that raised on that row. The observer gets `on_data_crash`, the failure is logged,
 and `error_policy` decides -- `"continue"` skips the row, `"fail_fast"` raises the error
 the conversion raised. It is not a `StoreWriteError`, because the store is healthy and every
-re-run would fail at the same row. The asynchronous orchestrator currently logs row failures
-at DEBUG and does not stop for `"fail_fast"` (ITL-879); this applies to these rows too.
+re-run would fail at the same row. Both orchestrators handle these rows the same way.
 
 This is the contract for now. An opt-in mode that tolerates store failures may be added
 later.

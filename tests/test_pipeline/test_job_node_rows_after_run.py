@@ -306,6 +306,7 @@ class TestRaisedRun:
         ("kind", "fn", "policy"),
         [
             ("sync", fails_on_20, "fail_fast"),
+            ("async", fails_on_20, "fail_fast"),
             ("sync", store_fails_on_20, "continue"),
             ("async", store_fails_on_20, "continue"),
         ],
@@ -470,8 +471,7 @@ class TestRefusedOrFailedRunAfterAGoodRun:
         job.run(orchestrator=_orchestrator(kind))
         node = job.nodes["node"]
         assert _values(node, lambda r: r["k"]) == [0, 1, 2]
-        # The async orchestrator raises its task group's error around it.
-        with pytest.raises((RuntimeError, ExceptionGroup)):
+        with pytest.raises(RuntimeError, match="^observer failed$"):
             job.run(orchestrator=_orchestrator(kind), observer=FailsAtNodeEnd())
         # Every stored row (the 6-row run's), read from the store.
         assert _values(node, lambda r: r["k"]) == [0, 1, 2, 3, 4, 5]

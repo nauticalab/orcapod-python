@@ -65,7 +65,7 @@ class AsyncPipelineOrchestrator:
         error_policy: Literal["continue", "fail_fast"] = "continue",
     ) -> None:
         self._buffer_size = buffer_size
-        self._error_policy = error_policy
+        self._error_policy: Literal["continue", "fail_fast"] = error_policy
 
     def run(
         self,
@@ -191,6 +191,8 @@ class AsyncPipelineOrchestrator:
 
         topo_order: list[Any] = []
         store_error: StoreError | TypeIdentityError | None = None
+        # id of each exception a node raised -> that node's label.
+        failed_nodes: dict[int, str] = {}
         try:
             topo_order = list(graph.topological_sort())
             buf = self._buffer_size
@@ -243,6 +245,7 @@ class AsyncPipelineOrchestrator:
                     if is_source_node(node):
                         _start_node(
                             tg,
+                            failed_nodes,
                             node,
                             node.async_execute(writer, observer=effective_observer),
                         )
@@ -255,11 +258,13 @@ class AsyncPipelineOrchestrator:
                         input_reader = edge_readers[(predecessors[0], node)]
                         _start_node(
                             tg,
+                            failed_nodes,
                             node,
                             node.async_execute(
                                 input_reader,
                                 writer,
                                 observer=effective_observer,
+                                error_policy=self._error_policy,
                                 run_id=run_id,
                             ),
                         )
@@ -278,6 +283,7 @@ class AsyncPipelineOrchestrator:
                         ]
                         _start_node(
                             tg,
+                            failed_nodes,
                             node,
                             node.async_execute(
                                 input_readers, writer, observer=effective_observer
@@ -292,6 +298,7 @@ class AsyncPipelineOrchestrator:
                         input_reader = edge_readers[(predecessors[0], node)]
                         _start_node(
                             tg,
+                            failed_nodes,
                             node,
                             node.async_execute(
                                 [input_reader],
@@ -327,7 +334,9 @@ class AsyncPipelineOrchestrator:
             if identity_errors:
                 store_error = identity_errors[0]
                 raise store_error
-            raise
+            # Any other failure is raised on its own too, as the sync orchestrator
+            # raises it: a row's error under fail_fast, a side effect's delivery error.
+            raise _single_failure(group, topo_order, failed_nodes)
         finally:
             # A failing on_run_end must not replace a failed store read or write.
             with keep_store_error(store_error, "Observer on_run_end"):
@@ -596,15 +605,22 @@ class _RowsInFlight:
 
 
 def _start_node(
-    tg: asyncio.TaskGroup, node: Any, work: Coroutine[Any, Any, None]
+    tg: asyncio.TaskGroup,
+    failed_nodes: dict[int, str],
+    node: Any,
+    work: Coroutine[Any, Any, None],
 ) -> None:
-    """Start a node's coroutine in ``tg``, naming the node on the store errors it raises.
+    """Start a node's coroutine in ``tg``, recording which node each failure came from.
 
     A store error raised on its own or inside an exception group (a node that runs
-    its own task group) gets the node's label when it has none.
+    its own task group) gets the node's label when it has none. Every exception the
+    node raises, each one inside a group included, is recorded in ``failed_nodes``
+    under the node's label, so ``_single_failure`` can order the run's failures as
+    the sync orchestrator meets them.
 
     Args:
         tg: The run's task group.
+        failed_nodes: The run's record, by exception id, of the node that raised it.
         node: The node the coroutine runs.
         work: The node's ``async_execute`` coroutine.
     """
@@ -616,15 +632,55 @@ def _start_node(
             # Name the node the failure belongs to, if the raising site did not,
             # so _single_store_error can order it like the sync orchestrator.
             exc.add_context(node_label=node.label)
+            failed_nodes[id(exc)] = node.label
             raise
         except BaseExceptionGroup as group:
             # A node that runs its own task group raises its store errors inside
             # a group; name the node on each and re-raise the group unchanged.
             for store_error in StoreError.in_group(group):
                 store_error.add_context(node_label=node.label)
+            for leaf in _leaves(group):
+                failed_nodes[id(leaf)] = node.label
+            raise
+        except Exception as exc:
+            failed_nodes[id(exc)] = node.label
             raise
 
     tg.create_task(run())
+
+
+def _single_failure(
+    group: BaseExceptionGroup, topo_order: list[Any], failed_nodes: dict[int, str]
+) -> BaseException:
+    """Pick the one exception an async run raises when no store error is among its failures.
+
+    The caller gets one exception, as from the sync orchestrator, never the task
+    group's exception group: the one whose node comes first in topological order (the
+    one the sync orchestrator would meet first, when both failures happen), with ties
+    and exceptions of no node broken by their order in the group, which is the order
+    the failures happened in. Every other exception is noted on the chosen one; the
+    whole group becomes its ``__context__`` when it is raised.
+
+    Args:
+        group: The exception group the run's ``TaskGroup`` raised.
+        topo_order: The run's nodes in topological order.
+        failed_nodes: The node label of each exception a node raised, by exception id.
+
+    Returns:
+        The exception to raise.
+    """
+    leaves = _leaves(group)
+    rank = {getattr(node, "label", None): i for i, node in enumerate(topo_order)}
+    chosen = min(leaves, key=lambda exc: rank.get(failed_nodes.get(id(exc)), len(rank)))
+    for other in leaves:
+        if other is chosen:
+            continue
+        label = failed_nodes.get(id(other))
+        where = f"Node {label!r}" if label is not None else "Another task"
+        chosen.add_note(
+            f"{where} also failed in the same run: {type(other).__name__}: {other}"
+        )
+    return chosen
 
 
 def _single_store_error(

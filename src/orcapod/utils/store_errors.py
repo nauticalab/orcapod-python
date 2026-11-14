@@ -45,6 +45,26 @@ def note_callback_failure(
     )
 
 
+def store_error_of(error: BaseException) -> StoreError | TypeIdentityError | None:
+    """Return the store error a failure carries: itself, or the first inside its group.
+
+    Args:
+        error: A run's failure, possibly an exception group from a task group.
+
+    Returns:
+        The ``StoreError`` or ``TypeIdentityError`` that is ``error`` or is the first
+        one found inside it, or ``None`` when it carries none.
+    """
+    if isinstance(error, (StoreError, TypeIdentityError)):
+        return error
+    if isinstance(error, BaseExceptionGroup):
+        for inner in error.exceptions:
+            found = store_error_of(inner)
+            if found is not None:
+                return found
+    return None
+
+
 @contextmanager
 def keep_store_error(
     store_error: StoreError | TypeIdentityError | None, during: str

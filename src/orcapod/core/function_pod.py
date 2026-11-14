@@ -7,7 +7,7 @@ import logging
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
 from functools import update_wrapper, wraps
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
@@ -592,6 +592,7 @@ class _FunctionPodBase(TraceableBase):
         pipeline_config: PipelineConfig | None = None,
         *,
         observer: ExecutionObserverProtocol | None = None,
+        error_policy: Literal["continue", "fail_fast"] = "continue",
         run_id: str | None = None,
     ) -> None:
         """Streaming async execution with per-data concurrency control.
@@ -606,7 +607,17 @@ class _FunctionPodBase(TraceableBase):
             output: Writable channel for output (tag, data) pairs.
             pipeline_config: Optional pipeline-level concurrency config.
             observer: Optional observer for per-item lifecycle hooks.
+            error_policy: What a row whose function raised does, as for a node's
+                ``execute``: ``"continue"`` skips the row; ``"fail_fast"`` raises its
+                exception, which cancels the rows still in flight. Rows run
+                concurrently, so the row raised is the first to fail, which is the
+                first in input order only with one row at a time.
             run_id: Pipeline run identifier forwarded to per-row processing.
+
+        Raises:
+            Exception: Under ``"fail_fast"``, the exception of the first row whose
+                function raised, inside the ``ExceptionGroup`` of the pod's task group.
+            StoreError: A failed store read or write, whatever ``error_policy`` is.
         """
         from orcapod.pipeline.observer import NoOpObserver
 
@@ -647,6 +658,8 @@ class _FunctionPodBase(TraceableBase):
                         "Data processing failed, skipping: %s", exc, exc_info=True
                     )
                     obs.on_data_crash(pod_label, tag, data, exc)
+                    if error_policy == "fail_fast":
+                        raise
                 else:
                     obs.on_data_end(pod_label, tag, data, result_data, cached=False)
                     if result_data is not None:
