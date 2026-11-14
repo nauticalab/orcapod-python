@@ -649,6 +649,52 @@ at DEBUG and does not stop for `"fail_fast"` (ITL-879); this applies to these ro
 This is the contract for now. An opt-in mode that tolerates store failures may be added
 later.
 
+### Side effects in a job: delivered by a run, never by a read
+
+A `SideEffectPod` (or `side_effect_pod`, `sink_pod`, `tap_pod`) calls its function for every
+row for what the call does outside Orcapod (send an email, write a file) and passes the row
+on unchanged. In a job, side effects are delivered only by running: `job.run()`, or
+`run()` on the side-effect node. Reading the node never delivers (ITL-1091): `as_table()`,
+`iter_data()`, the dataframe methods, `flow()`, `head()`, the notebook preview, and a node
+downstream reading its input all return the rows the node's last run passed on, which the
+node holds in memory:
+
+```python
+from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
+
+sent = []
+
+def notify(ctx, weight: float, height: float) -> None:
+    sent.append(weight)  # stands for sending a message
+
+notify_job = PipelineJob(name="notify_demo", database=InMemoryArrowDatabase())
+with notify_job:
+    mice_source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
+    SideEffectPod(notify)(mice_source, label="notify")
+
+notify_job.run()
+node = notify_job.nodes["notify"]
+print(node.as_table().num_rows, len(list(node.iter_data())), len(sent))
+# 3 3 3
+node.run()  # delivers only what the invocation log does not record: nothing here
+print(len(sent))
+# 3
+```
+
+- With `track_completion=True` (the default), a run delivers only the rows whose delivery the
+  node's invocation log does not record. With `track_completion=False`, every run, a second
+  `job.run()` or `node.run()`, delivers every row again; reads still deliver nothing.
+- The rows a read returns are those the last run in this process passed on: under
+  `on_error="log"`, a row whose delivery failed is left out with `drop_on_failure=True`
+  (the default) and kept with `drop_on_failure=False`, as for the nodes downstream.
+- Before any run in this process (a new job over a store that already records deliveries),
+  after a run that raised, or once a node upstream has changed since the run, a read returns
+  no rows and `head()` says that `run()` delivers. Run the job to get the rows.
+- Outside a job, the stream a side-effect pod returns keeps nothing, so every consuming read
+  of it (`iter_data()`, `as_table()`, the dataframe methods, `flow()`, `run()`) delivers every
+  side effect again; its `head()` and notebook preview deliver nothing and show no rows. See
+  [Streams](streams.md#computing-a-stream-outside-a-job-run).
+
 ### Saving and loading a job
 
 `job.save(path)` writes the job to a JSON file: the graph, the store's location and how each

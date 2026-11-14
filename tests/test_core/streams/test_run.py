@@ -4,8 +4,10 @@ Developer decision, November 13, 2026: the notebook preview and ``head()`` never
 and there is one uniform way to compute any stream: ``run()``. It takes no arguments, does
 the work ``as_table()`` does (through the same path and cache) and returns a ``StreamView``
 of all the computed rows. Job nodes keep their own ``run()`` (it computes, where their
-``as_table()`` only reads) and return the view too. A side-effect stream keeps no rows: each
-``run()`` delivers again, as each ``as_table()`` does, and its ``head()`` stays rowless.
+``as_table()`` only reads) and return the view too. A side-effect stream outside a job keeps
+no rows: each ``run()`` delivers again, as each ``as_table()`` does, and its ``head()`` stays
+rowless. A job's side-effect node keeps the rows its run passed on, and its reads deliver
+nothing (ITL-1091).
 """
 
 from __future__ import annotations
@@ -471,14 +473,31 @@ def test_side_effect_stream_run_delivers_each_time_and_head_stays_rowless() -> N
     assert len(delivered) == 2 * ROWS
 
 
-@pytest.mark.parametrize("node_class", [SideEffectNode, SideEffectJobNode])
-def test_side_effect_nodes_run_delivers_as_as_table_does(node_class: type) -> None:
-    """A side-effect node's ``run()`` delivers standalone, as its ``as_table()`` does."""
+def test_side_effect_node_run_delivers_as_as_table_does() -> None:
+    """A side-effect node outside a job delivers on ``run()``, as on ``as_table()``."""
     delivered, deliver = _deliveries()
-    node = node_class(side_effect_pod=SideEffectPod(deliver), input_stream=_source())
+    node = SideEffectNode(
+        side_effect_pod=SideEffectPod(deliver), input_stream=_source()
+    )
     view = node.run()
     assert len(delivered) == ROWS
     assert len(view) == ROWS
+    _ = node.as_table()
+    assert len(delivered) == 2 * ROWS
+
+
+def test_side_effect_job_node_run_delivers_and_its_reads_do_not() -> None:
+    """A side-effect job node's ``run()`` delivers; its ``as_table()`` reads what it passed on (ITL-1091)."""
+    delivered, deliver = _deliveries()
+    node = SideEffectJobNode(
+        side_effect_pod=SideEffectPod(deliver), input_stream=_source()
+    )
+    view = node.run()
+    assert len(delivered) == ROWS
+    assert len(view) == ROWS
+    assert len(node.as_table()) == ROWS
+    assert node.head().status is ViewStatus.ROWS
+    assert len(delivered) == ROWS
 
 
 # ---------------------------------------------------------------------------

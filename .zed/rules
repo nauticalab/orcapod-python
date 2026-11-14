@@ -784,6 +784,16 @@ data. The rules:
 - FunctionNode Phase 1 returns ALL records in the shared pipeline_path DB table.
   Phase 2 skips inputs whose hash is already in the DB.
 - Empty data → ArrowTableSource raises ValueError("Table is empty").
+- A side-effect job node delivers only when it runs (developer, November 13, 2026, ITL-1091):
+  job.run(), node.run() (the job run's work for that node: with track_completion only
+  what the invocation log does not record, without it every row again), execute,
+  async_execute. Every read (iter_data, as_table, dataframes, flow, head, preview, a
+  downstream node's read) returns the rows its last run in this process passed on, held in
+  memory (SideEffectJobNode._held_rows), and delivers nothing; with none (no run, a run that
+  raised, or stale by is_stale) a read returns zero rows. Never route a job node's read to
+  the standalone delivery path. The standalone SideEffectPodStream still delivers on every
+  consuming read (iter_data, as_table, dataframes, flow, run); its head() and
+  preview deliver nothing.
 - DerivedSource over a job node before run() → presents zero rows with the origin's columns
   (no computed records; no error), in the plain form and with tags_as_data.
 - Join requires non-overlapping data columns; raises InputValidationError on collision.

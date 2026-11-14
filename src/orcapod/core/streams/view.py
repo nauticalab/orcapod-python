@@ -151,9 +151,9 @@ class StreamView:
     made with: for other column groups (system tags, source info, context, content
     hashes) ask the stream, ``stream.as_table(columns=...)`` or
     ``stream.head(columns=...)``. After ``run()`` they read the rows a stream kept (a
-    pod's or operator's output stream, a job node, an in-memory source); a stream that
-    keeps none does its ``as_table()`` work again (a side-effect stream delivers again, a
-    polling source polls again).
+    pod's or operator's output stream, a job node, a job's side-effect node included, an
+    in-memory source); a stream that keeps none does its ``as_table()`` work again (a
+    side-effect stream outside a job delivers again, a polling source polls again).
 
     Attributes:
         table: The rows, with the exact Arrow types the stream gives them. When the
