@@ -183,7 +183,7 @@ def test_pod_declaration_with_nested_list_input():
 
 
 @pytest.mark.xfail(
-    reason="list[T] / dict[K, list[T]] where T is a logical type not yet supported (PLT-1732)",
+    reason="list[T] / dict[K, list[T]] where T is a logical type not yet supported (ITL-1077)",
     raises=ValueError,
     strict=True,
 )
@@ -233,7 +233,7 @@ def test_pod_declaration_with_complex_output():
 
 
 @pytest.mark.xfail(
-    reason="list[T] / dict[K, list[T]] where T is a logical type not yet supported (PLT-1732)",
+    reason="list[T] / dict[K, list[T]] where T is a logical type not yet supported (ITL-1077)",
     raises=ValueError,
     strict=True,
 )

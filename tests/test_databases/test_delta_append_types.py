@@ -208,7 +208,7 @@ def all_types() -> list[Any]:
     merge_rejects = pytest.mark.xfail(
         raises=RuntimeError,
         strict=True,
-        reason="Delta's merge rejects this type, also on main (ITL-916)",
+        reason="deltalake rejects this type on append: its list item field is named 'element', not 'item' (ITL-1076)",
     )
     return [
         pytest.param(

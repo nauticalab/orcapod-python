@@ -133,7 +133,7 @@ class TestArrowTableSourceResolveField:
     """
 
     NOT_IMPLEMENTED = pytest.mark.xfail(
-        reason="resolve_field not yet re-implemented after source refactor",
+        reason="resolve_field not yet re-implemented after source refactor (ITL-1078)",
         raises=NotImplementedError,
         strict=True,
     )

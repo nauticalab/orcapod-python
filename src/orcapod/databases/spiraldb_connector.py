@@ -389,7 +389,7 @@ class SpiralDBConnector:
         project_id: SpiralDB project identifier (e.g. ``"my-project-123456"``).
         dataset: Dataset within the project. Defaults to ``"default"``.
         overrides: Optional pyspiral client config overrides, e.g.
-            ``{"server.url": "http://api.spiraldb.dev"}`` for the dev
+            ``{"server.url": "https://api.spiraldb.dev"}`` for the dev
             environment. See the pyspiral config docs for full options.
     """
 

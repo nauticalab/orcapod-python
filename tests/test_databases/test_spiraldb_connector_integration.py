@@ -16,7 +16,7 @@ integration tests.
 Project and server URL are configurable via env vars:
 
 - ``SPIRAL_PROJECT_ID`` (default: ``test-orcapod-362211``)
-- ``SPIRAL_SERVER_URL`` (default: ``http://api.spiraldb.dev``)
+- ``SPIRAL_SERVER_URL`` (default: ``https://api.spiraldb.dev``)
 
 Version compatibility note (PLT-1773)
 -------------------------------------
@@ -48,7 +48,7 @@ from orcapod.types import ColumnInfo
 INTEGRATION = os.environ.get("SPIRAL_INTEGRATION_TESTS") == "1"
 DEV_PROJECT = os.environ.get("SPIRAL_PROJECT_ID", "test-orcapod-362211")
 DEV_OVERRIDES = {
-    "server.url": os.environ.get("SPIRAL_SERVER_URL", "http://api.spiraldb.dev")
+    "server.url": os.environ.get("SPIRAL_SERVER_URL", "https://api.spiraldb.dev")
 }
 
 pytestmark = pytest.mark.skipif(

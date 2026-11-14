@@ -89,6 +89,8 @@ def minio_server():
                     "bucket": bucket,
                 }
         except Exception as exc:
+            # ITL-1079: in CI this skips every S3 test (the image cannot be pulled, and
+            # `minio.get_url()` above does not exist); see the inventory spec, section 3.3.
             pytest.skip(f"MinIO container could not be started: {exc}")
 
 
