@@ -44,11 +44,6 @@ class RootSource(StreamBase):
         ``__init__``.  File-backed sources (DeltaTableSource, CSVSource) default
         to the file path; ``ArrowTableSource`` defaults to the table's data hash.
 
-    Field resolution:
-        All sources expose ``resolve_field(record_id, field_name)``.  The default
-        implementation raises ``NotImplementedError``; concrete subclasses
-        that back addressable data should override it.
-
     Concrete subclasses must set ``self._stream`` in their ``__init__`` to get
     the default stream delegation behavior. They may also override
     ``identity_structure()``.
@@ -88,24 +83,6 @@ class RootSource(StreamBase):
     def identity_structure(self) -> Any:
         """Default identity based on class name, output schema, and source_id."""
         return (self.__class__.__name__, self.output_schema(), self.source_id)
-
-    # -------------------------------------------------------------------------
-    # Field resolution
-    # -------------------------------------------------------------------------
-
-    def resolve_field(self, record_id: str, field_name: str) -> Any:
-        """Resolve a field value for a record.
-
-        Not implemented by default. Subclasses that back addressable data
-        should override this method.
-
-        Raises:
-            NotImplementedError: Always, by default.
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not implement resolve_field. "
-            f"Cannot resolve field {field_name!r} for record {record_id!r}."
-        )
 
     # -------------------------------------------------------------------------
     # PipelineElementProtocol — schema-only identity (base case of Merkle chain)

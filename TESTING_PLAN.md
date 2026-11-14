@@ -225,8 +225,6 @@ test-objective/
 - `test_arrow_source_source_id_set` — source_id property populated
 - `test_arrow_source_producer_is_none` — root sources have no producer
 - `test_arrow_source_upstreams_empty` — root sources have no upstreams
-- `test_arrow_source_resolve_field_by_record_id` — resolves field value
-- `test_arrow_source_resolve_field_missing_raises` — FieldNotResolvableError
 - `test_arrow_source_pipeline_identity_structure` — returns (tag_schema, data_schema)
 - `test_arrow_source_iter_data_yields_correct_pairs`
 - `test_arrow_source_as_table_has_all_columns`

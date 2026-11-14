@@ -230,10 +230,6 @@ class SourceProxy(RootSource):
             note="source not available; bind a live source",
         )
 
-    def resolve_field(self, record_id: str, field_name: str) -> Any:
-        """Delegate to bound source, or raise."""
-        return self._require_delegate().resolve_field(record_id, field_name)
-
     # -------------------------------------------------------------------------
     # Serialization
     # -------------------------------------------------------------------------

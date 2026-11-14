@@ -300,32 +300,6 @@ class TestCachedSourceCumulative:
 # ---------------------------------------------------------------------------
 
 
-class TestCachedSourceFieldResolution:
-    def test_resolve_field_delegates_raises_not_implemented(self, simple_source, db):
-        """CachedSource delegates to wrapped source which raises NotImplementedError."""
-        ps = CachedSource(simple_source, cache_database=db)
-        with pytest.raises(NotImplementedError):
-            ps.resolve_field("row_0", "age")
-
-    def test_resolve_field_with_record_id_column_raises(self, db):
-        table = pa.table(
-            {
-                "user_id": pa.array(["u1", "u2"], type=pa.large_string()),
-                "score": pa.array([100, 200], type=pa.int64()),
-            }
-        )
-        source = ArrowTableSource(
-            table,
-            tag_columns=["user_id"],
-            record_id_column="user_id",
-            source_id="test",
-            infer_nullable=True,
-        )
-        ps = CachedSource(source, cache_database=db)
-        with pytest.raises(NotImplementedError):
-            ps.resolve_field("user_id=u1", "score")
-
-
 # ---------------------------------------------------------------------------
 # Integration with downstream operators
 # ---------------------------------------------------------------------------

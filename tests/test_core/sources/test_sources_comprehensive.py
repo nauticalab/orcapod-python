@@ -4,11 +4,11 @@ behaviours not already exercised in test_sources.py or
 test_source_protocol_conformance.py.
 
 Coverage added here:
-- CSVSource: construction, source_id defaulting, record_id_column, resolve_field,
+- CSVSource: construction, source_id defaulting, record_id_column,
   file-not-found, protocol conformance
-- DeltaTableSource: construction, source_id defaulting, resolve_field, bad path
+- DeltaTableSource: construction, source_id defaulting, bad path
   error, protocol conformance
-- DataFrameSource: string tag_columns, resolve_field raises, system-column
+- DataFrameSource: string tag_columns, system-column
   stripping from Polars input, source_id parameter
 - DictSource: data_schema parameter, empty-data raises, source_id, content
   hash with explicit schema
@@ -108,12 +108,6 @@ class TestCSVSource:
         src = CSVSource(file_path=csv_path, source_id="my_csv_name")
         assert src.source_id == "my_csv_name"
 
-    def test_resolve_field_raises_not_implemented(self, csv_path):
-        """CSVSource delegates to ArrowTableSource which no longer implements resolve_field."""
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        with pytest.raises(NotImplementedError):
-            src.resolve_field("row_0", "score")
-
     def test_file_not_found_raises(self, tmp_path):
         with pytest.raises(Exception):
             CSVSource(file_path=str(tmp_path / "no_such_file.csv"))
@@ -199,12 +193,6 @@ class TestDeltaTableSource:
         src = DeltaTableSource(delta_table_path=delta_path, source_id="my_delta")
         assert src.source_id == "my_delta"
 
-    def test_resolve_field_raises_not_implemented(self, delta_path):
-        """DeltaTableSource delegates to ArrowTableSource which no longer implements resolve_field."""
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        with pytest.raises(NotImplementedError):
-            src.resolve_field("row_0", "id")
-
     def test_bad_path_raises_value_error(self, tmp_path):
         with pytest.raises(ValueError, match="Delta table not found"):
             DeltaTableSource(delta_table_path=tmp_path / "no_delta_here")
@@ -288,13 +276,6 @@ class TestDataFrameSourceAdditional:
         assert "id" in tag_keys
         assert "value" in data_keys
 
-    def test_resolve_field_raises_not_implemented(self):
-        """DataFrameSource does not override resolve_field; must raise."""
-        df = pl.DataFrame({"id": [1, 2], "value": ["x", "y"]})
-        src = DataFrameSource(data=df, tag_columns="id")
-        with pytest.raises(NotImplementedError):
-            src.resolve_field("row_0", "value")
-
     def test_system_columns_stripped_from_polars_input(self):
         """Polars DataFrames with system-prefix columns have those columns dropped."""
         df = pl.DataFrame(
@@ -373,12 +354,6 @@ class TestDictSourceAdditional:
         data = [{"id": 1, "val": "x"}]
         src = DictSource(data=data, tag_columns=["id"], source_id="my_dict")
         assert src.source_id == "my_dict"
-
-    def test_resolve_field_error_mentions_class_name(self):
-        data = [{"id": 1, "val": "a"}]
-        src = DictSource(data=data, tag_columns=["id"], source_id="named_dict")
-        with pytest.raises(NotImplementedError, match="DictSource"):
-            src.resolve_field("row_0", "val")
 
 
 # ---------------------------------------------------------------------------
@@ -534,13 +509,6 @@ class TestArrowTableSourceAdditional:
         token = t.column(source_cols[0])[0].as_py()
         assert token.startswith("my_source::")
 
-    def test_resolve_field_raises_not_implemented(self):
-        """ArrowTableSource no longer implements resolve_field."""
-        table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        src = ArrowTableSource(table=table, infer_nullable=True)
-        with pytest.raises(NotImplementedError):
-            src.resolve_field("row_0", "x")
-
     def test_system_tag_columns_forwarded_to_stream(self):
         """system_tag_columns passed at construction are preserved."""
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
@@ -564,13 +532,6 @@ class TestArrowTableSourceAdditional:
             c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
             for c in enriched.column_names
         )
-
-    def test_resolve_field_on_empty_record_id_prefix_raises(self):
-        """An empty string record_id raises NotImplementedError."""
-        table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table, infer_nullable=True)
-        with pytest.raises(NotImplementedError):
-            src.resolve_field("", "x")
 
     def test_tag_columns_not_present_in_table_raises(self):
         """tag_columns that don't exist in the table raise ValueError."""

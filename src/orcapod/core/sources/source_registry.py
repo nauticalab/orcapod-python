@@ -17,8 +17,8 @@ class SourceRegistry:
     A source ID is a stable, human-readable name (e.g. ``"delta_table:sales"``)
     that is independent of physical location.  The registry lets downstream
     code resolve a ``source_id`` token embedded in a provenance string back to
-    the concrete source object that produced it, enabling ``resolve_field``
-    calls without requiring a direct reference to the source object.
+    the concrete source object that produced it, without requiring a direct
+    reference to the source object.
 
     Registration behaviour
     ----------------------

@@ -177,12 +177,6 @@ class TestArrowTableSourceUsesBuilder:
         identity = src.identity_structure()
         assert identity[0] == "ArrowTableSource"
 
-    def test_resolve_field_raises_not_implemented(self):
-        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
-        src = ArrowTableSource(table=table, tag_columns=["id"])
-        with pytest.raises(NotImplementedError):
-            src.resolve_field("row_0", "x")
-
 
 class TestProvenanceTokensMatchRowValues:
     """Provenance tokens are built from one column, never the whole table (ITL-926 C3b).

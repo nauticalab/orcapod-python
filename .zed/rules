@@ -415,7 +415,7 @@ against `static_process(...).output_schema(...)`; see "Important implementation 
 src/orcapod/
   types.py                    — Schema, ColumnConfig, ContentHash
   system_constants.py         — Column prefixes and separators
-  errors.py                   — InputValidationError, DuplicateTagError, FieldNotResolvableError
+  errors.py                   — InputValidationError, DuplicateTagError
   config.py                   — Config dataclass
   contexts/                   — DataContext (semantic_hasher, arrow_hasher, type_converter)
   protocols/

@@ -118,7 +118,7 @@ class TestProtocolConformance:
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_is_source_protocol(self, src_fixture, request):
-        """Every source must satisfy SourceProtocol (source_id + resolve_field)."""
+        """Every source must satisfy SourceProtocol (source_id, to_config, from_config)."""
         src = request.getfixturevalue(src_fixture)
         assert isinstance(src, SourceProtocol), (
             f"{type(src).__name__} does not satisfy SourceProtocol"
