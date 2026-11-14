@@ -594,15 +594,22 @@ class SourceJobNode(SourceNodeBase):
     def run(self, *, load_only: bool = False) -> StreamView:
         """Read the bound source's rows and return a ``StreamView`` of all of them.
 
-        A source is read, never computed, so ``load_only`` changes nothing; a job
-        node's ``run()`` takes it (ITL-1095).
+        A source is read, never computed, so ``load_only`` changes nothing, except that
+        a load-only run refuses a bound stream that computes or delivers when read
+        (ITL-1121); a job node's ``run()`` takes it (ITL-1095).
 
         Args:
             load_only: Accepted for every job node; a source reads its rows either way.
 
         Raises:
             UnboundSourceError: When no concrete source is bound.
+            ValueError: If ``load_only`` and the bound stream computes or delivers
+                when read (``node_run.refuse_unloadable_inputs``).
         """
+        if load_only:
+            from orcapod.pipeline.node_run import refuse_unloadable_inputs
+
+            refuse_unloadable_inputs(self)
         return super().run()
 
     @property

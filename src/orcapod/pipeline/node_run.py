@@ -14,7 +14,7 @@ the commit ``job.run()`` makes.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -46,6 +46,84 @@ def depends_on_job_nodes(node: Any) -> bool:
     nothing to run first: its ``run()`` reads its input as it always has.
     """
     return any(_is_job_node(upstream) for upstream in node.upstreams)
+
+
+def _streams_read_by(node: Any) -> Iterator[Any]:
+    """Yield the streams outside a job that a run of ``node`` reads.
+
+    The node's inputs, the stream bound to a source slot among them, and, through every
+    stream outside a job, that stream's own inputs. A job node other than a source slot
+    is not entered: the run reads the rows the node holds (none if it has not run in
+    this process). Nor is an ``ArrowTableStream``: reading it reads only the table it
+    holds, whatever its ``upstreams`` name (ITL-1121).
+
+    Args:
+        node: A job node; for a source slot, its bound stream is what it reads.
+    """
+    from orcapod.core.nodes.source_node import SourceJobNode
+    from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+    pending: list[Any] = (
+        [node.bound_source] if isinstance(node, SourceJobNode) else list(node.upstreams)
+    )
+    seen: list[Any] = []
+    while pending:
+        stream = pending.pop()
+        if stream is None or any(stream is other for other in seen):
+            continue
+        seen.append(stream)
+        if isinstance(stream, SourceJobNode):
+            pending.append(stream.bound_source)
+            continue
+        if _is_job_node(stream):
+            continue
+        yield stream
+        if not isinstance(stream, ArrowTableStream):
+            pending.extend(getattr(stream, "upstreams", ()))
+
+
+def refuse_unloadable_inputs(node: Any) -> None:
+    """Refuse a load-only run of ``node`` that would read an input which computes or
+    delivers when it is read.
+
+    A load-only run computes, delivers and writes nothing (ITL-1095), so it reads only
+    job nodes, sources and streams that neither compute nor deliver (developer,
+    November 14, 2026: "Refuse is consistent"; ITL-1121). Outside a job, a function
+    pod's stream (``FunctionPodStream``, a cached pod's included) computes its rows when
+    read, and a side-effect pod's stream (``SideEffectPodStream``) or node
+    (``SideEffectNode``, the blueprint a ``Pipeline`` records) delivers its side
+    effects. Such a stream is refused before anything is read, whether it is an input of
+    ``node``, bound to a source slot, or read through another stream outside a job (an
+    operator's stream over it).
+
+    Args:
+        node: A job node a load-only run would run or read.
+
+    Raises:
+        ValueError: If a run of ``node`` would read such a stream.
+    """
+    from orcapod.core.function_pod import FunctionPodStream
+    from orcapod.side_effects import SideEffectNode, SideEffectPodStream
+
+    for upstream in _streams_read_by(node):
+        # A SideEffectJobNode is a job node: _streams_read_by never yields one.
+        if isinstance(upstream, (SideEffectPodStream, SideEffectNode)):
+            what = (
+                "a side-effect pod's stream outside a job, which delivers its side "
+                "effects when it is read, and a load-only run delivers nothing"
+            )
+        elif isinstance(upstream, FunctionPodStream):
+            what = (
+                "a function pod's stream outside a job, which computes when it is "
+                "read, and a load-only run computes nothing"
+            )
+        else:
+            continue
+        raise ValueError(
+            f"A load-only run cannot run node {node.label!r}: its input "
+            f"{upstream.label!r} is {what}. Build the pod inside the job, or run "
+            "without load_only."
+        )
 
 
 def _stores(nodes: list[Any]) -> list[ArrowDatabaseProtocol]:
@@ -114,7 +192,8 @@ def plan_run(graph: Any, *, load_only: bool, outside: Sequence[Any] = ()) -> Run
     is read only when a node that runs reads it; a stream outside the job
     (``outside``) is read for the nodes it feeds; every other node runs. The same plan
     serves ``job.run()`` (its whole graph) and ``node.run()`` (the node and what it
-    depends on).
+    depends on). A load-only plan refuses, before reading anything, a node to run whose
+    input computes or delivers when read (``refuse_unloadable_inputs``).
 
     Args:
         graph: The run's node graph (``topological_sort``, ``predecessors``).
@@ -124,6 +203,9 @@ def plan_run(graph: Any, *, load_only: bool, outside: Sequence[Any] = ()) -> Run
 
     Returns:
         The plan.
+
+    Raises:
+        ValueError: As ``refuse_unloadable_inputs``, for a load-only run.
     """
     from orcapod.core.nodes.source_node import SourceJobNode
     from orcapod.core.nodes.staleness import RunHoldingNode
@@ -154,6 +236,11 @@ def plan_run(graph: Any, *, load_only: bool, outside: Sequence[Any] = ()) -> Run
         and not is_outside(node)
         and not any(node is c for c in current)
     ]
+    if load_only:
+        # Refused before any stream is read below: a load-only run cannot read an
+        # input that computes or delivers (ITL-1121).
+        for node in to_run:
+            refuse_unloadable_inputs(node)
     included: list[Any] = []
     for node in order:
         feeds_a_run = any(
@@ -222,6 +309,8 @@ def run_with_dependencies(target: Any, *, load_only: bool) -> RunSummary:
 
     Raises:
         StoreWriteError: If committing the run's writes failed.
+        ValueError: For a load-only run, if a node it would run reads an input that
+            computes or delivers when read (``refuse_unloadable_inputs``); nothing has run then.
     """
     from orcapod.core.nodes.source_node import SourceJobNode
     from orcapod.pipeline.dag import OrcaDAG
@@ -270,4 +359,5 @@ def run_with_dependencies(target: Any, *, load_only: bool) -> RunSummary:
         run_node_summaries(graph, counter, held=plan.held_counts),
         load_only=load_only,
         target=target.label,
+        ran_nothing=not plan.to_run,
     )

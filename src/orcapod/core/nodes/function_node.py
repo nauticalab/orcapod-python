@@ -302,7 +302,11 @@ def run_job_node(
             ``RunSummary`` or ``None``.
         caller: The frame of the ``run()`` caller.
     """
-    from orcapod.pipeline.node_run import depends_on_job_nodes, run_with_dependencies
+    from orcapod.pipeline.node_run import (
+        depends_on_job_nodes,
+        refuse_unloadable_inputs,
+        run_with_dependencies,
+    )
     from orcapod.pipeline.run_summary import warn_row_failures
 
     if node.holds_current_run(load_only=load_only):
@@ -310,6 +314,8 @@ def run_job_node(
     if depends_on_job_nodes(node):
         summary = run_with_dependencies(node, load_only=load_only)
     else:
+        if load_only:
+            refuse_unloadable_inputs(node)
         summary = run_alone()
     if summary is None:
         return
@@ -1767,8 +1773,9 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
                 if entry[1] is not None:
                     output.append((entry[0], entry[1]))
             self._set_run_rows(loaded_ids, load_only=True, not_stored=not_stored)
-            ctx_obs.on_node_end(node_label, node_hash)
+            # Current before the observer hears the end, so a read there sees the rows.
             self._update_modified_time()
+            ctx_obs.on_node_end(node_label, node_hash)
         except BaseException:
             # A run that raised (an observer at the node's end included) defines no rows.
             self.clear_cache()
@@ -1822,8 +1829,9 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
                 if entry[1] is not None:
                     await output.send((entry[0], entry[1]))
             self._set_run_rows(loaded_ids, load_only=True, not_stored=not_stored)
-            ctx_obs.on_node_end(node_label, node_hash)
+            # Current before the observer hears the end, so a read there sees the rows.
             self._update_modified_time()
+            ctx_obs.on_node_end(node_label, node_hash)
         except BaseException:
             # A run that raised or was cancelled defines no rows.
             self.clear_cache()
@@ -2345,6 +2353,10 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
             )
             # The node's rows are those of this run's inputs, whatever else it caches.
             self._set_run_rows(emitted_entry_ids, failed=failed_rows)
+            # Mark this node as freshly computed before the observer hears the end, so
+            # a read there (and every later one) serves this run's rows instead of
+            # finding the node stale and clearing them (ITL-1121).
+            self._update_modified_time()
             ctx_obs.on_node_end(node_label, node_hash)
         except Exception as run_error:
             self._commit_after_failure(run_error)
@@ -2355,9 +2367,6 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
             self.clear_cache()
             raise
 
-        # Mark this node as freshly computed so subsequent iter_data() calls
-        # skip the is_stale check and serve results directly from the in-memory cache.
-        self._update_modified_time()
         return output
 
     def _process_data_internal(
@@ -4036,13 +4045,14 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
                     run_id=run_id,
                 )
 
+            # The run is complete: stamp the node as the sync execute() does, before
+            # the observer hears the end (a read there sees the rows, ITL-1121) and
+            # before the finally closes the output, so every downstream node, which
+            # stamps after it has seen that close, is newer than this one (ITL-1042).
+            self._update_modified_time()
             # Ended for the observer here, also when the call raises: not again below.
             node_open = False
             ctx_obs.on_node_end(node_label, node_hash)
-            # The run is complete: stamp the node as the sync execute() does, before
-            # the finally closes the output, so every downstream node, which stamps
-            # after it has seen that close, is newer than this one (ITL-1042).
-            self._update_modified_time()
         except asyncio.CancelledError as cancelled:
             # Another node's failure cancelled this one: commit what it wrote, as a
             # failing node does. The job's flush commits neither a node's ephemeral

@@ -577,6 +577,14 @@ incomplete: a group formed after it may lack members, and the result stored for 
 group by an earlier run may then be loaded for it. `run_async(load_only=True)` does the same
 on the asynchronous orchestrator.
 
+A load-only run reads only job nodes, sources and streams that neither compute nor deliver.
+A pod's stream built outside the job (a function pod's, which computes when it is read, or a
+side-effect pod's, which delivers) is refused with a `ValueError` before anything is read,
+whether a node of the job reads it, a source slot is bound to it or an operator's stream
+outside the job reads it. Build the pod inside the job, so its node loads its stored results,
+or run without `load_only`. (Refusing is the consistent choice for now; ITL-1130 re-evaluates
+it.)
+
 ### Running again: what a run runs
 
 `job.run()`, `await job.run_async()` and `job.nodes[label].run()` decide what to run from
@@ -832,14 +840,16 @@ notify_job.run()
 node = notify_job.nodes["notify"]
 print(node.as_table().num_rows, len(list(node.iter_data())), len(sent))
 # 3 3 3
-node.run()  # delivers only what the invocation log does not record: nothing here
+node.run()  # holds a current run: runs nothing and delivers nothing
 print(len(sent))
 # 3
 ```
 
 - With `track_completion=True` (the default), a run delivers only the rows whose delivery the
-  node's invocation log does not record. With `track_completion=False`, every run, a second
-  `job.run()` or `node.run()`, delivers every row again; reads still deliver nothing.
+  node's invocation log does not record. With `track_completion=False`, a run delivers every
+  row. A node that holds a current run is not run again, so a second `job.run()` or
+  `node.run()` delivers nothing; call `clear_cache()` on the node first to deliver again.
+  Reads never deliver.
 - The rows a read returns are those the last run in this process passed on: under
   `on_error="log"`, a row whose delivery failed is left out with `drop_on_failure=True`
   (the default) and kept with `drop_on_failure=False`, as for the nodes downstream.

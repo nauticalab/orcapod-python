@@ -843,7 +843,7 @@ data. The rules:
   non-stale run (for a full run: not load-only, nor anything above it) runs nothing;
   otherwise its non-current dependencies run first, each once, on the sync orchestrator
   (pipeline/node_run.py), and the run commits as job.run() does. A failed end-of-run
-  commit clears every node of the run. A load-only run's rows have status
+  commit clears only the nodes that ran; nodes it held keep their earlier run. A load-only run's rows have status
   loaded_only. Only job nodes' run() takes an argument (load_only).
   A loaded job (PipelineJob.load) runs only with load_only=True.
   job.run()/run_async() use the same state rule and plan (node_run.plan_run): a current node is

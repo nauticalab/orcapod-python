@@ -1349,6 +1349,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             "/".join(self._name),
             run_node_summaries(prepared.exec_dag, counter, held=plan.held_counts),
             load_only=load_only,
+            ran_nothing=not plan.to_run,
         )
         return self._last_run
 

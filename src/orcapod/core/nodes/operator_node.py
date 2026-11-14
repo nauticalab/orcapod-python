@@ -1617,6 +1617,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         """
         from orcapod.pipeline.node_run import (
             depends_on_job_nodes,
+            refuse_unloadable_inputs,
             run_with_dependencies,
         )
         from orcapod.pipeline.run_summary import warn_row_failures
@@ -1633,6 +1634,8 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             return self._run_view(computed=False)
         if self._loaded:
             raise self._cannot_compute_error()
+        if load_only:
+            refuse_unloadable_inputs(self)
         if self.is_stale or not self._holds_run(load_only=load_only):
             # Stale, or a load-only run's output asked for by a full run: run again.
             self.clear_cache()
@@ -1655,8 +1658,14 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
                     self._run_load_only = load_only
                 else:
                     self._cached_output_stream = self._compute_output()
+                    # As in the branches with a database (ITL-1121).
+                    self._run_load_only = load_only
                     self._update_modified_time()
                     computed = True
+                if computed:
+                    # Building the view is part of the run: a failure there clears the
+                    # node (ITL-1121).
+                    return self._run_view(computed=True)
             except BaseException:
                 # A run that raised defines no rows.
                 self.clear_cache()

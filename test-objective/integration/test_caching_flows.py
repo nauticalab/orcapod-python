@@ -23,7 +23,11 @@ from orcapod.types import CacheMode
 # ---------------------------------------------------------------------------
 
 
+_DOUBLE_CALLS: list[int] = []
+
+
 def _double(x: int) -> int:
+    _DOUBLE_CALLS.append(x)
     return x * 2
 
 
@@ -86,9 +90,11 @@ class TestFunctionNodeCaching:
             result_database=result_db,
         )
         # A node shows rows only after a run (ITL-1095); this run reads them all.
+        _DOUBLE_CALLS.clear()
         node2.run()
         data = list(node2.iter_data())
         assert len(data) == 3
+        assert _DOUBLE_CALLS == []  # every result came from the store
 
 
 class TestDerivedSourceReingestion:
