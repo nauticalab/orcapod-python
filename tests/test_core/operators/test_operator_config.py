@@ -2,6 +2,7 @@
 
 from orcapod.core.operators import (
     Batch,
+    DropColumns,
     DropDataColumns,
     DropNulls,
     DropTagColumns,
@@ -10,6 +11,7 @@ from orcapod.core.operators import (
     MapTags,
     MergeJoin,
     PolarsFilter,
+    SelectColumns,
     SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
@@ -92,6 +94,21 @@ class TestSelectTagColumnsConfig:
         config = op.to_config()
         restored = SelectTagColumns.from_config(config)
         assert isinstance(restored, SelectTagColumns)
+
+
+class TestTagAndDataColumnsConfig:
+    """``DropColumns`` and ``SelectColumns`` (ITL-1084) round-trip like the four."""
+
+    def test_round_trip(self):
+        for op_cls in (DropColumns, SelectColumns):
+            op = op_cls(columns=["b", "a", "a"], strict=False)
+            config = op.to_config()
+            assert config["class_name"] == op_cls.__name__
+            assert config["module_path"] == "orcapod.core.operators.column_selection"
+            assert config["config"] == {"columns": ["a", "b"], "strict": False}
+            restored = op_cls.from_config(config)
+            assert isinstance(restored, op_cls)
+            assert restored.identity_structure() == op.identity_structure()
 
 
 class TestDropTagColumnsConfig:

@@ -20,6 +20,10 @@ Operators perform structural transformations on streams without inspecting or sy
 
 ::: orcapod.core.operators.DropDataColumns
 
+::: orcapod.core.operators.DropColumns
+
+::: orcapod.core.operators.SelectColumns
+
 ::: orcapod.core.operators.MapTags
 
 ::: orcapod.core.operators.MapData

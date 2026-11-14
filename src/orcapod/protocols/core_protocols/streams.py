@@ -405,6 +405,32 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         """
         ...
 
+    def drop_columns(
+        self,
+        *columns: str | Collection[str],
+        strict: bool = True,
+        label: str | None = None,
+    ) -> "StreamProtocol":
+        """Drop the named columns, whether each is a tag or a data column.
+
+        Names are given as one or more strings, or as one collection of strings
+        as the only positional argument.
+        """
+        ...
+
+    def select_columns(
+        self,
+        *columns: str | Collection[str],
+        strict: bool = True,
+        label: str | None = None,
+    ) -> "StreamProtocol":
+        """Keep exactly the named columns, tag or data; drop every other one.
+
+        Names are given as one or more strings, or as one collection of strings
+        as the only positional argument.
+        """
+        ...
+
     def batch(
         self,
         batch_size: int = 0,

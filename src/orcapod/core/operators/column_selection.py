@@ -1,6 +1,7 @@
 import logging
+from abc import ABC, abstractmethod
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
@@ -538,6 +539,269 @@ class DropDataColumns(UnaryOperator):
             list(self.columns),
             self.strict,
         )
+
+
+def _require_a_data_column(remaining_data_columns: Collection[str]) -> None:
+    """Raise unless at least one data column remains.
+
+    A stream needs at least one data column (``ArrowTableStream`` refuses a table
+    without one), so a column operator whose result would have none is refused
+    when it is called, before any row is built.
+
+    Args:
+        remaining_data_columns: The data columns the result would keep.
+
+    Raises:
+        InputValidationError: When ``remaining_data_columns`` is empty.
+    """
+    if not remaining_data_columns:
+        raise InputValidationError(
+            "no data column would remain: a stream needs at least one data column"
+        )
+
+
+def _is_meta(name: str) -> bool:
+    """Whether ``name`` is a meta column or a raw stream's source-info column for one."""
+    return name.startswith(
+        (constants.META_PREFIX, f"{constants.SOURCE_PREFIX}{constants.META_PREFIX}")
+    )
+
+
+class _TagAndDataColumnsOperator(UnaryOperator, ABC):
+    """Base of the operators that act on named columns, tag or data alike (ITL-1084).
+
+    A subclass says only which of a group's columns it removes (``_removed``);
+    everything else is shared. ``DropColumns`` of one group's names gives the rows
+    of ``DropTagColumns`` or ``DropDataColumns``; ``SelectColumns`` gives those of
+    ``SelectTagColumns`` or ``SelectDataColumns`` when its names also include every
+    column of the other group. System tags pass through, the source-info column of
+    a removed data column goes with it, and the stream's column order is kept.
+    Unlike those operators, no data meta (``__``) column of the input is carried,
+    on either path, as ``Join`` does; and a result without a data column is refused
+    when the operator is called, on both paths.
+    """
+
+    _verb: ClassVar[str] = ""
+
+    def __init__(self, columns: str | Collection[str], strict: bool = True, **kwargs):
+        self.columns: tuple[str, ...] = _canonical_columns(columns)
+        self.strict: bool = strict
+        super().__init__(**kwargs)
+
+    @abstractmethod
+    def _removed(self, columns: Collection[str]) -> list[str]:
+        """Return the names among ``columns`` (one group, in order) this operator removes."""
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``columns`` and ``strict``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "columns": list(self.columns),
+            "strict": self.strict,
+        }
+        return config
+
+    def identity_structure(self) -> Any:
+        return (
+            self.__class__.__name__,
+            list(self.columns),
+            self.strict,
+        )
+
+    def _removals(
+        self, tag_columns: Collection[str], data_columns: Collection[str]
+    ) -> tuple[list[str], list[str]]:
+        """Return the tag columns and the user data columns this operator removes.
+
+        Args:
+            tag_columns: The input's tag columns, in order.
+            data_columns: The input's user data columns, in order (no meta column).
+        """
+        return self._removed(tag_columns), self._removed(data_columns)
+
+    def _validate_columns(
+        self, tag_columns: Collection[str], data_columns: Collection[str]
+    ) -> None:
+        """Check the names against the input's columns and the result's data columns.
+
+        Args:
+            tag_columns: The input's tag columns.
+            data_columns: The input's user data columns (no meta column).
+
+        Raises:
+            InputValidationError: When ``strict`` and a name is neither a tag nor a
+                data column, or when the result would have no data column.
+        """
+        missing = set(self.columns) - set(tag_columns) - set(data_columns)
+        if missing and self.strict:
+            raise InputValidationError(
+                f"Missing columns: {sorted(missing)}. Make sure all specified columns "
+                f"to {self._verb} are tag or data columns of the stream, or use "
+                f"strict=False to ignore missing columns"
+            )
+        _, data_removed = self._removals(tag_columns, data_columns)
+        try:
+            _require_a_data_column([c for c in data_columns if c not in data_removed])
+        except InputValidationError as error:
+            raise InputValidationError(
+                f"{self.__class__.__name__}({list(self.columns)}) would leave no data "
+                f"column: {error} (it removes data columns {data_removed})"
+            ) from error
+
+    @staticmethod
+    def _user_columns(stream: StreamProtocol) -> tuple[tuple[str, ...], list[str]]:
+        """The stream's tag columns and its data columns without meta columns.
+
+        A raw ``ArrowTableStream`` lists its meta (``__``) columns as data columns.
+        """
+        tag_columns, data_columns = stream.keys()
+        return tag_columns, [c for c in data_columns if not _is_meta(c)]
+
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
+        """Validate the names against the input stream.
+
+        Raises:
+            InputValidationError: When ``strict`` and a name is neither a tag nor a
+                data column, or when the result would have no data column.
+        """
+        self._validate_columns(*self._user_columns(stream))
+
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
+        tag_columns, data_columns = self._user_columns(stream)
+        tags_removed, data_removed = self._removals(tag_columns, data_columns)
+        table = stream.as_table(
+            columns={"source": True, "system_tags": True, "sort_by_tags": False}
+        )
+        removed = {
+            *tags_removed,
+            *data_removed,
+            *(f"{constants.SOURCE_PREFIX}{c}" for c in data_removed),
+        }
+        return ArrowTableStream(
+            table.drop_columns(
+                [
+                    c
+                    for c in table.column_names
+                    # Only data meta goes; a tag column is never stripped as meta.
+                    if c in removed or (_is_meta(c) and c not in tag_columns)
+                ]
+            ),
+            tag_columns=[c for c in tag_columns if c not in tags_removed],
+            data_context=stream.data_context_key,
+        )
+
+    def unary_output_schema(
+        self,
+        stream: StreamProtocol,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        tag_schema, data_schema = stream.output_schema(
+            columns=columns, all_info=all_info
+        )
+        tags_removed, data_removed = self._removals(*self._user_columns(stream))
+        # System tag columns are not among the removed names, so they are kept.
+        return (
+            Schema({k: v for k, v in tag_schema.items() if k not in tags_removed}),
+            Schema(
+                {
+                    k: v
+                    for k, v in data_schema.items()
+                    if k not in data_removed and not _is_meta(k)
+                }
+            ),
+        )
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash],
+    ) -> None:
+        """Streaming: remove the columns per row without materializing.
+
+        The names are validated against the first row, as ``validate_unary_input``
+        validates them against the stream.
+
+        Args:
+            inputs: The one readable input channel.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Not used: this operator keeps system-tag
+                names as they are, so no column is named after an input's
+                pipeline hash.
+        """
+        try:
+            removals: tuple[list[str], list[str]] | None = None
+            async for tag, data in inputs[0]:
+                if removals is None:
+                    tag_keys, data_keys = tag.keys(), data.keys()
+                    self._validate_columns(tag_keys, data_keys)
+                    removals = self._removals(tag_keys, data_keys)
+                tags_removed, data_removed = removals
+                if tags_removed:
+                    tag = tag.drop(*tags_removed)
+                if data_removed:
+                    data = data.drop(*data_removed)
+                if data.meta_columns:
+                    data = data.drop_meta_columns(*data.meta_columns)
+                await output.send((tag, data))
+        finally:
+            await output.close()
+
+
+class DropColumns(_TagAndDataColumnsOperator):
+    """Drop the named columns, whether each is a tag or a data column (ITL-1084).
+
+    For tag names only it gives the rows of ``DropTagColumns``, for data names only
+    those of ``DropDataColumns``. A dropped data column's source-info column goes
+    with it; system tags are kept.
+
+    Args:
+        columns: One column name or a collection of names.
+        strict: When ``True`` (the default), a name that is neither a tag nor a data
+            column of the input raises ``InputValidationError``; when ``False`` it
+            is ignored.
+
+    Raises:
+        InputValidationError: When called on a stream whose data columns would all
+            be dropped: a stream needs at least one data column.
+    """
+
+    _verb: ClassVar[str] = "drop"
+
+    def _removed(self, columns: Collection[str]) -> list[str]:
+        return [c for c in columns if c in self.columns]
+
+
+class SelectColumns(_TagAndDataColumnsOperator):
+    """Keep exactly the named columns, tag or data; drop every other one (ITL-1084).
+
+    Every user tag and data column not named is dropped, with the source-info column
+    of each dropped data column; system tags are kept. Naming no tag is allowed (the
+    result has no tag column).
+
+    Args:
+        columns: One column name or a collection of names.
+        strict: When ``True`` (the default), a name that is neither a tag nor a data
+            column of the input raises ``InputValidationError``; when ``False`` it
+            is ignored.
+
+    Raises:
+        InputValidationError: When called on a stream none of whose data columns is
+            named: a stream needs at least one data column.
+    """
+
+    _verb: ClassVar[str] = "select"
+
+    def _removed(self, columns: Collection[str]) -> list[str]:
+        return [c for c in columns if c not in self.columns]
 
 
 class MapTags(UnaryOperator):

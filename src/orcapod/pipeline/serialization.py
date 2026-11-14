@@ -181,6 +181,7 @@ def _build_operator_registry() -> dict[str, type]:
     """
     from orcapod.core.operators import (
         Batch,
+        DropColumns,
         DropDataColumns,
         DropNulls,
         DropTagColumns,
@@ -190,6 +191,7 @@ def _build_operator_registry() -> dict[str, type]:
         MapTags,
         MergeJoin,
         PolarsFilter,
+        SelectColumns,
         SelectDataColumns,
         SelectTagColumns,
         SemiJoin,
@@ -205,6 +207,8 @@ def _build_operator_registry() -> dict[str, type]:
         "DropTagColumns": DropTagColumns,
         "SelectDataColumns": SelectDataColumns,
         "DropDataColumns": DropDataColumns,
+        "SelectColumns": SelectColumns,
+        "DropColumns": DropColumns,
         "MapTags": MapTags,
         "MapData": MapData,
         "PolarsFilter": PolarsFilter,

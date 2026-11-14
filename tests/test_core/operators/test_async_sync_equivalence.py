@@ -30,6 +30,7 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import (
     Batch,
+    DropColumns,
     DropDataColumns,
     DropNulls,
     DropTagColumns,
@@ -41,6 +42,7 @@ from orcapod.core.operators import (
     MergeJoin,
     Pick,
     PolarsFilter,
+    SelectColumns,
     SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
@@ -309,6 +311,17 @@ CASES = [
     Case(
         "drop_data_columns",
         lambda: DropDataColumns(["s", "bn"]),
+        lambda: (source_a(),),
+    ),
+    # Tag and data columns in one call (ITL-1084).
+    Case(
+        "drop_columns",
+        lambda: DropColumns(["ta", "s", "bn"]),
+        lambda: (source_a(),),
+    ),
+    Case(
+        "select_columns",
+        lambda: SelectColumns(["k", "i8", "st", "p", "nul"]),
         lambda: (source_a(),),
     ),
     Case("index", lambda: Index("l8", 0), lambda: (source_a(),)),

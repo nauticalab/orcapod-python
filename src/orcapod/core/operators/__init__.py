@@ -1,7 +1,9 @@
 from .batch import Batch
 from .column_selection import (
+    DropColumns,
     DropDataColumns,
     DropTagColumns,
+    SelectColumns,
     SelectDataColumns,
     SelectTagColumns,
 )
@@ -27,6 +29,8 @@ __all__ = [
     "SelectDataColumns",
     "DropTagColumns",
     "DropDataColumns",
+    "SelectColumns",
+    "DropColumns",
     "PolarsFilter",
     "DropNulls",
     "Pick",

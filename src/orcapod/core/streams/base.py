@@ -67,6 +67,47 @@ def check_head_size(n: int) -> None:
         raise ValueError(f"head() takes a non-negative number of rows n, got {n}")
 
 
+def _column_names(columns: tuple[str | Collection[str], ...]) -> tuple[str, ...]:
+    """Normalize the positional names of ``drop_columns`` and ``select_columns``.
+
+    The names are given as one or more strings, or as one collection of strings
+    that is the only positional argument.
+
+    Args:
+        columns: The positional arguments as received.
+
+    Returns:
+        The names, in the order given.
+
+    Raises:
+        TypeError: When no name is given, a collection is mixed with further
+            positional arguments, or a name is not a string.
+        ValueError: When the one collection given is empty.
+    """
+    if not columns:
+        raise TypeError("expected at least one column name")
+    first = columns[0]
+    if isinstance(first, str):
+        names: tuple[object, ...] = columns
+    elif len(columns) > 1:
+        raise TypeError(
+            "give the column names either as strings or as one collection of "
+            "strings, not both"
+        )
+    elif isinstance(first, Collection):
+        names = tuple(first)
+        if not names:
+            raise ValueError(
+                "expected at least one column name, got an empty collection"
+            )
+    else:
+        raise TypeError(f"expected column names as strings, got {type(first).__name__}")
+    not_strings = [name for name in names if not isinstance(name, str)]
+    if not_strings:
+        raise TypeError(f"column names must be strings, got {not_strings!r}")
+    return tuple(str(name) for name in names)
+
+
 class StreamBase(TraceableBase):
     @property
     @abstractmethod
@@ -297,6 +338,75 @@ class StreamBase(TraceableBase):
         from orcapod.core.operators import DropDataColumns
 
         return DropDataColumns(data_columns, strict=strict)(self, label=label)
+
+    def drop_columns(
+        self,
+        *columns: str | Collection[str],
+        strict: bool = True,
+        label: str | None = None,
+    ) -> StreamBase:
+        """Drop the named columns, whether each is a tag or a data column.
+
+        ``s.drop_columns("a", "b")`` equals ``s.drop_columns(["a", "b"])``. A
+        dropped data column's source-info column goes with it; system tags are
+        kept. See ``orcapod.core.operators.DropColumns``.
+
+        Args:
+            *columns: One or more column names, or one collection of names as the
+                only positional argument.
+            strict: When ``True`` (the default), a name that is neither a tag nor
+                a data column raises ``InputValidationError``; when ``False`` it
+                is ignored.
+            label: Optional node label for the pipeline graph.
+
+        Returns:
+            The stream without the named columns.
+
+        Raises:
+            TypeError: When no name is given, a collection is mixed with further
+                positional arguments, or a name is not a string.
+            ValueError: When the one collection given is empty.
+            InputValidationError: When a ``strict`` name is missing, or when no
+                data column would remain.
+        """
+        from orcapod.core.operators import DropColumns
+
+        return DropColumns(_column_names(columns), strict=strict)(self, label=label)
+
+    def select_columns(
+        self,
+        *columns: str | Collection[str],
+        strict: bool = True,
+        label: str | None = None,
+    ) -> StreamBase:
+        """Keep exactly the named columns, tag or data; drop every other one.
+
+        ``s.select_columns("a", "b")`` equals ``s.select_columns(["a", "b"])``.
+        Every user tag and data column not named is dropped, with the source-info
+        column of each dropped data column; system tags are kept. Naming no tag
+        is allowed. See ``orcapod.core.operators.SelectColumns``.
+
+        Args:
+            *columns: One or more column names, or one collection of names as the
+                only positional argument.
+            strict: When ``True`` (the default), a name that is neither a tag nor
+                a data column raises ``InputValidationError``; when ``False`` it
+                is ignored.
+            label: Optional node label for the pipeline graph.
+
+        Returns:
+            The stream with only the named columns.
+
+        Raises:
+            TypeError: When no name is given, a collection is mixed with further
+                positional arguments, or a name is not a string.
+            ValueError: When the one collection given is empty.
+            InputValidationError: When a ``strict`` name is missing, or when no
+                data column is named.
+        """
+        from orcapod.core.operators import SelectColumns
+
+        return SelectColumns(_column_names(columns), strict=strict)(self, label=label)
 
     def pick(
         self,

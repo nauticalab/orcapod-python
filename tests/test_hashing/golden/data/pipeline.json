@@ -594,6 +594,51 @@
     "_tag_source_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5",
     "_tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5"
   ],
+  "tag_and_data_columns.drop.content_hash": "semantic_v1:5d1fe17f5231ae6205ec27b9c12d5460c1ca984e1756fb1bade19be28ee69310",
+  "tag_and_data_columns.drop.pipeline_hash": "semantic_v1:c25a9698354be8d6e1cba41a5c351db21b0f7a302cbb271f68ebe4e278859229",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s1\"}]._tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "00e4847203e7542fb74aa93d826057fe",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s1\"}]._tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "cohort_subjects",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s1\"}].data_hash": "arrow_v1:000002c734791b7452bb2affc60031491e7541bb53fb971cf3ef8b9af919eb0bf1f56e",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s2\"}]._tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "2a566652574b5aa5bb5291e7979d7aaf",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s2\"}]._tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "cohort_subjects",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s2\"}].data_hash": "arrow_v1:00000252e4f32a133cd6a8813f816e08b6bde1cdb467baa95d026fc41c5672b6b98110",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s3\"}]._tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "489e83de7e5d5f429c2cf662943f607c",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s3\"}]._tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "cohort_subjects",
+  "tag_and_data_columns.drop.row[{\"subject\":\"s3\"}].data_hash": "arrow_v1:0000025f33a2f5bf3e956edfb7ca628b6871f52b7bbf788d5a3774ddffe300d7d4aff5",
+  "tag_and_data_columns.drop.system_tag_columns": [
+    "_tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9",
+    "_tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9"
+  ],
+  "tag_and_data_columns.select.content_hash": "semantic_v1:7f909e7ac3fdc9fe68c161963b070f1429dbaf917172ac05219eaaae636ef25f",
+  "tag_and_data_columns.select.pipeline_hash": "semantic_v1:86a0f1aa9f37cd7f62c67cb53e25d8720cd61172eb4f40276318d0214e50193c",
+  "tag_and_data_columns.select.row[{\"subject\":\"s1\"}]._tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "00e4847203e7542fb74aa93d826057fe",
+  "tag_and_data_columns.select.row[{\"subject\":\"s1\"}]._tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "cohort_subjects",
+  "tag_and_data_columns.select.row[{\"subject\":\"s1\"}].data_hash": "arrow_v1:000002c734791b7452bb2affc60031491e7541bb53fb971cf3ef8b9af919eb0bf1f56e",
+  "tag_and_data_columns.select.row[{\"subject\":\"s2\"}]._tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "2a566652574b5aa5bb5291e7979d7aaf",
+  "tag_and_data_columns.select.row[{\"subject\":\"s2\"}]._tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "cohort_subjects",
+  "tag_and_data_columns.select.row[{\"subject\":\"s2\"}].data_hash": "arrow_v1:00000252e4f32a133cd6a8813f816e08b6bde1cdb467baa95d026fc41c5672b6b98110",
+  "tag_and_data_columns.select.row[{\"subject\":\"s3\"}]._tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "489e83de7e5d5f429c2cf662943f607c",
+  "tag_and_data_columns.select.row[{\"subject\":\"s3\"}]._tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9": "cohort_subjects",
+  "tag_and_data_columns.select.row[{\"subject\":\"s3\"}].data_hash": "arrow_v1:0000025f33a2f5bf3e956edfb7ca628b6871f52b7bbf788d5a3774ddffe300d7d4aff5",
+  "tag_and_data_columns.select.system_tag_columns": [
+    "_tag_source_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9",
+    "_tag_record_id::251965570f8e33b5c86f576b20e59a559edd5c912a1990ea747312ce96b3a4b9"
+  ],
+  "tag_and_data_columns.select_tag_and_data.content_hash": "semantic_v1:3acc174ab2b4414a54daef25e3ebdcbde60cbc040a51862dcad83cdde9ae1601",
+  "tag_and_data_columns.select_tag_and_data.pipeline_hash": "semantic_v1:50710378412bbb9cc9788761333efd6de274cf61d98c24fcd5a7b2af4f3adf6e",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s1\"}]._tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "e8e02084627f5e1aad83839e421538e8",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s1\"}]._tag_source_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "subjects",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s1\"}].data_hash": "arrow_v1:00000281f4d4a4e7742a2cae9d733cb30453503892bf97d5d5695d5b491df60c9af327",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s2\"}]._tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "144bb37f3c295e16919d770641bb8c65",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s2\"}]._tag_source_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "subjects",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s2\"}].data_hash": "arrow_v1:0000022420dc43cfa6c4d3682f044a90a1a222554a5d2fd5bc7ebf015f830d3e18869f",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s3\"}]._tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "d9391c2dcea750c496e0895ad301b30d",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s3\"}]._tag_source_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "subjects",
+  "tag_and_data_columns.select_tag_and_data.row[{\"subject\":\"s3\"}].data_hash": "arrow_v1:000002805d579510905b591a2d3748d388531edbef8cec4da1cef5f18abe1a77b21238",
+  "tag_and_data_columns.select_tag_and_data.system_tag_columns": [
+    "_tag_source_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5",
+    "_tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5"
+  ],
   "tagless_producerless_stream.as_given": "semantic_v1:8910e1f5088e3a86be550c356c8127e4dcd302c99378942f30bc34a982b1a108",
   "tagless_producerless_stream.reordered": "semantic_v1:8910e1f5088e3a86be550c356c8127e4dcd302c99378942f30bc34a982b1a108"
 }

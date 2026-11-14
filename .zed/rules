@@ -450,7 +450,7 @@ src/orcapod/
       semijoin.py             — SemiJoin (binary, non-commutative)
       batch.py                — Batch (group rows by count, types become list[T])
       group_by.py             — GroupBy (many→one reduction keyed on tag values)
-      column_selection.py     — Select/Drop Tag/Data columns
+      column_selection.py     — Select/Drop Tag/Data columns; SelectColumns/DropColumns (tag or data)
       mappers.py              — MapTags, MapData (rename columns)
       filters.py              — PolarsFilter
       drop_nulls.py       — DropNulls (drop rows with a null in named or all columns, T | None → T)

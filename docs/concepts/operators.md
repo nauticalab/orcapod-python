@@ -320,6 +320,39 @@ print(result.keys()[1])  # ('weight',)
 Selecting a column that does not exist raises `InputValidationError`; pass `strict=False` to
 ignore missing columns instead.
 
+Two more act on named columns whether each is a tag or a data column:
+
+- **`DropColumns(columns=["col1", "col2"])`** -- remove the named columns, tag or data
+- **`SelectColumns(columns=["col1", "col2"])`** -- keep exactly the named columns, tag or
+  data, and remove every other tag and data column
+
+Streams offer them as `drop_columns` and `select_columns`, which take the names as one or
+more strings or as one collection: `stream.drop_columns("a", "b")` is
+`stream.drop_columns(["a", "b"])`. A removed data column's source-info column goes with it,
+and system tags are kept, as with the four operators above.
+
+```python
+sessions = DictSource(
+    data=[
+        {"subject_id": "mouse_01", "session": 1, "age": 12, "weight": 25.3},
+        {"subject_id": "mouse_02", "session": 2, "age": 8, "weight": 22.1},
+    ],
+    tag_columns=["subject_id", "session"],
+)
+
+dropped = sessions.drop_columns("session", "age")
+print(dropped.keys())  # (('subject_id',), ('weight',))
+```
+
+```python
+selected = sessions.select_columns(["session", "weight"])
+print(selected.keys())  # (('session',), ('weight',))
+```
+
+A stream needs at least one data column, so `drop_columns` of every data column, or
+`select_columns` naming no data column, raises `InputValidationError` when it is called.
+Selecting no tag column is allowed.
+
 `SelectDataColumns` is also how you narrow a stream before a
 [function pod](function-pods.md), which accepts only the data columns its function declares.
 
