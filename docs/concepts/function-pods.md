@@ -333,6 +333,13 @@ database. Each recorded step becomes a node, available afterwards as `job.nodes[
 listed under its `source_id`). A node is a
 stream, so `as_table()`, `iter_data()` and `output_schema()` all work on it.
 
+After `job.run()`, a function node returns exactly the rows of that run's inputs, on either
+orchestrator. The database may hold more under the same node: results of an earlier run
+over other rows of the source stay stored and are reused when those rows come back, but
+they are not rows of this run. A run that raised defines no rows. A node read with no
+finished run in this process (a job built but not run, or a loaded job) returns every row
+stored under its key.
+
 `InMemoryArrowDatabase` lasts only as long as the Python process. Use
 `DeltaTableDatabase("some/directory")` from `orcapod.databases` to keep results on disk
 between sessions.
@@ -742,8 +749,9 @@ file names each run's rows by the content hash the run stored them under, so a l
 reads exactly what the same node built from your code would read from that store, and no
 rows under that key is an empty result, not an error.
 
-- A function node's `as_table()`, `iter_data()` and `get_all_records()` return the rows the
-  saved run stored, with the types they were stored with. Rows come in the order the store
+- A function node's `as_table()`, `iter_data()` and `get_all_records()` return the rows
+  stored under the saved run's key, with the types they were stored with: those of every
+  run of that node over the same sources, not only the saved run's inputs. Rows come in the order the store
   returns them; sort them if order matters.
 - Operators (a join, a filter) store outputs only when caching is enabled, under `odb_v1`.
   The saved file does not record an operator's cache mode (follow-up ITL-977), so attach a

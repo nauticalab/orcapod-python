@@ -1254,6 +1254,38 @@ class TestInputOfAnotherDataContext:
         assert calls == []
         assert reopened(store).list_sources() == []
 
+    def test_refused_input_after_a_good_run_leaves_no_run_rows(self, store: Store):
+        """A run refused for its input's data context defines no rows (ITL-1093).
+
+        After a good run the node holds that run's rows; a later sync run refused for its
+        input's data context drops them, and the node reads its stored rows, as with no
+        run in this process. (On the async path the context checked is the node's own
+        input stream's, so a node refused there never had a run.)
+        """
+        table = pa.table(
+            {"k": ["a", "b"], "x": [1, 2]},
+            schema=pa.schema(
+                [
+                    pa.field("k", pa.large_string(), nullable=False),
+                    pa.field("x", pa.int64(), nullable=False),
+                ]
+            ),
+        )
+        node = FunctionJobNode(
+            function_pod=double.pod,  # pyright: ignore[reportArgumentType]  # the decorator types .pod as the pod base class
+            input_stream=ArrowTableStream(table, tag_columns=["k"]),
+            pipeline_database=store,
+            result_database=store,
+        )
+        node.run()
+        assert node.head(10).origin == "held"
+
+        with pytest.raises(InputValidationError):
+            node.execute(_other_context_stream())
+
+        assert node.head(10).origin == "stored"
+        assert sorted(row["double"] for row in node.as_table().to_pylist()) == [2, 4]
+
     def test_add_pipeline_record_refuses_an_input_of_another_data_context(
         self, store: Store
     ):

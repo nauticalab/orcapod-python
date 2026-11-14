@@ -823,9 +823,11 @@ data. The rules:
   by the user is never changed. `SourceStreamBuilder.build` has no bare-hash default: it
   needs a `source_id` or a `source_kind`.
 - `ArrowTableStream` requires at least one data column; raises `ValueError` otherwise.
-- `FunctionNode.iter_data()` Phase 1 returns ALL records in the shared `pipeline_path`
-  DB table (not filtered to current inputs). Phase 2 skips inputs whose hash is already
-  in the DB.
+- After a run, a `FunctionJobNode` returns exactly the rows of that run's inputs, sync or
+  async (ITL-1093; a run that raised defines no rows). Read without a completed run in this
+  process (a fresh or loaded job), it returns every record stored under its content hash for
+  the current data context, not only its current inputs. A run skips inputs whose entry is
+  already stored.
 - Empty data → `ArrowTableSource` raises `ValueError("Table is empty")`.
 - A side-effect job node delivers only when it runs (developer, November 13, 2026, ITL-1091):
   `job.run()`, `node.run()` (the job run's work for that node: with `track_completion` only
