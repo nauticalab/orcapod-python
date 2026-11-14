@@ -287,12 +287,12 @@ def test_absent_defaulted_parameter_adds_no_step(
 
 def test_matching_input_adds_no_select_node_to_a_job() -> None:
     """Inside a job, a matching input records the source and the function only."""
-    job = PipelineJob(name="narrow", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="narrow", database=InMemoryArrowDatabase())
     with job:
         add.pod(SelectDataColumns(columns=["x", "y"])(_wide()), label="add")
     by_hand = sorted(type(node).__name__ for node in job.nodes.values())
 
-    job = PipelineJob(name="narrow", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="narrow", database=InMemoryArrowDatabase())
     with job:
         narrow = DictSource(
             [{"k": 1, "x": 2, "y": 3}], tag_columns=["k"], source_id="narrow"
@@ -347,7 +347,7 @@ def test_missing_required_column_is_an_error_in_every_mode(mode: str) -> None:
 
 def test_missing_required_column_adds_no_step_to_a_job() -> None:
     """The missing-column error is raised before a select is recorded."""
-    job = PipelineJob(name="missing", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="missing", database=InMemoryArrowDatabase())
     with job:
         with pytest.raises(ValueError, match="'y'"):
             add.pod(_xs(extra=1))
@@ -613,14 +613,14 @@ def test_job_equals_the_job_with_a_hand_written_select(tmp_path: Path) -> None:
     counted = _counting_pod(calls)
     db = InMemoryArrowDatabase()
 
-    automatic = PipelineJob(name="job", store=db)
+    automatic = PipelineJob(name="job", database=db)
     with automatic:
         counted.pod(_wide(), label="add")
     automatic.run()
     automatic_paths = sorted(db.list_table_paths())
     assert len(calls) == 2
 
-    by_hand = PipelineJob(name="job", store=db)
+    by_hand = PipelineJob(name="job", database=db)
     with by_hand:
         counted.pod.process(SelectDataColumns(columns=["x", "y"])(_wide()), label="add")
     by_hand.run()
@@ -647,12 +647,12 @@ def test_job_with_two_inputs_equals_hand_written_join_and_select() -> None:
     counted = _counting_pod(calls)
     db = InMemoryArrowDatabase()
 
-    automatic = PipelineJob(name="job", store=db)
+    automatic = PipelineJob(name="job", database=db)
     with automatic:
         counted.pod(_xs(a=1), _ys(b=2), label="add")
     automatic.run()
 
-    by_hand = PipelineJob(name="job", store=db)
+    by_hand = PipelineJob(name="job", database=db)
     with by_hand:
         joined = Join()(_xs(a=1), _ys(b=2))
         counted.pod.process(SelectDataColumns(columns=["x", "y"])(joined), label="add")
@@ -679,13 +679,13 @@ def test_change_in_an_unused_column_is_a_cache_hit() -> None:
     counted = _counting_pod(calls)
     db = InMemoryArrowDatabase()
 
-    first = PipelineJob(name="job", store=db)
+    first = PipelineJob(name="job", database=db)
     with first:
         counted.pod(_wide(extra=9), label="add")
     first.run()
     assert len(calls) == 2
 
-    second = PipelineJob(name="job", store=db)
+    second = PipelineJob(name="job", database=db)
     with second:
         counted.pod(_wide(extra=100), label="add")
     second.run()
@@ -699,7 +699,7 @@ def test_sync_and_async_runs_give_the_same_rows() -> None:
     """The automatic select is graph construction: both orchestrators run the same graph."""
     tables = []
     for orchestrator in (SyncPipelineOrchestrator(), AsyncPipelineOrchestrator()):
-        job = PipelineJob(name="job", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="job", database=InMemoryArrowDatabase())
         with job:
             add.pod(_xs(a=1), _ys(b=2), label="add")
         job.run(orchestrator=orchestrator)
@@ -742,12 +742,12 @@ def test_job_equals_the_job_built_with_convenience_methods() -> None:
     counted = _counting_pod(calls)
     db = InMemoryArrowDatabase()
 
-    automatic = PipelineJob(name="job", store=db)
+    automatic = PipelineJob(name="job", database=db)
     with automatic:
         counted.pod(_xs(a=1), _ys(b=2), label="add")
     automatic.run()
 
-    by_method = PipelineJob(name="job", store=db)
+    by_method = PipelineJob(name="job", database=db)
     with by_method:
         joined = _xs(a=1).join(_ys(b=2))
         counted.pod(joined.select_data_columns(["x", "y"]), label="add")

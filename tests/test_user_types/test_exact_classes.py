@@ -171,7 +171,7 @@ def test_chain_of_two_classes_is_refused_through_a_store(
     """The same chain in a Delta-backed job is refused as well, before anything runs."""
     first = _define(KINDS[kind])
     second = _define(KINDS[kind])
-    job = PipelineJob(name="exact", store=DeltaTableDatabase(tmp_path / "db"))
+    job = PipelineJob(name="exact", database=DeltaTableDatabase(tmp_path / "db"))
 
     with pytest.raises(ValueError, match="column 'q'"):
         with job:

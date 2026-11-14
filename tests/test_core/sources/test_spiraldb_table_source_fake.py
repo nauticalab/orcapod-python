@@ -164,7 +164,7 @@ class TestWorkshopPath:
                 return None
             return correct_trials / total_trials
 
-        job = PipelineJob(name="workshop", store=DeltaTableDatabase(store))
+        job = PipelineJob(name="workshop", database=DeltaTableDatabase(store))
         with job:
             joined = Join()(
                 SpiralDBTableSource(_PROJECT, "session"),
@@ -203,7 +203,7 @@ class TestWorkshopPath:
 
         path = tmp_path / "job.json"
         rerun.save(path)
-        loaded = PipelineJob.load(path, store=DeltaTableDatabase(store))
+        loaded = PipelineJob.load(path, database=DeltaTableDatabase(store))
         # Both Spiral sources were rebuilt from the saved config, not left unbound.
         assert loaded.unbound_sources == []
         records = loaded.nodes["accuracy"].get_all_records()
@@ -504,7 +504,7 @@ class TestNonNullableColumns:
             return total_trials * weight
 
         store = tmp_path / "store"
-        job = PipelineJob(name="strict", store=DeltaTableDatabase(store))
+        job = PipelineJob(name="strict", database=DeltaTableDatabase(store))
         with job:
             joined = Join()(
                 SpiralDBTableSource(_PROJECT, "session"),
@@ -523,7 +523,7 @@ class TestNonNullableColumns:
 
         path = tmp_path / "job.json"
         job.save(path)
-        loaded = PipelineJob.load(path, store=DeltaTableDatabase(store))
+        loaded = PipelineJob.load(path, database=DeltaTableDatabase(store))
         assert loaded.unbound_sources == []
         assert (
             loaded.nodes["score"].pipeline_hash() == job.nodes["score"].pipeline_hash()

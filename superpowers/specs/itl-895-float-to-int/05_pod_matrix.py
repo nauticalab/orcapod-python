@@ -102,7 +102,7 @@ def run(declared, value, i) -> tuple[str, str]:
     except Exception as e:  # noqa: BLE001
         out.append(f"raises {type(e).__name__}")
     try:
-        job = PipelineJob(name=f"m{i}", store=InMemoryArrowDatabase())
+        job = PipelineJob(name=f"m{i}", database=InMemoryArrowDatabase())
         with job:
             f.pod(src, label="f")
         job.run()

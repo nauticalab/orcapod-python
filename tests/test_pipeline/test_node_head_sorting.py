@@ -86,7 +86,7 @@ def _store(kind: str, tmp_path: Path) -> ArrowDatabaseProtocol:
 
 
 def _build(pod: Any, store: ArrowDatabaseProtocol, order: list[int]) -> PipelineJob:
-    job = PipelineJob(name="itl1053", store=store)
+    job = PipelineJob(name="itl1053", database=store)
     with job:
         pod.pod(_source(order), label="node")
     return job
@@ -207,7 +207,7 @@ def _tie_source() -> ArrowTableSource:
 def _tie_run(kind: str) -> Any:
     """Run ``_tie_source`` through a function node; ``async`` completes rows in reverse."""
     gates.clear()
-    job = PipelineJob(name="ties", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="ties", database=InMemoryArrowDatabase())
     if kind == "sync":
         with job:
             triple.pod(_tie_source(), label="node")

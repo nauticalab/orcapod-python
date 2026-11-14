@@ -89,7 +89,7 @@ def double(x: int) -> int:
 
 
 rule_store = InMemoryArrowDatabase()
-rule_job = PipelineJob(name="my_pipeline", store=rule_store)
+rule_job = PipelineJob(name="my_pipeline", database=rule_store)
 with rule_job:
     numbers = DictSource(
         data=[{"k": "a", "x": 1}], tag_columns=["k"], source_id="numbers"
@@ -1363,7 +1363,7 @@ def double_for_contexts(x: int) -> int:
 
 
 context_store = InMemoryArrowDatabase()
-context_job = PipelineJob(name="contexts_demo", store=context_store)
+context_job = PipelineJob(name="contexts_demo", database=context_store)
 with context_job:
     rows = DictSource(data=[{"k": "a", "x": 1}, {"k": "b", "x": 2}], tag_columns=["k"])
     _ = double_for_contexts.pod(rows, label="dbl")

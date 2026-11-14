@@ -295,7 +295,7 @@ def test_a_custom_content_hash_column_is_kept_by_a_nodes_head() -> None:
     from orcapod import PipelineJob
     from orcapod.databases import InMemoryArrowDatabase
 
-    job = PipelineJob(name="digest", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="digest", database=InMemoryArrowDatabase())
     with job:
         triple.pod(_source(), label="node")
     job.run()
@@ -373,7 +373,7 @@ def test_a_hash_column_named_like_another_column_group_is_kept(name: str) -> Non
     from orcapod import PipelineJob
     from orcapod.databases import InMemoryArrowDatabase
 
-    job = PipelineJob(name="names", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="names", database=InMemoryArrowDatabase())
     with job:
         pod_stream = triple.pod(_source(), label="node")
     assert isinstance(pod_stream, FunctionPodStream)

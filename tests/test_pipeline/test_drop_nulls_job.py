@@ -64,7 +64,7 @@ def _recordings(timestamps: list[int | None]) -> ArrowTableSource:
 def _run(store: DeltaTableDatabase, timestamps: list[int | None]) -> PipelineJob:
     """Record and run ``source -> drop_nulls -> to_seconds`` as a ``PipelineJob``."""
     pod = FunctionPod(PythonDataFunction(to_seconds, output_keys="seconds"))  # pyright: ignore[reportArgumentType]  # PythonDataFunction is not yet typed as matching DataFunctionProtocol (baselined in other tests); it works at runtime
-    job = PipelineJob(name="recordings", store=store)
+    job = PipelineJob(name="recordings", database=store)
     with job:
         present = _recordings(timestamps).drop_nulls(
             "recording_start_timestamp", label="present"
@@ -141,7 +141,7 @@ def test_job_save_and_load_round_trips_the_operator(
     assert [c["class_name"] for c in saved] == ["DropNulls"]
     assert saved[0]["config"] == {"columns": ["recording_start_timestamp"]}
 
-    loaded = PipelineJob.load(str(path), store=store)
+    loaded = PipelineJob.load(str(path), database=store)
     present = loaded.nodes["present"]
     assert present.output_schema() == (
         {"session": str},

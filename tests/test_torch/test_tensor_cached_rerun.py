@@ -53,7 +53,7 @@ SCRIPT = textwrap.dedent(
         tag_columns=["k"],
         source_id="numeric",
     )
-    job = PipelineJob(name="rerun", store=DeltaTableDatabase(base_path=store))
+    job = PipelineJob(name="rerun", database=DeltaTableDatabase(base_path=store))
     with job:
         identity.pod(src, label="identity_all")
         total.pod(identity.pod(numeric, label="identity_numeric"), label="total")

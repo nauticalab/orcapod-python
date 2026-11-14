@@ -71,7 +71,7 @@ def _sources() -> tuple[ArrowTableSource, ArrowTableSource]:
 def _job(store: InMemoryArrowDatabase) -> PipelineJob:
     """``scaled`` over ``a``, then ``joined`` (with ``b``, stored) and ``grouped``."""
     a, b = _sources()
-    job = PipelineJob(name="r", store=store)
+    job = PipelineJob(name="r", database=store)
     with job:
         scaled = scale.pod(a, label="scaled")
         Join()(scaled, b, label="joined")

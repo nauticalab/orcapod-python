@@ -54,7 +54,7 @@ def build(store: Path, source: Any, calls: list[int]) -> PipelineJob:
         calls.append(v)
         return 2 * v
 
-    job = PipelineJob(name="job", store=DeltaTableDatabase(store))
+    job = PipelineJob(name="job", database=DeltaTableDatabase(store))
     with job:
         double.pod(source, label="double")
     return job
@@ -74,7 +74,7 @@ def report(name: str, job: PipelineJob, calls: list[int], store: Path) -> None:
     print(f"    node.get_all_records() keys = {keys_of(node.get_all_records())}")
     saved = store.parent / f"{store.name}-{name}.json"
     job.save(saved)
-    loaded = PipelineJob.load(saved, store=DeltaTableDatabase(store)).nodes["double"]
+    loaded = PipelineJob.load(saved, database=DeltaTableDatabase(store)).nodes["double"]
     print(f"    loaded job get_all_records  = {keys_of(loaded.get_all_records())}")
     print(f"    node content hash           = {node.content_hash().to_hex()[:12]}")
     print(f"    node pipeline hash          = {node.pipeline_hash().to_hex()[:12]}")

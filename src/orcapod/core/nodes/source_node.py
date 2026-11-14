@@ -435,7 +435,7 @@ class SourceNode(SourceNodeBase):
         with pipeline:
             result = my_pod(slot)
 
-        job = PipelineJob.from_pipeline(pipeline, store=db, sources={"data": my_source})
+        job = PipelineJob.from_pipeline(pipeline, database=db, sources={"data": my_source})
         job.run()
 
     Hash-stability note:

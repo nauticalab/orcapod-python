@@ -123,7 +123,7 @@ def test_filter_upstream_of_join_inside_pipeline_job(kind, orchestrator):
         "keyword": (["a"], [15]),
         "mixed": (["a"], [15]),
     }
-    job = PipelineJob(name="filter_job", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="filter_job", database=InMemoryArrowDatabase())
     with job:
         filtered = _FILTERS[kind](_readings())
         joined = Join(label="joined")(filtered, _names())
@@ -208,7 +208,7 @@ _JOB_SCRIPT = textwrap.dedent("""\
         label="names",
     )
 
-    job = PipelineJob(name="expr_filter_cache", store=DeltaTableDatabase(base_path=sys.argv[1]))
+    job = PipelineJob(name="expr_filter_cache", database=DeltaTableDatabase(base_path=sys.argv[1]))
     with job:
         filtered = readings.polars_filter(pl.col("x") > 0, label="positive")
         joined = Join(label="joined")(filtered, names)

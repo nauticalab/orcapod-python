@@ -69,7 +69,7 @@ def counted_double(x: int) -> int:
 
 def build_job(store: Any, n_rows: int, pod: Any = double) -> PipelineJob:
     """A job with one function node ``dbl`` over ``n_rows`` rows."""
-    job = PipelineJob(name="batched", store=store)
+    job = PipelineJob(name="batched", database=store)
     with job:
         source = DictSource(
             data=[{"k": i, "x": i} for i in range(n_rows)],
@@ -328,7 +328,7 @@ def test_records_read_right_after_the_run_are_complete(
     tmp_path: Path, orchestrator: str, source_id: str | None
 ) -> None:
     """``get_all_records`` right after ``run`` returns every row (ITL-930)."""
-    job = PipelineJob(name="itl930", store=DeltaTableDatabase(tmp_path))
+    job = PipelineJob(name="itl930", database=DeltaTableDatabase(tmp_path))
     with job:
         source = DictSource(
             data=[{"k": "b", "x": 2}, {"k": "c", "x": 3}],
@@ -364,7 +364,7 @@ def test_rerun_of_an_ephemeral_node_recomputes_and_records_every_row(
     calls_before = len(_DOUBLE_CALLS)
     jobs: list[PipelineJob] = []
     for _ in range(2):
-        job = PipelineJob(name="ephemeral", store=make_store())
+        job = PipelineJob(name="ephemeral", database=make_store())
         jobs.append(job)
         with job:
             source = DictSource(
@@ -548,7 +548,7 @@ def test_a_failed_commit_of_writes_pending_before_the_run_stops_it_first(
     store = FailingCommits(DeltaTableDatabase(tmp_path), {"calls": 0, "ok": 0})
     leftover = pa.table({"v": pa.array([1], pa.int64())})
     store.add_record(("leftover",), b"left-1", leftover)  # pending, never committed
-    job = PipelineJob(name="batched", store=store)  # pyright: ignore[reportArgumentType]  # failing wrapper of a real store
+    job = PipelineJob(name="batched", database=store)  # pyright: ignore[reportArgumentType]  # failing wrapper of a real store
     with job:
         counted_double.pod(
             DictSource(data=[{"k": 1, "x": 1}], tag_columns=["k"], source_id="src"),

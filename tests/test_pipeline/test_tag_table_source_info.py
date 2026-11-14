@@ -99,7 +99,7 @@ def _pod(function: Callable[..., int], output_key: str) -> FunctionPod:
 def _job(store: ArrowDatabaseProtocol) -> PipelineJob:
     """source -> add_xy ("direct") -> times_two ("second"); source -> Select -> add_one."""
     src = _source()
-    job = PipelineJob(name=_JOB, store=store)
+    job = PipelineJob(name=_JOB, database=store)
     with job:
         z = _pod(add_xy, "z")(src, label="direct")
         _ = _pod(times_two, "w")(z, label="second")

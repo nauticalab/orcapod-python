@@ -48,7 +48,7 @@ async def first_row_last(x: int) -> int:
 
 def run_job(pod: Any, rows: list[dict[str, Any]], orchestrator: Any) -> Any:
     """Run ``pod`` over ``rows`` in a fresh job; return its node."""
-    job = PipelineJob(name="row_hashes", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="row_hashes", database=InMemoryArrowDatabase())
     with job:
         pod.pod(
             DictSource(data=rows, tag_columns=["k"], source_id="rows"), label="node"

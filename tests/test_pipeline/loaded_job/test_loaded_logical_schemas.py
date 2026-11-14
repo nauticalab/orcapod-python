@@ -80,7 +80,9 @@ def _save_logical_job(tmp_path: Path, function: Any, *, with_join: bool = True) 
     """Run and save a logical-output function followed by a Join."""
     source_file = tmp_path / "input"
     source_file.write_text("data")
-    job = op.PipelineJob(name="logical", store=DeltaTableDatabase(tmp_path / "store"))
+    job = op.PipelineJob(
+        name="logical", database=DeltaTableDatabase(tmp_path / "store")
+    )
     with job:
         source = DictSource([{"id": 1, "x": str(source_file)}], tag_columns=["id"])
         result = op.function_pod(output_keys="value")(function).pod(
@@ -194,7 +196,7 @@ class WriterOnly:
 def make_payload(x: int) -> WriterOnly:
     return WriterOnly(x)
 root = Path(sys.argv[1])
-job = PipelineJob(name="unknown", store=DeltaTableDatabase(root / "store"))
+job = PipelineJob(name="unknown", database=DeltaTableDatabase(root / "store"))
 with job:
     source = DictSource([{"id": 1, "x": 2}], tag_columns=["id"])
     result = make_payload.pod(source, label="producer")

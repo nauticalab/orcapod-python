@@ -40,7 +40,7 @@ db = InMemoryArrowDatabase()
 
 
 def build() -> PipelineJob:
-    job = PipelineJob(name="blast", store=db)
+    job = PipelineJob(name="blast", database=db)
     with job:
         src = DictSource(data=rows, tag_columns=["k"], source_id="src")
         half.pod(src, label="half")

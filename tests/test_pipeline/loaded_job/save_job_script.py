@@ -93,7 +93,9 @@ def main(root: pathlib.Path) -> None:
     )
     list_source = ListSource("z", [1, 2], source_id="lsrc")
 
-    job = PipelineJob(name="loaded_demo", store=DeltaTableDatabase(str(root / "store")))
+    job = PipelineJob(
+        name="loaded_demo", database=DeltaTableDatabase(str(root / "store"))
+    )
     with job:
         # A pod whose output feeds an operator: the shape that used to make
         # PipelineJob.load crash.

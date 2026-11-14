@@ -64,7 +64,7 @@ EXPECTED = ["1,2,True", "2,3,True"]
 
 def _job(tmp_path: Path) -> PipelineJob:
     """Return the two-pod job over a Delta store in ``tmp_path``, already run."""
-    job = PipelineJob(name="measured", store=DeltaTableDatabase(tmp_path / "db"))
+    job = PipelineJob(name="measured", database=DeltaTableDatabase(tmp_path / "db"))
     with job:
         _ = look.pod(make.pod(_source(), label="make"), label="look")
     job.run()

@@ -438,7 +438,7 @@ def _workshop_job(
             source_id="subjects",
         )
         job = PipelineJob(
-            name="itl926_workshop", store=DeltaTableDatabase(workdir / "store")
+            name="itl926_workshop", database=DeltaTableDatabase(workdir / "store")
         )
         with job:
             joined = Join()(src, subjects, label="joined")
@@ -481,7 +481,7 @@ def _load_phase(args: argparse.Namespace) -> None:
     out["content_hash"] = src.content_hash().to_string()
     out["pipeline_hash"] = src.pipeline_hash().to_string()
     loaded = PipelineJob.load(
-        workdir / "job.json", store=DeltaTableDatabase(workdir / "store")
+        workdir / "job.json", database=DeltaTableDatabase(workdir / "store")
     )
     out["unbound"] = list(loaded.unbound_sources)
     records = loaded.nodes["score"].get_all_records()
@@ -522,7 +522,7 @@ def _ro_job(args: argparse.Namespace, workdir: Path) -> tuple[Any, Any, Any, lis
     touch.__annotations__ = {"value": value_type, "return": value_type}
     pod = function_pod(output_keys="echoed")(touch)
     job = PipelineJob(
-        name="itl926_readonly", store=DeltaTableDatabase(workdir / "store")
+        name="itl926_readonly", database=DeltaTableDatabase(workdir / "store")
     )
     with job:
         joined = Join()(left, right, label="joined")
@@ -648,7 +648,7 @@ def _ro_load_phase(args: argparse.Namespace) -> None:
         out[f"{label}_content_hash"] = src.content_hash().to_string()
         out[f"{label}_pipeline_hash"] = src.pipeline_hash().to_string()
     loaded = PipelineJob.load(
-        workdir / "job.json", store=DeltaTableDatabase(workdir / "store")
+        workdir / "job.json", database=DeltaTableDatabase(workdir / "store")
     )
     records = loaded.nodes["echo"].get_all_records()
     out["echo_rows"] = None if records is None else records.num_rows

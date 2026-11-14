@@ -166,7 +166,7 @@ def build_job(
     store: Any, rows: list[dict[str, Any]], *, pod=double, with_operator: bool = False
 ):
     """Build a job with one function node ``dbl`` and optionally an operator ``sel``."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="src")
         out = pod.pod(source, label="dbl")
@@ -652,7 +652,7 @@ class FailingCrashObserver(NoOpObserver):
 
 def build_siblings(store: Any, other_pod: Any):
     """Two function nodes reading the same source: ``dbl`` and ``other``."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
         double_async.pod(source, label="dbl")

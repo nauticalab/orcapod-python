@@ -42,7 +42,7 @@ class TestSyncOrchestratorLinear:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="linear", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="linear", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 
@@ -68,7 +68,7 @@ class TestSyncOrchestratorWithOperator:
         pf = PythonDataFunction(double_val, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="op_pipe", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="op_pipe", database=InMemoryArrowDatabase())
         with job:
             mapped = op(src, label="mapper")
             pod(mapped, label="doubler")
@@ -90,7 +90,7 @@ class TestSyncOrchestratorDiamond:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="diamond", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="diamond", database=InMemoryArrowDatabase())
         with job:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
@@ -111,7 +111,7 @@ class TestSyncOrchestratorObserver:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="obs", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="obs", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 
@@ -185,7 +185,7 @@ class TestPipelineRunIntegration:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="default", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="default", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 
@@ -203,7 +203,7 @@ class TestPipelineRunIntegration:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="explicit", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="explicit", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 
@@ -255,7 +255,7 @@ class TestPipelineRunIntegration:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="cache", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="cache", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 
@@ -274,7 +274,7 @@ class TestSyncAsyncParity:
         pod = FunctionPod(pf)
 
         # Sync via PipelineJob
-        job_sync = PipelineJob(name="sync", store=InMemoryArrowDatabase())
+        job_sync = PipelineJob(name="sync", database=InMemoryArrowDatabase())
         with job_sync:
             pod(src, label="doubler")
         job_sync.run()
@@ -282,7 +282,7 @@ class TestSyncAsyncParity:
         sync_values = sorted(sync_records.column("result").to_pylist())
 
         # Async via PipelineJob with AsyncPipelineOrchestrator
-        job_async = PipelineJob(name="async", store=InMemoryArrowDatabase())
+        job_async = PipelineJob(name="async", database=InMemoryArrowDatabase())
         with job_async:
             pod(src, label="doubler")
         job_async.run(orchestrator=AsyncPipelineOrchestrator())
@@ -297,7 +297,7 @@ class TestSyncAsyncParity:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
-        job_sync = PipelineJob(name="sync_d", store=InMemoryArrowDatabase())
+        job_sync = PipelineJob(name="sync_d", database=InMemoryArrowDatabase())
         with job_sync:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
@@ -306,7 +306,7 @@ class TestSyncAsyncParity:
             job_sync.nodes["adder"].get_all_records().column("total").to_pylist()
         )
 
-        job_async = PipelineJob(name="async_d", store=InMemoryArrowDatabase())
+        job_async = PipelineJob(name="async_d", database=InMemoryArrowDatabase())
         with job_async:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
@@ -390,7 +390,7 @@ class TestMaterializedStreamIdentity:
         pod = FunctionPod(pf)
 
         # Run via PipelineJob (uses materialized streams internally)
-        job = PipelineJob(name="orch", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="orch", database=InMemoryArrowDatabase())
         with job:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
@@ -426,7 +426,7 @@ class TestSyncObserverInjection:
         pf = PythonDataFunction(double_val, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="obs_op", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="obs_op", database=InMemoryArrowDatabase())
         with job:
             mapped = op(src, label="mapper")
             pod(mapped, label="doubler")
@@ -485,7 +485,7 @@ class TestSyncObserverInjection:
         pod = FunctionPod(pf)
 
         db = InMemoryArrowDatabase()
-        job = PipelineJob(name="cached_obs", store=db)
+        job = PipelineJob(name="cached_obs", database=db)
         with job:
             pod(src, label="doubler")
 
@@ -570,7 +570,7 @@ class TestSyncObserverInjection:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="diamond_obs", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="diamond_obs", database=InMemoryArrowDatabase())
         with job:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
@@ -626,7 +626,7 @@ class TestSyncObserverInjection:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="no_obs", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="no_obs", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 
@@ -642,7 +642,7 @@ class TestMaterializeResults:
 
     def _make_job(self) -> PipelineJob:
         db = InMemoryArrowDatabase()
-        job = PipelineJob(name="materialize_test", store=db)
+        job = PipelineJob(name="materialize_test", database=db)
         src = _make_source("key", "value", self.SOURCE_DATA)
         pod = FunctionPod(
             data_function=PythonDataFunction(double_value, output_keys="result"),

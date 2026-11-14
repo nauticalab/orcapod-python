@@ -53,7 +53,7 @@ def _reset() -> None:
 
 def _operator_job(store: InMemoryArrowDatabase) -> PipelineJob:
     """A job with function node ``dbl`` and a stored (``LOG``) operator node ``sel``."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
         out = double.pod(source, label="dbl")
@@ -74,7 +74,7 @@ def notify(x: int, ctx: Any) -> int:
 
 def _notify_job(store: InMemoryArrowDatabase) -> PipelineJob:
     """A job whose only stored node is a function pod that takes the invocation context."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
         notify.pod(source, label="notify")
@@ -99,7 +99,7 @@ def _add_table_written_before_v03(
 
 def _sink_job(store: InMemoryArrowDatabase) -> PipelineJob:
     """A job whose only stored node is a sink reading the source directly."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
         sink = sink_pod(_deliver)
@@ -280,7 +280,7 @@ class TestTablesOfNodesTheRunLeavesOut:
         tag_schema, data_schema = DictSource(
             data=ROWS, tag_columns=["k"], source_id="src"
         ).output_schema()
-        job = PipelineJob(name=JOB_NAME, store=store)
+        job = PipelineJob(name=JOB_NAME, database=store)
         with job:
             unbound = SourceNode(
                 name="src", tag_schema=tag_schema, data_schema=data_schema

@@ -98,7 +98,7 @@ def build_job(use_async_fn: bool) -> PipelineJob:
                  └── slow_double (branch_b)
     """
     db = InMemoryArrowDatabase()
-    job = PipelineJob(name="demo", store=db)
+    job = PipelineJob(name="demo", database=db)
 
     fn = async_slow_double if use_async_fn else sync_slow_double
     with job:

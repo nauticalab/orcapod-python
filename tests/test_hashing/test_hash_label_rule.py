@@ -363,7 +363,7 @@ def _run_cached_join() -> tuple[OperatorJobNode, InMemoryArrowDatabase]:
 def _run_job() -> tuple[PipelineJob, InMemoryArrowDatabase]:
     """Run a job with a join and a function pod on an in-memory store."""
     store = InMemoryArrowDatabase()
-    job = PipelineJob(name="label_rule_job", store=store)
+    job = PipelineJob(name="label_rule_job", database=store)
     with job:
         joined = Join(label="joined")(_source(), _other_source())
         label_rule_double.pod(joined, label="double")

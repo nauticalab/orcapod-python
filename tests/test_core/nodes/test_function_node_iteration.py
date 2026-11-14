@@ -138,7 +138,7 @@ class TestIterDatasReadOnly:
 
         node = _make_node()
         node._load_status = LoadStatus.UNAVAILABLE
-        with pytest.raises(RuntimeError, match="was loaded without a store"):
+        with pytest.raises(RuntimeError, match="was loaded without a database"):
             node.run()
 
     def test_execute_error_policy_continue_skips_failures(self):

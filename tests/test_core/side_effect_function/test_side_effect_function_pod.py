@@ -266,7 +266,7 @@ class TestSideEffectFunctionPodPipelineIntegration:
         pod = FunctionPod.from_fn(transform, output_keys=["result"], ctx_arg_name="ctx")
         db = _make_pipeline_db()
 
-        with PipelineJob(name="test_sef", store=db) as job:
+        with PipelineJob(name="test_sef", database=db) as job:
             source = DictSource(
                 [{"id": 0, "value": 10}, {"id": 1, "value": 20}],
                 tag_columns=["id"],
@@ -302,13 +302,13 @@ class TestSideEffectFunctionPodPipelineIntegration:
         db = _make_pipeline_db()
         source_data = [{"id": 0, "value": 10}, {"id": 1, "value": 20}]
 
-        with PipelineJob(name="test_sef_cache", store=db) as job1:
+        with PipelineJob(name="test_sef_cache", database=db) as job1:
             source1 = DictSource(source_data, tag_columns=["id"])
             pod.process(source1)
         job1.run()
         assert call_count == 2
 
-        with PipelineJob(name="test_sef_cache", store=db) as job2:
+        with PipelineJob(name="test_sef_cache", database=db) as job2:
             source2 = DictSource(source_data, tag_columns=["id"])
             pod.process(source2)
         job2.run()

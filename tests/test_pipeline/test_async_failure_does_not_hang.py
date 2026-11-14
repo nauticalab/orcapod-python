@@ -88,7 +88,7 @@ def run_in_thread(job: PipelineJob, timeout: float = 120.0) -> BaseException | N
 def test_function_node_store_failure_raises(tmp_path: Path, store: str) -> None:
     """A failed pipeline-record write at row 3 of 250 fails the run."""
     failing = FailPipelineRecords(STORES[store](tmp_path), {"n": 0})
-    job = PipelineJob(name="nohang", store=failing)  # pyright: ignore[reportArgumentType]  # failing wrapper of a real store
+    job = PipelineJob(name="nohang", database=failing)  # pyright: ignore[reportArgumentType]  # failing wrapper of a real store
     with job:
         source = DictSource(
             data=[{"k": i, "x": i} for i in range(N_ROWS)],
@@ -104,7 +104,7 @@ def test_function_node_store_failure_raises(tmp_path: Path, store: str) -> None:
 @pytest.mark.parametrize("store", list(STORES))
 def test_operator_node_failure_raises(tmp_path: Path, store: str) -> None:
     """A join that rejects its inputs while 250 rows are in flight fails the run."""
-    job = PipelineJob(name="nohang", store=STORES[store](tmp_path))
+    job = PipelineJob(name="nohang", database=STORES[store](tmp_path))
     with job:
         # Both tag keys are Python ints, so the graph builds; their Arrow widths
         # differ, which the join rejects once rows arrive (type strictness).

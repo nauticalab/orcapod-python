@@ -76,7 +76,7 @@ def _build_pipeline(
     pf = PythonDataFunction(fn, output_keys="result")
     pod = FunctionPod(pf, pod_config=PodConfig(max_concurrency=max_concurrency))
     db = InMemoryArrowDatabase()
-    job = PipelineJob(name="matrix_test", store=db)
+    job = PipelineJob(name="matrix_test", database=db)
     with job:
         pod(_make_source(n), label="node")
     return job
@@ -166,7 +166,7 @@ class TestSyncOrchestratorSyncFunction:
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
 
-        job = PipelineJob(name="direct_orch", store=db)
+        job = PipelineJob(name="direct_orch", database=db)
         with job:
             pod(_make_source(), label="node")
 
@@ -434,8 +434,8 @@ async def _run_async_with_limited_pool(
 
     # Flush pending database writes (PipelineJob.run() does this internally,
     # but here we call the orchestrator directly).
-    assert job.store is not None
-    job.store.at(*job.name).flush()
+    assert job.database is not None
+    job.database.at(*job.name).flush()
 
     records = job.nodes["node"].get_all_records()
     assert records is not None
@@ -575,7 +575,7 @@ class TestSyncOrchestratorSyncFunctionPipelineJob:
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
 
-        job = PipelineJob(name="matrix_pj", store=db)
+        job = PipelineJob(name="matrix_pj", database=db)
         with job:
             pod(_make_source(), label="node")
 

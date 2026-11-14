@@ -64,7 +64,7 @@ def _run(store_name: str, orchestrator_name: str, tmp: Path) -> None:
         [{"k": "fwd", "reverse": False}, {"k": "rev", "reverse": True}],
         tag_columns=["k"],
     )
-    job = PipelineJob(name="order", store=store)
+    job = PipelineJob(name="order", database=store)
     with job:
         frames = make.pod(source, label="make")
         first.pod(frames, label="first")
@@ -95,7 +95,7 @@ def _run_sequential(store_name: str, orchestrator_name: str, tmp: Path) -> None:
             else AsyncPipelineOrchestrator()
         )
         source = DictSource([{"k": key, "reverse": reverse}], tag_columns=["k"])
-        job = PipelineJob(name="order_seq", store=store)
+        job = PipelineJob(name="order_seq", database=store)
         with job:
             frames = make.pod(source, label="make")
             first.pod(frames, label="first")

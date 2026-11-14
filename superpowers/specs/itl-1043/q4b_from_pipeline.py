@@ -41,7 +41,7 @@ def sources(tag_null: bool) -> tuple[ArrowTableSource, ArrowTableSource]:
 for tag_null in (False, True):
     store = InMemoryArrowDatabase()
     a, b = sources(tag_null)
-    job = PipelineJob(name=NAME, store=store)
+    job = PipelineJob(name=NAME, database=store)
     with job:
         Join()(a, b, label="joined")
     node = job.nodes["joined"]
@@ -54,7 +54,7 @@ for tag_null in (False, True):
         pfile.write_text(json.dumps(json.loads(saved.read_text())["pipeline"]))
         a2, b2 = sources(tag_null)
         fp = PipelineJob.from_pipeline(
-            Pipeline.load(pfile), store=store, sources={"a": a2, "b": b2}
+            Pipeline.load(pfile), database=store, sources={"a": a2, "b": b2}
         )
         fnode = fp.nodes["joined"]
         fnode.attach_databases(

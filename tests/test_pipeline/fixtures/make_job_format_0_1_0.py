@@ -38,7 +38,7 @@ def add_values(value: int, score: int) -> int:
 
 a = src("key", "value", {"key": ["a", "b"], "value": [10, 20]})
 b = src("key", "score", {"key": ["a", "b"], "score": [100, 200]})
-job = PipelineJob(store=InMemoryArrowDatabase())
+job = PipelineJob(database=InMemoryArrowDatabase())
 with job:
     pf = PythonDataFunction(add_values, output_keys="total")
     pod = FunctionPod(data_function=pf)  # pyright: ignore[reportArgumentType] -- protocol mismatch shared with other tests

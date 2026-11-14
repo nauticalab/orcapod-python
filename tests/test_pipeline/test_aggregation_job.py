@@ -93,7 +93,7 @@ def session_source_factory():
 def _run(store, source, operator, name, function=count_paths):
     """Record and run `source -> operator -> function` as a PipelineJob."""
     pod = FunctionPod(PythonDataFunction(function, output_keys="n"))
-    job = PipelineJob(name=name, store=store)
+    job = PipelineJob(name=name, database=store)
     with job:
         pod(operator(source, label="agg"), label="counter")
     _ = job.run()
@@ -290,7 +290,7 @@ class TestStoreWrittenByV020:
         pod = FunctionPod(
             PythonDataFunction(count_paths, output_keys="n")  # pyright: ignore[reportArgumentType]  # protocol mismatch baselined elsewhere (ITL-844)
         )
-        job = PipelineJob(name="legacy", store=store)
+        job = PipelineJob(name="legacy", database=store)
         with job:
             grouped = group_by(source, label="agg")
             selected = SelectDataColumns(columns=["path"])(grouped, label="sel")
@@ -348,7 +348,7 @@ class TestMergeJoinRegression:
         )
 
         pod = FunctionPod(PythonDataFunction(count_v, output_keys="n"))
-        job = PipelineJob(name="mj", store=store)
+        job = PipelineJob(name="mj", database=store)
         with job:
             pod(MergeJoin()(left, right, label="mj"), label="counter")
         job.run()
@@ -405,7 +405,7 @@ class TestFileContentHashingThroughReduction:
     def _run(self, store, cfg_paths, *, grouped):
         _CALLS["cfg"].clear()
         source = self._source(cfg_paths)
-        job = PipelineJob(name="filehash", store=store)
+        job = PipelineJob(name="filehash", database=store)
         with job:
             if grouped:
                 pod = FunctionPod(PythonDataFunction(reduce_configs, output_keys="n"))

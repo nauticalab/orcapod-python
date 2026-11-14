@@ -128,7 +128,7 @@ class TestEqualFramesHashEqual:
             """Return the first ``n`` rows of the expected frame."""
             return expected.head(n)
 
-        job = PipelineJob(name="h", store=DeltaTableDatabase(tmp_path / "store"))
+        job = PipelineJob(name="h", database=DeltaTableDatabase(tmp_path / "store"))
         with job:
             make.pod(DictSource([{"k": "a", "n": 2}], tag_columns=["k"]), label="m")
         job.run()

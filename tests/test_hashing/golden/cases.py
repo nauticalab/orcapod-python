@@ -1289,7 +1289,7 @@ def pipeline_job() -> dict[str, Any]:
     from orcapod.operators import Join
 
     db = InMemoryArrowDatabase()
-    job = PipelineJob(name="golden_job", store=db)
+    job = PipelineJob(name="golden_job", database=db)
     with job:
         joined = Join(label="joined")(_subjects(), _scans())
         golden_adjust.pod(joined, label="adjust")
@@ -1559,7 +1559,7 @@ def pipeline_polars_filter_expr_job() -> dict[str, Any]:
     from orcapod.operators import Join
 
     db = InMemoryArrowDatabase()
-    job = PipelineJob(name="golden_filter_job", store=db)
+    job = PipelineJob(name="golden_filter_job", database=db)
     with job:
         older = _subjects().polars_filter(pl.col("age") > 3, label="older")
         joined = Join(label="joined")(older, _scans())
@@ -1693,7 +1693,7 @@ def pipeline_drop_nulls_job() -> dict[str, Any]:
     from orcapod.databases import InMemoryArrowDatabase
 
     db = InMemoryArrowDatabase()
-    job = PipelineJob(name="golden_drop_null_job", store=db)
+    job = PipelineJob(name="golden_drop_null_job", database=db)
     with job:
         present = (
             _nullable_readings()
@@ -1757,7 +1757,9 @@ def pipeline_default_source_ids() -> dict[str, Any]:
         out[f"{name}.source_id"] = source.source_id
         out[f"{name}.content_hash"] = source.content_hash().to_string()
 
-    job = PipelineJob(name="golden_default_source_ids", store=InMemoryArrowDatabase())
+    job = PipelineJob(
+        name="golden_default_source_ids", database=InMemoryArrowDatabase()
+    )
     with job:
         joined = Join(label="joined")(_subjects(), _scans())
         golden_adjust.pod(joined, label="adjust")

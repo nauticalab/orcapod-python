@@ -48,7 +48,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
     - Operator invocations → ``OperatorNode``
 
     To run a ``Pipeline``, use
-    ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` to create
+    ``PipelineJob.from_pipeline(pipeline, sources=..., database=...)`` to create
     a ``PipelineJob``.
 
     Args:
@@ -248,7 +248,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
 
         Reconstructs topology and SourceNode declarations. The loaded
         pipeline is topology-only — to run it, use
-        ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)``.
+        ``PipelineJob.from_pipeline(pipeline, sources=..., database=...)``.
 
         Args:
             path: Path to the JSON file produced by ``save()``.

@@ -166,7 +166,7 @@ def _job(store: ArrowDatabaseProtocol) -> PipelineJob:
         source_id="b",
         label="B",
     )
-    job = PipelineJob(name="itl1042", store=store)
+    job = PipelineJob(name="itl1042", database=store)
     with job:
         scaled = scale.pod(a, label="scaled")
         Join()(scaled, b, label="joined")

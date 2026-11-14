@@ -49,7 +49,7 @@ def test_failed_function_with_join_does_not_abort_pipeline():
     pf = PythonDataFunction(always_fails, output_keys="transformed")
     failing_pod = FunctionPod(pf)
 
-    job = PipelineJob(name="test_join_continue", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="test_join_continue", database=InMemoryArrowDatabase())
     with job:
         failing_out = failing_pod(src, label="failing")
         Join()(failing_out, src, label="joined")
@@ -74,7 +74,7 @@ def test_empty_buffer_schema_preserves_nullability():
     pod = FunctionPod(pf)
 
     db = InMemoryArrowDatabase()
-    job = PipelineJob(name="test_empty_schema", store=db)
+    job = PipelineJob(name="test_empty_schema", database=db)
     with job:
         pod(src, label="fn")
 

@@ -39,7 +39,7 @@ def _make_operator_stream() -> Any:
 
 
 def _make_job_node(label: str) -> Any:
-    job = PipelineJob(name="itl1067", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1067", database=InMemoryArrowDatabase())
     with job:
         doubled = double.pod(_source(), label="double")
         _ = SelectDataColumns(["y"])(doubled, label="sel")

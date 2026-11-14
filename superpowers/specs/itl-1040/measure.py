@@ -62,7 +62,7 @@ def source(n: int) -> ArrowTableSource:
 
 def run(store: Any, n: int, mode: str) -> tuple[PipelineJob, Any]:
     """Run ``times_ten`` over ``n`` rows on ``store`` (``mode`` "sync" or "async")."""
-    job = PipelineJob(name="m", store=store)
+    job = PipelineJob(name="m", database=store)
     with job:
         times_ten.pod(source(n), label="n")  # the automatic select of x drops s
     orchestrator = (
@@ -208,7 +208,7 @@ def operator_node() -> None:
             ),
         )
         store = InMemoryArrowDatabase()
-        job = PipelineJob(name="j", store=store)
+        job = PipelineJob(name="j", database=store)
         with job:
             selected = SelectDataColumns(["x"])(
                 ArrowTableSource(a, tag_columns=["k"], source_id="a")

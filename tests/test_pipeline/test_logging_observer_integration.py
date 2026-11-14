@@ -58,7 +58,7 @@ class TestSyncPipelineSuccessLogs:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_logs", store=db)
+        job = PipelineJob(name="test_logs", database=db)
         with job:
             pod(source, label="doubler")
 
@@ -91,7 +91,7 @@ class TestFailingDatasLogged:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_fail", store=db)
+        job = PipelineJob(name="test_fail", database=db)
         with job:
             pod(source, label="failing")
 
@@ -128,7 +128,7 @@ class TestFlatLogStorage:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_flat", store=db)
+        job = PipelineJob(name="test_flat", database=db)
         with job:
             pod(source, label="ident")
 
@@ -161,7 +161,7 @@ class TestQueryableTagColumns:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_tags", store=db)
+        job = PipelineJob(name="test_tags", database=db)
         with job:
             pod(source, label="ident")
 
@@ -196,7 +196,7 @@ class TestAsyncOrchestratorLogs:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_async_logs", store=db)
+        job = PipelineJob(name="test_async_logs", database=db)
         with job:
             pod(source, label="doubler")
 
@@ -228,7 +228,7 @@ class TestFailFastErrorPolicy:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_failfast", store=db)
+        job = PipelineJob(name="test_failfast", database=db)
         with job:
             pod(source, label="failing")
 
@@ -273,7 +273,7 @@ class TestMixedSuccessFailure:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_mixed", store=db)
+        job = PipelineJob(name="test_mixed", database=db)
         with job:
             pod(source, label="divider")
 
@@ -314,7 +314,7 @@ class TestMultipleFunctionNodesCombinedLogs:
         )
         pod2 = FunctionPod(pf2)
 
-        job = PipelineJob(name="test_multi", store=db)
+        job = PipelineJob(name="test_multi", database=db)
         with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
@@ -354,7 +354,7 @@ class TestGetLogsNodeSpecific:
         )
         pod2 = FunctionPod(pf2)
 
-        job = PipelineJob(name="test_filter", store=db)
+        job = PipelineJob(name="test_filter", database=db)
         with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")

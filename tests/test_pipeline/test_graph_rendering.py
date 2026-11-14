@@ -80,7 +80,7 @@ def compiled_job(pipeline_db: InMemoryArrowDatabase) -> PipelineJob:
     pf = PythonDataFunction(_add_values, output_keys="total")
     pod = FunctionPod(data_function=pf)
 
-    job = PipelineJob(name="test_render", store=pipeline_db)
+    job = PipelineJob(name="test_render", database=pipeline_db)
     with job:
         joined = Join()(src_a, src_b)
         pod(joined, label="adder")
@@ -297,7 +297,7 @@ class TestStyleRuleSets:
 
 class TestPipelineShowGraph:
     def test_show_graph_raises_before_compile(self, pipeline_db) -> None:
-        job = PipelineJob(name="uncompiled", store=pipeline_db)
+        job = PipelineJob(name="uncompiled", database=pipeline_db)
 
         with pytest.raises(RuntimeError):
             job.pipeline.show_graph(raw_output=True, show=False)

@@ -33,7 +33,7 @@ def source() -> ArrowTableSource:
 
 
 def build(store: InMemoryArrowDatabase) -> PipelineJob:
-    job = PipelineJob(name="itl1060", store=store)
+    job = PipelineJob(name="itl1060", database=store)
     with job:
         times_ten.pod(source(), label="node")
     return job

@@ -139,13 +139,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     the resolvable subgraph — nodes whose upstream SourceNodes are all bound.
 
     ``PipelineJob`` can also be created from a ``Pipeline`` via
-    ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` for the
+    ``PipelineJob.from_pipeline(pipeline, sources=..., database=...)`` for the
     "explicit blueprint" workflow.
 
     Args:
         name: Pipeline name (string or tuple). Used as the path prefix for
             all cache/pipeline paths when the pipeline is run.
-        store: Database for result caching and operator records.
+        database: Database for result caching and operator records.
         execution_context: Optional execution configuration.
         tracker_manager: Optional tracker manager override.
         auto_compile: If ``True`` (default), ``compile()`` is called
@@ -164,13 +164,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     def __init__(
         self,
         name: str | tuple[str, ...] = "pipeline",
-        store: "ArrowDatabaseProtocol | None" = None,
+        database: "ArrowDatabaseProtocol | None" = None,
         execution_context: "ExecutionContext | None" = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
         auto_compile: bool = True,
     ) -> None:
         super().__init__(name=name, tracker_manager=tracker_manager)
-        self._store = store
+        self._database = database
         self._execution_context = execution_context
         self._auto_compile = auto_compile
         # name → bound concrete source (user-facing API: job.sources).
@@ -221,7 +221,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         The lazy ``compiled_pipeline`` cache is invalidated.
 
-        If ``_store`` is set, distributes databases to all function and
+        If ``_database`` is set, distributes databases to all function and
         operator job nodes.
         """
         # Preserve any sources already bound (e.g. from a prior bind() call).
@@ -252,7 +252,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         self._compiled_pipeline = None
 
         # Wire databases if a store is already set.
-        if self._store is not None:
+        if self._database is not None:
             self._distribute_databases()
 
     # ------------------------------------------------------------------
@@ -312,9 +312,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         return dict(self._sources)
 
     @property
-    def store(self) -> "ArrowDatabaseProtocol | None":
+    def database(self) -> "ArrowDatabaseProtocol | None":
         """The database used for result caching."""
-        return self._store
+        return self._database
 
     @property
     def execution_context(self) -> "ExecutionContext | None":
@@ -329,7 +329,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     def from_pipeline(
         cls,
         pipeline: "Pipeline",
-        store: "ArrowDatabaseProtocol | None" = None,
+        database: "ArrowDatabaseProtocol | None" = None,
         sources: "dict[str, cp.StreamProtocol] | None" = None,
         execution_context: "ExecutionContext | None" = None,
     ) -> "PipelineJob":
@@ -344,7 +344,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         Args:
             pipeline: A compiled ``Pipeline`` (``pipeline._compiled`` must
                 be ``True``).
-            store: Database for result caching and operator records.
+            database: Database for result caching and operator records.
             sources: Mapping of ``SourceNode.name`` → concrete source.
             execution_context: Optional execution configuration.
 
@@ -389,13 +389,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # (data-inclusive) hash keys in _upstreams, while _sources_by_hash is
         # keyed by schema-based hashes derived from the unbound SourceJobNodes.
         job = cls.from_invocations(pipeline.to_invocations(), name=pipeline._name)
-        job._store = store
+        job._database = database  # pyright: ignore[reportAttributeAccessIssue]  # from_invocations is typed as the base class; the instance is a PipelineJob
         job._execution_context = execution_context
 
         # Bind concrete sources and distribute databases.
         if bound_sources:
             job.bind(sources=bound_sources)
-        if store is not None:
+        if database is not None:
             job._distribute_databases()
 
         return job
@@ -407,7 +407,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     def bind(
         self,
         sources: "dict[str, cp.StreamProtocol] | None" = None,
-        store: "ArrowDatabaseProtocol | None" = None,
+        database: "ArrowDatabaseProtocol | None" = None,
         execution_context: "ExecutionContext | None" = None,
     ) -> None:
         """Update bindings in place. Returns ``None``.
@@ -419,13 +419,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         its matching ``SourceJobNode`` slot schema, then the corresponding
         ``SourceJobNode.bound_source`` is updated in-place.
 
-        When *store* is provided and differs from the current store,
+        When *database* is provided and differs from the current database,
         ``_distribute_databases()`` is called so that all job nodes receive
         live DB references immediately.
 
         Args:
             sources: Mapping of ``SourceNode.name`` → concrete source.
-            store: Replaces the current store and triggers DB redistribution.
+            database: Replaces the current database and triggers DB redistribution.
             execution_context: Replaces the current execution context.
 
         Raises:
@@ -434,10 +434,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         """
         from orcapod.core.nodes.source_node import SourceNodeBase
 
-        store_changed = store is not None and store is not self._store
+        database_changed = database is not None and database is not self._database
 
-        if store is not None:
-            self._store = store
+        if database is not None:
+            self._database = database
 
         if sources is not None:
             source_names = {
@@ -469,7 +469,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         if execution_context is not None:
             self._execution_context = execution_context
 
-        if store_changed:
+        if database_changed:
             self._distribute_databases()
 
     # ------------------------------------------------------------------
@@ -480,18 +480,18 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         """Wire live DB references to all FunctionJobNode and OperatorJobNode objects.
 
         Called by ``compile()`` when a store is already set, and by ``bind()``
-        when *store* is changed.
+        when *database* is changed.
 
         Raises:
-            RuntimeError: If ``_store`` is not set.
+            RuntimeError: If ``_database`` is not set.
         """
-        if self._store is None:
+        if self._database is None:
             raise RuntimeError(
-                "Cannot distribute databases: no store is set. "
-                "Call bind(store=...) or from_pipeline(..., store=...) first."
+                "Cannot distribute databases: no database is set. "
+                "Call bind(database=...) or from_pipeline(..., database=...) first."
             )
 
-        pipeline_db = self._store.at(*self._name)
+        pipeline_db = self._database.at(*self._name)
         result_db = pipeline_db.at("_result")
 
         for node in (self._persistent_node_map or {}).values():
@@ -526,9 +526,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 source and everything downstream of it). Such a node does not
                 run, so it reports nothing itself and claims no table.
         """
-        if self._store is None:
+        if self._database is None:
             return
-        pipeline_db = self._store.at(*self._name)
+        pipeline_db = self._database.at(*self._name)
         claimed: set[tuple[str, ...]] = set()
         for node_hash, node in (self._persistent_node_map or {}).items():
             if node_hash in excluded_hashes:
@@ -806,7 +806,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         Returns:
             ``True`` if all SourceNode slots are bound and a store is set.
         """
-        return self._store is not None and not self.unbound_sources
+        return self._database is not None and not self.unbound_sources
 
     def is_runnable(self, node_label: str) -> bool:
         """Return whether a live job has all upstream inputs of *node_label* resolved.
@@ -927,7 +927,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             ``job.nodes``.
 
         Raises:
-            ValueError: If no store is set, or ``commit_every_rows`` is not a
+            ValueError: If no database is set, or ``commit_every_rows`` is not a
                 positive integer smaller than the store's ``batch_size``.
             RuntimeError: If no pipeline has been compiled, or the job was built
                 by ``PipelineJob.load`` (a loaded job is read-only).
@@ -1063,7 +1063,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # Until this run finishes, what the store holds for a node is not certain.
         self._last_run_finished = False
 
-        table_committing = as_table_committing(self._store)
+        table_committing = as_table_committing(self._database)
         if (
             table_committing is not None
             and commit_every_rows >= table_committing.batch_size
@@ -1075,12 +1075,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 "commit pipeline records before their results. Use a smaller "
                 "commit_every_rows, or create the store with a larger batch_size."
             )
-        if self._store is None:
+        if self._database is None:
             raise ValueError(
-                "PipelineJob.run() requires a store. "
-                "Call job.bind(store=db) before run(). "
+                "PipelineJob.run() requires a database. "
+                "Call job.bind(database=db) before run(). "
                 "For transient (in-memory) storage use "
-                "job.bind(store=InMemoryArrowDatabase())."
+                "job.bind(database=InMemoryArrowDatabase())."
             )
 
         # Reject loaded read-only stubs: nodes created by load() have no live
@@ -1160,7 +1160,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         snapshot_hash = hashlib.sha256("\n".join(leaf_hashes).encode()).hexdigest()[:16]
         pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
 
-        pipeline_db = self._store.at(*self._name)
+        pipeline_db = self._database.at(*self._name)
         result_db = pipeline_db.at("_result")
 
         # A store that commits a table by itself at batch_size: commit what it already
@@ -1265,10 +1265,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
     def __repr__(self) -> str:
         n_sources = len(self._sources)
-        has_store = self._store is not None
+        has_database = self._database is not None
         is_compiled = self._compiled
         return (
-            f"PipelineJob(sources={n_sources}, store={has_store}, "
+            f"PipelineJob(sources={n_sources}, database={has_database}, "
             f"compiled={is_compiled})"
         )
 
@@ -1325,10 +1325,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             else:
                 sources_block[spec_name] = {"source_type": "unknown"}
 
-        # Store config (best-effort)
-        store_block = None
-        if self._store is not None and hasattr(self._store, "to_config"):
-            store_block = self._store.to_config()
+        # Database config (best-effort)
+        database_block = None
+        if self._database is not None and hasattr(self._database, "to_config"):
+            database_block = self._database.to_config()
 
         if not self._has_run:
             status = "pending"
@@ -1380,7 +1380,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             "pipeline": pipeline_data,
             "bindings": {
                 "sources": sources_block,
-                "store": store_block,
+                "database": database_block,
             },
         }
 
@@ -1391,7 +1391,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     def load(
         cls,
         path: "str | Path",
-        store: "ArrowDatabaseProtocol | None" = None,
+        database: "ArrowDatabaseProtocol | None" = None,
     ) -> "PipelineJob":
         """Deserialize a ``PipelineJob`` from a JSON file to read its stored results.
 
@@ -1411,14 +1411,18 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         Args:
             path: Path to the JSON file produced by ``save()``.
-            store: Optional store override. When provided, takes precedence
-                over any store configuration in the file.
+            database: Optional database override. When provided, takes precedence
+                over any database configuration in the file.
 
         Returns:
             A read-only ``PipelineJob`` whose nodes serve their stored results.
 
         Raises:
-            ValueError: If the file's format version is unsupported.
+            ValueError: If the file's format version is unsupported, or if it was
+                saved before the database key was renamed (``bindings.store``
+                instead of ``bindings.database``) and no ``database`` is given.
+                An explicit ``database`` makes the saved block irrelevant, so
+                such a file then loads.
         """
         import json as _json
         import os
@@ -1487,22 +1491,33 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     spec_name,
                 )
 
-        # Reconstruct store
-        effective_store = store
-        if effective_store is None:
-            store_config = data.get("bindings", {}).get("store")
+        # Reconstruct database
+        effective_database = database
+        if effective_database is None:
+            bindings = data.get("bindings", {})
+            if bindings.get("store") and "database" not in bindings:
+                # A file saved before ITL-1082 renamed the key. It is not read under
+                # the old name: the job would load without its database, silently.
+                raise ValueError(
+                    f"{path} names its database under the key 'bindings.store', "
+                    "which was renamed 'bindings.database' (ITL-1082); the file was "
+                    "saved before the rename. Load it with an explicit database: "
+                    "PipelineJob.load(path, database=...), or rewrite the key as "
+                    "'bindings.database' and save it again."
+                )
+            store_config = bindings.get("database")
             if store_config:
                 try:
                     from orcapod.pipeline.serialization import (
                         resolve_database_from_config,
                     )
 
-                    effective_store = resolve_database_from_config(store_config)
+                    effective_database = resolve_database_from_config(store_config)
                 except Exception as exc:
                     logger.warning(
-                        "Could not reconstruct the store from its saved config: %s. "
-                        "Node results cannot be read until a store is given: "
-                        "PipelineJob.load(path, store=...) or job.bind(store=...).",
+                        "Could not reconstruct the database from its saved config: %s. "
+                        "Node results cannot be read until a database is given: "
+                        "PipelineJob.load(path, database=...) or job.bind(database=...).",
                         exc,
                     )
 
@@ -1511,7 +1526,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # that cannot compute content hashes, so the to_invocations() → from_invocations()
         # path used by from_pipeline() would fail.  Instead, attach the loaded
         # pipeline directly as the compiled blueprint and set up source bindings.
-        job = cls(name=pipeline._name, store=effective_store)
+        job = cls(name=pipeline._name, database=effective_database)
         job._loaded = True
         job._compiled_pipeline = pipeline
         # Mark compiled so save() / compiled_pipeline can be accessed.
@@ -1635,7 +1650,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 job_dag.add_edge(u_node, v_node)
         job._node_graph = job_dag
 
-        if effective_store is not None:
+        if effective_database is not None:
             job._distribute_databases()
 
         # Restore run metadata (run_block was already parsed earlier in this method)

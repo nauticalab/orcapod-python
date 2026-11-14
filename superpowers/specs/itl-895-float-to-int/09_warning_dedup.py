@@ -54,7 +54,7 @@ def run(scenario: str, always: bool) -> None:
         for _ in range(2 if scenario == "standalone-twice" else 1):
             stored = near_miss.pod(source).as_table().num_rows
     else:
-        job = PipelineJob(name="dedup", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="dedup", database=InMemoryArrowDatabase())
         with job:
             near_miss.pod(source, label="near_miss")
         orchestrator = (

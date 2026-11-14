@@ -42,7 +42,7 @@ POD_CASES = [make_uuids, make_strs, make_uuid]
 
 
 def _build(store: Path, pod: Any, n: int) -> PipelineJob:
-    job = PipelineJob(name="j", store=DeltaTableDatabase(base_path=store))
+    job = PipelineJob(name="j", database=DeltaTableDatabase(base_path=store))
     with job:
         src = op.sources.DictSource(
             [{"id": i, "x": i} for i in range(n)], tag_columns=["id"], source_id="s"

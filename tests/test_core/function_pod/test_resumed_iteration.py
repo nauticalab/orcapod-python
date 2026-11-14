@@ -169,7 +169,7 @@ def test_a_job_node_read_partially_then_in_full_has_every_row(
     from orcapod import PipelineJob
     from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 
-    job = PipelineJob(name="itl1039", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1039", database=InMemoryArrowDatabase())
     with job:
         new_pod()(source(), label="node")
     job.run(

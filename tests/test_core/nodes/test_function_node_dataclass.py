@@ -41,7 +41,7 @@ def take_sum(a: int, b: int) -> _SumResult:
 def test_as_df_dataclass_column_populated():
     """FunctionNode with a dataclass return type produces a correct Polars DataFrame."""
     store = InMemoryArrowDatabase()
-    job = PipelineJob(store=store)
+    job = PipelineJob(database=store)
     source = DictSource([{"id": 0, "a": 5, "b": 3}], tag_columns=["id"])
 
     with job:
@@ -66,7 +66,7 @@ def test_as_df_dataclass_column_populated():
 
 def test_as_df_dataclass_column_empty_node():
     """Unrun FunctionNode returns a zero-row DataFrame with the dataclass column present."""
-    job = PipelineJob(store=InMemoryArrowDatabase())
+    job = PipelineJob(database=InMemoryArrowDatabase())
     source = DictSource([{"id": 0, "a": 5, "b": 3}], tag_columns=["id"])
 
     with job:
@@ -85,7 +85,7 @@ def test_as_df_empty_schema_matches_nonempty_schema():
     """Empty and populated as_df() for the same node type share identical schemas."""
     # Populated node
     source_full = DictSource([{"id": 0, "a": 5, "b": 3}], tag_columns=["id"])
-    job_full = PipelineJob(store=InMemoryArrowDatabase())
+    job_full = PipelineJob(database=InMemoryArrowDatabase())
     with job_full:
         take_sum.pod(source_full)
     job_full.run()
@@ -93,7 +93,7 @@ def test_as_df_empty_schema_matches_nonempty_schema():
 
     # Unrun node — same pod, fresh job
     source_empty = DictSource([{"id": 0, "a": 5, "b": 3}], tag_columns=["id"])
-    job_empty = PipelineJob(store=InMemoryArrowDatabase())
+    job_empty = PipelineJob(database=InMemoryArrowDatabase())
     with job_empty:
         take_sum.pod(source_empty)
     empty_df = job_empty.nodes["take_sum"].as_df()

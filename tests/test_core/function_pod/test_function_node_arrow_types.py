@@ -131,7 +131,7 @@ def _run(job: PipelineJob, mode: str) -> None:
 
 def _build(store, table: pa.Table, *, chained: bool = False) -> PipelineJob:
     """A job: source -> ``double`` (-> ``increment`` when chained)."""
-    with PipelineJob(name="types", store=store) as job:
+    with PipelineJob(name="types", database=store) as job:
         src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
         out = double.pod(src, label="double")
         if chained:

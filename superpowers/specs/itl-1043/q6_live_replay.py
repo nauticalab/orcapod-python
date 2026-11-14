@@ -29,7 +29,7 @@ def src(col: str, ids: list[int], sid: str) -> ArrowTableSource:
 
 
 def job(store, a_ids: list[int], mode: CacheMode) -> PipelineJob:
-    j = PipelineJob(name="q6", store=store)
+    j = PipelineJob(name="q6", database=store)
     with j:
         Join()(src("a", a_ids, f"a{a_ids}"), src("b", [0, 1], "b"), label="joined")
     j.nodes["joined"].attach_databases(

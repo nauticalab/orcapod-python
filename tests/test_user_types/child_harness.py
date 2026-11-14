@@ -151,7 +151,7 @@ def run_job(point_cls, pod_and_calls=None, rows=None):
     data = [{"k": f"r{i}", "p": point_cls(**row)} for i, row in enumerate(rows, 1)]
     before = len(calls)
     db_root = os.environ["WS_DB"]
-    job = PipelineJob(name="ws", store=DeltaTableDatabase(Path(db_root)))
+    job = PipelineJob(name="ws", database=DeltaTableDatabase(Path(db_root)))
     with job:
         pod.pod(DictSource(data=data, tag_columns=["k"], source_id="s"), label="shift")
     job.run()

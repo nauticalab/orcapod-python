@@ -123,7 +123,7 @@ def _run(
     source = DictSource(
         [{"k": key, "reverse": reverse} for key, reverse in rows], tag_columns=["k"]
     )
-    job = PipelineJob(name="pandas_order", store=store)
+    job = PipelineJob(name="pandas_order", database=store)
     with job:
         frames = make_frame.pod(source, label="make")
         leading_names.pod(frames, label="leading")
@@ -188,7 +188,7 @@ class TestPandasColumnOrder:
         got: dict[str, str] = {}
         for key, reverse in (("first", False), ("equal", False), ("reordered", True)):
             source = DictSource([{"k": key, "reverse": reverse}], tag_columns=["k"])
-            job = PipelineJob(name="pandas_order_counted", store=store)
+            job = PipelineJob(name="pandas_order_counted", database=store)
             with job:
                 frames = make_frame.pod(source, label="make")
                 counted_leading_names.pod(frames, label="leading")
@@ -216,7 +216,7 @@ class TestPandasColumnOrder:
             ("levels", "levels"),
         ):
             source = DictSource([{"k": key, "variant": variant}], tag_columns=["k"])
-            job = PipelineJob(name="pandas_order_variants", store=store)
+            job = PipelineJob(name="pandas_order_variants", database=store)
             with job:
                 frames = make_variant_frame.pod(source, label="make")
                 counted_variant_leading_names.pod(frames, label="leading")
@@ -251,7 +251,7 @@ class TestPandasColumnOrder:
         totals: list[int] = []
         for _ in range(2):
             source = DictSource([{"k": "a", "n": 3}], tag_columns=["k"])
-            job = PipelineJob(name="pandas_storage_form", store=store)
+            job = PipelineJob(name="pandas_storage_form", database=store)
             with job:
                 frames = make_frame_storage_changes.pod(source, label="make")
                 counted_total.pod(frames, label="total")

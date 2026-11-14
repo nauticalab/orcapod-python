@@ -80,7 +80,7 @@ def _fresh_load(
         "from orcapod import PipelineJob\n"
         "from orcapod.databases import DeltaTableDatabase\n"
         "from orcapod.sources import SpiralDBTableSource\n"
-        f"job = PipelineJob.load({str(job_path)!r}, store=DeltaTableDatabase({str(store)!r}))\n"
+        f"job = PipelineJob.load({str(job_path)!r}, database=DeltaTableDatabase({str(store)!r}))\n"
         "records = job.nodes['double'].get_all_records()\n"
         f"s = SpiralDBTableSource({project!r}, {table!r}, dataset={dataset!r})\n"
         "print(json.dumps({'rows': None if records is None else records.num_rows,\n"
@@ -114,7 +114,7 @@ def _workshop_path(
             calls.append(1)
             return 2 * x
 
-        job = PipelineJob(name="itl936", store=DeltaTableDatabase(store))
+        job = PipelineJob(name="itl936", database=DeltaTableDatabase(store))
         with job:
             joined = Join()(
                 SpiralDBTableSource(project, first, dataset=dataset),

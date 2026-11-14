@@ -585,7 +585,7 @@ def _make_probe_db(path: Path) -> str:
 
 def _probe_job(db_path: str, name: str = "probes") -> PipelineJob:
     """Return a job that copies the ``name`` key into data and measures its length."""
-    job = PipelineJob(name=name, store=InMemoryArrowDatabase())
+    job = PipelineJob(name=name, database=InMemoryArrowDatabase())
     with job:
         derived = DerivedSource(
             SQLiteTableSource(db_path, "probe"), tags_as_data={"name": "name_copy"}
@@ -606,7 +606,7 @@ class TestPipelineJob:
 
     def test_origin_and_derived_source_in_one_job(self, tmp_path):
         db_path = _make_probe_db(tmp_path / "edi.db")
-        job = PipelineJob(name="both", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="both", database=InMemoryArrowDatabase())
         with job:
             probe = SQLiteTableSource(db_path, "probe")
             derived = DerivedSource(probe, tags_as_data={"name": "name_copy"})
@@ -627,7 +627,7 @@ class TestPipelineJob:
         path = tmp_path / "job.json"
         job.save(path)
 
-        loaded = PipelineJob.load(path, store=InMemoryArrowDatabase())
+        loaded = PipelineJob.load(path, database=InMemoryArrowDatabase())
         assert loaded.unbound_sources == []
         reloaded = loaded.sources[source_name]
         assert isinstance(reloaded, DerivedSource)
@@ -656,7 +656,7 @@ class TestPipelineJob:
         assert rebuilt.as_table(all_info=True).equals(derived.as_table(all_info=True))
 
     def test_not_reloadable_when_the_origin_is_not(self, tmp_path):
-        job = PipelineJob(name="memory", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="memory", database=InMemoryArrowDatabase())
         with job:
             derived = DerivedSource(_experiment(), tags_as_data=COPY)
             onset_s.pod(
@@ -668,7 +668,7 @@ class TestPipelineJob:
         job.run()
         path = tmp_path / "job.json"
         job.save(path)
-        loaded = PipelineJob.load(path, store=InMemoryArrowDatabase())
+        loaded = PipelineJob.load(path, database=InMemoryArrowDatabase())
         assert loaded.unbound_sources == [derived.source_id]
 
 
@@ -705,7 +705,7 @@ def task_upper(task_id: str) -> str:
 
 def _upper_job() -> PipelineJob:
     """Return a job with one function node, ``upper``, over the ``experiment`` table."""
-    job = PipelineJob(name="stage1", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="stage1", database=InMemoryArrowDatabase())
     with job:
         task_upper.pod(_experiment().select_data_columns(["task_id"]), label="upper")
     return job
@@ -755,7 +755,7 @@ class TestNodeOrigin:
     def test_feeds_a_second_job(self):
         job = _upper_job()
         job.run()
-        stage2 = PipelineJob(name="stage2", store=InMemoryArrowDatabase())
+        stage2 = PipelineJob(name="stage2", database=InMemoryArrowDatabase())
         with stage2:
             derived = job.nodes["upper"].as_source(tags_as_data=COPY)
             Join()(

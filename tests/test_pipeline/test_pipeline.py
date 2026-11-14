@@ -127,7 +127,7 @@ class TestPipelineSourceSpecEnforcement:
 
         db = InMemoryArrowDatabase()
         job = PipelineJob.from_pipeline(
-            pipeline, sources={"a": src_a, "b": src_b}, store=db
+            pipeline, sources={"a": src_a, "b": src_b}, database=db
         )
 
         assert isinstance(job, PipelineJob)
@@ -135,7 +135,7 @@ class TestPipelineSourceSpecEnforcement:
         # original object, but it must be a fully compiled Pipeline.
         assert job.compiled_pipeline is not None
         assert job.compiled_pipeline._compiled
-        assert job.store is db
+        assert job.database is db
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +146,7 @@ class TestPipelineSourceSpecEnforcement:
 class TestCompileSourceWrapping:
     def test_compile_wraps_leaf_streams_as_persistent_source_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b)
 
@@ -167,7 +167,7 @@ class TestCompileFunctionNode:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -180,7 +180,7 @@ class TestCompileFunctionNode:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -198,7 +198,7 @@ class TestCompileFunctionNode:
 class TestCompileOperatorNode:
     def test_compile_creates_persistent_operator_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         assert "joiner" in job.pipeline.nodes
@@ -207,7 +207,7 @@ class TestCompileOperatorNode:
 
     def test_operator_node_pipeline_path_prefix(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         node = job.pipeline.nodes["joiner"]
@@ -226,7 +226,7 @@ class TestCompileMutatesNodes:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -240,7 +240,7 @@ class TestCompileMutatesNodes:
     def test_exec_operator_nodes_have_pipeline_database_after_run(self, pipeline_db):
         """After run(), exec OperatorNodes have pipeline_database attached."""
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         _ = job.run()
@@ -261,7 +261,7 @@ class TestFunctionDatabaseHandling:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(name="my_pipe", store=pipeline_db)
+        job = PipelineJob(name="my_pipe", database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -286,7 +286,7 @@ class TestFunctionDatabaseHandling:
 class TestLabelAccess:
     def test_node_access_by_label(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="my_join")
 
@@ -304,7 +304,7 @@ class TestLabelAccess:
         pod1 = FunctionPod(data_function=pf1)
         pod2 = FunctionPod(data_function=pf2)
 
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             pod1(src_a, label="compute")
             pod2(src_b, label="compute")
@@ -325,7 +325,7 @@ class TestLabelAccess:
         assert hash_1 != hash_2
 
     def test_getattr_raises_for_unknown(self, pipeline_db):
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             pass  # empty pipeline
 
@@ -334,7 +334,7 @@ class TestLabelAccess:
 
     def test_dir_includes_node_labels(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="my_join")
 
@@ -350,7 +350,7 @@ class TestLabelAccess:
 class TestAutoCompileAndRun:
     def test_auto_compile_on_exit(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
 
@@ -363,7 +363,7 @@ class TestAutoCompileAndRun:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
 
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -382,7 +382,7 @@ class TestAutoCompileAndRun:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
 
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
@@ -408,7 +408,7 @@ class TestEndToEnd:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
@@ -440,7 +440,7 @@ class TestHashChainDetaching:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -455,7 +455,7 @@ class TestHashChainDetaching:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -469,7 +469,7 @@ class TestHashChainDetaching:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -497,7 +497,7 @@ class TestHashGraph:
     def test_graph_has_edges_after_compile(self, pipeline_db):
         """After a with block + compile, graph contains the right edges."""
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         pipeline = job.pipeline
@@ -512,13 +512,13 @@ class TestHashGraph:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
         # Build single-node pipeline
-        job1 = PipelineJob(store=pipeline_db)
+        job1 = PipelineJob(database=pipeline_db)
         with job1:
             Join()(src_a, src_b, label="joiner")
         edges_single = set(job1.pipeline.graph.edges)
         # Build two-node pipeline
         src_a2, src_b2 = _make_two_sources()
-        job2 = PipelineJob(store=InMemoryArrowDatabase())
+        job2 = PipelineJob(database=InMemoryArrowDatabase())
         with job2:
             joined = Join()(src_a2, src_b2, label="joiner")
             pod(joined, label="adder")
@@ -528,7 +528,7 @@ class TestHashGraph:
     def test_graph_node_type_source(self, pipeline_db):
         """Source nodes have node_type='source' after compile."""
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         pipeline = job.pipeline
@@ -541,7 +541,7 @@ class TestHashGraph:
     def test_graph_node_type_operator(self, pipeline_db):
         """Operator nodes have node_type='operator' after compile."""
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         pipeline = job.pipeline
@@ -553,7 +553,7 @@ class TestHashGraph:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -564,7 +564,7 @@ class TestHashGraph:
     def test_graph_label_attribute(self, pipeline_db):
         """Labeled nodes carry their label in graph node attributes after compile."""
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="my_join")
         pipeline = job.pipeline
@@ -574,7 +574,7 @@ class TestHashGraph:
     def test_graph_pipeline_hash_attribute(self, pipeline_db):
         """Compiled nodes have pipeline_hash attribute set in the graph."""
         src_a, src_b = _make_two_sources()
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
         pipeline = job.pipeline
@@ -598,7 +598,7 @@ class TestCompileDoesNotTriggerExecution:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -619,7 +619,7 @@ class TestSourceNodesInPipeline:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -643,7 +643,7 @@ class TestSourceNodesInPipeline:
         )
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             pod(src, label="doubler")
         assert "my_source" in job.pipeline.nodes
@@ -654,7 +654,7 @@ class TestSourceNodesInPipeline:
         src_a, _ = _make_two_sources()
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             pod(src_a, label="doubler")
         source_nodes = [
@@ -671,7 +671,7 @@ class TestSourceNodeNoCaching:
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
@@ -694,7 +694,7 @@ class TestSourceNodeNoCaching:
         cached_b = CachedSource(src_b, cache_database=source_db)
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-        job = PipelineJob(store=pipeline_db)
+        job = PipelineJob(database=pipeline_db)
         with job:
             joined = Join()(cached_a, cached_b)
             pod(joined, label="adder")
@@ -712,7 +712,7 @@ class TestSourceNodeNoCaching:
 def test_run_with_override_observer_does_not_raise():
     src_a, src_b = _make_two_sources()
     db = InMemoryArrowDatabase()
-    job = PipelineJob(store=db)
+    job = PipelineJob(database=db)
     with job:
         Join()(src_a, src_b, label="joiner")
     # Passing an explicit observer must not raise

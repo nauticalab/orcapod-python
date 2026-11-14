@@ -74,7 +74,7 @@ attempt(
 )  # pyright: ignore[reportArgumentType]
 
 db = InMemoryArrowDatabase()
-job = PipelineJob(name="stage1", store=db)
+job = PipelineJob(name="stage1", database=db)
 with job:
     e = fx.src(fx.experiment_table(), fx.KEYS_EXPERIMENT, "experiment")
     task_upper.pod(e.select_data_columns(["task_id"]), label="upper")
@@ -125,7 +125,7 @@ def length(task_upper: str) -> int:
 
 print("\n=== 6. a DerivedSource inside a second PipelineJob")
 for name, orch in (("sync", None), ("async", AsyncPipelineOrchestrator())):
-    job2 = PipelineJob(name=f"stage2_{name}", store=InMemoryArrowDatabase())
+    job2 = PipelineJob(name=f"stage2_{name}", database=InMemoryArrowDatabase())
     with job2:
         length.pod(node.as_source(), label="len")
     attempt(f"{name} run", lambda job=job2, o=orch: job.run(orchestrator=o) and None)
@@ -142,7 +142,7 @@ with tempfile.TemporaryDirectory() as tmp:
 print("\n=== 7. downstream of today's DerivedSource (it carries no system tags)")
 store = InMemoryArrowDatabase()
 for attempt_no in (1, 2):
-    job3 = PipelineJob(name="stage2_records", store=store)
+    job3 = PipelineJob(name="stage2_records", database=store)
     with job3:
         length.pod(node.as_source(), label="len")
     job3.run()

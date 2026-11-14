@@ -30,7 +30,7 @@ def _make_job() -> PipelineJob:
         }
     )
     source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
-    job = PipelineJob(name="test_job", store=db)
+    job = PipelineJob(name="test_job", database=db)
     with job:
         out1 = pod1(source)
         pod2(out1)
@@ -91,6 +91,6 @@ class TestApplyNodeConfig:
     def test_apply_before_compilation_raises(self):
         """apply_node_config raises RuntimeError if the job is not compiled yet."""
         db = InMemoryArrowDatabase()
-        job = PipelineJob(name="uncompiled_job", store=db)
+        job = PipelineJob(name="uncompiled_job", database=db)
         with pytest.raises(RuntimeError, match="No compiled pipeline"):
             job.apply_node_config(NodeConfig(is_result_ephemeral=True))

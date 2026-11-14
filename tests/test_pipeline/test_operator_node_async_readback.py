@@ -177,7 +177,7 @@ def _run_job(
 ) -> PipelineJob:
     """Build ``case`` in a new job on a fresh store and run it on ``orchestrator``."""
     job = PipelineJob(
-        name="itl896", store=_make_store(store_kind, tmp_path / orchestrator)
+        name="itl896", database=_make_store(store_kind, tmp_path / orchestrator)
     )
     with job:
         _ = case.build(_source_a(), _source_b(), _source_c())
@@ -626,7 +626,7 @@ def test_operator_node_reads_back_only_the_latest_run(
     expected_ids: list[int],
 ) -> None:
     """A second run replaces the node's rows, even when it produces none."""
-    job = PipelineJob(name="itl896_rerun", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl896_rerun", database=InMemoryArrowDatabase())
     with job:
         _ = PolarsFilter(constraints={"grp": "g1"})(
             _rerun_source([1, 2], ["g1", "g1"]), label="op"

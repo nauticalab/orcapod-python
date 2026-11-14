@@ -116,7 +116,7 @@ def test_head_and_iter_data_show_the_current_rows_after_the_reset() -> None:
 def test_job_node_stale_between_two_calls_keeps_rows_and_hashes_aligned() -> None:
     from orcapod import PipelineJob
 
-    job = PipelineJob(name="itl1045", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl1045", database=InMemoryArrowDatabase())
     with job:
         plus_one.pod(stamp.pod(source(), label="st"), label="n")
     _ = job.run()

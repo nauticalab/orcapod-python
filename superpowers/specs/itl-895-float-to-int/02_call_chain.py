@@ -104,7 +104,7 @@ print(f"  as_table: y={t['y'].to_pylist()} type={t.schema.field('y').type}")
 
 # --- E. FunctionNode in a PipelineJob -----------------------------------------------
 def run_job(store, orchestrator=None, fn=f_sync) -> None:
-    job = PipelineJob(name="itl895", store=store)
+    job = PipelineJob(name="itl895", database=store)
     with job:
         fn.pod(make_src(), label="f")
     job.run(orchestrator=orchestrator)

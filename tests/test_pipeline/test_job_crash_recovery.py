@@ -112,7 +112,7 @@ JOB_SCRIPT = textwrap.dedent(
 
 
     store = CrashOnFlush(DeltaTableDatabase(store_path), {"n": 0})
-    job = PipelineJob(name="crash", store=store)
+    job = PipelineJob(name="crash", database=store)
     with job:
         source = DictSource(
             data=[{"k": i, "x": i} for i in range(%d)],

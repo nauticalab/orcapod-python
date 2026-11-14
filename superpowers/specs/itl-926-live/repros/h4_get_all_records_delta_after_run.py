@@ -37,7 +37,7 @@ for make_store in (
 ):
     for source_id in ("s", None):
         store = make_store()
-        job = PipelineJob(name="h4", store=store)
+        job = PipelineJob(name="h4", database=store)
         with job:
             double.pod(
                 ArrowTableSource(data, tag_columns=["k"], source_id=source_id),

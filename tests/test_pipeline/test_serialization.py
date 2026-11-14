@@ -195,7 +195,7 @@ class TestPipelineBlueprintLoad:
         )
         store = InMemoryArrowDatabase()
         job = PipelineJob.from_pipeline(
-            loaded, sources={"source_a": src_a, "source_b": src_b}, store=store
+            loaded, sources={"source_a": src_a, "source_b": src_b}, database=store
         )
         _ = job.run()
         assert job._has_run is True

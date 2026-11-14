@@ -60,7 +60,7 @@ with fake_pyspiral.install(work / "spiral"):
     for project in ("edi-sample-a", "edi-sample-b"):
         calls.clear()
         source = SpiralDBTableSource(project, "subject")
-        job = PipelineJob(name="workshop", store=DeltaTableDatabase(work / "store"))
+        job = PipelineJob(name="workshop", database=DeltaTableDatabase(work / "store"))
         with job:
             to_kg.pod(source, label="kg")
         job.run()
@@ -70,7 +70,7 @@ with fake_pyspiral.install(work / "spiral"):
         )
         print("   as_table:", job.nodes["kg"].as_table().to_pylist())
 
-    later = PipelineJob(name="workshop", store=DeltaTableDatabase(work / "store"))
+    later = PipelineJob(name="workshop", database=DeltaTableDatabase(work / "store"))
     with later:
         to_kg.pod(SpiralDBTableSource("edi-sample-b", "subject"), label="kg")
     records = later.nodes["kg"].get_all_records()

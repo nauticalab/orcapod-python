@@ -116,7 +116,7 @@ def test_pipeline_store_reads_match_default_reader_for_logical_types(
 
     store_dir = tmp_path / "store"
     db = DeltaTableDatabase(store_dir)
-    job = PipelineJob(store=db)
+    job = PipelineJob(database=db)
     with job:
         same_path.pod(paths, label="same_path")
         measure.pod(numbers, label="measure")

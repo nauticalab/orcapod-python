@@ -385,7 +385,7 @@ def test_stored_tables_of_a_logical_type_pod_carry_the_identifier(
     paths = DictSource(
         [{"id": 0, "p": pathlib.Path("/a")}], tag_columns=["id"], source_id="paths"
     )
-    job = PipelineJob(name="job", store=DeltaTableDatabase(tmp_path))
+    job = PipelineJob(name="job", database=DeltaTableDatabase(tmp_path))
     with job:
         shift.pod(paths, label="shift")
     job.run()

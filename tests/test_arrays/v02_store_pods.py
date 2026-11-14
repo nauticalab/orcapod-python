@@ -66,7 +66,7 @@ def build_job(store_root: Path) -> Any:
         tag_columns=["k"],
         source_id="mixed",
     )
-    job = PipelineJob(name="v02", store=DeltaTableDatabase(base_path=store_root))
+    job = PipelineJob(name="v02", database=DeltaTableDatabase(base_path=store_root))
     with job:
         total.pod(double.pod(arrays, label="double"), label="total")
         direct_sum.pod(arrays, label="direct_sum")

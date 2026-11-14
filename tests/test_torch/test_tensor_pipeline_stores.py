@@ -84,7 +84,7 @@ def _build(store: Any) -> PipelineJob:
         tag_columns=["k", "g"],
         source_id="every",
     )
-    job = PipelineJob(name="tensors", store=store)
+    job = PipelineJob(name="tensors", database=store)
     with job:
         identity.pod(every, label="identity_all")
         y = identity.pod(numeric, label="identity_numeric")
@@ -98,7 +98,7 @@ def _build(store: Any) -> PipelineJob:
 def _build_list_output(store: Any) -> PipelineJob:
     """Build a job whose pod returns ``list[torch.Tensor]`` on ``store``."""
     numeric, shifted = _numeric_sources()
-    job = PipelineJob(name="tensor_lists", store=store)
+    job = PipelineJob(name="tensor_lists", database=store)
     with job:
         pair.pod(MergeJoin()(numeric, shifted, label="merge_join"), label="pair")
     return job

@@ -88,7 +88,7 @@ def _run(
     """Run the job with the join stored (``LOG``)."""
     _, data_nullable = NULLABILITY[nullability]
     sources = _sources(nullability)
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         left: Any = sources["src_a"]
         if with_function:
@@ -120,7 +120,7 @@ def _save(
 
 def _load_replaying(saved: pathlib.Path, store: ArrowDatabaseProtocol) -> PipelineJob:
     """Load the job and attach its operator node in ``REPLAY`` mode."""
-    loaded = PipelineJob.load(str(saved), store=store)
+    loaded = PipelineJob.load(str(saved), database=store)
     loaded.nodes["joined"].attach_databases(
         pipeline_database=store.at(JOB_NAME), cache_mode=CacheMode.REPLAY
     )
@@ -158,7 +158,7 @@ def test_every_node_keeps_its_identity_and_schema_through_save_and_load(
     """Pipeline hash, content hash, table path and output schema are the run's."""
     store = _store(store_kind, tmp_path)
     job = _run(store, nullability)
-    loaded = PipelineJob.load(str(_save(job, tmp_path)), store=store)
+    loaded = PipelineJob.load(str(_save(job, tmp_path)), database=store)
     # In-memory sources are not saved: a source node's content hash is its bound
     # source's, so bind the same sources before comparing.
     loaded.bind(sources=_sources(nullability))
@@ -207,7 +207,7 @@ def test_a_pipeline_loaded_and_bound_to_its_sources_reuses_the_operator_cache(
     def rebuilt(cache_mode: CacheMode) -> PipelineJob:
         """The saved pipeline bound to the same sources, its join in ``cache_mode``."""
         again = PipelineJob.from_pipeline(
-            Pipeline.load(saved), store=store, sources=_sources(nullability)
+            Pipeline.load(saved), database=store, sources=_sources(nullability)
         )
         again.nodes["joined"].attach_databases(
             pipeline_database=store.at(JOB_NAME), cache_mode=cache_mode
@@ -305,7 +305,7 @@ def test_without_the_run_content_hash_head_says_why_it_shows_no_rows(
 
 def _live_replaying(store: ArrowDatabaseProtocol, job: PipelineJob) -> Any:
     """The join of ``job``'s definition rebuilt from code, in REPLAY over ``store``."""
-    rebuilt = PipelineJob.from_pipeline(job.pipeline, store=store)
+    rebuilt = PipelineJob.from_pipeline(job.pipeline, database=store)
     rebuilt.bind(sources=job.sources)
     node = rebuilt.nodes["joined"]
     node.attach_databases(
@@ -338,7 +338,7 @@ def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
     saved = _save(job, tmp_path)
     # Another store whose table at the same path holds another run's rows.
     other_store = InMemoryArrowDatabase()
-    other = PipelineJob(name=JOB_NAME, store=other_store)
+    other = PipelineJob(name=JOB_NAME, database=other_store)
     with other:
         other_a = ArrowTableSource(
             pa.table(
@@ -395,7 +395,7 @@ def _run_empty_join(store: ArrowDatabaseProtocol) -> PipelineJob:
         table = pa.table({"id": ids, column: [1] * len(ids)}, schema=schema)
         return ArrowTableSource(table, tag_columns=["id"], source_id=source_id)
 
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         _ = Join()(
             source("a", [0, 1], "src_a"),
@@ -468,7 +468,7 @@ def test_saving_a_loaded_job_again_keeps_what_its_file_recorded(
     store = InMemoryArrowDatabase()
     saved = _save(_run(store, nullability), tmp_path)
     resaved = tmp_path / "resaved.json"
-    PipelineJob.load(str(saved), store=store).save(resaved)
+    PipelineJob.load(str(saved), database=store).save(resaved)
     assert _recorded_fields(resaved) == _recorded_fields(saved)
 
 
@@ -485,7 +485,7 @@ def test_saving_a_lossy_loaded_job_again_records_nothing_it_does_not_know(
 
     saved = _save(_run(store, "nullable_tag"), tmp_path, drop_both)
     resaved = tmp_path / "resaved.json"
-    PipelineJob.load(str(saved), store=store).save(resaved)
+    PipelineJob.load(str(saved), database=store).save(resaved)
     assert all(value is None for value in _recorded_fields(resaved).values())
 
 
@@ -537,7 +537,7 @@ def _store_the_fixture_join(store: ArrowDatabaseProtocol) -> Any:
         )
 
     name = json.loads(FORMAT_0_1_0.read_text())["pipeline"]["pipeline"]["name"]
-    job = PipelineJob(name=tuple(name), store=store)
+    job = PipelineJob(name=tuple(name), database=store)
     with job:
         joined = Join()(source("value", [10, 20]), source("score", [100, 200]))
         function = PythonDataFunction(_add_values, output_keys="total")
@@ -559,7 +559,7 @@ def test_a_format_0_1_0_file_finds_its_join_table_and_never_shows_its_rows_as_no
     """The real 0.1.0 file: the run's path, ``head()`` says why, ``as_table()`` raises."""
     store = InMemoryArrowDatabase()
     run_join = _store_the_fixture_join(store)
-    loaded = PipelineJob.load(str(FORMAT_0_1_0), store=store)
+    loaded = PipelineJob.load(str(FORMAT_0_1_0), database=store)
     node = loaded.nodes["Join"]
     name = json.loads(FORMAT_0_1_0.read_text())["pipeline"]["pipeline"]["name"]
     node.attach_databases(
@@ -626,7 +626,7 @@ def test_saving_again_drops_only_the_records_its_file_lacked(
 
     saved = _save(_run(store, "nullable_tag_and_data"), tmp_path, drop_src_a)
     resaved = tmp_path / "resaved.json"
-    PipelineJob.load(str(saved), store=store).save(resaved)
+    PipelineJob.load(str(saved), database=store).save(resaved)
     assert _recorded_fields(resaved) == _recorded_fields(saved)
     assert _recorded_fields(resaved)["src_a"] is None
     assert _recorded_fields(resaved)["src_b"] == {"tag": ["id"], "data": ["b"]}
@@ -749,7 +749,7 @@ def test_a_run_that_did_not_finish_records_no_counts(tmp_path: pathlib.Path) -> 
     """Counts are written only when certain: not before a run, nor after a failed one."""
     store = InMemoryArrowDatabase()
     sources = _sources("non_null")
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         _ = Join()(sources["src_a"], sources["src_b"], label="joined")
     pending = _save(job, tmp_path / "pending")
@@ -760,7 +760,7 @@ def test_a_run_that_did_not_finish_records_no_counts(tmp_path: pathlib.Path) -> 
         """Fail on every row."""
         raise ValueError(f"no {a}")
 
-    failing = PipelineJob(name=JOB_NAME, store=store)
+    failing = PipelineJob(name=JOB_NAME, database=store)
     with failing:
         _ = fails.pod(_sources("non_null")["src_a"], label="fails")
     with pytest.raises(ValueError, match="no 0|no 1"):
@@ -799,7 +799,7 @@ def test_a_source_node_without_its_own_record_takes_its_output_schemas(
             descriptor.get("source_config", {}).pop("nullable", None)
 
     saved = _save(job, tmp_path, drop_source_config_records)
-    loaded = PipelineJob.load(str(saved), store=store)
+    loaded = PipelineJob.load(str(saved), database=store)
     for label in ("src_a", "src_b"):
         assert loaded.nodes[label].output_schema() == job.nodes[label].output_schema()
     resaved = tmp_path / "resaved.json"

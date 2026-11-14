@@ -40,7 +40,7 @@ def run(store_kind: str, nullable: bool, tmp: Path) -> None:
         else DeltaTableDatabase(str(tmp / "store"))
     )
     ta, tb = tables(nullable)
-    job = PipelineJob(name=NAME, store=store)
+    job = PipelineJob(name=NAME, database=store)
     with job:
         left = ArrowTableSource(ta, tag_columns=["id"], source_id="a")
         right = ArrowTableSource(tb, tag_columns=["id"], source_id="b")
@@ -55,7 +55,7 @@ def run(store_kind: str, nullable: bool, tmp: Path) -> None:
     saved = tmp / "job.json"
     job.save(saved)
 
-    loaded = PipelineJob.load(str(saved), store=store)
+    loaded = PipelineJob.load(str(saved), database=store)
     lnode = loaded.nodes["joined"]
     print(
         "  load: node type",

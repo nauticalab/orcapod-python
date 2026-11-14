@@ -331,7 +331,7 @@ class TestSaveAndLoad:
         def build() -> PipelineJob:
             """Build the job over the source with the copy."""
             job = PipelineJob(
-                name="spikes", store=DeltaTableDatabase(tmp_path / "store")
+                name="spikes", database=DeltaTableDatabase(tmp_path / "store")
             )
             with job:
                 to_ms.pod(_source(tags_as_data=_COPY), label="to_ms")

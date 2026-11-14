@@ -31,7 +31,7 @@ def run(keys: list[int], store: Path, use_async: bool) -> PipelineJob:
     def double(v: int) -> int:
         return 2 * v
 
-    job = PipelineJob(name="job", store=DeltaTableDatabase(store))
+    job = PipelineJob(name="job", database=DeltaTableDatabase(store))
     with job:
         source = DictSource(
             [{"k": k, "v": k} for k in keys], tag_columns=["k"], source_id="same"

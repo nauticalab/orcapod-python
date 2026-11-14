@@ -84,7 +84,7 @@ def stored_records(
     pipeline: str, orchestrator: str, store_kind: str, directory: Path
 ) -> pa.Table:
     """The function node's stored records after a run, rows in tag order."""
-    job = PipelineJob(name="itl1040", store=STORES[store_kind](directory))
+    job = PipelineJob(name="itl1040", database=STORES[store_kind](directory))
     with job:
         PIPELINES[pipeline](source())
     job.run(
@@ -120,7 +120,7 @@ def test_the_operator_node_table_is_the_same_on_both_orchestrators(
     """The select or drop node itself shows the same columns after either run."""
     tables = []
     for orchestrator in (SyncPipelineOrchestrator, AsyncPipelineOrchestrator):
-        job = PipelineJob(name="itl1040", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="itl1040", database=InMemoryArrowDatabase())
         with job:
             src = source()
             if pipeline == "explicit_select":

@@ -36,7 +36,7 @@ def _store_bytes_per_row(
         else InMemoryArrowDatabase()
     )
     store = CountingDatabase(inner)
-    job = PipelineJob(name="scaling", store=store)  # pyright: ignore[reportArgumentType]  # counting wrapper of a real store
+    job = PipelineJob(name="scaling", database=store)  # pyright: ignore[reportArgumentType]  # counting wrapper of a real store
     with job:
         src = DictSource(
             data=[{"k": i, "x": i} for i in range(n_rows)],

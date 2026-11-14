@@ -34,7 +34,9 @@ def parameter(n: int) -> torch.nn.Parameter:
 
 def _save(tmp_path: Path, function: Any) -> Path:
     """Run and save a job whose pod returns a tensor, followed by a ``Join``."""
-    job = op.PipelineJob(name="tensors", store=DeltaTableDatabase(tmp_path / "store"))
+    job = op.PipelineJob(
+        name="tensors", database=DeltaTableDatabase(tmp_path / "store")
+    )
     with job:
         source = DictSource(
             [{"id": 1, "n": 3}, {"id": 2, "n": 4}], tag_columns=["id"], source_id="n"

@@ -57,7 +57,7 @@ class TestSyncPipelineSuccessStatus:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_status", store=db)
+        job = PipelineJob(name="test_status", database=db)
         with job:
             pod(source, label="doubler")
 
@@ -93,7 +93,7 @@ class TestFailingDatasStatus:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_fail_status", store=db)
+        job = PipelineJob(name="test_fail_status", database=db)
         with job:
             pod(source, label="failing")
 
@@ -138,7 +138,7 @@ class TestFlatStatusStorage:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_flat_status", store=db)
+        job = PipelineJob(name="test_flat_status", database=db)
         with job:
             pod(source, label="ident")
 
@@ -169,7 +169,7 @@ class TestQueryableTagColumns:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_tags_status", store=db)
+        job = PipelineJob(name="test_tags_status", database=db)
         with job:
             pod(source, label="ident")
 
@@ -203,7 +203,7 @@ class TestAsyncOrchestratorStatus:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_async_status", store=db)
+        job = PipelineJob(name="test_async_status", database=db)
         with job:
             pod(source, label="doubler")
 
@@ -238,7 +238,7 @@ class TestFailFastErrorPolicy:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_failfast_status", store=db)
+        job = PipelineJob(name="test_failfast_status", database=db)
         with job:
             pod(source, label="failing")
 
@@ -285,7 +285,7 @@ class TestMixedSuccessFailure:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_mixed_status", store=db)
+        job = PipelineJob(name="test_mixed_status", database=db)
         with job:
             pod(source, label="divider")
 
@@ -329,7 +329,7 @@ class TestMultipleFunctionNodesSeparateStatus:
         )
         pod2 = FunctionPod(pf2)
 
-        job = PipelineJob(name="test_multi_status", store=db)
+        job = PipelineJob(name="test_multi_status", database=db)
         with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
@@ -370,7 +370,7 @@ class TestGetStatusNodeSpecific:
         )
         pod2 = FunctionPod(pf2)
 
-        job = PipelineJob(name="test_filter_status", store=db)
+        job = PipelineJob(name="test_filter_status", database=db)
         with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
@@ -403,7 +403,7 @@ class TestStatusSchema:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_schema", store=db)
+        job = PipelineJob(name="test_schema", database=db)
         with job:
             pod(source, label="ident")
 
@@ -446,7 +446,7 @@ class TestRunIdTracking:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_runid", store=db)
+        job = PipelineJob(name="test_runid", database=db)
         with job:
             pod(source, label="ident")
 

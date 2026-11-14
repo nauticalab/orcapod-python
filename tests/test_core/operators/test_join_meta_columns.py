@@ -84,7 +84,7 @@ def _cache_hit_streams() -> tuple[StreamProtocol, StreamProtocol]:
 
 def _function_node_streams() -> tuple[StreamProtocol, StreamProtocol]:
     """Two function nodes of a run PipelineJob; their rows carry ``__computed``."""
-    job = PipelineJob(name="join_meta", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="join_meta", database=InMemoryArrowDatabase())
     with job:
         source_a, source_b = _dict_sources()
         _ = function_pod(output_keys="fa")(add_one_a).pod(source_a, label="fa")

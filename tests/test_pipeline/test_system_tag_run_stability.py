@@ -96,7 +96,7 @@ def _run_once(
         delivered.append(metric)
 
     method_tags = ["probe", "method"] if shared_key else ["method"]
-    with PipelineJob(name="itl817", store=DeltaTableDatabase(db_path)) as job:
+    with PipelineJob(name="itl817", database=DeltaTableDatabase(db_path)) as job:
         probe_source = ArrowTableSource(
             _table(probes),
             tag_columns=["probe"],

@@ -73,7 +73,7 @@ def run(point_class):
         {"k": "a", "p": point_class(x=3.0, y=4.0)},
         {"k": "b", "p": point_class(x=6.0, y=8.0)},
     ]
-    job = PipelineJob(name="points", store=db)
+    job = PipelineJob(name="points", database=db)
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="pts")
         norm.pod(source, label="norm")

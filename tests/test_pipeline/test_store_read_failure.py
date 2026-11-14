@@ -77,7 +77,7 @@ def build_job(store_path: Path, keys: str = "abc") -> PipelineJob:
         tag_columns=["k"],
         infer_nullable=True,
     )
-    job = PipelineJob(name="itl884", store=DeltaTableDatabase(base_path=store_path))
+    job = PipelineJob(name="itl884", database=DeltaTableDatabase(base_path=store_path))
     with job:
         _ = double.pod(source, label="dbl")
     return job
@@ -249,7 +249,7 @@ def test_unrelated_concurrent_failure_does_not_hide_store_read_error(tmp_path):
         tag_columns=["k"],
         infer_nullable=True,
     )
-    job = PipelineJob(name="itl884", store=DeltaTableDatabase(base_path=stored))
+    job = PipelineJob(name="itl884", database=DeltaTableDatabase(base_path=stored))
     with job:
         _ = double.pod(source, label="dbl")
         _ = triple.pod(source, label="tri")

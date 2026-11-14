@@ -58,7 +58,7 @@ print(f"  down received y={seen!r}; z={t['z'].to_pylist()}")
 
 for label, orch in [("sync", None), ("async", AsyncPipelineOrchestrator())]:
     seen.clear()
-    job = PipelineJob(name=f"itl895_chain_{label}", store=InMemoryArrowDatabase())
+    job = PipelineJob(name=f"itl895_chain_{label}", database=InMemoryArrowDatabase())
     with job:
         down.pod(up.pod(src(), label="up"), label="down")
     job.run(orchestrator=orch)

@@ -17,12 +17,20 @@ from orcapod.databases import InMemoryArrowDatabase
 from orcapod.errors import UnboundSourceError
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.types import Cursor, PollingConfig, Schema
 
 
 # ---------------------------------------------------------------------------
 # Shared fake impl — two-batch DynamicSourceProtocol
 # ---------------------------------------------------------------------------
+
+
+def _database_of(job: PipelineJob) -> ArrowDatabaseProtocol:
+    """Return the job's database, which every job in this file has."""
+    database = job.database
+    assert database is not None
+    return database
 
 
 class _TwoBatchImpl:
@@ -101,13 +109,13 @@ class TestPollingSourcePipelineJobIntegration:
         )
 
         store = InMemoryArrowDatabase()
-        job = PipelineJob(name="polling_integration_test", store=store)
+        job = PipelineJob(name="polling_integration_test", database=store)
         with job:
             _double_val.pod(src, label="doubled")
 
         await AsyncPipelineOrchestrator().run_async(job.dag)
-        job.store.at(*job._name).flush()
-        job.store.at(*job._name).at("_result").flush()
+        _database_of(job).at(*job._name).flush()
+        _database_of(job).at(*job._name).at("_result").flush()
 
         records = job.nodes["doubled"].get_all_records()
         assert records is not None

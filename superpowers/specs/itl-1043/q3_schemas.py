@@ -49,7 +49,7 @@ def show(label: str, node) -> None:
 
 
 store = InMemoryArrowDatabase()
-job = PipelineJob(name=NAME, store=store)
+job = PipelineJob(name=NAME, database=store)
 with job:
     left = ArrowTableSource(table("a", [1, 2], True), tag_columns=["id"], source_id="a")
     right = ArrowTableSource(
@@ -89,7 +89,7 @@ with tempfile.TemporaryDirectory() as d:
             "pipeline_hash",
             desc["pipeline_hash"],
         )
-    loaded = PipelineJob.load(str(saved), store=store)
+    loaded = PipelineJob.load(str(saved), database=store)
     print("== loaded job ==")
     for label, node in loaded.nodes.items():
         show(label, node)

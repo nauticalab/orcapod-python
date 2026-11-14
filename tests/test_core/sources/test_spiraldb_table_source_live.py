@@ -116,7 +116,7 @@ def test_an_async_job_over_a_limited_read(tmp_path: Path):
 
     def run() -> PipelineJob:
         """Build the job over a 500-row read and run it asynchronously."""
-        job = PipelineJob(name="live", store=DeltaTableDatabase(tmp_path / "store"))
+        job = PipelineJob(name="live", database=DeltaTableDatabase(tmp_path / "store"))
         with job:
             double.pod(
                 SpiralDBTableSource(PROJECT, "spike_event", limit=500), label="double"
@@ -176,7 +176,9 @@ def test_rows_appended_between_runs_are_the_only_ones_computed(tmp_path: Path):
 
     def run() -> None:
         """Build the job over the scratch table and run it."""
-        job = PipelineJob(name="append", store=DeltaTableDatabase(tmp_path / "store"))
+        job = PipelineJob(
+            name="append", database=DeltaTableDatabase(tmp_path / "store")
+        )
         with job:
             double.pod(
                 SpiralDBTableSource(PROJECT, name, dataset="scratch"), label="double"

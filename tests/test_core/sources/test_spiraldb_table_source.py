@@ -423,7 +423,7 @@ class TestPipelineIntegration:
             return None if firing_rate is None else firing_rate * 2.0
 
         _make_table()
-        job = PipelineJob(name="spiraldb_integration", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="spiraldb_integration", database=InMemoryArrowDatabase())
         with job:
             double_rate.pod(
                 SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), label="doubler"

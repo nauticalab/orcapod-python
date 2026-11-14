@@ -94,7 +94,9 @@ def build_job(store_path: Path, keys: str, *, reader_first: bool) -> PipelineJob
         tag_columns=["k"],
         infer_nullable=True,
     )
-    job = PipelineJob(name="together", store=DeltaTableDatabase(base_path=store_path))
+    job = PipelineJob(
+        name="together", database=DeltaTableDatabase(base_path=store_path)
+    )
     with job:
         if reader_first:
             _ = double.pod(source, label="rd")

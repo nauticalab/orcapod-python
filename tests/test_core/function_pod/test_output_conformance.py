@@ -298,7 +298,7 @@ class TestPipelineJobRowFailure:
         """Only the rejected row fails; the observer gets the ``OutputTypeError``."""
         half = function_pod(output_keys="y")(_half_on_even)
         observer = _CrashRecorder()
-        job = PipelineJob(name="itl895", store=_store(store_kind, tmp_path))
+        job = PipelineJob(name="itl895", database=_store(store_kind, tmp_path))
         with job:
             half.pod(make_source((1, 2, 3)), label="half")
         job.run(orchestrator=orchestrator_cls(), observer=observer)
@@ -314,7 +314,7 @@ class TestPipelineJobRowFailure:
     def test_fail_fast_raises_the_output_type_error(self) -> None:
         """Under ``fail_fast`` the sync orchestrator raises the rejection."""
         half = function_pod(output_keys="y")(_half_on_even)
-        job = PipelineJob(name="itl895", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="itl895", database=InMemoryArrowDatabase())
         with job:
             half.pod(make_source((1, 2, 3)), label="half")
         with pytest.raises(errors.OutputTypeError):
@@ -326,7 +326,7 @@ class TestPipelineJobRowFailure:
     ) -> None:
         """A NULL used to be stored in a not-null field, leaving the node unreadable."""
         pod = make_pod(int, None, name="nothing")
-        job = PipelineJob(name="itl895", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="itl895", database=InMemoryArrowDatabase())
         with job:
             pod.pod(make_source((1,)), label="nothing")
         job.run(orchestrator=orchestrator_cls())
@@ -391,7 +391,7 @@ class TestRejectedConversions:
             pod.pod(make_source()).as_table()
         assert str(materialized.value) == str(caught.value)
         recorder = _CrashRecorder()
-        job = PipelineJob(name="policy", store=_store(store_kind, tmp_path))
+        job = PipelineJob(name="policy", database=_store(store_kind, tmp_path))
         with job:
             pod.pod(make_source(), label="bad")
         job.run(orchestrator=orchestrator_cls(), observer=recorder)
@@ -504,7 +504,7 @@ class TestDownstreamSeesStoredValue:
         """On both orchestrators and stores, downstream receives the stored, converted value."""
         received: list[Any] = []
         up, down = self._chain(declared, returned, received)
-        job = PipelineJob(name="itl895", store=_store(store_kind, tmp_path))
+        job = PipelineJob(name="itl895", database=_store(store_kind, tmp_path))
         with job:
             down.pod(up.pod(make_source(), label="up"), label="down")
         with warnings.catch_warnings():
@@ -553,7 +553,7 @@ class TestRejectionInPipelineJob:
         """D1, D3 and ITL-901 rejections fail the row and store nothing."""
         pod = make_pod(declared, returned, name="rejected")
         observer = _CrashRecorder()
-        job = PipelineJob(name="itl895", store=_store(store_kind, tmp_path))
+        job = PipelineJob(name="itl895", database=_store(store_kind, tmp_path))
         with job:
             pod.pod(make_source((1,)), label="rejected")
         job.run(orchestrator=orchestrator_cls(), observer=observer)
@@ -655,7 +655,7 @@ class TestUnifiedOutputBoundary:
         with pytest.raises(errors.OutputTypeError) as table:
             pod.pod(make_source()).as_table()
         observer = _CrashRecorder()
-        job = PipelineJob(name="unified", store=_store(store_kind, tmp_path))
+        job = PipelineJob(name="unified", database=_store(store_kind, tmp_path))
         with job:
             pod.pod(make_source(), label="invalid")
         job.run(orchestrator=orchestrator_cls(), observer=observer)
@@ -746,7 +746,7 @@ class TestSubclassOutputs:
 
         list(inspect_reading.pod(first.pod(make_source())).iter_data())
         assert received[0] is original
-        job = PipelineJob(name="subclass", store=_store(store_kind, tmp_path))
+        job = PipelineJob(name="subclass", database=_store(store_kind, tmp_path))
         with job:
             first.pod(make_source(), label="base")
         job.run(orchestrator=orchestrator_cls())
@@ -782,7 +782,9 @@ class TestSubclassOutputs:
         [(_, data)] = list(pod.pod(make_source()).iter_data())
         assert data.as_dict()["y"] is returned
         assert pod.pod(make_source()).as_table()["y"].to_pylist() == [stored]
-        job = PipelineJob(name="builtin_subclass", store=_store(store_kind, tmp_path))
+        job = PipelineJob(
+            name="builtin_subclass", database=_store(store_kind, tmp_path)
+        )
         with job:
             pod.pod(make_source(), label="result")
         job.run(orchestrator=orchestrator_cls())
@@ -833,7 +835,7 @@ def test_declared_saver_for_nested_subclasses(
         assert data.as_dict()["y"][0] is original[0]
     else:
         assert data.as_dict()["y"] is original
-    job = PipelineJob(name="nested_subclass", store=_store(store_kind, tmp_path))
+    job = PipelineJob(name="nested_subclass", database=_store(store_kind, tmp_path))
     with job:
         pod.pod(make_source(), label="base")
     job.run(orchestrator=orchestrator_cls())
@@ -949,7 +951,7 @@ class TestDeclaredLiteral:
     @pytest.mark.parametrize("orchestrator_cls", ORCHESTRATORS)
     def test_non_member_is_never_stored(self, orchestrator_cls: Any) -> None:
         """``1.5`` for ``Literal[1]`` is a row failure, not a stored ``1``."""
-        job = PipelineJob(name="literal", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="literal", database=InMemoryArrowDatabase())
         with job:
             make_pod(Literal[1], 1.5).pod(make_source(), label="node")
         job.run(orchestrator=orchestrator_cls())
@@ -977,7 +979,7 @@ class TestSubclassOnlyFieldsDownstream:
 
     @staticmethod
     def _run(store: Any, xs: tuple[int, ...], orchestrator_cls: Any) -> dict[str, int]:
-        job = PipelineJob(name="extra", store=store)
+        job = PipelineJob(name="extra", database=store)
         with job:
             made = make_extended_reading.pod(make_source(xs), label="make")
             read_extra_field.pod(made, label="down")

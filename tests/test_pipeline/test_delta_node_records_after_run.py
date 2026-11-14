@@ -34,7 +34,7 @@ def test_node_returns_every_row_right_after_first_run(
     def double(x: int) -> int:
         return x * 2
 
-    job = PipelineJob(store=DeltaTableDatabase(tmp_path))
+    job = PipelineJob(database=DeltaTableDatabase(tmp_path))
     with job:
         double.pod(source, label="double")
     job.run(orchestrator=orchestrator())

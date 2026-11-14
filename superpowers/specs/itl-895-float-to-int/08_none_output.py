@@ -77,7 +77,7 @@ for label, kind, orch in [
             if kind == "delta"
             else InMemoryArrowDatabase()
         )
-        job = PipelineJob(name="none_out", store=store)
+        job = PipelineJob(name="none_out", database=store)
         with job:
             f.pod(src(), label="f")
         try:

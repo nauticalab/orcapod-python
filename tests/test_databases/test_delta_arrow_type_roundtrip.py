@@ -183,7 +183,7 @@ TAGS = {
 
 def _chained_job(root: pathlib.Path, table: pa.Table) -> PipelineJob:
     """A job on a Delta store at ``root``: source -> ``double`` -> ``increment``."""
-    with PipelineJob(name="j", store=DeltaTableDatabase(root)) as job:
+    with PipelineJob(name="j", database=DeltaTableDatabase(root)) as job:
         src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
         increment.pod(double.pod(src, label="double"), label="increment")
     return job
@@ -238,7 +238,7 @@ import json, pathlib, sys
 from orcapod import PipelineJob
 from orcapod.databases import DeltaTableDatabase
 root = pathlib.Path(sys.argv[1])
-job = PipelineJob.load(root / "job.json", store=DeltaTableDatabase(root / "store"))
+job = PipelineJob.load(root / "job.json", database=DeltaTableDatabase(root / "store"))
 print(json.dumps({
     label: str(job.nodes[label].as_table().schema.field("k").type)
     for label in ("double", "increment")
@@ -288,7 +288,7 @@ def test_an_operator_replay_reads_the_tag_type(
     def build(mode: CacheMode) -> PipelineJob:
         """A job with operator node ``sel`` in the given cache mode."""
         store = DeltaTableDatabase(tmp_path)
-        with PipelineJob(name="o", store=store) as job:
+        with PipelineJob(name="o", database=store) as job:
             src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
             SelectDataColumns(["x"])(src, label="sel")
         # OperatorNode.attach_databases is the public way to turn on LOG / REPLAY mode.

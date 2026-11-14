@@ -226,7 +226,7 @@ class TestPipelineIntegration:
         pf = PythonDataFunction(double_response, output_keys="doubled")
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="pg_integration", store=InMemoryArrowDatabase())
+        job = PipelineJob(name="pg_integration", database=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
 

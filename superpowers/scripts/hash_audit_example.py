@@ -231,7 +231,7 @@ def main() -> None:
     simple_pod = grade_simple.pod
     job_db = InMemoryArrowDatabase()
 
-    with PipelineJob(name="hash_audit", store=job_db) as job:
+    with PipelineJob(name="hash_audit", database=job_db) as job:
         job_scores = DictSource(
             [
                 {"student": "alice", "math": 90},

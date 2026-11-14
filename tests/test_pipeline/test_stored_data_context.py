@@ -94,7 +94,7 @@ def build_job(
     cache_mode: CacheMode = CacheMode.LOG,
 ) -> PipelineJob:
     """A job with function node ``dbl`` and optionally a stored operator ``sel`` and a sink."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
         out = double.pod(source, label="dbl")
@@ -432,7 +432,7 @@ def triple_v3_7(x: int) -> int:
 
 def _stored_function_versions(store: Store, pod: Any) -> list[str]:
     """Run ``pod`` over ``ROWS`` in a job and return the versions its result rows hold."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         pod(DictSource(data=ROWS, tag_columns=["k"], source_id="src"), label="fn")
     _ = job.run()
@@ -463,7 +463,7 @@ class TestFunctionVersionColumn:
 
         def build(database: Store) -> PipelineJob:
             """A job running ``triple_v3_7`` over ``ROWS`` on ``database``."""
-            job = PipelineJob(name=JOB_NAME, store=database)
+            job = PipelineJob(name=JOB_NAME, database=database)
             with job:
                 triple_v3_7.pod(
                     DictSource(data=ROWS, tag_columns=["k"], source_id="src"),
@@ -521,7 +521,7 @@ class TestJobSavedByV02:
         calls.clear()
 
         with caplog.at_level(logging.WARNING, logger="orcapod"):
-            loaded = PipelineJob.load(str(saved), store=store)
+            loaded = PipelineJob.load(str(saved), database=store)
 
         for label in ("dbl", "sel"):
             assert loaded.nodes[label].get_all_records() is None
@@ -544,7 +544,7 @@ class TestJobSavedByV02:
         copy_as_v02(written, store)
 
         _ = build_job(store, with_operator=True).run()
-        loaded = PipelineJob.load(str(saved), store=reopened(store))
+        loaded = PipelineJob.load(str(saved), database=reopened(store))
 
         assert rows_of(loaded.nodes["dbl"].get_all_records()) == [2, 4]
         assert rows_of(loaded.nodes["sel"].get_all_records()) == [2, 4]
@@ -885,7 +885,7 @@ class TestRowsOfAnotherDataContext:
 
 def _sink_job(store: Store) -> PipelineJob:
     """A job whose only stored node is a sink reading the source directly."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(
             data=[{"k": "a", "double": 2}, {"k": "b", "double": 4}],
@@ -1006,7 +1006,7 @@ def notify(double: int, ctx: Any) -> int:
 
 def _notify_job(store: Store) -> PipelineJob:
     """A job whose only stored node is a function pod that takes the invocation context."""
-    job = PipelineJob(name=JOB_NAME, store=store)
+    job = PipelineJob(name=JOB_NAME, database=store)
     with job:
         source = DictSource(
             data=[{"k": "a", "double": 2}, {"k": "b", "double": 4}],

@@ -75,7 +75,7 @@ def build_job(store_path: Path) -> PipelineJob:
         tag_columns=["k"],
         infer_nullable=True,
     )
-    job = PipelineJob(name="itl881", store=DeltaTableDatabase(base_path=store_path))
+    job = PipelineJob(name="itl881", database=DeltaTableDatabase(base_path=store_path))
     with job:
         _ = pair.pod(source, label="pair")
     return job

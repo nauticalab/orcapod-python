@@ -43,7 +43,7 @@ def _build(store: Any) -> PipelineJob:
         tag_columns=["k"],
         source_id="every",
     )
-    job = PipelineJob(name="arrays", store=store)
+    job = PipelineJob(name="arrays", database=store)
     with job:
         identity.pod(every, label="identity_all")
         y = identity.pod(numeric, label="identity_numeric")
@@ -118,7 +118,7 @@ def test_pod_output_list_of_arrays(tmp_path: Path, store: str, runner: str) -> N
         tag_columns=["k"],
         source_id="numeric",
     )
-    job = PipelineJob(name="array_lists", store=STORES[store](tmp_path))
+    job = PipelineJob(name="array_lists", database=STORES[store](tmp_path))
     with job:
         split.pod(source, label="split")
     RUNNERS[runner](job)
@@ -151,7 +151,7 @@ def test_batch_and_group_by_over_an_array_column(
         tag_columns=["g", "k"],
         source_id="grouped",
     )
-    job = PipelineJob(name="array_groups", store=STORES[store](tmp_path))
+    job = PipelineJob(name="array_groups", database=STORES[store](tmp_path))
     with job:
         if operator == "batch":
             grouped = Batch(batch_size=2)(source)

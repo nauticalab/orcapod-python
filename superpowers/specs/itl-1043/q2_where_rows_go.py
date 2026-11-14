@@ -38,7 +38,7 @@ def src(col: str, sid: str) -> ArrowTableSource:
 
 
 store = InMemoryArrowDatabase()
-job = PipelineJob(name=NAME, store=store)
+job = PipelineJob(name=NAME, database=store)
 with job:
     Join()(src("a", "a"), src("b", "b"), label="joined")
 node = job.nodes["joined"]
@@ -46,7 +46,7 @@ node.attach_databases(pipeline_database=store.at(NAME), cache_mode=CacheMode.LOG
 job.run()
 with tempfile.TemporaryDirectory() as d:
     job.save(Path(d) / "job.json")
-    lnode = PipelineJob.load(str(Path(d) / "job.json"), store=store).nodes["joined"]
+    lnode = PipelineJob.load(str(Path(d) / "job.json"), database=store).nodes["joined"]
 lnode.attach_databases(pipeline_database=store.at(NAME), cache_mode=CacheMode.REPLAY)
 
 print("same table path:", lnode._stored_table_path == node._stored_table_path)

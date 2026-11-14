@@ -45,7 +45,7 @@ class TestFunctionNodeGetAllRecordsNullability:
         def double(x: int) -> int:
             return x * 2
 
-        job = PipelineJob(store=database)
+        job = PipelineJob(database=database)
         with job:
             double.pod(source)
 
@@ -80,7 +80,7 @@ class TestFunctionNodeGetAllRecordsNullability:
         def triple(x: int) -> int:
             return x * 3
 
-        job = PipelineJob(store=database)
+        job = PipelineJob(database=database)
         with job:
             triple.pod(source)
 
@@ -122,7 +122,7 @@ class TestFunctionNodeIterDatasNullability:
         def add_one(x: int) -> int:
             return x + 1
 
-        job = PipelineJob(store=database)
+        job = PipelineJob(database=database)
         with job:
             add_one.pod(source)
 

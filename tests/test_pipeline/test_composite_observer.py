@@ -59,7 +59,7 @@ class TestLoggingAndStatusTogether:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_composite", store=pipeline_db)
+        job = PipelineJob(name="test_composite", database=pipeline_db)
         with job:
             pod(source, label="doubler")
 
@@ -102,7 +102,7 @@ class TestCreateDataLoggerDelegation:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_logger_delegation", store=pipeline_db)
+        job = PipelineJob(name="test_logger_delegation", database=pipeline_db)
         with job:
             pod(source, label="ident")
 
@@ -150,7 +150,7 @@ class TestCompositeObserverMultiNodeIntegration:
         )
         pod2 = FunctionPod(pf2)
 
-        job = PipelineJob(name="test_ctx_composite", store=pipeline_db)
+        job = PipelineJob(name="test_ctx_composite", database=pipeline_db)
         with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
@@ -193,7 +193,7 @@ class TestCompositeWithFailures:
         )
         pod = FunctionPod(pf)
 
-        job = PipelineJob(name="test_composite_fail", store=pipeline_db)
+        job = PipelineJob(name="test_composite_fail", database=pipeline_db)
         with job:
             pod(source, label="failing")
 

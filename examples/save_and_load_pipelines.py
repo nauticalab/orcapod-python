@@ -28,7 +28,7 @@ def take_sum(x: int, y: int) -> int:
 
 
 # Record the pipeline: nothing is computed inside the ``with`` block.
-job = PipelineJob(name="my_pipeline", store=database)
+job = PipelineJob(name="my_pipeline", database=database)
 with job:
     take_sum.pod(source1.join(source2), label="sum")
 

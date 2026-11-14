@@ -1554,9 +1554,9 @@ class FunctionJobNode(FunctionNodeBase):
         function pod, so its results can come only from the store.
         """
         return RuntimeError(
-            f"FunctionJobNode {self.label!r} was loaded without a store, so its stored "
-            "results cannot be read. Pass the store to PipelineJob.load(path, "
-            "store=...) or call job.bind(store=...)."
+            f"FunctionJobNode {self.label!r} was loaded without a database, so its stored "
+            "results cannot be read. Pass a database to PipelineJob.load(path, "
+            "database=...) or call job.bind(database=...)."
         )
 
     def _cannot_compute_error(self) -> RuntimeError:

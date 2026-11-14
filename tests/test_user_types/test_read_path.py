@@ -75,7 +75,7 @@ def _run_labelled(db_root: Path) -> tuple[int, list[Labelled]]:
         return p
 
     rows: list[Any] = [{"k": f"r{i}", "p": Labelled(f"x{i}", i)} for i in (1, 2)]
-    job = PipelineJob(name="compact", store=DeltaTableDatabase(db_root))
+    job = PipelineJob(name="compact", database=DeltaTableDatabase(db_root))
     with job:
         echo.pod(DictSource(data=rows, tag_columns=["k"], source_id="s"), label="echo")
     # One commit per row, so the result table has one file per row to compact.

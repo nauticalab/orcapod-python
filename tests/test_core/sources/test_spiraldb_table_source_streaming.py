@@ -546,7 +546,7 @@ class TestInAJob:
             calls.append(amplitude)
             return None if amplitude is None else 2 * amplitude
 
-        job = PipelineJob(name="events", store=DeltaTableDatabase(store))
+        job = PipelineJob(name="events", database=DeltaTableDatabase(store))
         with job:
             double.pod(
                 SpiralDBTableSource(_PROJECT, "event", max_rows=max_rows),

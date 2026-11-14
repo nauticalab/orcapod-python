@@ -254,7 +254,7 @@ with tempfile.TemporaryDirectory() as tmp:
         label: str, orch: AsyncPipelineOrchestrator | None
     ) -> tuple[PipelineJob, ProtoDerivedSource]:
         """Run the copy-then-pod job with the given orchestrator and print its rows."""
-        job = PipelineJob(name=f"probe_{label}", store=InMemoryArrowDatabase())
+        job = PipelineJob(name=f"probe_{label}", database=InMemoryArrowDatabase())
         with job:
             probe = SQLiteTableSource(db_path, "probe")
             src = ProtoDerivedSource(probe, {"name": "name_copy"})
@@ -269,7 +269,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     path = Path(tmp) / "job.json"
     job.save(path)
-    loaded = PipelineJob.load(path, store=InMemoryArrowDatabase())
+    loaded = PipelineJob.load(path, database=InMemoryArrowDatabase())
     print("loaded unbound sources:", loaded.unbound_sources)
     print("loaded sources:", {k: type(v).__name__ for k, v in loaded.sources.items()})
     reloaded = loaded.sources["derived:probe"]
@@ -285,7 +285,7 @@ with tempfile.TemporaryDirectory() as tmp:
     )
 
     print("\n=== 7b. origin and derived source used in one job")
-    job_b = PipelineJob(name="both", store=InMemoryArrowDatabase())
+    job_b = PipelineJob(name="both", database=InMemoryArrowDatabase())
     try:
         with job_b:
             probe = SQLiteTableSource(db_path, "probe")
@@ -305,7 +305,7 @@ with tempfile.TemporaryDirectory() as tmp:
     except Exception as exc:  # noqa: BLE001 - the experiment records any failure
         print(f"{type(exc).__name__}: {str(exc)[:300]}")
     try:
-        with PipelineJob(name="clash", store=InMemoryArrowDatabase()):
+        with PipelineJob(name="clash", database=InMemoryArrowDatabase()):
             probe = SQLiteTableSource(db_path, "probe")
             same = ProtoDerivedSource(probe, {"name": "name_copy"}, source_id="probe")
             Join()(
@@ -317,7 +317,7 @@ with tempfile.TemporaryDirectory() as tmp:
         print(f"with the origin's source_id: {type(exc).__name__}: {str(exc)[:120]}")
 
     print("\n=== 8. the hand-written recipe saved and loaded (for contrast)")
-    job_r = PipelineJob(name="recipe", store=InMemoryArrowDatabase())
+    job_r = PipelineJob(name="recipe", database=InMemoryArrowDatabase())
     with job_r:
         raw = SQLiteTableSource(db_path, "probe").as_table()
         naive = raw.append_column("name_copy", raw["name"])
@@ -330,5 +330,5 @@ with tempfile.TemporaryDirectory() as tmp:
         name_length.pod(rec.select_data_columns(["name_copy"]), label="len")
     job_r.run()
     job_r.save(path)
-    loaded_r = PipelineJob.load(path, store=InMemoryArrowDatabase())
+    loaded_r = PipelineJob.load(path, database=InMemoryArrowDatabase())
     print("recipe loaded unbound sources:", loaded_r.unbound_sources)

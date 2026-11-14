@@ -187,7 +187,7 @@ class TestCtxArgDBBacked:
         pod = transform.pod
         db = _make_pipeline_db()
 
-        with PipelineJob(name="test_ctx_pod", store=db) as job:
+        with PipelineJob(name="test_ctx_pod", database=db) as job:
             source = DictSource(
                 [{"id": 0, "value": 10}, {"id": 1, "value": 20}],
                 tag_columns=["id"],

@@ -71,7 +71,7 @@ def _store(kind: str, tmp_path: Path) -> ArrowDatabaseProtocol:
 
 def _job(store: ArrowDatabaseProtocol) -> PipelineJob:
     """A job of ``triple`` over the source, then a select of ``y``."""
-    job = PipelineJob(name="itl991", store=store)
+    job = PipelineJob(name="itl991", database=store)
     with job:
         tripled = triple.pod(_source(), label="triple")
         _ = SelectDataColumns(["y"])(tripled, label="sel")
@@ -156,7 +156,7 @@ def test_a_loaded_job_shows_stored_rows_and_never_raises(tmp_path: Path) -> None
     job.save(saved)
     CALLS.clear()
 
-    loaded = PipelineJob.load(str(saved), store=store)
+    loaded = PipelineJob.load(str(saved), database=store)
     fn_head = loaded.nodes["triple"].head()
     op_head = loaded.nodes["sel"].head()
     assert CALLS == []
@@ -237,7 +237,7 @@ def test_an_operator_node_with_an_empty_result_reads_as_computed(
     """After a run that produced no rows, an operator node is computed and empty."""
     from orcapod.core.operators import PolarsFilter
 
-    job = PipelineJob(name="itl991_empty", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="itl991_empty", database=InMemoryArrowDatabase())
     with job:
         _ = PolarsFilter(constraints={"x": -1})(_source(), label="none")
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator]())
@@ -282,7 +282,7 @@ def test_head_keeps_the_tag_arrow_type_of_the_input(
 
     def build(store: ArrowDatabaseProtocol) -> PipelineJob:
         """Build a job of ``triple`` over the narrow-tag source on ``store``."""
-        job = PipelineJob(name="itl991_types", store=store)
+        job = PipelineJob(name="itl991_types", database=store)
         with job:
             _ = triple.pod(
                 ArrowTableSource(table, tag_columns=["id"], source_id="narrow"),

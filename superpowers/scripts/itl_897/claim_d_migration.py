@@ -79,7 +79,7 @@ CHILD = textwrap.dedent(
         tag_columns=["k"], source_id="frames",
     )
     store = DeltaTableDatabase(STORE)
-    job = PipelineJob(name="migration", store=store)
+    job = PipelineJob(name="migration", database=store)
     with job:
         frames = make.pod(source, label="make")
         first.pod(frames, label="first")

@@ -178,7 +178,7 @@ def test_the_table_of_no_rows_agrees_with_a_function_pod_over_no_rows(
 
 @pytest.mark.parametrize("kwargs", KWARGS, ids=IDS)
 def test_the_job_node_table_agrees_for_every_config(kwargs: dict[str, Any]) -> None:
-    job = PipelineJob(name="se", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="se", database=InMemoryArrowDatabase())
     with job:
         SideEffectPod(deliver)(_source(), label="node")
     job.run()

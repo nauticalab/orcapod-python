@@ -31,7 +31,7 @@ def inc(x: int) -> int:
 
 
 for store in (InMemoryArrowDatabase(), DeltaTableDatabase(tempfile.mkdtemp())):
-    job = PipelineJob(name="h1", store=store)
+    job = PipelineJob(name="h1", database=store)
     with job:
         inc.pod(
             ArrowTableSource(data, tag_columns=["start"], source_id="s"), label="inc"

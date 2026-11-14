@@ -311,7 +311,7 @@ mice = [
 
 db = InMemoryArrowDatabase()
 
-job = PipelineJob(name="bmi_demo", store=db)
+job = PipelineJob(name="bmi_demo", database=db)
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     compute_bmi.pod(source, label="bmi")
@@ -345,7 +345,7 @@ row is computed; the other two results come from the database:
 ```python
 mice.append({"subject_id": "mouse_03", "weight": 27.8, "height": 0.11})
 
-job = PipelineJob(name="bmi_demo", store=db)
+job = PipelineJob(name="bmi_demo", database=db)
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     compute_bmi.pod(source, label="bmi")
@@ -411,7 +411,7 @@ ready, and runs your function on several rows concurrently. Choose it with the
 ```python
 from orcapod.pipeline import AsyncPipelineOrchestrator
 
-job = PipelineJob(name="bmi_async", store=InMemoryArrowDatabase())
+job = PipelineJob(name="bmi_async", database=InMemoryArrowDatabase())
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     compute_bmi.pod(source, label="bmi")
@@ -450,7 +450,7 @@ level of a notebook cell. In a script, start async code with `asyncio.run`:
 ```python
 import asyncio
 
-job = PipelineJob(name="bmi_awaited", store=InMemoryArrowDatabase())
+job = PipelineJob(name="bmi_awaited", database=InMemoryArrowDatabase())
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     compute_bmi.pod(source, label="bmi")
@@ -475,7 +475,7 @@ of a notebook cell it is shown as a table; `print` shows the same as text. The j
 Running the same job again computes nothing new, and the summary says so:
 
 ```python
-job = PipelineJob(name="bmi_demo", store=db)
+job = PipelineJob(name="bmi_demo", database=db)
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     compute_bmi.pod(source, label="bmi")
@@ -497,7 +497,7 @@ def careless_bmi(weight: float, height: float) -> float:
     return weight / heigth ** 2  # a typo: heigth
 
 
-job = PipelineJob(name="bmi_typo", store=InMemoryArrowDatabase())
+job = PipelineJob(name="bmi_typo", database=InMemoryArrowDatabase())
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     careless_bmi.pod(source, label="bmi")
@@ -671,7 +671,7 @@ from orcapod.databases import DeltaTableDatabase
 
 workdir = Path(tempfile.mkdtemp())  # any directory you keep
 
-job = PipelineJob(name="bmi_demo", store=DeltaTableDatabase(workdir / "store"))
+job = PipelineJob(name="bmi_demo", database=DeltaTableDatabase(workdir / "store"))
 with job:
     source = DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")
     compute_bmi.pod(source, label="bmi")
@@ -728,7 +728,7 @@ rows under that key is an empty result, not an error.
   this at INFO level. This does not affect reading the other nodes. To read such a source
   node itself, bind a source to it: `loaded.bind(sources={"mice": source})`.
 - The results are read from the store recorded in the file. Pass
-  `PipelineJob.load(path, store=...)` if the store has moved.
+  `PipelineJob.load(path, database=...)` if the store has moved.
 - The job file may also hold an optional, advisory section, `run.expected_rows`: for each
   node, how many rows the store held under its run's key when the job was saved (written
   only when that is certain: after a run that finished). Reading a loaded node always

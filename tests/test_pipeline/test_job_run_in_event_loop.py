@@ -57,7 +57,7 @@ def double(x: int) -> int:
 def make_job(store: Any) -> PipelineJob:
     """A source of five rows feeding ``double``, recorded in a fresh job."""
     rows = [{"k": f"r{i}", "x": i} for i in range(5)]
-    job = PipelineJob(name="loop_demo", store=store)
+    job = PipelineJob(name="loop_demo", database=store)
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
         double.pod(source, label="doubled")
@@ -203,7 +203,7 @@ def test_interrupt_while_running_inside_a_loop_stops_the_run() -> None:
     """The notebook's interrupt button stops the run; nothing keeps running after it."""
     slow_calls.clear()
     rows = [{"k": f"r{i:02d}", "x": i} for i in range(N_SLOW_ROWS)]
-    job = PipelineJob(name="interrupt_demo", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="interrupt_demo", database=InMemoryArrowDatabase())
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
         slow_and_interrupted.pod(source, label="slow")
@@ -283,7 +283,7 @@ def after_stuck(y: int) -> int:
 def make_stuck_job(store: Any) -> PipelineJob:
     """Six rows through ``stuck_on_first_row`` and then ``after_stuck``."""
     rows = [{"k": f"r{i}", "x": i} for i in range(6)]
-    job = PipelineJob(name="stuck_demo", store=store)
+    job = PipelineJob(name="stuck_demo", database=store)
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
         stuck = stuck_on_first_row.pod(source, label="stuck")
@@ -395,7 +395,7 @@ def test_second_interrupt_names_an_async_function_blocking_the_loop(
         async_stuck_on_first_row
     )
     rows = [{"k": f"r{i}", "x": i} for i in range(6)]
-    job = PipelineJob(name="async_stuck_demo", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="async_stuck_demo", database=InMemoryArrowDatabase())
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
         stuck = pod.pod(source, label="stuck")
@@ -450,7 +450,7 @@ def test_tasks_left_pending_by_a_pod_are_cancelled_and_cleaned_up() -> None:
     """Inside a running loop, as with ``asyncio.run``, leftover tasks get their cleanup."""
     pod_task_cleanup.clear()
     rows = [{"k": f"r{i}", "x": i} for i in range(3)]
-    job = PipelineJob(name="leftover_demo", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="leftover_demo", database=InMemoryArrowDatabase())
     with job:
         source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
         leaves_a_task_running.pod(source, label="leaves")

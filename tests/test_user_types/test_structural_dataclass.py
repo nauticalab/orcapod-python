@@ -645,7 +645,7 @@ def make(x: int) -> Sample:
     return Sample(f"s{x}", Point(x, x / 2), ["a", "b"], None, Path("/tmp/f"), [Point(0, 0.0)], {Key(1), Key(2)})
 
 
-job = PipelineJob(name="w", store=DeltaTableDatabase(Path(os.environ["WS_DB"])))
+job = PipelineJob(name="w", database=DeltaTableDatabase(Path(os.environ["WS_DB"])))
 with job:
     make.pod(DictSource(data=[{"k": "a", "x": 1}], tag_columns=["k"], source_id="s"), label="make")
 job.run()

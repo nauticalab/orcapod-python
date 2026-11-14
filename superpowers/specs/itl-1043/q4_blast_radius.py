@@ -57,7 +57,7 @@ def sources(
 
 def build(store, tag_null: bool, data_null: bool, mode: CacheMode) -> PipelineJob:
     a, b = sources(tag_null, data_null)
-    job = PipelineJob(name=NAME, store=store)
+    job = PipelineJob(name=NAME, database=store)
     with job:
         out = (inc_opt if data_null else inc).pod(a, label="inc")
         Join()(out, b, label="joined")
@@ -128,7 +128,7 @@ for tag_null in (False, True):
         with tempfile.TemporaryDirectory() as d:
             saved = Path(d) / "job.json"
             job.save(saved)
-            loaded = PipelineJob.load(str(saved), store=store)
+            loaded = PipelineJob.load(str(saved), database=store)
             compare("load", ref, snapshot(loaded))
             print(
                 "      load: inc rows",
@@ -160,7 +160,7 @@ for tag_null in (False, True):
             a, b = sources(tag_null, data_null)
             try:
                 fp = PipelineJob.from_pipeline(
-                    pl, store=store, sources={"a": a, "b": b}
+                    pl, database=store, sources={"a": a, "b": b}
                 )
                 compare("from_pipeline", ref, snapshot(fp))
                 try:

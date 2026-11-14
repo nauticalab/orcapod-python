@@ -46,7 +46,7 @@ def pipeline(store_dir: Path, orchestrator_name: str, runs: int = 1) -> None:
         source = op.sources.DictSource(
             [{"id": i, "x": 10 * i} for i in range(3)], tag_columns=["id"]
         )
-        job = PipelineJob(store=DeltaTableDatabase(store_dir))
+        job = PipelineJob(database=DeltaTableDatabase(store_dir))
         with job:
             double.pod(source, label="double")
         job.run(orchestrator=orch())

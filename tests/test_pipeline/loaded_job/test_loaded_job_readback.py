@@ -88,7 +88,9 @@ def _save_small_job(
         record: Called inside the job's ``with`` block to record the pipeline.
         configure: Called after recording and before the run, to configure nodes.
     """
-    job = PipelineJob(name="small", store=DeltaTableDatabase(str(tmp_path / "store")))
+    job = PipelineJob(
+        name="small", database=DeltaTableDatabase(str(tmp_path / "store"))
+    )
     with job:
         record()
     if configure is not None:
@@ -163,7 +165,9 @@ def test_datetime_output_with_nothing_stored_returns_typed_zero_rows(
     data["run"].pop("expected_rows", None)
     _ = pathlib.Path(path).write_text(json.dumps(data))
     table = (
-        PipelineJob.load(path, store=InMemoryArrowDatabase()).nodes["stamp"].as_table()
+        PipelineJob.load(path, database=InMemoryArrowDatabase())
+        .nodes["stamp"]
+        .as_table()
     )
     assert table.num_rows == 0
     assert pa.types.is_timestamp(table.schema.field("t").type)
@@ -366,7 +370,7 @@ def test_other_context_records_do_not_satisfy_saved_expectation(
         other.add_records(table_path, rows, record_id_column="__rid")
     other.flush()
 
-    node = PipelineJob.load(path, store=other).nodes["dbl"]
+    node = PipelineJob.load(path, database=other).nodes["dbl"]
     # The store is the source of truth (ITL-1043): it holds none of the run's
     # records, so none is read; the job file's count makes it a warning.
     with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
@@ -402,7 +406,7 @@ def test_live_node_hot_load_reads_the_latest_recomputed_result(
     # Behaviour change (ITL-904): the hot-load used to keep whichever record of an
     # entry the join returned last; it now keeps the latest recomputation.
     store = DeltaTableDatabase(str(tmp_path / "store"))
-    job = PipelineJob(name="small", store=store)
+    job = PipelineJob(name="small", database=store)
     with job:
         _record_double()
     _ = job.run()
@@ -411,7 +415,7 @@ def test_live_node_hot_load_reads_the_latest_recomputed_result(
     _append_recomputed_record(node, entry_id, recomputation_index=2, value=222)
     _append_recomputed_record(node, entry_id, recomputation_index=1, value=111)
 
-    fresh = PipelineJob(name="small", store=store)
+    fresh = PipelineJob(name="small", database=store)
     with fresh:
         _record_double()
     values = {
@@ -498,7 +502,7 @@ def test_loaded_function_node_warns_once_on_a_store_without_its_runs_records(
     The job file's advisory count makes the difference a ``StoreContentWarning``,
     issued once per node.
     """
-    node = _load(saved, store=InMemoryArrowDatabase()).nodes["dbl"]
+    node = _load(saved, database=InMemoryArrowDatabase()).nodes["dbl"]
     with pytest.warns(StoreContentWarning) as record:
         table = node.as_table()
         rows = list(node.iter_data())
@@ -526,7 +530,7 @@ def test_store_content_warning_names_a_delta_stores_location(
 ) -> None:
     """The warning names a Delta store's location."""
     other = tmp_path / "other_store"
-    node = _load(saved, store=DeltaTableDatabase(str(other))).nodes["dbl"]
+    node = _load(saved, database=DeltaTableDatabase(str(other))).nodes["dbl"]
     with pytest.warns(StoreContentWarning, match="the store at '") as record:
         _ = node.as_table()
     assert str(other) in str(record[0].message)
@@ -558,7 +562,7 @@ def test_store_with_only_another_runs_records_reads_none_with_a_warning(
     path = _save_small_job(tmp_path / "this_run", _record_double)
     _ = _save_small_job(tmp_path / "other_run", record_other_source)
     other_store = DeltaTableDatabase(str(tmp_path / "other_run" / "store"))
-    node = PipelineJob.load(path, store=other_store).nodes["dbl"]
+    node = PipelineJob.load(path, database=other_store).nodes["dbl"]
     # Non-public on purpose: confirm the shared table exists, so this test checks
     # the per-record count, not the missing-table case.
     assert node._pipeline_database is not None
@@ -588,11 +592,11 @@ def test_saving_a_loaded_job_keeps_the_expected_rows(
 ) -> None:
     """Re-saving a job loaded with another store keeps the saved counts."""
     resaved = tmp_path / "resaved.json"
-    _load(saved, store=InMemoryArrowDatabase()).save(str(resaved))
+    _load(saved, database=InMemoryArrowDatabase()).save(str(resaved))
     original = json.loads((saved / "job.json").read_text())["run"]["expected_rows"]
     run = json.loads(resaved.read_text())["run"]
     assert run["expected_rows"] == original
-    node = PipelineJob.load(str(resaved), store=InMemoryArrowDatabase()).nodes["dbl"]
+    node = PipelineJob.load(str(resaved), database=InMemoryArrowDatabase()).nodes["dbl"]
     with pytest.warns(StoreContentWarning, match="records 2 rows"):
         assert node.as_table().num_rows == 0
 
@@ -607,7 +611,7 @@ def test_loaded_function_node_with_nothing_stored_returns_zero_rows(
         data["run"]["expected_rows"]["dbl"] = 0
 
     path = _rewrite_job_file(saved, tmp_path, nothing_stored)
-    node = PipelineJob.load(path, store=InMemoryArrowDatabase()).nodes["dbl"]
+    node = PipelineJob.load(path, database=InMemoryArrowDatabase()).nodes["dbl"]
     with warnings.catch_warnings():
         # Zero expected and zero found: nothing to warn about.
         warnings.simplefilter("error", StoreContentWarning)
@@ -629,7 +633,7 @@ def test_file_without_the_expected_rows_section_reads_without_a_check(
     path = _rewrite_job_file(saved, tmp_path, drop_section)
     with warnings.catch_warnings():
         warnings.simplefilter("error", StoreContentWarning)
-        job = PipelineJob.load(path, store=InMemoryArrowDatabase())
+        job = PipelineJob.load(path, database=InMemoryArrowDatabase())
         assert job.nodes["dbl"].as_table().num_rows == 0
         assert PipelineJob.load(path).nodes["dbl"].as_table().num_rows == 2
 
@@ -647,7 +651,7 @@ def test_a_file_with_the_old_stored_records_flag_loads_without_a_check(
     path = _rewrite_job_file(saved, tmp_path, old_flag)
     with warnings.catch_warnings():
         warnings.simplefilter("error", StoreContentWarning)
-        node = PipelineJob.load(path, store=InMemoryArrowDatabase()).nodes["dbl"]
+        node = PipelineJob.load(path, database=InMemoryArrowDatabase()).nodes["dbl"]
         assert node.as_table().num_rows == 0
 
 
@@ -658,7 +662,7 @@ def test_loaded_function_node_without_store_says_how_to_attach_one(
 
     def drop_store(data: dict[str, Any]) -> None:
         """Remove the saved store configuration."""
-        data["bindings"]["store"] = None
+        data["bindings"]["database"] = None
 
     job = PipelineJob.load(_rewrite_job_file(saved, tmp_path, drop_store))
     node = job.nodes["dbl"]
@@ -668,23 +672,23 @@ def test_loaded_function_node_without_store_says_how_to_attach_one(
         with pytest.raises(RuntimeError) as excinfo:
             _ = read()
         message = str(excinfo.value)
-        assert "was loaded without a store" in message
-        assert "PipelineJob.load(path, store=...)" in message
-        assert "job.bind(store=...)" in message
+        assert "was loaded without a database" in message
+        assert "PipelineJob.load(path, database=...)" in message
+        assert "job.bind(database=...)" in message
         assert "no database attached" not in message
 
 
 def test_binding_a_store_makes_a_storeless_loaded_node_readable(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """``job.bind(store=...)`` makes a loaded node readable."""
+    """``job.bind(database=...)`` makes a loaded node readable."""
 
     def drop_store(data: dict[str, Any]) -> None:
         """Remove the saved store configuration."""
-        data["bindings"]["store"] = None
+        data["bindings"]["database"] = None
 
     job = PipelineJob.load(_rewrite_job_file(saved, tmp_path, drop_store))
-    job.bind(store=DeltaTableDatabase(str(saved / "store")))
+    job.bind(database=DeltaTableDatabase(str(saved / "store")))
     assert job.nodes["dbl"].as_table().num_rows == 2
 
 
@@ -748,11 +752,11 @@ def test_loaded_operator_rejects_direct_execution(
 def test_loaded_job_without_a_store_cannot_run(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """A loaded job without a store gets the read-only error, not 'requires a store'."""
+    """A loaded job without a store gets the read-only error, not 'requires a database'."""
 
     def drop_store(data: dict[str, Any]) -> None:
         """Remove the saved store configuration."""
-        data["bindings"]["store"] = None
+        data["bindings"]["database"] = None
 
     job = PipelineJob.load(_rewrite_job_file(saved, tmp_path, drop_store))
     with pytest.raises(RuntimeError, match="cannot execute a loaded job"):
@@ -873,7 +877,7 @@ def test_unreconstructable_store_is_a_warning_with_the_remedy(
 
     def break_store(data: dict[str, Any]) -> None:
         """Replace the store configuration with an unknown type."""
-        data["bindings"]["store"] = {"type": "no_such_store_type"}
+        data["bindings"]["database"] = {"type": "no_such_store_type"}
 
     caplog.set_level(logging.INFO, logger="orcapod.pipeline.job")
     _ = PipelineJob.load(_rewrite_job_file(saved, tmp_path, break_store))
@@ -884,11 +888,11 @@ def test_unreconstructable_store_is_a_warning_with_the_remedy(
     ]
     assert len(warnings) == 1
     assert warnings[0].startswith(
-        "Could not reconstruct the store from its saved config: "
+        "Could not reconstruct the database from its saved config: "
     )
     assert warnings[0].endswith(
-        "Node results cannot be read until a store is given: "
-        "PipelineJob.load(path, store=...) or job.bind(store=...)."
+        "Node results cannot be read until a database is given: "
+        "PipelineJob.load(path, database=...) or job.bind(database=...)."
     )
 
 

@@ -745,7 +745,7 @@ def test_pick_on_an_array_column_raises_while_building_a_pipeline(
     from orcapod.operators import Pick
 
     source = DictSource(data=[{"k": "r", "x": np.arange(3.0)}], tag_columns=["k"])
-    job = PipelineJob(name="pick", store=InMemoryArrowDatabase())
+    job = PipelineJob(name="pick", database=InMemoryArrowDatabase())
     with pytest.raises(InputValidationError, match="'x'"), job:
         Pick("x", "dtype")(source)
 
