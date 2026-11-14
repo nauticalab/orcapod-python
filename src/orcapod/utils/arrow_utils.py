@@ -194,7 +194,9 @@ def _normalize_field_to_large_types(
     return field.with_type(normalize_to_large_types(field.type, keep_null=keep_null))
 
 
-def normalize_schema_to_large_types(schema: "pa.Schema") -> "pa.Schema":
+def normalize_schema_to_large_types(
+    schema: "pa.Schema", *, keep_null: bool = False
+) -> "pa.Schema":
     """
     Convert a schema to use large variants of data types.
 
@@ -203,6 +205,9 @@ def normalize_schema_to_large_types(schema: "pa.Schema") -> "pa.Schema":
 
     Args:
         schema: Arrow schema to normalize
+        keep_null: Passed to ``normalize_to_large_types``. ``True`` keeps a
+            ``null`` column ``null``, as operators and sources do; the default
+            ``False`` maps it to ``large_string``, as ``Data`` does.
 
     Returns:
         New schema with large type variants, or same schema if no changes needed
@@ -220,7 +225,7 @@ def normalize_schema_to_large_types(schema: "pa.Schema") -> "pa.Schema":
     schema_changed = False
 
     for field in schema:
-        normalized_type = normalize_to_large_types(field.type)
+        normalized_type = normalize_to_large_types(field.type, keep_null=keep_null)
 
         # Check if the type actually changed
         if normalized_type != field.type:
@@ -275,16 +280,22 @@ def shared_arrow_type(
     return None
 
 
-def normalize_table_to_large_types(table: "pa.Table") -> "pa.Table":
+def normalize_table_to_large_types(
+    table: "pa.Table", *, keep_null: bool = False
+) -> "pa.Table":
     """
     Normalize table schema to use large type variants.
 
     Uses cast() which should be zero-copy for large variant conversions
     since they have identical binary representations, but ensures proper
-    type validation and handles any edge cases safely.
+    type validation and handles any edge cases safely. Only layouts change:
+    width, nullability, field metadata and logical (extension) types are kept.
 
     Args:
         table: Arrow table to normalize
+        keep_null: Passed to ``normalize_to_large_types``. ``True`` keeps a
+            ``null`` column ``null``, as operators and sources do; the default
+            ``False`` maps it to ``large_string``, as ``Data`` does.
 
     Returns:
         Table with normalized schema, or same table if no changes needed
@@ -296,10 +307,13 @@ def normalize_table_to_large_types(table: "pa.Table") -> "pa.Table":
         name: large_string
         age: int64
     """
-    normalized_schema = normalize_schema_to_large_types(table.schema)
+    # ``table.schema`` makes a new Schema object on every access: read it once,
+    # so the identity check below can find an unchanged schema.
+    schema = table.schema
+    normalized_schema = normalize_schema_to_large_types(schema, keep_null=keep_null)
 
     # If schema didn't change, return original table
-    if normalized_schema is table.schema:
+    if normalized_schema is schema:
         return table
 
     # Use cast() for safety - should be zero-copy for large variant conversions

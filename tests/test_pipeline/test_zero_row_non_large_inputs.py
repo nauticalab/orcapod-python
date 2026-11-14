@@ -163,7 +163,8 @@ def test_side_effect_stream_zero_row_equals_populated() -> None:
 
 
 def test_cached_source_over_an_empty_source_equals_its_head() -> None:
-    """A cache with nothing stored reads with the wrapped source's own Arrow types."""
+    """A cache with nothing stored: its head before the read has the types of the read
+    (the large form of the wrapped source's Arrow types, ITL-1122)."""
     from orcapod.core.sources import CachedSource
 
     empty = ArrowTableSource(

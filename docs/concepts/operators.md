@@ -634,6 +634,10 @@ silent widening; convert explicitly.
 - **Types are normalized to their large variants.** `string` becomes `large_string`,
   `binary` becomes `large_binary` and `list` becomes `large_list`, recursively (also inside
   structs). The Arrow hasher treats each pair as identical, so this never changes a hash.
+  Every operator does this, also one that passes its rows through unchanged (a select, a
+  rename, a filter with nothing to filter, a join), on a plain stream as inside a job. Every
+  source gives large types too, so an operator's inputs already have them (see
+  [Arrow types of a source](sources.md#arrow-types-of-a-source)).
 - **Width, nullability and logical types are kept.** An `int8` column stays `int8`, a
   `float32` column stays `float32`, and a logical type such as `Path` keeps its logical type.
 - **List columns built by `MergeJoin`, `Batch` and `GroupBy`** are `large_list<T>`, where `T`

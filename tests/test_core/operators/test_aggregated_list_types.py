@@ -171,8 +171,8 @@ def _row_hashes(stream: StreamProtocol) -> list[tuple[str, str]]:
     ]
 
 
-def _in_list_layout(stream: StreamProtocol) -> ArrowTableStream:
-    """Rebuild ``stream`` with every top-level ``large_list`` column as ``list``.
+def _list_layout_table(stream: StreamProtocol) -> pa.Table:
+    """Return ``stream``'s table with every top-level ``large_list`` column as ``list``.
 
     This is the layout ``Batch`` and ``GroupBy`` emitted before ITL-832
     (``pa.list_(input type)``); logical list columns were already extension
@@ -187,8 +187,16 @@ def _in_list_layout(stream: StreamProtocol) -> ArrowTableStream:
             for field in table.schema
         ]
     )
+    return table.cast(schema)
+
+
+def _in_list_layout(stream: StreamProtocol) -> ArrowTableStream:
+    """Rebuild ``stream`` from its ``list``-layout table (``_list_layout_table``).
+
+    The stream presents ``large_list`` again (ITL-1122).
+    """
     tag_columns, _ = stream.keys()
-    return ArrowTableStream(table.cast(schema), tag_columns=tag_columns)
+    return ArrowTableStream(_list_layout_table(stream), tag_columns=tag_columns)
 
 
 class TestAggregatedContentHashes:
@@ -199,9 +207,19 @@ class TestAggregatedContentHashes:
     ) -> None:
         """Every row hashes the same in the ``large_list`` and ``list`` layouts."""
         _, _, result = aggregated
+        # A stream presents large layouts only (ITL-1122): the old layout exists as a
+        # table, which the Arrow hasher hashes as the new one, row by row.
+        old_table = _list_layout_table(result)
+        new_table = result.as_table(columns={"source": True, "system_tags": True})
+        assert pa.types.is_list(old_table.schema.field("n").type)
+        assert pa.types.is_large_list(new_table.schema.field("n").type)
+        hasher = result.data_context.arrow_hasher
+        for i in range(new_table.num_rows):
+            assert hasher.hash_table(old_table.slice(i, 1)) == hasher.hash_table(
+                new_table.slice(i, 1)
+            )
         before = _in_list_layout(result)
-        assert pa.types.is_list(before.as_table().schema.field("n").type)
-        assert pa.types.is_large_list(result.as_table().schema.field("n").type)
+        assert pa.types.is_large_list(before.as_table().schema.field("n").type)
         assert _row_hashes(result) == _row_hashes(before)
 
     def test_stream_content_hash_matches_the_list_layout(

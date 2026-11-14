@@ -33,7 +33,7 @@ import pytest
 from orcapod.contexts import get_default_context, get_default_type_converter
 from orcapod.hashing.arrow_hashers import StarfixArrowHasher
 from orcapod.core.operators import MergeJoin, PolarsFilter
-from orcapod.core.sources import CSVSource, DictSource
+from orcapod.core.sources import DictSource
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
@@ -517,18 +517,25 @@ class TestDisagreeingInputs:
         with pytest.raises(InputValidationError, match=r"'k'"):
             MergeJoin().static_process(first, second)
 
-    def test_csv_and_dict_sources_on_a_string_column(self, tmp_path: Path) -> None:
-        """A CSV ``string`` column colliding with a dict ``large_string`` one merges."""
-        csv_path = tmp_path / "labels.csv"
-        csv_path.write_text("id,label\n1,a\n2,b\n")
-        csv_source = CSVSource(str(csv_path), tag_columns=["id"])
+    def test_user_string_and_dict_sources_on_a_string_column(self) -> None:
+        """A user's ``string`` column colliding with a dict one merges.
+
+        The ``string`` / ``large_string`` meeting of ITL-829 no longer reaches an
+        operator: every stream presents the large variant (ITL-1122), so the user's
+        ``string`` column is ``large_string`` at its source already.
+        """
+        user_source = ArrowTableSource(
+            _table({"id": (pa.int64(), [1, 2]), "label": (pa.string(), ["a", "b"])}),
+            tag_columns=["id"],
+            source_id="user",
+        )
         dict_source = DictSource(
             [{"id": 1, "label": "x"}, {"id": 2, "label": "y"}], tag_columns=["id"]
         )
-        assert csv_source.as_table().schema.field("label").type == pa.string()
+        assert user_source.as_table().schema.field("label").type == pa.large_string()
         assert dict_source.as_table().schema.field("label").type == pa.large_string()
 
-        table = MergeJoin()(csv_source, dict_source).as_table()
+        table = MergeJoin()(user_source, dict_source).as_table()
         assert table.schema.field("label").type == pa.large_list(pa.large_string())
         labels = table.sort_by("id").column("label").to_pylist()
         assert labels == [["a", "x"], ["b", "y"]]
@@ -738,10 +745,10 @@ def _small_layout(arrow_type: pa.DataType) -> pa.DataType:
     return arrow_type
 
 
-def _relayout(
+def _relayout_table(
     stream: StreamProtocol, overrides: dict[str, pa.DataType] | None = None
-) -> ArrowTableStream:
-    """Rebuild ``stream`` in the small layouts, with optional per-column types.
+) -> pa.Table:
+    """Return ``stream``'s table in the small layouts, with optional per-column types.
 
     The small layouts are what MergeJoin emitted for a merged column of
     ``int64`` or ``string`` values before this change (``list<...>``).
@@ -754,8 +761,19 @@ def _relayout(
             for field in table.schema
         ]
     )
+    return table.cast(schema)
+
+
+def _relayout(
+    stream: StreamProtocol, overrides: dict[str, pa.DataType] | None = None
+) -> ArrowTableStream:
+    """Rebuild ``stream`` from its table in the small layouts (``_relayout_table``).
+
+    The stream presents the large layouts again (ITL-1122); what stays is any width
+    an override changes.
+    """
     tag_columns, _ = stream.keys()
-    return ArrowTableStream(table.cast(schema), tag_columns=tag_columns)
+    return ArrowTableStream(_relayout_table(stream, overrides), tag_columns=tag_columns)
 
 
 def _stream_hash(stream: StreamProtocol) -> str:
@@ -848,8 +866,16 @@ class TestContentHashes:
         """
         values = [1, 2] if arrow_type == pa.int64() else ["a", "b"]
         result = MergeJoin().static_process(*_pair(arrow_type, arrow_type, values, 2))
+        # A stream presents large layouts only (ITL-1122): the old layout exists as a
+        # table, which the Arrow hasher hashes as the new one.
+        old_table = _relayout_table(result)
+        assert pa.types.is_list(old_table.schema.field("x").type)
+        hasher = _starfix_hasher()
+        assert hasher.hash_table(old_table) == hasher.hash_table(
+            result.as_table(columns={"source": True, "system_tags": True})
+        )
         old_layout = _relayout(result)
-        assert pa.types.is_list(old_layout.as_table().schema.field("x").type)
+        assert pa.types.is_large_list(old_layout.as_table().schema.field("x").type)
         assert _row_hashes(result) == _row_hashes(old_layout)
         assert _stream_hash(result) == _stream_hash(old_layout)
 

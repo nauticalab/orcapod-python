@@ -48,6 +48,17 @@ Data with no rows has no columns to read, so `DictSource(data=[], ...)` raises
 `ValueError: Table is empty`. To build a source with no rows, pass `data_schema=` so the
 columns are known.
 
+### Arrow types of a source
+
+Every source gives the large variants of string, binary and list types (`large_string`,
+`large_binary`, `large_list`, recursively), whatever its input: an Arrow table of your own
+(`ArrowTableSource`), an Arrow schema you pass (`schema=` or `data_schema=`), Python values,
+a data frame, a CSV file or a database table. A `string` column you give comes back as
+`large_string`. Only the layout changes: names, nullability, widths (`int8` stays `int8`) and
+logical types are kept, and the two variants hash identically, so no hash depends on which
+one you gave. The Arrow `list_view` and `large_list_view` types are not supported: a source
+refuses a column of either type.
+
 ### SpiralDB tables
 
 `SpiralDBTableSource` exposes a table in a [SpiralDB](https://spiraldb.com) project as a

@@ -39,6 +39,13 @@ class ArrowTableStream(StreamBase):
     This is useful for ensuring that the data in the stream remains consistent and unchanging.
 
     The types of the tag and data columns are inferred from the PyArrow Table schema.
+
+    Every column takes the large variant of its Arrow type (developer, November 14,
+    2026, ITL-1122): ``string`` is ``large_string``, ``binary`` is ``large_binary``,
+    ``list`` is ``large_list``, recursively. This is the one place a table becomes a
+    stream, so every source (each builds its stream here, from a user's Arrow table
+    too) and every operator result presents large types. Width, nullability, field
+    metadata and logical types are kept; large and non-large variants hash identically.
     """
 
     # The table's rows are held, not computed: a run() view says "all N rows", as
@@ -59,6 +66,9 @@ class ArrowTableStream(StreamBase):
 
         self._producer = producer
         self._upstreams = upstreams
+
+        # Every table Orcapod presents is in its large variants (ITL-1122).
+        table = arrow_utils.normalize_table_to_large_types(table, keep_null=True)
 
         data_table, data_context_table = arrow_utils.split_by_column_groups(
             table, [constants.CONTEXT_KEY]
