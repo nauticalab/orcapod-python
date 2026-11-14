@@ -12,7 +12,7 @@ Built-in PythonTypeHandlerProtocol implementations:
   UUIDHandler          -- uuid.UUID     → canonical bytes
   BytesHandler         -- bytes/bytearray → hex string
   FunctionHandler      -- callable      → via FunctionInfoExtractorProtocol
-  TypeObjectHandler    -- type objects  → "type:<module>.<qualname>"
+  TypeObjectHandler    -- type objects  → logical type identifier, else "type:<module>.<qualname>"
   FileHandler          -- orcapod.File  → file content hash
   DirectoryHandler     -- orcapod.Directory → recursive Merkle tree hash
   register_builtin_python_type_handlers -- populate a registry with all of the above

@@ -4,7 +4,7 @@ Built-in PythonTypeHandlerProtocol implementations.
   UUIDHandler           -- uuid.UUID: 16-byte binary representation
   BytesHandler          -- bytes/bytearray: hex string representation
   FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
-  TypeObjectHandler     -- type objects: stable "type:<module>.<qualname>" string
+  TypeObjectHandler     -- type objects: logical type identifier, else "type:<module>.<qualname>"
   SpecialFormHandler    -- typing._SpecialForm
   GenericAliasHandler   -- generic alias type annotations
   UnionTypeHandler      -- types.UnionType (Python 3.10+ X | Y syntax)
@@ -169,25 +169,34 @@ class FunctionHandler:
 class TypeObjectHandler:
     """Hasher for type objects (classes passed as values).
 
-    Resolves types registered in the ``LogicalTypeRegistry`` exposed by
-    *type_converter* to their logical type identifier, the Arrow extension name
-    and extension metadata, written as ``LogicalTypeIdentifier.text``
+    Resolves a type to its logical type in the ``LogicalTypeRegistry`` exposed by
+    *type_converter* and hashes its logical type identifier, the Arrow extension
+    name and extension metadata, written as ``LogicalTypeIdentifier.text``
     (``"type:orcapod.file;7b2276657273696f6e223a317d"`` for ``op.File``:
     the name, ``;``, then the metadata ``{"version":1}`` in hex). A change of
     either part of the identifier therefore changes every type, schema,
     function and pipeline hash the type takes part in.
-    Falls back to ``"type:<module>.<qualname>"`` for unregistered types or
-    when no ``type_converter`` is provided. The module is the canonical one
-    from ``canonical_type_name``, so standard-library types that moved into a
-    private submodule (``pathlib._local`` on Python 3.13) hash identically on
-    every Python version.
+
+    A class not registered yet that a registered factory covers (a dataclass,
+    an ``orcapod.dataclass``, a pydantic model) is registered first, through
+    ``type_converter.get_logical_type_for_python_type``. So a type hashes the
+    same before and after anything else registers it (ITL-1137): hashing a
+    schema before the source or function pod that registers its class gives
+    the registered value, the one every stored path and golden value holds.
+
+    Falls back to ``"type:<module>.<qualname>"`` for a type with no logical
+    type (``int``, a class no factory covers) or when no ``type_converter`` is
+    provided. The module is the canonical one from ``canonical_type_name``, so
+    standard-library types that moved into a private submodule
+    (``pathlib._local`` on Python 3.13) hash identically on every Python
+    version.
 
     Args:
         type_converter: Optional ``TypeConverterProtocol``.  When provided,
-            ``type_converter.get_logical_type(obj)`` is called to resolve
-            registered logical types to their identifier.  When
-            ``None`` (the default), the fallback ``"type:<module>.<qualname>"``
-            serialisation is always used.
+            ``type_converter.get_logical_type_for_python_type(obj)`` resolves the
+            type to its logical type, registering it when a factory covers it.
+            When ``None`` (the default), the fallback
+            ``"type:<module>.<qualname>"`` serialisation is always used.
     """
 
     def __init__(self, type_converter: "TypeConverterProtocol | None" = None) -> None:
@@ -199,7 +208,7 @@ class TypeObjectHandler:
                 f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
             )
         if self._type_converter is not None:
-            lt = self._type_converter.get_logical_type(obj)
+            lt = self._type_converter.get_logical_type_for_python_type(obj)
             if lt is not None:
                 return f"type:{logical_type_identifier(lt).text}"
         return f"type:{canonical_type_name(obj)}"
@@ -310,9 +319,11 @@ class SchemaHandler:
     not part of the structural identity used for caching or pipeline routing.
 
     When ``type_converter`` is provided, every field type is verified to be
-    Arrow-translatable before hashing. A type that cannot be converted raises
-    ``TypeError`` with a diagnostic message, catching unregistered types at hash time
-    rather than silently falling back to a potentially unstable Python module path.
+    Arrow-translatable. A type that cannot be converted raises ``TypeError`` with a
+    diagnostic message, catching unsupported types at hash time rather than silently
+    falling back to a Python module path. The check runs after the field type is
+    hashed, because hashing a type registers a class a factory covers
+    (``TypeObjectHandler``), and the check reads only registered types.
 
     Args:
         type_converter: Optional ``TypeConverterProtocol``. When provided, validates
@@ -344,6 +355,8 @@ class SchemaHandler:
             raise TypeError(f"SchemaHandler: expected a Schema, got {type(obj)!r}")
         result: dict[str, ContentHash] = {}
         for field_name, python_type in obj.items():
+            # Hashing the type registers a class a factory covers, so it comes first.
+            type_hash = hasher.hash_object(python_type)
             if self._type_converter is not None:
                 try:
                     self._type_converter.python_type_to_arrow_type(python_type)
@@ -356,7 +369,7 @@ class SchemaHandler:
                         f"supported native type (int, str, float, bool, bytes, "
                         f"datetime, date)."
                     ) from exc
-            result[field_name] = hasher.hash_object(python_type)
+            result[field_name] = type_hash
         # Sort by field name for determinism — matches _expand_mapping's sort_keys.
         return dict(sorted(result.items()))
 
@@ -764,7 +777,8 @@ def register_builtin_python_type_handlers(
         type_converter: Optional ``TypeConverterProtocol`` forwarded to
             ``TypeObjectHandler``, ``FunctionSignatureExtractor``, and
             ``SchemaHandler`` for stable canonical type-name resolution via
-            ``get_logical_type()`` and Arrow-translatability validation.
+            ``get_logical_type_for_python_type()`` and Arrow-translatability
+            validation.
             When ``None`` (the default), all three handlers fall back to the raw
             ``"type:<module>.<qualname>"`` serialisation and skip Arrow validation.
     """

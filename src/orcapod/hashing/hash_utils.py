@@ -44,12 +44,16 @@ def canonical_annotation_str(
 ) -> str:
     """Return a stable, canonical string for a type annotation.
 
-    Resolves types registered in *type_converter* (e.g. ``orcapod.File``) to
-    their logical type identifier text (``LogicalTypeIdentifier.text``: the Arrow
-    extension name, ``;``, then the extension metadata in hex, e.g.
-    ``"orcapod.file;7b2276657273696f6e223a317d"``) via
-    ``type_converter.get_logical_type()``. Internal module relocations do not
-    change the string; a change of the type's identifier does.
+    Resolves a type that has a logical type in *type_converter* (e.g.
+    ``orcapod.File``) to its logical type identifier text
+    (``LogicalTypeIdentifier.text``: the Arrow extension name, ``;``, then the
+    extension metadata in hex, e.g. ``"orcapod.file;7b2276657273696f6e223a317d"``)
+    via ``type_converter.get_logical_type_for_python_type()``, which registers a
+    class a factory covers (a dataclass, an ``orcapod.dataclass``, a pydantic
+    model) that nothing has registered yet. So an annotation gives the same string
+    before and after its class is registered (ITL-1137), as ``TypeObjectHandler``
+    does for a type hashed as a value. Internal module relocations do not change
+    the string; a change of the type's identifier does.
 
     For union types (both PEP 604 ``X | Y`` and ``typing.Union[X, Y]``),
     members are sorted byte-wise so that ``str | Path`` and ``Path | str``
@@ -66,16 +70,18 @@ def canonical_annotation_str(
 
     Args:
         annotation: A type annotation object.
-        type_converter: Optional ``TypeConverterProtocol``. When provided,
-            registered logical types resolve to their identifier text via
-            ``get_logical_type()``.
+        type_converter: Optional ``TypeConverterProtocol``. When provided, a
+            type with a logical type resolves to its identifier text via
+            ``get_logical_type_for_python_type()``, registering it if needed.
 
     Returns:
         A canonical string representation.
     """
-    # Registered logical type: use its identifier (extension name and metadata)
+    # A type with a logical type: its identifier (extension name and metadata).
+    # Registers a class a factory covers, so the string never depends on whether
+    # something registered it first (ITL-1137).
     if type_converter is not None and isinstance(annotation, type):
-        lt = type_converter.get_logical_type(annotation)
+        lt = type_converter.get_logical_type_for_python_type(annotation)
         if lt is not None:
             return logical_type_identifier(lt).text
 
