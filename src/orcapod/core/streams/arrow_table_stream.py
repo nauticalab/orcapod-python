@@ -16,7 +16,7 @@ from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagPro
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema, SourceInfoValue
-from orcapod.utils import arrow_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -84,6 +84,8 @@ class ArrowTableStream(StreamBase):
 
         prefix_info = {constants.SOURCE_PREFIX: source_info}
 
+        # A tag never has a meta column's name (ITL-1080).
+        schema_utils.require_names_not_meta(tag_columns)
         # determine tag columns first and then exclude any source info
         self._tag_columns = tuple(c for c in tag_columns if c in table.column_names)
         self._system_tag_columns = tuple(

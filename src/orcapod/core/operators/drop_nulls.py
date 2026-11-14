@@ -7,6 +7,7 @@ import typing
 from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.operators.meta_columns import WithoutMetaWriter
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.datagrams import Data, Tag
 from orcapod.core.operators.base import UnaryOperator
@@ -331,6 +332,7 @@ class DropNulls(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             async for tag, data in inputs[0]:
                 names = self._target_columns(tag.keys(), data.keys())
                 tag_table = self._narrow_table(

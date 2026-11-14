@@ -67,6 +67,13 @@ def test_pick_out_collision_raises(dict_stream):
         Pick("scores", "speed", out="scores")(dict_stream)
 
 
+def test_pick_out_with_the_meta_prefix_raises():
+    """``__`` is reserved for meta columns, which no operator carries (ITL-1080): an
+    ``out`` named with it would be dropped on every path, so it is refused at once."""
+    with pytest.raises(InputValidationError, match="reserved for meta columns"):
+        Pick("scores", "speed", out="__speed")
+
+
 # ── functional tests: Pick ────────────────────────────────────────────────────
 
 
@@ -230,6 +237,13 @@ def test_index_out_collision_raises():
     stream = _make_list_stream([{"id": 1, "items": [10, 20]}])
     with pytest.raises(InputValidationError, match="already exists"):
         Index("items", 0, out="items")(stream)
+
+
+def test_index_out_with_the_meta_prefix_raises():
+    """``__`` is reserved for meta columns, which no operator carries (ITL-1080): an
+    ``out`` named with it would be dropped on every path, so it is refused at once."""
+    with pytest.raises(InputValidationError, match="reserved for meta columns"):
+        Index("items", 0, out="__first")
 
 
 # ── functional tests: Index ───────────────────────────────────────────────────

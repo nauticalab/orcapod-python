@@ -23,7 +23,7 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod import contexts
-from orcapod.channels import Channel, ReadableChannel, WritableChannel
+from orcapod.channels import Channel, ChannelClosed, ReadableChannel, WritableChannel
 from orcapod.config import OrcapodConfig
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
@@ -87,6 +87,55 @@ async def _discard(channel: ReadableChannel[Any]) -> None:
     """
     async for _ in channel:
         pass
+
+
+class _InputTap:
+    """An input channel reader that keeps the rows needed to rebuild its columns.
+
+    An async operator node hands its input channels to the operator, so it sees
+    no input row itself. When the run produces no output row, the node rebuilds
+    each input with no rows and applies the operator to those, as the sync path
+    applies it to the rebuilt upstream rows (ITL-1080). Those columns and types
+    are what ``StaticOutputOperatorPod._rows_to_table`` makes of the input's
+    rows, and the only thing in them that depends on more than one row is the
+    nullability of a source-info column (nullable when some row's token is
+    ``None``). So the tap keeps the first row, and the first row with a ``None``
+    token for each source-info column, never the whole input.
+
+    Attributes:
+        rows: The kept rows, in arrival order.
+    """
+
+    def __init__(self, reader: ReadableChannel[tuple[TagProtocol, DataProtocol]]):
+        self._reader = reader
+        self.rows: list[tuple[TagProtocol, DataProtocol]] = []
+        self._null_sources: set[str] = set()
+
+    def _keep(self, item: tuple[TagProtocol, DataProtocol]) -> None:
+        """Keep ``item`` if it is the first row or has a new ``None`` token."""
+        nulls = {name for name, token in item[1].source_info().items() if token is None}
+        if not self.rows or not nulls <= self._null_sources:
+            self.rows.append(item)
+            self._null_sources |= nulls
+
+    async def receive(self) -> tuple[TagProtocol, DataProtocol]:
+        """Receive the next row from the wrapped reader, keeping it if needed."""
+        item = await self._reader.receive()
+        self._keep(item)
+        return item
+
+    def __aiter__(self) -> "_InputTap":
+        return self
+
+    async def __anext__(self) -> tuple[TagProtocol, DataProtocol]:
+        try:
+            return await self.receive()
+        except ChannelClosed:
+            raise StopAsyncIteration
+
+    async def collect(self) -> list[tuple[TagProtocol, DataProtocol]]:
+        """Drain every remaining row."""
+        return [item async for item in self]
 
 
 # ---------------------------------------------------------------------------
@@ -1761,11 +1810,12 @@ class OperatorJobNode(OperatorNodeBase):
 
             hashes = [s.pipeline_hash() for s in self._input_streams]
             operator = cast(StaticOutputOperatorPod, self._operator)
+            taps = [_InputTap(reader) for reader in inputs]
             try:
                 async with asyncio.TaskGroup() as tg:
                     tg.create_task(
                         operator.async_execute(
-                            inputs,
+                            taps,
                             intermediate.writer,
                             input_pipeline_hashes=hashes,
                         )
@@ -1787,14 +1837,23 @@ class OperatorJobNode(OperatorNodeBase):
                 if should_store:
                     self._store_output_stream(stream)
             else:
-                # A completed run with no rows keeps a typed zero-row result, as the
-                # sync path does, so the node reads as computed and empty (not as
-                # never run). Nothing is stored for it.
-                self._cached_output_stream = ArrowTableStream(
-                    self._make_empty_table(),
-                    tag_columns=self.keys()[0],
-                    data_context=self.data_context,
+                # A completed run with no rows keeps the operator's result over its
+                # inputs rebuilt with no rows, exactly as the sync orchestrator
+                # rebuilds them, so the node reads as computed and empty with the
+                # sync path's columns and Arrow types (ITL-1080). An input that
+                # delivered no row is rebuilt from its Python output schema, as on
+                # the sync path. Nothing is stored for it.
+                empty_result = operator.process(
+                    *(
+                        StaticOutputOperatorPod._materialize_upstream(
+                            tap.rows, upstream, zero_rows=True
+                        )
+                        for tap, upstream in zip(taps, self._input_streams, strict=True)
+                    )
                 )
+                # Computed, as execute() computes it, so the node reads as run.
+                _ = list(empty_result.iter_data())
+                self._cached_output_stream = empty_result
 
             self._update_modified_time()
 

@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from orcapod.core.operators.meta_columns import WithoutMetaWriter
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
@@ -33,6 +34,28 @@ def _canonical_columns(columns: str | Collection[str]) -> tuple[str, ...]:
     if isinstance(columns, str):
         return (columns,)
     return tuple(sorted(set(columns)))
+
+
+def require_a_data_column(remaining: Collection[str]) -> None:
+    """Refuse a column operation whose result would have no data column.
+
+    A stream needs at least one data column (``ArrowTableStream`` refuses a table
+    without one), so the sync path checks this when the operator is applied and
+    the async path on the first row, with this one error. Every column operator
+    (``SelectDataColumns``, ``DropDataColumns``, ``SelectColumns``,
+    ``DropColumns``, ``MapData``) uses it. Meta (``__``) columns
+    are not data: no operator carries them (ITL-1080).
+
+    Args:
+        remaining: The data columns the result would have.
+
+    Raises:
+        InputValidationError: If ``remaining`` has no data column.
+    """
+    if not [c for c in remaining if not c.startswith(constants.META_PREFIX)]:
+        raise InputValidationError(
+            "no data column would remain: a stream needs at least one data column"
+        )
 
 
 class SelectTagColumns(UnaryOperator):
@@ -128,6 +151,7 @@ class SelectTagColumns(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             tags_to_drop: list[str] | None = None
             async for tag, data in inputs[0]:
                 if tags_to_drop is None:
@@ -211,13 +235,19 @@ class SelectDataColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        tag_columns, data_columns = stream.keys()
+        tag_columns, listed_columns = stream.keys()
+        # A raw stream lists its meta (``__``) columns as data; they are not data
+        # columns to select, as on the async path (ITL-1080).
+        data_columns = [
+            c for c in listed_columns if not c.startswith(constants.META_PREFIX)
+        ]
         columns_to_select = self.columns
         missing_columns = set(columns_to_select) - set(data_columns)
         if missing_columns and self.strict:
             raise InputValidationError(
                 f"Missing data columns: {missing_columns}. Make sure all specified columns to select are present or use strict=False to ignore missing columns"
             )
+        require_a_data_column([c for c in data_columns if c in columns_to_select])
 
     def unary_output_schema(
         self,
@@ -256,6 +286,7 @@ class SelectDataColumns(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             pkts_to_drop: list[str] | None = None
             async for tag, data in inputs[0]:
                 if pkts_to_drop is None:
@@ -268,6 +299,7 @@ class SelectDataColumns(UnaryOperator):
                                 f"specified columns to select are present or use "
                                 f"strict=False to ignore missing columns"
                             )
+                    require_a_data_column([c for c in pkt_keys if c in self.columns])
                     pkts_to_drop = [c for c in pkt_keys if c not in self.columns]
                 if not pkts_to_drop:
                     await output.send((tag, data))
@@ -379,6 +411,7 @@ class DropTagColumns(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             effective_drops: list[str] | None = None
             async for tag, data in inputs[0]:
                 if effective_drops is None:
@@ -468,12 +501,18 @@ class DropDataColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        _, data_columns = stream.keys()
+        _, listed_columns = stream.keys()
+        # A raw stream lists its meta (``__``) columns as data; they are not data
+        # columns to drop, as on the async path (ITL-1080).
+        data_columns = [
+            c for c in listed_columns if not c.startswith(constants.META_PREFIX)
+        ]
         missing_columns = set(self.columns) - set(data_columns)
         if missing_columns and self.strict:
             raise InputValidationError(
                 f"Missing data columns: {missing_columns}. Make sure all specified columns to drop are present or use strict=False to ignore missing columns"
             )
+        require_a_data_column([c for c in data_columns if c not in self.columns])
 
     def unary_output_schema(
         self,
@@ -509,6 +548,7 @@ class DropDataColumns(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             effective_drops: list[str] | None = None
             async for tag, data in inputs[0]:
                 if effective_drops is None:
@@ -521,6 +561,9 @@ class DropDataColumns(UnaryOperator):
                                 f"specified columns to drop are present or use "
                                 f"strict=False to ignore missing columns"
                             )
+                    require_a_data_column(
+                        [c for c in pkt_keys if c not in self.columns]
+                    )
                     effective_drops = (
                         list(self.columns)
                         if self.strict
@@ -538,25 +581,6 @@ class DropDataColumns(UnaryOperator):
             self.__class__.__name__,
             list(self.columns),
             self.strict,
-        )
-
-
-def _require_a_data_column(remaining_data_columns: Collection[str]) -> None:
-    """Raise unless at least one data column remains.
-
-    A stream needs at least one data column (``ArrowTableStream`` refuses a table
-    without one), so a column operator whose result would have none is refused
-    when it is called, before any row is built.
-
-    Args:
-        remaining_data_columns: The data columns the result would keep.
-
-    Raises:
-        InputValidationError: When ``remaining_data_columns`` is empty.
-    """
-    if not remaining_data_columns:
-        raise InputValidationError(
-            "no data column would remain: a stream needs at least one data column"
         )
 
 
@@ -646,7 +670,7 @@ class _TagAndDataColumnsOperator(UnaryOperator, ABC):
             )
         _, data_removed = self._removals(tag_columns, data_columns)
         try:
-            _require_a_data_column([c for c in data_columns if c not in data_removed])
+            require_a_data_column([c for c in data_columns if c not in data_removed])
         except InputValidationError as error:
             raise InputValidationError(
                 f"{self.__class__.__name__}({list(self.columns)}) would leave no data "
@@ -738,6 +762,7 @@ class _TagAndDataColumnsOperator(UnaryOperator, ABC):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             removals: tuple[list[str], list[str]] | None = None
             async for tag, data in inputs[0]:
                 if removals is None:
@@ -749,8 +774,6 @@ class _TagAndDataColumnsOperator(UnaryOperator, ABC):
                     tag = tag.drop(*tags_removed)
                 if data_removed:
                     data = data.drop(*data_removed)
-                if data.meta_columns:
-                    data = data.drop_meta_columns(*data.meta_columns)
                 await output.send((tag, data))
         finally:
             await output.close()

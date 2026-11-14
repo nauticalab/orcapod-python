@@ -17,7 +17,7 @@ from orcapod.core.sources.source_ids import hash_source_id
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
-from orcapod.utils import arrow_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.schema_utils import compute_source_schema_hash
 from orcapod.utils.lazy_module import LazyModule
 
@@ -185,6 +185,10 @@ class SourceStreamBuilder:
         """
         tag_columns_tuple = tuple(tag_columns)
         system_tag_columns_tuple = tuple(system_tag_columns)
+
+        # A tag never has a meta column's name; the meta columns are dropped next,
+        # so say so here rather than report the tag as missing (ITL-1080).
+        schema_utils.require_names_not_meta(tag_columns_tuple)
 
         # 1. Drop system columns from raw input.
         table = arrow_utils.drop_system_columns(table)

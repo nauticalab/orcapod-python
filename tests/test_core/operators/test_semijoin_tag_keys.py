@@ -27,7 +27,9 @@ from orcapod.errors import SemiJoinIgnoredColumnWarning
 from orcapod.protocols.core_protocols import StreamProtocol
 from tests.test_core.operators.test_async_sync_equivalence import (
     Row,
+    _meta_columns,  # pyright: ignore[reportPrivateUsage]  # shared test helper
     _source,  # pyright: ignore[reportPrivateUsage]  # shared test helper
+    _with_meta,  # pyright: ignore[reportPrivateUsage]  # shared test helper
     assert_equivalent,
     assert_same_provenance,
     sync_rows,
@@ -266,3 +268,32 @@ def test_filter_without_the_warning() -> None:
         warnings.simplefilter("error", SemiJoinIgnoredColumnWarning)
         result = SemiJoin()(source, keys_only)
     assert left_ids(result) == [2]
+
+
+@pytest.mark.parametrize("path", ["sync", "async_validated", "async_unvalidated"])
+def test_shared_meta_column_is_neither_a_key_nor_warned_about(path: str) -> None:
+    """A meta (``__``) column of the same name on both inputs is not a user column
+    (ITL-1080): no match key, no ``SemiJoinIgnoredColumnWarning``, not in the output."""
+    # Same meta names on both sides, with different values: a key would drop rows.
+    left = _with_meta(left_source(), _meta_columns("m", 3))
+    right = _with_meta(right_tags_only(), _meta_columns("m", 2))
+    op = SemiJoin()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SemiJoinIgnoredColumnWarning)
+        if path == "sync":
+            result = op(left, right)
+            ids = left_ids(result)
+            meta = [n for n in result.as_table(all_info=True).column_names if "__" in n]
+        else:
+            if path == "async_validated":
+                _ = op(left, right)
+            rows = asyncio.run(_async_rows(op, left, right))
+            ids = [tag.as_dict()["id"] for tag, _ in rows]
+            meta = [
+                n
+                for _, data in rows
+                for n in data.as_table(all_info=True).column_names
+                if "__" in n
+            ]
+    assert ids == [1, 3]
+    assert meta == []

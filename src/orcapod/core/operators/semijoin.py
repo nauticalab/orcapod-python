@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Collection, Sequence
 from typing import TYPE_CHECKING, Any, final
 
 from orcapod.channels import ChannelClosed, ReadableChannel, WritableChannel
+from orcapod.core.operators.meta_columns import WithoutMetaWriter
 from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_type
 from orcapod.core.operators.key_nullability import reconcile_key_nullability
 from orcapod.core.operators.match_keys import frozen_scalar
@@ -324,6 +325,7 @@ class SemiJoin(BinaryOperator):
         """
         left_rows: _LeftRows | None = None
         try:
+            output = WithoutMetaWriter(output)
             # Phase 1: Build right-side lookup, reading the left input meanwhile
             right_rows, left_rows = await _collect_right_reading_left(
                 inputs[0], inputs[1]

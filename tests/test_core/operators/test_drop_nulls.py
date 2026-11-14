@@ -807,7 +807,8 @@ def test_no_argument_leaves_meta_columns_alone() -> None:
     """A meta (``__``) column is not a data column for "every column".
 
     A stream built straight from a table lists its meta columns among its data
-    keys (ITL-846); a null there still drops no row and the field stays nullable.
+    keys (ITL-846); a null there still drops no row. Like every operator, DropNulls
+    does not carry its input's meta columns (ITL-1080).
     """
     meta = f"{constants.META_PREFIX}note"
     table = readings().as_table(columns=ALL)
@@ -821,9 +822,8 @@ def test_no_argument_leaves_meta_columns_alone() -> None:
     assert [tag["id"] for tag, _ in rows] == [1]
     data = rows[0][1]
     assert data.as_dict() == {"x": 10, "y": 1.5, "note": "a"}
-    meta_field = data.arrow_schema(columns={"meta": True}).field(meta)
-    assert meta_field == pa.field(meta, pa.large_string(), nullable=True)
-    assert data.as_table(columns={"meta": True}).column(meta).to_pylist() == [None]
+    assert data.meta_columns == ()
+    assert meta not in result.as_table(all_info=True).column_names
     # Non-public on purpose: a prediction is verified against the static result.
     computed = DropNulls().static_process(stream).output_schema()
     assert DropNulls().output_schema(stream) == computed

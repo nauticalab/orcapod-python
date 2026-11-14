@@ -1,13 +1,16 @@
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.operators.meta_columns import WithoutMetaWriter
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
+from orcapod.core.operators.column_selection import require_a_data_column
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, ContentHash, Schema
+from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -26,6 +29,9 @@ class MapData(UnaryOperator):
     def __init__(
         self, name_map: Mapping[str, str], drop_unmapped: bool = False, **kwargs
     ):
+        # A data column never gets a meta column's name (ITL-1080): refused here,
+        # so no path (sync, async or the prediction) can produce one.
+        schema_utils.require_names_not_meta(name_map.values())
         self.name_map = dict(name_map)
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
@@ -45,7 +51,12 @@ class MapData(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, data_columns = stream.keys()
+        tag_columns, listed_columns = stream.keys()
+        # A raw stream lists its meta (``__``) columns as data; they are not data,
+        # are never renamed, and no operator carries them (ITL-1080).
+        data_columns = tuple(
+            c for c in listed_columns if not c.startswith(constants.META_PREFIX)
+        )
         unmapped_columns = set(data_columns) - set(self.name_map.keys())
 
         if not any(n in data_columns for n in self.name_map):
@@ -88,9 +99,13 @@ class MapData(UnaryOperator):
         relevant_source = []
         relevant_target = []
         for source, target in self.name_map.items():
-            if source in data_columns:
+            # A meta (``__``) column a raw stream lists as data is never renamed.
+            if source in data_columns and not source.startswith(constants.META_PREFIX):
                 relevant_source.append(source)
                 relevant_target.append(target)
+        if self.drop_unmapped:
+            # Only the renamed columns remain, and a stream needs a data column.
+            require_a_data_column(relevant_target)
         remaining_data_columns = set(data_columns) - set(relevant_source)
         overlapping_data_columns = remaining_data_columns.intersection(relevant_target)
         overlapping_tag_columns = set(tag_columns).intersection(relevant_target)
@@ -118,7 +133,8 @@ class MapData(UnaryOperator):
         new_data_schema = {
             self.name_map.get(k, k): v
             for k, v in data_schema.items()
-            if k in self.name_map or not self.drop_unmapped
+            if not k.startswith(constants.META_PREFIX)
+            and (k in self.name_map or not self.drop_unmapped)
         }
 
         return tag_schema, Schema(new_data_schema)
@@ -140,6 +156,7 @@ class MapData(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             rename_map: dict[str, str] | None = None
             unmapped: list[str] | None = None
             async for tag, data in inputs[0]:
@@ -149,6 +166,7 @@ class MapData(UnaryOperator):
                         k: self.name_map[k] for k in pkt_keys if k in self.name_map
                     }
                     if self.drop_unmapped:
+                        require_a_data_column(list(rename_map.values()))
                         unmapped = [k for k in pkt_keys if k not in self.name_map]
                 if not rename_map:
                     await output.send((tag, data))
@@ -178,6 +196,9 @@ class MapTags(UnaryOperator):
     def __init__(
         self, name_map: Mapping[str, str], drop_unmapped: bool = False, **kwargs
     ):
+        # A tag never gets a meta column's name (ITL-1080): refused here, so no
+        # path (sync, async or the prediction) can produce one.
+        schema_utils.require_names_not_meta(name_map.values())
         self.name_map = dict(name_map)
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
@@ -200,8 +221,10 @@ class MapTags(UnaryOperator):
         tag_columns, data_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
-        if not any(n in tag_columns for n in self.name_map):
-            # nothing to rename in the tags, return stream as is
+        if not any(n in tag_columns for n in self.name_map) and not (
+            self.drop_unmapped and missing_tags
+        ):
+            # nothing to rename or drop in the tags, return stream as is
             return stream
 
         table = stream.as_table(
@@ -289,6 +312,7 @@ class MapTags(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             rename_map: dict[str, str] | None = None
             unmapped: list[str] | None = None
             async for tag, data in inputs[0]:
@@ -299,10 +323,12 @@ class MapTags(UnaryOperator):
                     }
                     if self.drop_unmapped:
                         unmapped = [k for k in tag_keys if k not in self.name_map]
-                if not rename_map:
+                if not rename_map and not unmapped:
                     await output.send((tag, data))
                 else:
-                    new_tag = tag.rename(rename_map)
+                    # With ``drop_unmapped`` the unmapped tags go even when no
+                    # tag is renamed, as on the sync path and in the prediction.
+                    new_tag = tag.rename(rename_map) if rename_map else tag
                     if unmapped:
                         new_tag = new_tag.drop(*unmapped)
                     await output.send((new_tag, data))

@@ -17,6 +17,8 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from orcapod import contexts
+
 import orcapod as op
 from orcapod import side_effects
 from orcapod.core.datagrams import Data, Tag
@@ -146,7 +148,12 @@ class TestMaterializationAlignsColumnsByName:
 
     def test_orchestrator_materialize_as_stream(self) -> None:
         """The orchestrator materializer emits rows in the first row's column order."""
-        upstream = SimpleNamespace(producer=None, upstreams=())
+        # The rebuilt stream takes the upstream's data context (ITL-1080).
+        upstream = SimpleNamespace(
+            producer=None,
+            upstreams=(),
+            data_context_key=contexts.get_default_context_key(),
+        )
         stream = SyncPipelineOrchestrator._materialize_as_stream(
             _rows_with_swapped_tag_order(), upstream
         )

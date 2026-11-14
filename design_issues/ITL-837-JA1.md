@@ -56,4 +56,4 @@ drop them. Nothing downstream of a `Join` reads or stores them, and meta is not 
 two inputs that share only a meta name join. How meta columns should be handled across
 operators and pods is a separate design question (ITL-867). `MergeJoin` still carries input
 meta on its sync path (colliding names are merged into lists like data) and drops it on its
-barrier async path (ITL-846).
+barrier async path (ITL-846). Since ITL-1080 no operator carries input meta, on either path (SA1).

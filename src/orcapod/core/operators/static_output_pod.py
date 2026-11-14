@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
@@ -278,6 +279,74 @@ class StaticOutputOperatorPod(TraceableBase):
         # No ``source_info`` argument: the table's own ``_source_*`` columns
         # pass through, one value per row.
         return ArrowTableStream(table, tag_columns=tag_keys)
+
+    @staticmethod
+    def _materialize_upstream(
+        rows: Sequence[tuple[TagProtocol, DataProtocol]],
+        upstream: StreamProtocol,
+        *,
+        zero_rows: bool = False,
+    ) -> StreamProtocol:
+        """Rebuild the rows an upstream node delivered as that node's stream.
+
+        This is how an operator node's input is built in a job: the sync
+        orchestrator rebuilds every upstream's buffered rows with it, and an
+        async operator node rebuilds its inputs with it when its run produced
+        no row (``zero_rows``). The stream takes the upstream's producer and
+        upstreams, so its identity and pipeline hash are the upstream's and
+        system-tag column names come out as they would on the upstream itself.
+
+        With rows, the table is ``_rows_to_table(rows)``: every row keeps its
+        own system tags and source info. Without rows, the table is built from
+        the upstream's Python output schema (with system tags and source info),
+        which cannot recover Arrow types the rows would have had (ITL-912).
+
+        Args:
+            rows: The rows the upstream delivered; may be empty.
+            upstream: The upstream node or stream the rows came from.
+            zero_rows: Keep the table's columns and types but none of its rows.
+
+        Returns:
+            A stream over the rows (none when ``zero_rows``), in order.
+        """
+        from orcapod.core.base import DataContextMixin
+        from orcapod.system_constants import constants
+        from orcapod.utils import arrow_utils
+
+        # The rebuilt stream is in the upstream's data context, as its rows are.
+        context = (
+            upstream.data_context
+            if isinstance(upstream, DataContextMixin)
+            else contexts.resolve_context(upstream.data_context_key)
+        )
+        if rows:
+            table, tag_keys = StaticOutputOperatorPod._rows_to_table(rows)
+            if zero_rows:
+                table = table.slice(0, 0)
+        else:
+            # Build an empty table preserving declared field nullability.
+            tag_schema, data_schema = upstream.output_schema(
+                columns={"system_tags": True, "source": True}
+            )
+            table = arrow_utils.make_empty_table(
+                {**tag_schema, **data_schema}, context.type_converter
+            )
+            tag_keys = upstream.keys()[0]
+        # The context column names the upstream's context on every row; without
+        # it, the stream would fill in the default context's key.
+        table = table.append_column(
+            pa.field(constants.CONTEXT_KEY, pa.large_string(), nullable=False),
+            pa.array([context.context_key] * table.num_rows, pa.large_string()),
+        )
+        # No ``source_info`` argument: the table's own ``_source_*`` columns
+        # pass through, one value per row.
+        return ArrowTableStream(
+            table,
+            tag_columns=tag_keys,
+            producer=upstream.producer,
+            upstreams=upstream.upstreams,
+            data_context=context,
+        )
 
     @staticmethod
     def _materialize_input_stream(

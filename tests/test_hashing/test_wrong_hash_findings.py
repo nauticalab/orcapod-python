@@ -534,8 +534,16 @@ class TestColumnSelectionIdentity:
 
     @pytest.mark.parametrize("op_cls", [SelectDataColumns, DropDataColumns])
     def test_data_column_spellings_share_identity(self, op_cls: Any) -> None:
-        """Every spelling of one set of data columns gives one identity."""
-        source = _xy_source()
+        """Every spelling of one set of data columns gives one identity.
+
+        The source has a third data column, ``z``, so dropping ``x`` and ``y`` leaves
+        one: a selection that leaves no data column is refused (ITL-1080).
+        """
+        source = DictSource(
+            data=[{"k": 1, "j": 2, "x": 1, "y": 2, "z": 3}],
+            tag_columns=["k", "j"],
+            source_id="s",
+        )
         spellings = [["x", "y"], ("x", "y"), {"x", "y"}, ["y", "x"], ["x", "y", "x"]]
         streams = [op_cls(columns=c)(source) for c in spellings]
         assert len({s.pipeline_hash() for s in streams}) == 1

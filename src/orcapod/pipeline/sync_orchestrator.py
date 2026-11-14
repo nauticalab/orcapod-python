@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.errors import StoreError, TypeIdentityError
 from orcapod.pipeline.result import OrchestratorResult
-from orcapod.utils import arrow_utils
 from orcapod.utils.store_errors import keep_store_error
 from orcapod.protocols.node_protocols import (
     is_function_node,
@@ -187,58 +186,22 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _materialize_as_stream(buf: list[tuple[Any, Any]], upstream_node: Any) -> Any:
-        """Wrap a (tag, data) buffer as an ArrowTableStream.
+        """Wrap a (tag, data) buffer as the upstream node's stream.
 
-        Builds the table with ``StaticOutputOperatorPod._rows_to_table``, as
-        ``StaticOutputOperatorPod._materialize_to_stream`` does, so every row
-        keeps its own system tags and source info.
+        ``StaticOutputOperatorPod._materialize_upstream`` builds it, the one
+        definition an async operator node shares when it rebuilds its inputs
+        for a run that produced no row.
 
         Args:
             buf: List of (tag, data) tuples.
-            upstream_node: The node that produced this buffer (used to
-                determine tag column names).
+            upstream_node: The node that produced this buffer.
 
         Returns:
             An ArrowTableStream.
         """
-        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-
-        if not buf:
-            # Build an empty stream preserving declared field nullability.
-            tag_schema, data_schema = upstream_node.output_schema(
-                columns={"system_tags": True, "source": True}
-            )
-            type_converter = upstream_node.data_context.type_converter
-            empty_table = arrow_utils.make_empty_table(
-                {**tag_schema, **data_schema}, type_converter
-            )
-            tag_keys = upstream_node.keys()[0]
-            return ArrowTableStream(
-                empty_table,
-                tag_columns=tag_keys,
-                producer=upstream_node.producer,
-                upstreams=upstream_node.upstreams,
-            )
-
         from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 
-        # Each row keeps its own system tags and source info.
-        full_table, user_tag_keys = StaticOutputOperatorPod._rows_to_table(buf)
-
-        # Pass the upstream node's producer and upstreams so the
-        # materialized stream inherits the correct identity_structure
-        # and pipeline_identity_structure (via StreamBase delegation).
-        # This ensures downstream operators produce correct system tag
-        # column names (which embed pipeline hashes of their inputs).
-        producer = upstream_node.producer
-        upstreams = upstream_node.upstreams
-
-        return ArrowTableStream(
-            full_table,
-            tag_columns=user_tag_keys,
-            producer=producer,
-            upstreams=upstreams,
-        )
+        return StaticOutputOperatorPod._materialize_upstream(buf, upstream_node)
 
     @staticmethod
     def _gc_buffers(

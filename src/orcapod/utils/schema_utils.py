@@ -577,3 +577,29 @@ def require_output_keys_not_tags(
             + "name cannot be both a tag and a data column. Rename the output "
             + "(the function's output key), or rename the tag with map_tags."
         )
+
+
+def require_names_not_meta(names: Collection[str]) -> None:
+    """Raise if a tag or data column name starts with the reserved meta prefix.
+
+    Names starting with the meta prefix (``__``) are meta columns: a datagram
+    keeps them apart from its tags and data, and no operator carries them
+    (ITL-1080). A tag or data column given such a name would silently stop being
+    one on every path that rebuilds rows, so no stream, source or operator may
+    produce one.
+
+    Args:
+        names: Tag or data column names.
+
+    Raises:
+        InputValidationError: If a name starts with the meta prefix. The message
+            names the column.
+    """
+    from orcapod.system_constants import constants
+
+    for name in sorted(names):
+        if name.startswith(constants.META_PREFIX):
+            raise InputValidationError(
+                f"column name {name!r} starts with {constants.META_PREFIX!r}, which is "
+                "reserved for meta columns; a tag or data column needs another name."
+            )

@@ -5,6 +5,10 @@ from abc import abstractmethod
 from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.operators.meta_columns import (
+    without_input_meta,
+    without_meta_fields,
+)
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.errors import InputValidationError
@@ -136,7 +140,8 @@ class UnaryOperator(StaticOutputOperatorPod):
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
         """Forward to ``unary_static_process`` with the single input stream."""
         stream = streams[0]
-        return self.unary_static_process(stream)
+        # No operator carries its input's Data meta columns (ITL-1080).
+        return without_input_meta(self.unary_static_process(stream), streams)
 
     def output_schema(
         self,
@@ -145,7 +150,11 @@ class UnaryOperator(StaticOutputOperatorPod):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         stream = streams[0]
-        return self.unary_output_schema(stream, columns=columns, all_info=all_info)
+        tag_schema, data_schema = self.unary_output_schema(
+            stream, columns=columns, all_info=all_info
+        )
+        # The prediction of ``without_input_meta`` in ``static_process``.
+        return tag_schema, without_meta_fields(data_schema)
 
     def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         # return single stream as a tuple
@@ -231,7 +240,10 @@ class BinaryOperator(StaticOutputOperatorPod):
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
         """Forward to ``binary_static_process`` with two input streams."""
         left_stream, right_stream = streams
-        return self.binary_static_process(left_stream, right_stream)
+        # No operator carries its inputs' Data meta columns (ITL-1080).
+        return without_input_meta(
+            self.binary_static_process(left_stream, right_stream), streams
+        )
 
     def output_schema(
         self,
@@ -240,9 +252,11 @@ class BinaryOperator(StaticOutputOperatorPod):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         left_stream, right_stream = streams
-        return self.binary_output_schema(
+        tag_schema, data_schema = self.binary_output_schema(
             left_stream, right_stream, columns=columns, all_info=all_info
         )
+        # The prediction of ``without_input_meta`` in ``static_process``.
+        return tag_schema, without_meta_fields(data_schema)
 
     def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) != 2:

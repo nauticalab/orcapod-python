@@ -37,6 +37,14 @@ The filters are the operators that read data columns: `PolarsFilter` evaluates i
 on values, and `DropNulls` reads only whether a value is present (its validity), never the
 value. Both decide which rows exist; neither synthesizes a value.
 
+No operator carries its inputs' meta columns: the `__`-prefixed columns, such as a cached
+function pod's `__computed`, that describe how an input row was produced. An operator's
+output row is produced by the operator, so its `Data` holds none of them and its predicted
+output schema lists none, on the sync and the async path alike. A way to carry them forward
+across operators is an open design question (ITL-867). The `__` prefix is reserved for meta
+columns: a stream and a source refuse a tag column named with it, and `MapTags` and `MapData`
+refuse it as the new name of a tag or data column.
+
 ## Operator categories
 
 ### `UnaryOperator` -- single input
@@ -58,9 +66,8 @@ Takes one or more streams. Used for `Join`, which performs an N-ary inner join.
 
 N-ary inner join on shared tag columns. Requires that input streams have non-overlapping
 data columns (raises `InputValidationError` on collision). Join is **commutative** -- the
-order of input streams does not affect the result. Join drops its inputs' meta
-(`__`-prefixed) columns, such as a cached function pod's `__computed`, so they never collide
-and never appear in its output. Rows match on equality of every shared tag column, whatever
+order of input streams does not affect the result. Like every operator, Join drops its
+inputs' meta (`__`-prefixed) columns, so they never collide. Rows match on equality of every shared tag column, whatever
 its type (lists and structs compare element by element). A row with a null in any shared tag
 column matches nothing, a null list or struct included, and rows with null on both sides do
 not match each other (the SQL convention for nulls; `MergeJoin` and `SemiJoin` follow it too, on the sync and the async path, while `GroupBy` is the exception by design and puts null keys in one group); a null *inside* a list or struct is an ordinary element that equals
@@ -543,7 +550,8 @@ print(by_method.pipeline_hash() == by_operator.pipeline_hash())
 
 `DropNulls()` and `stream.drop_nulls()`, with no names, drop every row that has a null in
 **any** tag or data column, and make every tag and data column non-nullable. System-tag,
-source-info, context and meta columns are never tested or changed.
+source-info, context and meta columns are never tested (meta columns are not carried
+at all, as by every operator).
 
 ```python
 visits = ArrowTableSource(

@@ -839,43 +839,14 @@ def _meta_case(case: Case) -> Case:
     return Case(case.label, case.make_op, make_sources)
 
 
-# Operators whose paths disagree on meta columns in ways that are not a local
-# Join-style fix. Strict, so a fix flags them.
-_MATERIALIZE_DROPS_META = (
-    "ITL-846: barrier-mode async_execute rebuilds its input with "
-    "_materialize_to_stream, which drops Data meta columns"
-)
-_SYNC_DROPS_META = (
-    "ITL-846: the sync path drops Data meta columns that the async path keeps (a raw "
-    "ArrowTableStream lists its __ columns as data columns, so the sync selection "
-    "or _materialize_to_stream discards them)"
-)
-META_XFAIL: dict[str, str] = {
-    "merge_join": _MATERIALIZE_DROPS_META,
-    "merge_join_nullable_key": _MATERIALIZE_DROPS_META,
-    "batch_2": _MATERIALIZE_DROPS_META,
-    "batch_all": _MATERIALIZE_DROPS_META,
-    "group_by": _MATERIALIZE_DROPS_META,
-    "polars_filter": _MATERIALIZE_DROPS_META,
-    "select_data_columns": _SYNC_DROPS_META,
-    "index": _SYNC_DROPS_META,
-    "pick": _SYNC_DROPS_META,
-}
-META_CASES = [
-    pytest.param(
-        _meta_case(c),
-        id=c.label,
-        marks=[pytest.mark.xfail(strict=True, reason=META_XFAIL[c.label])]
-        if c.label in META_XFAIL
-        else [],
-    )
-    for c in CASES
-]
+# Every operator, with each input carrying its own meta columns. No operator keeps
+# them, on either path (ITL-1080; see ``test_no_operator_carries_raw_stream_meta``).
+META_CASES = [pytest.param(_meta_case(c), id=c.label) for c in CASES]
 
 
 @pytest.mark.parametrize("case", META_CASES)
 def test_async_meta_equals_sync(case: Case) -> None:
-    """The async path's Data meta columns equal the sync path's (Join drops them on both)."""
+    """The async path's Data meta columns equal the sync path's: none, on both (ITL-1080)."""
     sources = case.make_sources()
     expected = sync_rows(case.make_op(), *sources)
     actual = async_rows(case.make_op(), *sources)
@@ -1405,3 +1376,368 @@ def test_async_null_logical_key_matches_nothing_as_the_sync_path_does() -> None:
         for operands in ((left, right), (right, left)):
             expected = sync_rows(operator(), *operands)
             assert_equivalent(expected, async_rows(operator(), *operands))
+
+
+# ── no operator carries its inputs' Data meta columns (ITL-1080, rule B) ────
+
+
+def _assert_no_input_meta(rows: list[Row]) -> None:
+    """No output row carries a Data meta column."""
+    for _, data in rows:
+        assert data.meta_columns == ()
+        assert not [
+            name
+            for name in data.as_table(all_info=True).column_names
+            if "__m" in name or "__computed" in name
+        ]
+
+
+@pytest.mark.parametrize(
+    "case", [pytest.param(_meta_case(c), id=c.label) for c in CASES]
+)
+def test_no_operator_carries_raw_stream_meta(case: Case) -> None:
+    """A raw ``ArrowTableStream``'s ``__`` columns reach no operator output, on either path.
+
+    Join's rule (ITL-854/857), generalized to every operator: meta columns describe how
+    an input row was produced; an operator's output row was produced by the operator.
+    The prediction leaves the ``__`` names out as well.
+    """
+    sources = case.make_sources()
+    expected = sync_rows(case.make_op(), *sources)
+    actual = async_rows(case.make_op(), *sources)
+    _assert_no_input_meta(expected)
+    _assert_no_input_meta(actual)
+    _, data_schema = case.make_op().output_schema(*sources)
+    assert not [name for name in data_schema if name.startswith("__")]
+
+
+def cached_meta_source(
+    source_id: str, offset: int = 0, mergeable: bool = False
+) -> StreamProtocol:
+    """A cached function pod's output whose every row's ``Data`` carries ``__computed``.
+
+    Tags ``k: int16`` and ``t: int8``; data ``y: int``, ``yl: list[int]``,
+    ``yd: dict[str, int]`` and nullable ``yn: int | None``; only ``y`` and ``yl`` when
+    ``mergeable``, the columns ``MergeJoin`` can merge (it cannot sort dicts or nulls).
+    """
+    source = _source(
+        {
+            "k": pa.array([1, 2, 3], pa.int16()),
+            "t": pa.array([5, 5, 6], pa.int8()),
+            "a": pa.array([1, 2, 3], pa.int8()),
+        },
+        tags=("k", "t"),
+        source_id=source_id,
+    )
+
+    def outputs(a: int) -> tuple[int, list[int], dict[str, int], int | None]:
+        return a + offset, [a, a + 1], {"q": a}, None if a == 2 else a
+
+    def merged_outputs(a: int) -> tuple[int, list[int]]:
+        return a + offset, [a, a + 1]
+
+    function_pod = FunctionPod(
+        PythonDataFunction(  # pyright: ignore[reportArgumentType]  # PythonDataFunction is not yet typed as matching DataFunctionProtocol (baselined in other tests); it works at runtime
+            merged_outputs if mergeable else outputs,
+            output_keys=("y", "yl") if mergeable else ("y", "yl", "yd", "yn"),
+            function_name=f"outputs_{source_id}",
+        )
+    )
+    pod = CachedFunctionPod(function_pod, result_database=InMemoryArrowDatabase())
+    stream = pod(source)
+    assert all(data.meta_columns for _, data in stream.iter_data())
+    return stream
+
+
+CACHED_META_CASES = [
+    Case("join", Join, lambda: (cached_meta_source("p"), source_b(nested=False))),
+    Case(
+        "merge_join",
+        MergeJoin,
+        lambda: (
+            cached_meta_source("p", mergeable=True),
+            cached_meta_source("q", 10, mergeable=True),
+        ),
+    ),
+    Case("semijoin", SemiJoin, lambda: (cached_meta_source("p"), source_b())),
+    Case("batch_2", lambda: Batch(batch_size=2), lambda: (cached_meta_source("p"),)),
+    Case("batch_all", Batch, lambda: (cached_meta_source("p"),)),
+    Case("group_by", lambda: GroupBy(["t"]), lambda: (cached_meta_source("p"),)),
+    Case(
+        "polars_filter",
+        lambda: PolarsFilter(constraints={"t": 5}),
+        lambda: (cached_meta_source("p"),),
+    ),
+    Case("map_tags", lambda: MapTags({"t": "tb"}), lambda: (cached_meta_source("p"),)),
+    Case("map_data", lambda: MapData({"y": "w"}), lambda: (cached_meta_source("p"),)),
+    Case(
+        "select_tag_columns",
+        lambda: SelectTagColumns(["k"]),
+        lambda: (cached_meta_source("p"),),
+    ),
+    Case(
+        "select_data_columns",
+        lambda: SelectDataColumns(["y"]),
+        lambda: (cached_meta_source("p"),),
+    ),
+    Case(
+        "drop_tag_columns",
+        lambda: DropTagColumns(["t"]),
+        lambda: (cached_meta_source("p"),),
+    ),
+    Case(
+        "drop_data_columns",
+        lambda: DropDataColumns(["yl"]),
+        lambda: (cached_meta_source("p"),),
+    ),
+    Case("index", lambda: Index("yl", 0), lambda: (cached_meta_source("p"),)),
+    Case("pick", lambda: Pick("yd", "q"), lambda: (cached_meta_source("p"),)),
+    Case("drop_nulls", lambda: DropNulls("yn"), lambda: (cached_meta_source("p"),)),
+    Case("drop_nulls_all", DropNulls, lambda: (cached_meta_source("p"),)),
+]
+
+
+@pytest.mark.parametrize(
+    "case", CACHED_META_CASES, ids=[c.label for c in CACHED_META_CASES]
+)
+def test_no_operator_carries_cached_pod_meta(case: Case) -> None:
+    """A cached pod's ``__computed`` reaches no operator output, on either path.
+
+    The stream hides the column in ``as_table()`` but every row's ``Data`` carries it,
+    so a per-row async path used to keep it while the sync path lost it.
+    """
+    sources = case.make_sources()
+    expected = sync_rows(case.make_op(), *sources)
+    actual = async_rows(case.make_op(), *sources)
+    assert expected
+    _assert_no_input_meta(expected)
+    _assert_no_input_meta(actual)
+    assert_equivalent(expected, actual)
+    assert_same_meta(expected, actual)
+
+
+# ── a selection that would leave no data column (ITL-1080) ──────────────────
+
+NO_DATA_COLUMN_OPS = {
+    "drop_every_data_column": lambda: DropDataColumns(["i32", "u8", "f32", "ls"]),
+    "drop_every_data_column_not_strict": lambda: DropDataColumns(
+        ["i32", "u8", "f32", "ls", "absent"], strict=False
+    ),
+    "select_no_data_column_not_strict": lambda: SelectDataColumns(
+        ["absent"], strict=False
+    ),
+}
+
+
+@pytest.mark.parametrize("make_op", NO_DATA_COLUMN_OPS.values(), ids=NO_DATA_COLUMN_OPS)
+def test_selection_leaving_no_data_column_raises_alike_on_both_paths(
+    make_op: Callable[[], StaticOutputOperatorPod],
+) -> None:
+    """A stream needs a data column: both paths refuse a result without one.
+
+    The sync path raises when the operator is applied, ``op(stream)``; the async
+    path on the first row, with the same error. Before, the sync path raised only
+    when the rows were read and the async path emitted rows with empty ``Data``.
+    """
+    source = source_b(nested=False)
+    with pytest.raises(InputValidationError, match="no data column") as sync_error:
+        _ = make_op()(source)
+    with pytest.raises(InputValidationError, match="no data column") as async_error:
+        _ = async_rows(make_op(), source)
+    assert str(async_error.value) == str(sync_error.value)
+
+
+def test_selection_leaving_only_meta_columns_raises() -> None:
+    """A raw stream's ``__`` columns are not data: they are not carried (ITL-1080)."""
+    source = _with_meta(source_b(nested=False), _meta_columns("m", 3))
+    op = DropDataColumns(["i32", "u8", "f32", "ls"])
+    with pytest.raises(InputValidationError, match="no data column"):
+        _ = op(source)
+    with pytest.raises(InputValidationError, match="no data column"):
+        _ = async_rows(DropDataColumns(["i32", "u8", "f32", "ls"]), source)
+
+
+# ── a tag named with the meta prefix (ITL-1080) ──────────────────────────────
+#
+# A ``__`` name is a meta column: a datagram keeps it apart from its tags, so a tag with
+# such a name would stop being a tag on every path that rebuilds rows. No route may
+# produce one.
+
+
+def _table_with_meta_named_column() -> pa.Table:
+    return pa.table(
+        {
+            "k": pa.array([1, 2], pa.int16()),
+            "__g": pa.array([1, 1], pa.int8()),
+            "x": pa.array([3, 4], pa.int8()),
+        }
+    )
+
+
+def test_a_stream_refuses_a_tag_named_with_the_meta_prefix() -> None:
+    with pytest.raises(InputValidationError, match="'__g'.*reserved for meta"):
+        _ = ArrowTableStream(_table_with_meta_named_column(), tag_columns=["k", "__g"])
+
+
+def test_a_source_refuses_a_tag_named_with_the_meta_prefix() -> None:
+    """Not "tag column not found": the source would drop the meta column first."""
+    with pytest.raises(InputValidationError, match="'__g'.*reserved for meta"):
+        _ = ArrowTableSource(
+            _table_with_meta_named_column(), tag_columns=["k", "__g"], source_id="s"
+        )
+
+
+def test_map_tags_refuses_a_meta_named_target() -> None:
+    """Refused when built, so neither path nor the prediction can produce one."""
+    with pytest.raises(InputValidationError, match="'__t'.*reserved for meta"):
+        _ = MapTags({"ta": "__t"})
+
+
+def test_join_keeps_a_tag_and_drops_the_data_meta_columns() -> None:
+    """Join drops only data meta columns; a tag is never one (it once dropped by prefix).
+
+    A stream with a ``__`` tag cannot be built, so the one case left is data meta
+    next to ordinary tags: the tags all survive, the meta columns do not.
+    """
+    left = _with_meta(source_a(), _meta_columns("m", 3))
+    stream = Join()(left, source_b(nested=False))
+    tag_keys, data_keys = stream.keys()
+    assert set(tag_keys) == {"k", "ta"}
+    assert not [name for name in data_keys if name.startswith("__")]
+    assert not [
+        name for name in stream.as_table(all_info=True).column_names if "__m" in name
+    ]
+
+
+def test_map_data_does_not_rename_a_meta_column_into_data() -> None:
+    """A raw stream's ``__`` column is meta: ``MapData`` renames it on neither path.
+
+    The sync path used to build its renames from ``keys()``, which on a raw stream
+    lists ``__`` columns, so the meta value reached a data column (CodeRabbit, #369).
+    """
+    source = _with_meta(source_a(), _meta_columns("m", 3))
+    expected = sync_rows(MapData({"__m_i8": "renamed"}), source)
+    actual = async_rows(MapData({"__m_i8": "renamed"}), source)
+    for rows in (expected, actual):
+        for _, data in rows:
+            assert "renamed" not in data.keys()
+    assert_equivalent(expected, actual)
+    op = MapData({"__m_i8": "renamed"})
+    predicted = op.output_schema(source)
+    assert "renamed" not in predicted[1]
+    # Non-public on purpose: a prediction is verified against the static result.
+    assert predicted == op.static_process(source).output_schema()
+
+
+def test_map_data_meta_source_does_not_collide() -> None:
+    """A meta source is not a rename source, so it cannot collide with a data column."""
+    source = _with_meta(source_b(nested=False), _meta_columns("m", 3))
+    op = MapData({"__m_i8": "i32", "u8": "v8"})
+    expected = sync_rows(op, source)
+    actual = async_rows(MapData({"__m_i8": "i32", "u8": "v8"}), source)
+    for _, data in expected:
+        assert set(data.keys()) == {"i32", "v8", "f32", "ls"}
+    assert_equivalent(expected, actual)
+
+
+@pytest.mark.parametrize(
+    "name_map",
+    [{"absent": "a"}, {"__m_i8": "renamed"}],
+    ids=["absent_source", "meta_source"],
+)
+def test_map_data_dropping_every_data_column_raises_alike(
+    name_map: dict[str, str],
+) -> None:
+    """``drop_unmapped`` with no applicable source would leave no data column.
+
+    Before, both paths kept every data column while the prediction listed none.
+    """
+    source = _with_meta(source_b(nested=False), _meta_columns("m", 3))
+    with pytest.raises(InputValidationError, match="no data column") as sync_error:
+        _ = MapData(name_map, drop_unmapped=True)(source)
+    with pytest.raises(InputValidationError, match="no data column") as async_error:
+        _ = async_rows(MapData(name_map, drop_unmapped=True), source)
+    assert str(async_error.value) == str(sync_error.value)
+
+
+def test_map_tags_dropping_every_tag_agrees_on_both_paths() -> None:
+    """``MapTags`` with ``drop_unmapped`` and no applicable source drops every tag.
+
+    A stream may have no tags, so this is not an error. Before, the async path kept
+    every tag while the sync path and the prediction dropped them.
+    """
+    source = source_a()
+    op = MapTags({"absent": "a"}, drop_unmapped=True)
+    expected = sync_rows(op, source)
+    actual = async_rows(MapTags({"absent": "a"}, drop_unmapped=True), source)
+    assert op.output_schema(source)[0] == {}
+    for rows in (expected, actual):
+        assert len(rows) == 3
+        for tag, _ in rows:
+            assert tag.keys() == ()
+    for (tag, data), (sync_tag, sync_data) in zip(actual, expected):
+        assert data.content_hash() == sync_data.content_hash()
+        assert list(tag.system_tags().items()) == list(sync_tag.system_tags().items())
+
+
+def test_map_data_refuses_a_meta_named_target() -> None:
+    """A data column never gets a meta column's name: refused when built."""
+    with pytest.raises(InputValidationError, match="'__x'.*reserved for meta"):
+        _ = MapData({"i8": "__x"})
+
+
+def test_semijoin_does_not_match_on_a_meta_column() -> None:
+    """A ``__`` column both raw inputs carry is not a match key, on either path."""
+    left = _with_meta(source_c(), {"__shared": pa.array([1, 2, 3], pa.int8())})
+    right = _with_meta(
+        source_b(nested=False), {"__shared": pa.array([9, 9, 9], pa.int8())}
+    )
+    expected = sync_rows(SemiJoin(), left, right)
+    op = SemiJoin()
+    _ = op(left, right)  # records the common keys, as an operator node does
+    actual = async_rows(op, left, right)
+    assert len(expected) == len(actual) == 3
+    assert_equivalent(expected, actual)
+
+
+def test_without_meta_fields_keeps_optional_fields() -> None:
+    """Dropping the meta fields leaves the optionality of the others (CodeRabbit, #369)."""
+    from orcapod.core.operators.meta_columns import without_meta_fields
+    from orcapod.types import Schema
+
+    schema = Schema(
+        {"x": int, "y": int, "__note": str}, optional_fields={"x", "__note"}
+    )
+    kept = without_meta_fields(schema)
+    assert dict(kept) == {"x": int, "y": int}
+    assert kept.optional_fields == frozenset({"x"})
+
+
+@pytest.mark.parametrize(
+    "make_op",
+    [
+        lambda: SelectDataColumns(["i32", "__note"]),
+        lambda: DropDataColumns(["__note"]),
+    ],
+    ids=["select", "drop"],
+)
+def test_strict_selection_naming_a_meta_column_raises_alike(
+    make_op: Callable[[], StaticOutputOperatorPod],
+) -> None:
+    """A raw stream's ``__`` column is not a data column for a strict selection.
+
+    The sync path found it in ``keys()``; the async path, whose ``Data`` keeps it as
+    meta, reported it missing (CodeRabbit, #369). Both now report it missing.
+    """
+    source = _with_meta(
+        source_b(nested=False), {"__note": pa.array(["a", "b", "c"], pa.string())}
+    )
+    with pytest.raises(
+        InputValidationError, match="Missing data columns"
+    ) as sync_error:
+        _ = make_op()(source)
+    with pytest.raises(
+        InputValidationError, match="Missing data columns"
+    ) as async_error:
+        _ = async_rows(make_op(), source)
+    assert str(async_error.value) == str(sync_error.value)

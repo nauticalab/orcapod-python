@@ -7,6 +7,7 @@ import typing
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.core.operators.meta_columns import WithoutMetaWriter
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.system_constants import constants
@@ -14,7 +15,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, ContentHash, Schema, SourceInfoValue
-from orcapod.utils import arrow_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -59,6 +60,10 @@ class Index(UnaryOperator):
     ) -> None:
         self.column = column
         self.i = i
+        # A data column never gets a meta column's name (ITL-1080): refused here,
+        # as ``MapData`` refuses it, so no path can produce one and drop it.
+        if out is not None:
+            schema_utils.require_names_not_meta([out])
         self.out = out
         self.fail_on_miss = fail_on_miss
         self._output_type: type = None  # type: ignore[assignment]
@@ -430,6 +435,7 @@ class Index(UnaryOperator):
                 pipeline hash.
         """
         try:
+            output = WithoutMetaWriter(output)
             async for tag, data in inputs[0]:
                 result = self._process_one(tag, data)
                 if result is not None:

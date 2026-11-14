@@ -3,6 +3,12 @@ import itertools
 from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.operators.meta_columns import (
+    WithoutMetaWriter,
+    without_input_meta,
+    without_meta_columns,
+    without_meta_fields,
+)
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.match_keys import frozen_scalar
 from orcapod.core.operators.base import (
@@ -71,7 +77,10 @@ class Join(NonZeroInputOperator):
 
         if len(streams) == 1:
             # if single stream, simply return the output schema of the single input stream
-            return streams[0].output_schema(columns=columns, all_info=all_info)
+            tag_schema, data_schema = streams[0].output_schema(
+                columns=columns, all_info=all_info
+            )
+            return tag_schema, without_meta_fields(data_schema)
 
         tag_schema, data_schema = self._joined_user_schemas(*streams)
 
@@ -95,7 +104,7 @@ class Join(NonZeroInputOperator):
         System tags are excluded: the join renames them, and
         ``_predict_system_tag_schema`` computes them separately. Meta
         (``__``-prefixed) columns are excluded too: Join drops them
-        (``_without_meta``), including the ones a raw ``ArrowTableStream``
+        (``meta_columns.without_meta_columns``), including the ones a raw ``ArrowTableStream``
         lists as data columns in its ``output_schema``.
 
         Args:
@@ -111,10 +120,10 @@ class Join(NonZeroInputOperator):
         ordered_streams = self.order_input_streams(*streams)
         stream = ordered_streams[0]
         tag_schema, data_schema = stream.output_schema()
-        data_schema = self._without_meta_fields(data_schema)
+        data_schema = without_meta_fields(data_schema)
         for other_stream in ordered_streams[1:]:
             other_tag_schema, other_data_schema = other_stream.output_schema()
-            other_data_schema = self._without_meta_fields(other_data_schema)
+            other_data_schema = without_meta_fields(other_data_schema)
             # A shared tag key that differs in nullability only is non-nullable
             # (ITL-829): a null key matches nothing.
             tag_schema = schema_utils.union_schemas(
@@ -181,14 +190,14 @@ class Join(NonZeroInputOperator):
 
         The result holds every input's tag and data columns, source info and
         system tags (renamed per input). It holds none of the inputs' meta
-        (``__``-prefixed) columns, which Join drops (``_without_meta``).
+        (``__``-prefixed) columns, which Join drops (``meta_columns.without_meta_columns``).
 
         Raises:
             InputValidationError: If two inputs share a data column, or a
                 shared tag key has different Arrow types in two inputs.
         """
         if len(streams) == 1:
-            return streams[0]
+            return without_input_meta(streams[0], streams)
 
         # Canonically order streams by pipeline_hash for deterministic
         # system tag column names regardless of input order (Join is commutative)
@@ -204,8 +213,8 @@ class Join(NonZeroInputOperator):
         stream = ordered_streams[0]
 
         tag_keys, _ = [set(k) for k in stream.keys()]
-        table = self._without_meta(
-            stream.as_table(columns={"source": True, "system_tags": True})
+        table = without_meta_columns(
+            stream.as_table(columns={"source": True, "system_tags": True}), tag_keys
         )
         # trick to get cartesian product; use int8 explicitly so that zero-row
         # tables don't produce a null-typed column that Polars rejects on join
@@ -219,8 +228,9 @@ class Join(NonZeroInputOperator):
 
         for idx, next_stream in enumerate(ordered_streams[1:], start=1):
             next_tag_keys, _ = next_stream.keys()
-            next_table = self._without_meta(
-                next_stream.as_table(columns={"source": True, "system_tags": True})
+            next_table = without_meta_columns(
+                next_stream.as_table(columns={"source": True, "system_tags": True}),
+                next_tag_keys,
             )
             next_table = arrow_utils.append_to_system_tags(
                 next_table,
@@ -332,55 +342,6 @@ class Join(NonZeroInputOperator):
             return table
         return pa.Table.from_arrays(table.columns, schema=schema)
 
-    @staticmethod
-    def _without_meta(table: "pa.Table") -> "pa.Table":
-        """Drop the meta (``__``-prefixed) columns from an input table.
-
-        Join keeps none of its inputs' meta columns. They describe how one
-        input row was produced (a cached pod's ``__computed``, the result
-        cache's ``__pf_*`` and ``__pod_ts``), nothing downstream of a Join
-        reads them, and inputs routinely share their names. A raw
-        ``ArrowTableStream`` returns its ``__`` columns from ``as_table``
-        whatever the column configuration, together with a source-info
-        column for each (``_source___x``), so both are dropped by name.
-
-        Args:
-            table: An input's table.
-
-        Returns:
-            The table without its meta columns and their source-info columns.
-        """
-        meta_source_prefix = f"{constants.SOURCE_PREFIX}{constants.META_PREFIX}"
-        meta = [
-            name
-            for name in table.column_names
-            if name.startswith((constants.META_PREFIX, meta_source_prefix))
-        ]
-        return table.drop_columns(meta) if meta else table
-
-    @staticmethod
-    def _without_meta_fields(schema: Schema) -> Schema:
-        """Drop the meta (``__``-prefixed) fields from a data schema.
-
-        The prediction counterpart of ``_without_meta``: a raw
-        ``ArrowTableStream`` lists its ``__`` columns as data columns.
-
-        Args:
-            schema: An input's data schema.
-
-        Returns:
-            The schema without its meta fields.
-        """
-        if not any(name.startswith(constants.META_PREFIX) for name in schema):
-            return schema
-        return Schema(
-            {
-                name: data_type
-                for name, data_type in schema.items()
-                if not name.startswith(constants.META_PREFIX)
-            }
-        )
-
     # ------------------------------------------------------------------
     # Async execution
     # ------------------------------------------------------------------
@@ -453,6 +414,7 @@ class Join(NonZeroInputOperator):
             ValueError: If ``input_pipeline_hashes`` does not have one hash per input.
         """
         try:
+            output = WithoutMetaWriter(output)
             if len(input_pipeline_hashes) != len(inputs):
                 raise ValueError(
                     f"input_pipeline_hashes length ({len(input_pipeline_hashes)}) "
@@ -894,7 +856,7 @@ class Join(NonZeroInputOperator):
 
         Every column keeps the Arrow type it already has, and the source info
         of both sides is carried over. Neither side's meta columns are, as in
-        ``static_process`` (``_without_meta``).
+        ``static_process`` (``meta_columns.without_meta_columns``).
 
         Args:
             left: The canonically earlier data (in a staggered join, the
