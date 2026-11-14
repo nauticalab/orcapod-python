@@ -800,6 +800,21 @@ data. The rules:
   async path) and never stored, so its identity is the fixed ("DropNulls", None),
   different from any list of names. System-tag, source-info, context and meta columns are
   never included. An explicitly empty collection is not "no argument": it raises ValueError.
+- `SemiJoin`'s match keys are exactly the names that are tag columns of both inputs
+  (developer, November 13, 2026, ITL-1088), from one helper, `SemiJoin._match_keys`, used by
+  validation, the sync path and the async path. A shared data column name, or a name that is a
+  tag on one side and data on the other, is ignored (by name only); the right input's data
+  columns are never read. No shared tag column: every left row is returned. Ignored names
+  raise `SemiJoinIgnoredColumnWarning` once per operator and set of names (provisional in
+  v0.3: may become an error); the async path warns only when no validation ran.
+- `Join`, `MergeJoin` and `SemiJoin` accept a shared TAG key whose types differ only in
+  nullability (`T` against `T | None`), because a null key matches nothing (developer,
+  November 13, 2026, ITL-829). `Join` and `MergeJoin` give the key `T` when any input has it
+  `T`, and `T | None` only when every input has it nullable; `SemiJoin`'s output is the left
+  input's schema as it is. The rule is `core/operators/key_nullability.py`
+  (`reconcile_key_nullability` on tag schemas before they are combined, `key_nullable` for the
+  Arrow field flag, set by re-wrapping arrays, never by a cast). Equal nullability takes the
+  unchanged path; any other type difference, and every data column, behaves as before.
 - GroupBy requires every column in `by` to be a scalar tag column; raises InputValidationError
   for unknown, data, or list-valued columns (list-valued usually means the stream came from
   Batch — group before batching, not after). Members sort by non-key tag values with system

@@ -1189,6 +1189,58 @@ def pipeline_semi_join() -> dict[str, Any]:
     return stream_summary(SemiJoin()(_subjects(), _scans()))
 
 
+def _keyed(source_id: str, value: str, nullable_key: bool) -> Any:
+    """A source on tag ``subject`` (``large_string``), nullable with a null if asked."""
+    from orcapod.sources import ArrowTableSource
+
+    subjects = ["s1", None, "s3"] if nullable_key else ["s1", "s2", "s3"]
+    table = pa.table(
+        {
+            "subject": pa.array(subjects, pa.large_string()),
+            value: pa.array([1, 2, 3], pa.int64()),
+        },
+        schema=pa.schema(
+            [
+                pa.field("subject", pa.large_string(), nullable=nullable_key),
+                pa.field(value, pa.int64(), nullable=False),
+            ]
+        ),
+    )
+    return ArrowTableSource(table, tag_columns=["subject"], source_id=source_id)
+
+
+@case("pipeline", "join_key_nullability")
+def pipeline_join_key_nullability() -> dict[str, Any]:
+    """Pin the joins over a tag key that is ``T`` in one input and ``T | None`` in the other.
+
+    Accepted since ITL-829 (it raised before, so nothing was stored): ``Join`` and
+    ``MergeJoin`` give the key ``T``; ``SemiJoin`` keeps the left input's schema.
+    """
+    from orcapod.operators import Join, MergeJoin, SemiJoin
+
+    def nullable() -> Any:
+        return _keyed("golden_nullable_key", "x", nullable_key=True)
+
+    def plain() -> Any:
+        return _keyed("golden_plain_key", "y", nullable_key=False)
+
+    out = _prefixed("join", stream_summary(Join()(nullable(), plain())))
+    out.update(
+        _prefixed("merge_join", stream_summary(MergeJoin()(nullable(), plain())))
+    )
+    out.update(
+        _prefixed(
+            "semi_join_left_nullable", stream_summary(SemiJoin()(nullable(), plain()))
+        )
+    )
+    out.update(
+        _prefixed(
+            "semi_join_right_nullable", stream_summary(SemiJoin()(plain(), nullable()))
+        )
+    )
+    return out
+
+
 @case("pipeline", "batch")
 def pipeline_batch() -> dict[str, Any]:
     from orcapod.operators import Batch

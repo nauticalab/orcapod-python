@@ -6,6 +6,10 @@ from orcapod.core.operators.base import (
     require_shared_arrow_type,
     require_tag_data_roles_agree,
 )
+from orcapod.core.operators.key_nullability import (
+    key_nullable,
+    reconcile_key_nullability,
+)
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -216,8 +220,11 @@ class MergeJoin(BinaryOperator):
         left_tag_schema, left_data_schema = first_stream.output_schema()
         right_tag_schema, right_data_schema = second_stream.output_schema()
 
-        # Tag schema: union of both tag schemas
-        tag_schema = schema_utils.union_schemas(left_tag_schema, right_tag_schema)
+        # Tag schema: union of both tag schemas. A shared tag key that differs in
+        # nullability only is non-nullable (ITL-829): a null key matches nothing.
+        tag_schema = schema_utils.union_schemas(
+            *reconcile_key_nullability(left_tag_schema, right_tag_schema)
+        )
 
         # Data schema: colliding columns become list[T], non-colliding stay scalar
         colliding_schema = schema_utils.intersection_schemas(
@@ -382,6 +389,12 @@ class MergeJoin(BinaryOperator):
         for name, nullable in right_nullable.items():
             if name not in output_nullable:
                 output_nullable[name] = nullable
+        # A shared tag key is nullable only when nullable in both inputs: a null
+        # key matches nothing (ITL-829). Equal flags give the flag as before.
+        for name in shared_tag_keys:
+            output_nullable[name] = key_nullable(
+                left_nullable[name], right_nullable[name]
+            )
         # Merged (colliding) data columns become 2-element lists — always non-null
         for col in colliding_keys:
             output_nullable[col] = False

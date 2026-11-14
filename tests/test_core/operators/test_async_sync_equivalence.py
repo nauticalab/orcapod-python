@@ -59,6 +59,12 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.utils import arrow_utils
 
+# The ``semijoin_shared_data_column`` case shares a data column name on purpose; SemiJoin
+# warns that it is not a match key (ITL-1088), which is tested in test_semijoin_tag_keys.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore::orcapod.errors.SemiJoinIgnoredColumnWarning"
+)
+
 Row: TypeAlias = tuple[TagProtocol, DataProtocol]
 Column: TypeAlias = "pa.Array[Any] | pa.ChunkedArray[Any]"
 
@@ -155,6 +161,34 @@ def source_c() -> ArrowTableSource:
         tags=("k", "tc"),
         source_id="c",
         nullable=("tc", "c8"),
+    )
+
+
+def source_nullable_k() -> ArrowTableSource:
+    """Tag ``k: int16``, nullable with a null; for a join against a non-nullable ``k``."""
+    return _source(
+        {
+            "k": pa.array([1, None, 3, 4], pa.int16()),
+            "kn": pa.array([1, 2, 3, 4], pa.int8()),
+            "ks": pa.array(["a", "b", "c", "d"], pa.string()),
+        },
+        tags=("k",),
+        source_id="kn",
+        nullable=("k",),
+    )
+
+
+def source_shared_data() -> ArrowTableSource:
+    """Tag ``k: int16``; data ``i32`` and ``ls`` named as ``source_b``'s, other values and types."""
+    return _source(
+        {
+            "k": pa.array([3, 1], pa.int16()),
+            "i32": pa.array([-1, -2], pa.int64()),
+            "ls": pa.array([None, "x"], pa.string()),
+        },
+        tags=("k",),
+        source_id="shared_data",
+        nullable=("ls",),
     )
 
 
@@ -280,6 +314,18 @@ CASES = [
     Case("join_2_reversed", Join, lambda: (source_b(), source_a())),
     Case("join_3", Join, lambda: (source_a(), source_b(), source_c())),
     Case("join_3_rotated", Join, lambda: (source_c(), source_a(), source_b())),
+    # A shared tag key nullable in one input only (ITL-829).
+    Case("join_nullable_key", Join, lambda: (source_nullable_k(), source_b())),
+    Case(
+        "join_3_nullable_key",
+        Join,
+        lambda: (source_c(), source_nullable_k(), source_b()),
+    ),
+    Case(
+        "merge_join_nullable_key",
+        MergeJoin,
+        lambda: (source_b(nested=False), source_nullable_k()),
+    ),
     Case(
         "merge_join",
         MergeJoin,
@@ -287,6 +333,23 @@ CASES = [
     ),
     Case("semijoin", SemiJoin, lambda: (source_c(), source_b(nested=False))),
     Case("semijoin_nested", SemiJoin, lambda: (source_a(), source_b())),
+    # A shared tag key nullable in one input only (ITL-829).
+    Case(
+        "semijoin_left_nullable_key",
+        SemiJoin,
+        lambda: (source_nullable_k(), source_b(nested=False)),
+    ),
+    Case(
+        "semijoin_right_nullable_key",
+        SemiJoin,
+        lambda: (source_c(), source_nullable_k()),
+    ),
+    # A shared data column name is not a key (ITL-1088): only ``k`` decides.
+    Case(
+        "semijoin_shared_data_column",
+        SemiJoin,
+        lambda: (source_b(nested=False), source_shared_data()),
+    ),
     Case("batch_2", lambda: Batch(batch_size=2), lambda: (source_a(),)),
     Case("batch_all", Batch, lambda: (source_a(),)),
     Case("group_by", lambda: GroupBy(["ta"]), lambda: (source_a(),)),
@@ -789,6 +852,7 @@ _SYNC_DROPS_META = (
 )
 META_XFAIL: dict[str, str] = {
     "merge_join": _MATERIALIZE_DROPS_META,
+    "merge_join_nullable_key": _MATERIALIZE_DROPS_META,
     "batch_2": _MATERIALIZE_DROPS_META,
     "batch_all": _MATERIALIZE_DROPS_META,
     "group_by": _MATERIALIZE_DROPS_META,

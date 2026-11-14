@@ -244,7 +244,8 @@ def test_tag_and_data_columns_in_one_call() -> None:
 
 def test_narrowed_nullable_key_joins_with_a_non_nullable_key() -> None:
     """A source whose key columns are nullable by specification (as a Spiral table's
-    are) cannot join a source whose keys are ``T``; after ``DropNulls`` it can."""
+    are) joins a source whose keys are ``T`` as it does after ``DropNulls``: a null
+    key matches nothing, so the join gives the key ``T`` either way (ITL-829)."""
     events = _source(
         {
             "session": pa.array(["s1", None, "s3"], pa.large_string()),
@@ -262,19 +263,20 @@ def test_narrowed_nullable_key_joins_with_a_non_nullable_key() -> None:
         tags=("session",),
         source_id="sessions",
     )
-    with pytest.raises(InputValidationError, match="not compatible"):
-        Join()(events, sessions)
-
-    joined = Join()(DropNulls("session")(events), sessions)
-    assert joined.output_schema() == (
-        {"session": str},
-        {"start": int | None, "animal": str},
-    )
-    rows = sorted(joined.as_table().to_pylist(), key=lambda r: r["session"])
-    assert rows == [
-        {"session": "s1", "start": 100, "animal": "m1"},
-        {"session": "s3", "start": 300, "animal": "m3"},
-    ]
+    for joined in (
+        Join()(events, sessions),
+        Join()(DropNulls("session")(events), sessions),
+    ):
+        assert joined.output_schema() == (
+            {"session": str},
+            {"start": int | None, "animal": str},
+        )
+        assert not joined.as_table().schema.field("session").nullable
+        rows = sorted(joined.as_table().to_pylist(), key=lambda r: r["session"])
+        assert rows == [
+            {"session": "s1", "start": 100, "animal": "m1"},
+            {"session": "s3", "start": 300, "animal": "m3"},
+        ]
 
 
 def test_stream_without_tag_columns() -> None:

@@ -19,7 +19,7 @@ from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Index, Join, MergeJoin, Pick, SemiJoin
 from orcapod.core.sources import ArrowTableSource
-from orcapod.errors import InputValidationError
+from orcapod.errors import InputValidationError, SemiJoinIgnoredColumnWarning
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 
 from .test_async_sync_equivalence import async_rows
@@ -124,8 +124,13 @@ def test_valid_join_still_works() -> None:
 
 
 def test_semijoin_is_not_affected() -> None:
-    """SemiJoin keys on every common column, tag or data, and returns the left stream's columns."""
-    result = SemiJoin()(tag_x(), data_x())
+    """SemiJoin keys on tags shared by both inputs only (ITL-1088): ``x``, a tag on the
+    left and data on the right, is not a key and is named in a warning; with no shared
+    tag every left row is returned, with the left stream's columns."""
+    with pytest.warns(
+        SemiJoinIgnoredColumnWarning, match="'x' \\(tag on the left, data"
+    ):
+        result = SemiJoin()(tag_x(), data_x())
     table = result.as_table()
     assert table.column_names == ["x", "a"]
     assert table.column("x").to_pylist() == [1, 2]

@@ -10,6 +10,10 @@ from orcapod.core.operators.base import (
     require_shared_arrow_type,
     require_tag_data_roles_agree,
 )
+from orcapod.core.operators.key_nullability import (
+    key_nullable,
+    reconcile_key_nullability,
+)
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import (
@@ -111,7 +115,11 @@ class Join(NonZeroInputOperator):
         for other_stream in ordered_streams[1:]:
             other_tag_schema, other_data_schema = other_stream.output_schema()
             other_data_schema = self._without_meta_fields(other_data_schema)
-            tag_schema = schema_utils.union_schemas(tag_schema, other_tag_schema)
+            # A shared tag key that differs in nullability only is non-nullable
+            # (ITL-829): a null key matches nothing.
+            tag_schema = schema_utils.union_schemas(
+                *reconcile_key_nullability(tag_schema, other_tag_schema)
+            )
             intersection_data_schema = schema_utils.intersection_schemas(
                 data_schema, other_data_schema
             )
@@ -250,6 +258,9 @@ class Join(NonZeroInputOperator):
             table = arrow_utils.restore_schema_nullability(
                 table, table_ref_schema, next_ref_schema
             )
+            table = self._shared_key_nullability(
+                table, table_ref_schema, next_ref_schema, common_tag_keys
+            )
 
             tag_keys.update(next_tag_keys)
 
@@ -277,6 +288,49 @@ class Join(NonZeroInputOperator):
             result_table,
             tag_columns=tuple(tag_order),
         )
+
+    @staticmethod
+    def _shared_key_nullability(
+        table: "pa.Table",
+        left_schema: "pa.Schema",
+        right_schema: "pa.Schema",
+        keys: Collection[str],
+    ) -> "pa.Table":
+        """Flag each shared tag key nullable only when both inputs have it nullable.
+
+        A null key matches nothing, so a key non-nullable in either input holds
+        no null after the join (ITL-829). The same arrays are re-wrapped under the
+        new field flags: no value or type changes. Equal flags keep the flag.
+
+        Args:
+            table: The joined table.
+            left_schema: The left input table's schema.
+            right_schema: The right input table's schema.
+            keys: The join keys; names absent from either schema are skipped.
+
+        Returns:
+            The table with each shared key's nullable flag decided by ``key_nullable``.
+        """
+        schema = table.schema
+        changed = False
+        for name in keys:
+            left_index = left_schema.get_field_index(name)
+            right_index = right_schema.get_field_index(name)
+            index = schema.get_field_index(name)
+            if left_index < 0 or right_index < 0 or index < 0:
+                continue
+            nullable = key_nullable(
+                left_schema.field(left_index).nullable,
+                right_schema.field(right_index).nullable,
+            )
+            if schema.field(index).nullable != nullable:
+                changed = True
+                schema = schema.set(  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+                    index, schema.field(index).with_nullable(nullable)
+                )
+        if not changed:
+            return table
+        return pa.Table.from_arrays(table.columns, schema=schema)
 
     @staticmethod
     def _without_meta(table: "pa.Table") -> "pa.Table":
@@ -757,7 +811,8 @@ class Join(NonZeroInputOperator):
         left lacks. The async path joins in canonical order, so this is the
         order ``_joined_user_schemas`` defines. A shared (join-key) column
         takes the right tag's field, as ``static_process`` does
-        (``restore_schema_nullability`` lets the last reference win), and the
+        (``restore_schema_nullability`` lets the last reference win), nullable
+        only when both tags have it nullable (``key_nullable``), and the
         left tag's values, as its Polars join does (they are equal because the
         rows matched on it, except ``0.0`` against ``-0.0``).
 
@@ -787,10 +842,16 @@ class Join(NonZeroInputOperator):
             # A tag without user columns is a zero-column, zero-row table.
             for index, name in enumerate(table.column_names):
                 arrow_type = table.schema.types[index]
+                field = table.schema.field(index)
                 if name in types:
                     _ = require_shared_arrow_type("Join", name, types[name], arrow_type)
+                    # A shared key is nullable only when both tags have it
+                    # nullable: a null key matches nothing (ITL-829).
+                    field = field.with_nullable(
+                        key_nullable(fields[name].nullable, field.nullable)
+                    )
                 types[name] = arrow_type
-                fields[name] = table.schema.field(index)
+                fields[name] = field
                 # A shared column keeps the left tag's values (the sync join's
                 # Polars join does): rows that match on ``0.0`` and ``-0.0``
                 # keep the left spelling.

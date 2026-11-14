@@ -28,7 +28,6 @@ from orcapod.core.operators.semijoin import SemiJoin
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.errors import InputValidationError
 from orcapod.types import CacheMode, PodConfig
 
 
@@ -475,15 +474,6 @@ class TestOperatorNodeAsyncExecute:
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=InputValidationError,
-        reason=(
-            'SemiJoin rejects a non-nullable vs nullable key: "Type conflict for '
-            "key 'id': <class 'int'> vs int | None\" (ITL-829). This test was "
-            "shadowed by a duplicate class name and never ran until ITL-826."
-        ),
-    )
     @pytest.mark.asyncio
     async def test_binary_op_delegation(self):
         left = make_stream(5)

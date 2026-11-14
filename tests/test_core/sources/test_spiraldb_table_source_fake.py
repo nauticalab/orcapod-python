@@ -19,7 +19,7 @@ import pytest
 
 from orcapod import PipelineJob, function_pod
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import InputValidationError, NullabilityRecordError
+from orcapod.errors import NullabilityRecordError
 from orcapod.operators import Join, SelectDataColumns
 from orcapod.databases import SpiralDBConnector
 from orcapod.sources import SpiralDBTableSource
@@ -484,14 +484,20 @@ class TestNonNullableColumns:
         with pytest.raises(ValueError, match="float \\| None"):
             halve.pod(SelectDataColumns(["weight"])(source))
 
-    def test_join_of_recorded_and_unrecorded_keys_is_refused(self, strict_root):
-        # Type strictness: a key that is T on one side and T | None on the other.
-        """A T key joined with a T | None key is refused."""
-        with pytest.raises(InputValidationError, match="str \\| None"):
-            Join()(
-                SpiralDBTableSource(_PROJECT, "unit"),
-                SpiralDBTableSource(_PROJECT, "session_unrecorded"),
-            )
+    def test_join_of_recorded_and_unrecorded_keys_gives_the_recorded_type(
+        self, strict_root
+    ):
+        """A T key joined with a T | None key is accepted and comes out T (ITL-829).
+
+        A null key matches nothing, so no joined row can hold a null there.
+        """
+        unit = SpiralDBTableSource(_PROJECT, "unit")
+        unrecorded = SpiralDBTableSource(_PROJECT, "session_unrecorded")
+        assert unrecorded.output_schema()[0]["subject_id"] == str | None
+        joined = Join()(unit, unrecorded)
+        tag_schema, _ = joined.output_schema()
+        assert tag_schema["subject_id"] is str
+        assert not joined.as_table().schema.field("subject_id").nullable
 
     def test_plain_typed_pod_runs_through_join_and_save_load(
         self, strict_root, tmp_path

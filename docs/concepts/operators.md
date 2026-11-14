@@ -67,6 +67,13 @@ not match each other (the SQL convention for nulls; `MergeJoin` and `SemiJoin` f
 another null, an empty list is not a null, and NaN equals NaN. The async path gives the same
 rows.
 
+Because a null key matches nothing, a shared tag column may differ between the inputs in
+nullability alone: `T` in one input and `T | None` in another is accepted by `Join`, `MergeJoin`
+and `SemiJoin`. In the output of `Join` and `MergeJoin` the column is `T` when any input has it
+`T`, and `T | None` only when every input has it nullable; `SemiJoin`'s output keeps the left
+input's type. Any other type difference is still an error, and a data column is never
+reconciled this way.
+
 A name is a tag or a data column, never both: if one input has `x` as a tag column and another has it as a data column, `Join` (and `MergeJoin`) raises `InputValidationError` when the graph is built; rename one with `map_tags` or `map_data`.
 
 Column order follows each operator's argument symmetry: commutative operators (`Join`,
@@ -144,6 +151,17 @@ Binary join that filters the left stream to only include rows whose tags match t
 stream. The right stream's data columns are discarded. SemiJoin is **not commutative** --
 the order of inputs matters. The first stream is the one being filtered; the second stream
 provides the set of matching tags.
+
+The match keys are exactly the columns that are tag columns of both streams. A name the two
+streams share as a data column, or a tag in one and a data column in the other, is not a key
+and is ignored: the right stream's data columns are never read. If the streams share no tag
+column, every left row is returned. Because such names were match keys before v0.3, SemiJoin
+names them in a `SemiJoinIgnoredColumnWarning` (from `orcapod.errors`). This behaviour is
+provisional in v0.3 and may become an error. To silence the warning, rename or drop the
+column on the right stream before the semi join (`map_data`, `select_data_columns`,
+`drop_data_columns`, or `map_tags` for a tag). A right stream must keep at least one data
+column, so a filtered copy of the left stream (which shares every data name) can be reduced
+to one renamed column, e.g. `subset.select_data_columns(["age"]).map_data({"age": "_age"})`.
 
 ```python
 from orcapod.sources import DictSource
@@ -509,9 +527,10 @@ The rules:
   was). The new hash is the one the row has in a stream that declared the column
   non-nullable from the start.
 
-Tag columns work the same way. A stream whose key column is `str | None` cannot be joined
-with one whose key is `str` (`Join` never reconciles types), so narrow the key first. The
-stream method is `drop_nulls`:
+Tag columns work the same way. A stream whose key column is `str | None` can be joined with
+one whose key is `str`: a null key matches nothing, so the joined key comes out `str` (see
+`Join`). Narrowing still matters wherever a column must be `T` before it is consumed, such
+as a pod parameter typed `str`. The stream method is `drop_nulls`:
 
 ```python
 by_method = recordings.drop_nulls(["session", "start_ms"])

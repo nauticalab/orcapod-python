@@ -268,10 +268,18 @@ def test_nested_non_nullable_fields_keep_their_flag() -> None:
 
 
 def keyed(name: str, key_column: Column, tag: Sequence[int]) -> ArrowTableSource:
-    """A source with tag ``t_<name>`` and the shared nullable data column ``key``."""
+    """A source with tags ``t_<name>`` and the shared nullable ``key``, data ``d_<name>``.
+
+    ``key`` is the only tag both inputs share, so it is the semi join's match key
+    (ITL-1088: the keys are the shared tag columns).
+    """
     return _source(
-        {f"t_{name}": pa.array(tag, pa.int16()), "key": key_column},
-        tags=(f"t_{name}",),
+        {
+            f"t_{name}": pa.array(tag, pa.int16()),
+            "key": key_column,
+            f"d_{name}": pa.array(tag, pa.int16()),
+        },
+        tags=(f"t_{name}", "key"),
         source_id=name,
         nullable=("key",),
     )

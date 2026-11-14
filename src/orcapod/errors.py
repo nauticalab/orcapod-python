@@ -382,6 +382,24 @@ class ProvisionalHashWarning(UserWarning):
     """
 
 
+class SemiJoinIgnoredColumnWarning(UserWarning):
+    """``SemiJoin`` inputs share a column name that is not a match key.
+
+    ``SemiJoin`` matches on the columns that are tag columns of both inputs and on
+    nothing else (ITL-1088). A name the inputs share as data columns, or as a tag on
+    one side and a data column on the other, is ignored: it does not take part in
+    matching, and the right input's data is never read. This warning names such
+    columns, once per operator and set of columns, because before v0.3 they were
+    match keys. The behaviour for them is provisional in v0.3 and may become an
+    error.
+
+    To silence it, rename or drop the column on the right input before the semi join
+    (``map_data``, ``drop_data_columns``, ``select_data_columns``, or ``map_tags``
+    for a tag), or call ``warnings.filterwarnings("ignore",
+    category=SemiJoinIgnoredColumnWarning)``.
+    """
+
+
 class EmptyDataAccessError(Exception):
     """Raised when a payload-access method is called on an ``EmptyData`` instance.
 

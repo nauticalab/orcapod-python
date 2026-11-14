@@ -9,32 +9,14 @@ bookkeeping, which is process-wide.
 
 from __future__ import annotations
 
-import sys
 import threading
 import warnings
-from types import FrameType
 
 from orcapod.errors import ProvisionalHashWarning
+from orcapod.utils.warning_utils import outside_orcapod_stacklevel
 
 _lock = threading.RLock()
 _issued: set[str] = set()
-
-
-def _outside_orcapod_stacklevel() -> int:
-    """Return the stacklevel of the first frame outside Orcapod, as seen from the caller.
-
-    Level 1 is the caller of this function (``warn_provisional``). When every frame
-    is Orcapod's (a worker thread), the caller of ``warn_provisional`` is used.
-    """
-    level = 1
-    frame: FrameType | None = sys._getframe(1)  # pyright: ignore[reportPrivateUsage]  # as the warnings module does
-    while frame is not None:
-        module = str(frame.f_globals.get("__name__", ""))
-        if module != "orcapod" and not module.startswith("orcapod."):
-            return level
-        frame = frame.f_back
-        level += 1
-    return 2
 
 
 def warn_provisional(extension_name: str) -> None:
@@ -60,7 +42,7 @@ def warn_provisional(extension_name: str) -> None:
             "silence: warnings.filterwarnings('ignore', "
             "category=orcapod.errors.ProvisionalHashWarning).",
             ProvisionalHashWarning,
-            stacklevel=_outside_orcapod_stacklevel(),
+            stacklevel=outside_orcapod_stacklevel(),
         )
         _issued.add(extension_name)
 
