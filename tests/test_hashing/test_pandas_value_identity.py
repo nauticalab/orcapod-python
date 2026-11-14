@@ -47,14 +47,6 @@ def _multi_index() -> pd.MultiIndex:
     return pd.MultiIndex.from_tuples([(0, "p"), (1, "q")], names=["i", "j"])
 
 
-def _struct_frame(order: list[str]) -> pd.DataFrame:
-    """One ``pd.ArrowDtype`` struct column whose fields are in ``order``."""
-    types = {"u": pa.int64(), "v": pa.large_string()}
-    struct = pa.struct([(name, types[name]) for name in order])
-    array = pa.array([{"u": 1, "v": "x"}], struct)
-    return pd.DataFrame({"s": pd.Series(array, dtype=pd.ArrowDtype(struct))})
-
-
 def _with_columns_name(df: pd.DataFrame, name: str) -> pd.DataFrame:
     """A copy of ``df`` whose column axis is named ``name``."""
     out = df.copy()
@@ -98,7 +90,6 @@ DISTINCT: dict[str, tuple[Any, Any]] = {
         _frame().set_index(_multi_index()),
         _frame().set_index(_multi_index()).swaplevel(),
     ),
-    "struct field order": (_struct_frame(["u", "v"]), _struct_frame(["v", "u"])),
     # labels and names
     "column label type 0 vs '0'": (
         pd.DataFrame({0: [1, 2]}),
@@ -324,7 +315,6 @@ EXCEPTIONS: dict[str, tuple[tuple[Any, Any], bool]] = {
 PROPERTY_OF_PAIR: dict[str, str] = {
     "column order": "column_order",
     "MultiIndex level order": "index_level_order",
-    "struct field order": "struct_field_order",
     "column label type 0 vs '0'": "label_type",
     "MultiIndex columns vs flat labels": "label_type",
     "columns.name": "columns_names",
@@ -462,7 +452,7 @@ class TestIdentityProperties:
         )
 
         options = {p.name for p in PANDAS_IDENTITY_PROPERTIES if p.option}
-        assert options == {"column_order", "struct_field_order", "series_name", "attrs"}
+        assert options == {"column_order", "series_name", "attrs"}
         assert options == PANDAS_DATAFRAME_OPTIONS | PANDAS_SERIES_OPTIONS
         assert all(p.identity for p in PANDAS_IDENTITY_PROPERTIES if p.option)
 
@@ -590,9 +580,16 @@ class TestOutsideTheGrammar:
             _hash(series)
         assert list(frame.attrs) == ["lock"]
 
-    def test_date_label_hashes(self) -> None:
+    def test_date_label_is_in_the_grammar(self) -> None:
         """A ``datetime.date`` label is in the grammar."""
-        assert _hash(pd.DataFrame([[1]], columns=pd.Index([dt.date(2020, 1, 1)])))
+        from orcapod.hashing.pandas_value_hash import pandas_label_descriptor
+
+        assert pandas_label_descriptor(dt.date(2020, 1, 1)) == {"date": "2020-01-01"}
+
+    def test_date_column_axis_is_refused(self) -> None:
+        """A column axis of dates cannot be read back from storage, so it is refused (ITL-1054)."""
+        with pytest.raises(ValueError, match="column axis.*cannot be read back"):
+            _hash(pd.DataFrame([[1]], columns=pd.Index([dt.date(2020, 1, 1)])))
 
 
 STORABLE_FRAMES: dict[str, Any] = {
@@ -936,15 +933,6 @@ class TestDescriptorGrammar:
         assert pandas_dtype_descriptor(pd.IntervalDtype("int64", "left")) == {
             "interval": [{"numpy": "int64"}, "left"]
         }
-        # The Arrow type itself, struct field order included, is in the ordered digest.
-        assert (
-            pandas_dtype_descriptor(
-                pd.ArrowDtype(
-                    pa.list_(pa.struct([("v", pa.string()), ("u", pa.int8())]))
-                )
-            )
-            == "arrow"
-        )
 
 
 def _arrow_series(values: list[Any], arrow_type: pa.DataType) -> pd.Series:
@@ -1008,25 +996,23 @@ class TestArrowDtypeLeafTypeIsIdentity:
         assert _hash(built[0]) == _hash(built[1])
         assert _hash(_stored_and_read(built[0])) == _hash(built[0])
 
-    def test_nested_arrow_dtypes_keep_the_bare_term(self) -> None:
-        """A nested ``pd.ArrowDtype`` is described by the bare term, large or not.
+    def test_nested_arrow_dtypes_are_refused(self) -> None:
+        """A nested or dictionary ``pd.ArrowDtype`` is refused by the hash (ITL-1054).
 
-        ITL-1054 decides the identity of nested Arrow dtypes (none reads back today), so the
-        large and non-large list stay equal until then.
+        Storage cannot read such a column back, so no hash describes one: the hash refuses it
+        with storage's own message, and a ``list`` and a ``large_list`` column are never
+        confused.
         """
-        from orcapod.hashing.pandas_value_hash import pandas_dtype_descriptor
-
         for nested in (
             pa.list_(pa.int64()),
             pa.large_list(pa.int64()),
             pa.struct([("s", pa.string())]),
             pa.map_(pa.string(), pa.int64()),
+            pa.dictionary(pa.int8(), pa.string()),
         ):
-            assert pandas_dtype_descriptor(pd.ArrowDtype(nested)) == "arrow"
-        values = [[1, 2], None]
-        assert _hash(_arrow_series(values, pa.list_(pa.int64()))) == _hash(
-            _arrow_series(values, pa.large_list(pa.int64()))
-        )
+            empty = pa.array([], nested)
+            with pytest.raises(ValueError, match="cannot be read back"):
+                _hash(pd.Series(empty, dtype=pd.ArrowDtype(nested), name="s"))
 
     def test_leaf_terms(self) -> None:
         """The term of a leaf type is its Arrow type text (``null`` included)."""

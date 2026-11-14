@@ -7,8 +7,11 @@ text. So this module checks the rule for every index kind, column axis and colum
 lists, each on its own, and over the products of representatives of each, for frames and
 Series.
 
-A value storage does not accept (the write or the read raises) is outside the rule and is
-left out; each test asserts that most of its matrix was accepted, so it cannot pass empty.
+Only the first write may refuse a value: storage refuses at write, with ``ValueError``, what it
+would not restore (ITL-1054), and such a value is left out. Every value written must read back,
+survive a second round trip, hash the same after each, and hold each column and index level at
+its own position. Each test asserts that most of its matrix was accepted, so it cannot pass
+empty.
 """
 
 from __future__ import annotations
@@ -272,37 +275,112 @@ def _hash(value: Any) -> str:
     return get_default_context().semantic_hasher.hash_object(value).to_string()
 
 
+def _logical(value: Any) -> LogicalPandasDataFrame | LogicalPandasSeries:
+    """The logical type that stores ``value``."""
+    if isinstance(value, pd.Series):
+        return LogicalPandasSeries()
+    return LogicalPandasDataFrame()
+
+
 def _stored_and_read(value: Any) -> Any:
     """``value`` after the storage round trip of its logical type."""
-    logical = (
-        LogicalPandasSeries()
-        if isinstance(value, pd.Series)
-        else LogicalPandasDataFrame()
-    )
+    logical = _logical(value)
     return logical.storage_to_python(logical.python_to_storage(value))
 
 
+def _level(axis: pd.Index, position: int) -> pd.Index:
+    """Level ``position`` of ``axis`` by position (``get_level_values`` tries names first)."""
+    if not isinstance(axis, pd.MultiIndex):
+        return axis
+    unnamed = axis.set_names([None] * axis.nlevels)
+    return unnamed.get_level_values(position).rename(axis.names[position])
+
+
+def _name_text(name: Any) -> Any:
+    """An index level name as storage writes it: its text, a tuple's parts each as text."""
+    if name is None:
+        return None
+    if isinstance(name, tuple):
+        return str(tuple(_name_text(part) for part in name))
+    return str(name)
+
+
+def _positional_mismatches(value: Any, back: Any) -> list[str]:
+    """The parts of ``back`` that do not hold, at their position, what ``value`` holds there.
+
+    Independent of the whole-value hash, which describes a value in the form storage
+    restores and so cannot see a part restored in another part's place (ITL-1054: MultiIndex
+    levels written in another order hashed like the reordered value). Each column and each
+    index level, taken by position, must hash like the original's part at that position; the
+    column labels (as text, per level) and the index level names (as text) must be in the
+    same order.
+    """
+    mismatches: list[str] = []
+    frame = value.to_frame() if isinstance(value, pd.Series) else value
+    frame_back = back.to_frame() if isinstance(back, pd.Series) else back
+    if frame.shape != frame_back.shape:
+        return [f"shape {frame.shape} -> {frame_back.shape}"]
+    for position in range(frame.shape[1]):
+        column = frame.iloc[:, position].reset_index(drop=True).rename(None)
+        column_back = frame_back.iloc[:, position].reset_index(drop=True).rename(None)
+        if _hash(column) != _hash(column_back):
+            mismatches.append(f"column {position}")
+    if isinstance(value, pd.DataFrame):
+        if value.columns.nlevels != back.columns.nlevels:
+            return [*mismatches, "column axis levels"]
+        for position in range(value.columns.nlevels):
+            labels = [str(label) for label in _level(value.columns, position)]
+            labels_back = [str(label) for label in _level(back.columns, position)]
+            if labels != labels_back:
+                mismatches.append(f"column axis level {position} labels")
+    if value.index.nlevels != back.index.nlevels:
+        return [*mismatches, "index levels"]
+    for position in range(value.index.nlevels):
+        level = pd.DataFrame(index=_level(value.index, position).rename(None))
+        level_back = pd.DataFrame(index=_level(back.index, position).rename(None))
+        if _hash(level) != _hash(level_back):
+            mismatches.append(f"index level {position}")
+    names = [_name_text(name) for name in value.index.names]
+    if names != [_name_text(name) for name in back.index.names]:
+        mismatches.append("index level names")
+    return mismatches
+
+
 def _unstable(values: dict[str, Any]) -> tuple[list[str], int]:
-    """Check the round-trip rule on every value storage accepts.
+    """Check the round-trip rule on every value storage accepts at the first write.
+
+    Only the first write may refuse a value (that value is left out). Once written, a value
+    must read back, survive a second round trip, hash the same after each, and hold each part
+    at its own position (``_positional_mismatches``). A read that raises, a second round trip
+    that raises, or a changed value is a failure, never "unsupported input".
 
     Returns:
-        The names of the values whose hash changed through storage (or changed again on a
-        second round trip), and how many values storage accepted.
+        The names of the values that failed, each with the reason, and how many values the
+        first write accepted.
     """
-    unstable: list[str] = []
+    failed: list[str] = []
     accepted = 0
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for name, value in values.items():
+            logical = _logical(value)
             try:
-                back = _stored_and_read(value)
-                again = _stored_and_read(back)
-            except (ValueError, TypeError, NotImplementedError, pa.ArrowException):
-                continue  # Storage does not accept this value.
+                stored = logical.python_to_storage(value)
+            except ValueError:
+                continue  # Refused at write: storage would not restore this value.
             accepted += 1
+            try:
+                back = logical.storage_to_python(stored)
+                again = _stored_and_read(back)
+            except Exception as exc:  # noqa: BLE001 - every failure after the write counts
+                failed.append(f"{name}: {type(exc).__name__}: {exc}")
+                continue
             if not (_hash(value) == _hash(back) == _hash(again)):
-                unstable.append(name)
-    return unstable, accepted
+                failed.append(f"{name}: hash changed through storage")
+            mismatches = _positional_mismatches(value, back)
+            if mismatches:
+                failed.append(f"{name}: {mismatches}")
+    return failed, accepted
 
 
 def _frame(index: pd.Index, columns: pd.Index, values: Any) -> pd.DataFrame:

@@ -1452,9 +1452,10 @@ series: {"kind": "orcapod.pandas.series", "height": <rows>, "attrs": <attrs>,
          | {"arrow": <Arrow type text>}             pd.ArrowDtype of a non-nested Arrow type:
                                                     str(type), "large_binary", "null",
                                                     "timestamp[ns, tz=UTC]"
-         | "arrow"                                  pd.ArrowDtype of a nested, dictionary or
-                                                    run-end type: the type is in D only
 ```
+
+A nested, dictionary or run-end `pd.ArrowDtype` has no term: storage cannot read such a
+column back, so the value is refused (see "What is refused" below).
 
 `kind` is the name of the value's logical type (its Arrow extension name).
 
@@ -1468,7 +1469,6 @@ the value that was written. `PANDAS_IDENTITY_PROPERTIES` in
 |---|---|---|
 | Column order | yes | `D` (ordered) |
 | MultiIndex level order (frame and Series) | yes | `D` (ordered) |
-| Struct field order in a `pd.ArrowDtype` struct column, at every depth | yes | `D` (ordered) |
 | Values, row order, row count, Arrow type (int width, datetime unit and timezone) | yes | `D` |
 | Index values, index level names (as the text storage writes), index dtype (as storage restores it) | yes | `D`, descriptor |
 | `columns.name` / `columns.names` | yes | descriptor |
@@ -1538,19 +1538,17 @@ More consequences of the same rule:
   decimal column and the all-null or empty `object` column is `{"numpy": "object"}`, so they
   **hash equal**; the height still counts, and a `string`-dtype column of `None` (descriptor
   `"string"`) stays different. Other all-null or empty columns (Arrow string, timestamp,
-  integer, list or struct, `Int64`, `string`, categorical) keep their own types and are
+  integer, `Int64`, `string`, categorical) keep their own types and are
   unchanged.
   A `pd.ArrowDtype` of a non-nested Arrow type is described by its Arrow type text, so
   `pd.ArrowDtype(pa.null())` (`{"arrow": "null"}`) never hashes like a
   `pd.ArrowDtype(pa.large_string())` column of `None`, and `binary` and `large_binary`
   columns (which storage restores as themselves, although D unifies large and non-large
   variants) hash differently. A decimal column is the exception that shows the rule: storage
-  restores it as `object`, so two precisions hash equal. A nested `pd.ArrowDtype` (list,
-  struct, map, union), a dictionary or a run-end type keeps the bare term `"arrow"`; none
-  reads back today, and ITL-1054 decides what identifies one (so a `list` and a `large_list`
-  column hash equal until then).
-  A `pd.ArrowDtype` of a nested type with a `null` child (`list<null>`, `struct<a: null>`)
-  is still refused by the hash, as before.
+  restores it as `object` (each value comes back exactly, digits and scale included; the
+  dtype and its declared precision do not), so two precisions hash equal. A nested
+  `pd.ArrowDtype` (list, struct, map, union), a dictionary or a run-end type is refused:
+  storage cannot read it back (ITL-1054).
 - **A timezone is the text storage writes for it** (`"UTC"`, `"Europe/Berlin"`,
   `"+01:00"`), whatever class holds it: `datetime.timezone(timedelta(hours=1))` is read
   back as another class of the same offset, and both hash equal.
@@ -1568,15 +1566,74 @@ warning, or raise `TypeError`, depending on its version). With `attrs` in the ig
 the hash does not read them (it never copies them either, so `attrs` that cannot be copied
 do not matter then).
 
-Storage refuses a value it would corrupt. Column labels and index names that collide
-once written as text (the index name `1` with a column `"1"`; integer names of MultiIndex
-levels) would be written as two fields of one name, and the value read back would have lost
-its index. Distinct labels that read back equal (the labels `True` and `False` both read
-back `True`) would come back as duplicates. `python_to_storage` raises `ValueError` in both
-cases.
-
 A label or dtype outside the grammar raises `ValueError` naming it (a dtype error names its
-column). A value that cannot be converted to Arrow raises `ValueError`.
+column).
+
+**What is refused.** Storage refuses, when the value is written, a value it would not
+restore, and the hash refuses the same values with the same `ValueError` (one check,
+`require_restorable` in `orcapod/hashing/pandas_value_hash.py`; ITL-1054). The message names
+the column, index level or column-axis level and the reason. Refused, on every supported
+pyarrow version:
+
+- **MultiIndex levels that would be written in another order.** pyarrow fetches index level
+  `i` with `index.get_level_values(i)`, which pandas resolves as a level *name* first. So
+  level names that are also level positions (`names=[1, 0]`; `1.0` and `True` count as `1`)
+  would be written, and read back, with the levels swapped, and nothing would raise.
+- **Values storage cannot read back.** A `pd.ArrowDtype` column (or Series) of a list,
+  large list, fixed-size list, list view, struct, map, dictionary, run-end or union type,
+  of fixed-size binary, or of an Arrow extension type (`uuid`, `json`, `bool8`, a fixed-shape
+  tensor); an index level of a `pd.ArrowDtype` list, large list, fixed-size list, struct,
+  map, dictionary, fixed-size binary or `float16` type; a column axis (any level of it) that
+  is categorical, period, timedelta, interval, `datetime.date` objects, or a `pd.ArrowDtype`
+  timestamp, duration, time, bool, date, decimal or unsigned integer, which includes a
+  Series named with a `pd.Timedelta`, `pd.Period` or `datetime.date`; a categorical column,
+  Series or index whose categories are tuples (they read back as arrays, which cannot be
+  categories; ITL-1115) or intervals.
+- **Index levels whose values cannot be read back.** A `pd.ArrowDtype` `time64[ns]` index
+  level holding a value that is not a whole number of microseconds (ITL-1118), and a
+  MultiIndex level holding tuples or lists, which read back as arrays that cannot be the
+  values of a MultiIndex level (ITL-1120). These failures depend on the values, so each
+  index level is converted once, in full, and a MultiIndex is assembled once, when a value is
+  written or hashed; columns are checked without converting any row.
+- **Index level names that would read back as another name.** pyarrow drops a name of the
+  form `__index_level_<n>__` (its own name for an unnamed level), so such a level reads back
+  unnamed (ITL-1119). Names are compared as the text storage writes for them.
+- **Column labels that would read back as another label.** pyarrow restores a bool label
+  from its text, so the label `False` (a one-column bool axis, a Series named `False`, a
+  `False` in a level of a MultiIndex column axis) reads back `True` (ITL-1116). Labels are
+  compared as text, so mixed-type labels, which storage writes as text, are not a change.
+- **Labels and names that collide once written as text** (the index name `1` with a column
+  `"1"`; integer names of MultiIndex levels): two fields of one name, and the value read
+  back would have lost its index. Distinct labels that read back equal (the labels `True`
+  and `False` both read back `True`) would come back as duplicates.
+- **Values Arrow cannot convert** (mixed or non-Arrow values, `complex128`, sparse columns,
+  a categorical of periods, a `float16` column axis, an index of a type Arrow does not
+  support).
+
+Before v0.3 such values were written: a value of the first kind reads back changed, and one
+of the second kind cannot be read at all.
+
+```python
+import pandas as pd
+from orcapod.contexts import get_default_context
+from orcapod.logical_types.pandas_type import LogicalPandasDataFrame
+
+semantic_hasher = get_default_context().semantic_hasher
+swapped = pd.DataFrame(
+    {"a": [10, 20]},
+    index=pd.MultiIndex.from_tuples([("p", 7), ("q", 8)], names=[1, 0]),
+)
+try:
+    LogicalPandasDataFrame().python_to_storage(swapped)
+except ValueError as error:
+    print(str(error).split(":")[0])
+# index level 0 (name 1)
+try:
+    semantic_hasher.hash_object(swapped)
+except ValueError as error:
+    print(str(error).split(":")[0])
+# index level 0 (name 1)
+```
 
 **What a data context can make the hash ignore.** Nothing is ignored by default. The
 registration file (`orcapod/contexts/logical_types.json`, `hash_ignore`) can name, per type,
@@ -1588,7 +1645,6 @@ The preimage keeps its shape: an ignored property is hashed with a fixed value.
 |---|---|---|
 | `column_order` | DataFrame | the columns are hashed sorted by the canonical JSON of their typed labels |
 | `series_name` | Series | `name` is hashed as `null` |
-| `struct_field_order` | both | starfix's `ordered_struct_fields` option is off for `D` |
 | `attrs` | both | `attrs` is hashed as `{}` |
 
 Every other property always counts, and the properties storage does not restore never do;

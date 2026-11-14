@@ -14,7 +14,6 @@ the DataFrame round-trip.
 from __future__ import annotations
 
 import io
-from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -26,6 +25,8 @@ from orcapod.hashing.pandas_value_hash import (
     PANDAS_SERIES_OPTIONS,
     PANDAS_UNNAMED_SERIES_COLUMN,
     pandas_attrs_as_stored,
+    pandas_frame_to_arrow,
+    require_restorable,
 )
 from orcapod.logical_types.ignore_list import IgnoreListLogicalType
 
@@ -46,61 +47,6 @@ Before v0.3 these types were stored under the names ``pandas.dataframe`` and
 ``pandas.series`` (with empty metadata). Those names are not registered any more, so a
 column stored under them is refused on read, never read as the current types.
 """
-
-
-def _require_restorable_axes(table: pa.Table, frame: pd.DataFrame) -> None:
-    """Raise if the frame read back from ``table`` would not have ``frame``'s axes.
-
-    Arrow writes some column labels and every index level name as text. Two cases corrupt
-    a value silently, so they are refused before anything is written:
-
-    - Two fields get one name: the index name ``1`` beside the column ``"1"``, or integer
-      names of MultiIndex levels. The frame read back has lost its index (the levels come
-      back as columns).
-    - Distinct labels read back equal: the labels ``True`` and ``False`` are written as
-      text and both read back ``True``.
-
-    The check builds the frame storage would restore for the table's schema; no rows are
-    converted.
-
-    Args:
-        table: ``pa.Table.from_pandas(frame, preserve_index=True)``.
-        frame: The frame about to be stored.
-
-    Raises:
-        ValueError: If a field name occurs twice (the message lists the names), or the
-            frame read back would have another number of columns or index levels, or
-            duplicate column labels the frame does not have.
-    """
-    counts = Counter(table.schema.names)
-    repeated = sorted(name for name, count in counts.items() if count > 1)
-    if repeated:
-        raise ValueError(
-            f"column labels and index names collide once written as text: {repeated}. "
-            "Storage could not restore the index. Rename the index levels (integer "
-            "level names are a common cause) or the columns."
-        )
-    try:
-        restored = table.schema.empty_table().to_pandas()
-    except (TypeError, ValueError, NotImplementedError, pa.ArrowException):
-        return  # Not a case this check is about; reading reports it.
-    if (
-        restored.shape[1] != frame.shape[1]
-        or restored.index.nlevels != frame.index.nlevels
-    ):
-        raise ValueError(
-            "the value read back from storage would have "
-            f"{restored.shape[1]} column(s) and {restored.index.nlevels} index "
-            f"level(s), not {frame.shape[1]} and {frame.index.nlevels}. Rename the "
-            "columns or the index levels."
-        )
-    if frame.columns.is_unique and not restored.columns.is_unique:
-        labels = sorted({repr(label) for label in restored.columns})
-        raise ValueError(
-            "distinct column labels would read back from storage as duplicates: "
-            f"{labels}. Rename the columns (labels of mixed or bool type are written "
-            "as text)."
-        )
 
 
 def _table_to_ipc_bytes(table: pa.Table) -> bytes:
@@ -175,20 +121,16 @@ class LogicalPandasDataFrame(IgnoreListLogicalType):
             schema, index, and data.
 
         Raises:
-            ValueError: If any column cannot be converted to an Arrow type, column
-                labels and index names would not read back as they are (they collide
-                once written as text), or ``attrs`` cannot be written as JSON.
+            ValueError: If the frame cannot be converted to Arrow, storage would not
+                restore it (labels and names that collide once written as text,
+                MultiIndex levels written in another order, a column, index level or
+                column-axis level that cannot be read back; see ``require_restorable``),
+                or ``attrs`` cannot be written as JSON. The message names the column or
+                level.
         """
         pandas_attrs_as_stored(value.attrs)  # refuses attrs that are not JSON
-        try:
-            table = pa.Table.from_pandas(value, preserve_index=True)
-        except pa.lib.ArrowInvalid as exc:
-            raise ValueError(
-                f"LogicalPandasDataFrame: cannot convert DataFrame to Arrow. "
-                f"Check for columns with mixed or non-Arrow-serialisable types. "
-                f"Original error: {exc}"
-            ) from exc
-        _require_restorable_axes(table, value)
+        table = pandas_frame_to_arrow(value)
+        require_restorable(table, value)
         return _table_to_ipc_bytes(table)
 
     def storage_to_python(
@@ -251,9 +193,10 @@ class LogicalPandasSeries(IgnoreListLogicalType):
 
         Raises:
             ValueError: If ``value.name`` equals the reserved sentinel, the Series
-                values cannot be converted to an Arrow type, the name and the index
-                names collide once written as text, or ``attrs`` cannot be written as
-                JSON.
+                cannot be converted to Arrow, storage would not restore it (see
+                ``require_restorable``: the name and the index names collide once written
+                as text, MultiIndex levels written in another order, values or an index
+                level that cannot be read back), or ``attrs`` cannot be written as JSON.
         """
         if value.name == _SERIES_UNNAMED_SENTINEL:
             raise ValueError(
@@ -264,15 +207,8 @@ class LogicalPandasSeries(IgnoreListLogicalType):
         col_name = value.name if value.name is not None else _SERIES_UNNAMED_SENTINEL
         pandas_attrs_as_stored(value.attrs)  # refuses attrs that are not JSON
         df = value.to_frame(name=col_name)
-        try:
-            table = pa.Table.from_pandas(df, preserve_index=True)
-        except pa.lib.ArrowInvalid as exc:
-            raise ValueError(
-                f"LogicalPandasSeries: cannot convert Series to Arrow. "
-                f"Check for non-Arrow-serialisable values. "
-                f"Original error: {exc}"
-            ) from exc
-        _require_restorable_axes(table, df)
+        table = pandas_frame_to_arrow(df)
+        require_restorable(table, df)
         return _table_to_ipc_bytes(table)
 
     def storage_to_python(

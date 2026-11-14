@@ -1,10 +1,11 @@
 """What a data context can configure the pandas value hash to ignore (ITL-897, ITL-981).
 
 The hash of a ``pd.DataFrame`` / ``pd.Series`` is strict by default. A data context can
-name properties to ignore, per type: ``column_order``, ``struct_field_order`` and ``attrs``
-for a frame; ``series_name``, ``struct_field_order`` and ``attrs`` for a Series. The list is
-saved in the logical type's extension metadata, so two lists are two logical types. Storage
-is the same under every list.
+name properties to ignore, per type: ``column_order`` and ``attrs`` for a frame;
+``series_name`` and ``attrs`` for a Series. The list is saved in the logical type's extension
+metadata, so two lists are two logical types. Storage is the same under every list.
+``struct_field_order`` is not an option: it acted only on a ``pd.ArrowDtype`` struct column,
+which storage cannot read back and so is refused (ITL-1054).
 """
 
 from __future__ import annotations
@@ -46,19 +47,6 @@ def _with_attrs(value: Any) -> Any:
     return out
 
 
-def _struct_series(order: list[str]) -> pd.Series:
-    """A ``pd.ArrowDtype`` struct Series whose fields are in ``order``."""
-    types = {"u": pa.int64(), "v": pa.large_string()}
-    struct = pa.struct([(name, types[name]) for name in order])
-    array = pa.array([{"u": 1, "v": "x"}], struct)
-    return pd.Series(array, dtype=pd.ArrowDtype(struct), name="s")
-
-
-def _struct_frame(order: list[str]) -> pd.DataFrame:
-    """A frame with one ``pd.ArrowDtype`` struct column whose fields are in ``order``."""
-    return pd.DataFrame({"s": _struct_series(order)})
-
-
 def _reordered(frame: pd.DataFrame) -> pd.DataFrame:
     """``frame`` with its columns in reverse order."""
     return frame.reindex(columns=list(frame.columns)[::-1])
@@ -67,12 +55,10 @@ def _reordered(frame: pd.DataFrame) -> pd.DataFrame:
 # option -> two values that differ only in that property
 FRAME_PAIRS: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {
     "column_order": (_frame(), _reordered(_frame())),
-    "struct_field_order": (_struct_frame(["u", "v"]), _struct_frame(["v", "u"])),
     "attrs": (_frame(), _with_attrs(_frame())),
 }
 SERIES_PAIRS: dict[str, tuple[pd.Series, pd.Series]] = {
     "series_name": (pd.Series([1, 2], name="a"), pd.Series([1, 2], name="b")),
-    "struct_field_order": (_struct_series(["u", "v"]), _struct_series(["v", "u"])),
     "attrs": (pd.Series([1, 2]), _with_attrs(pd.Series([1, 2]))),
 }
 
@@ -178,16 +164,21 @@ class TestHandlers:
         """The handler and the logical type of one pandas type offer the same options."""
         assert PandasDataFrameHandler.OPTIONS == LogicalPandasDataFrame.OPTIONS
         assert PandasSeriesHandler.OPTIONS == LogicalPandasSeries.OPTIONS
-        assert PandasDataFrameHandler.OPTIONS == {
-            "attrs",
-            "column_order",
-            "struct_field_order",
-        }
-        assert PandasSeriesHandler.OPTIONS == {
-            "attrs",
-            "series_name",
-            "struct_field_order",
-        }
+        assert PandasDataFrameHandler.OPTIONS == {"attrs", "column_order"}
+        assert PandasSeriesHandler.OPTIONS == {"attrs", "series_name"}
+
+    def test_struct_field_order_is_not_an_option(self) -> None:
+        """``struct_field_order`` is refused: no value storage accepts has a struct column."""
+        for refuse in (
+            PandasDataFrameHandler,
+            PandasSeriesHandler,
+            LogicalPandasDataFrame,
+            LogicalPandasSeries,
+        ):
+            with pytest.raises(
+                ValueError, match="unknown property name 'struct_field_order'"
+            ):
+                refuse(ignore=["struct_field_order"])
 
 
 class TestIdentifier:
@@ -318,3 +309,11 @@ class TestDataContext:
         """A configured name that is not an option raises."""
         with pytest.raises(ContextValidationError, match="flags"):
             _context(tmp_path, {FRAME_NAME: ["flags"]})
+
+    def test_struct_field_order_in_a_data_context_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """A data context naming ``struct_field_order`` for a pandas type is refused (ITL-1054)."""
+        for name in (FRAME_NAME, SERIES_NAME):
+            with pytest.raises(ContextValidationError, match="struct_field_order"):
+                _context(tmp_path, {name: ["struct_field_order"]})
