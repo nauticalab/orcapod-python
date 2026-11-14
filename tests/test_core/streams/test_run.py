@@ -383,13 +383,6 @@ def test_operator_stream_run_recomputes_after_its_upstream_changed() -> None:
     assert len(calls) == 2 * ROWS
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ITL-1083: an operator that hands its input on unread (a select that drops "
-        "nothing) judges its result stale once that input finishes computing"
-    ),
-)
 def test_head_after_run_of_a_pass_through_operator_shows_the_rows() -> None:
     """After ``run()``, a pass-through operator stream's ``head()`` shows its rows."""
     out = SelectDataColumns(["y"])(_counting_pod([]).pod(_source()))
@@ -397,14 +390,6 @@ def test_head_after_run_of_a_pass_through_operator_shows_the_rows() -> None:
     assert out.head(3).table.equals(view.head(3).table)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "ITL-1083: a pass-through operator stream judged stale leaves the pod stream "
-        "reading it without a modified time, so the job node over it is stale after its "
-        "run and drops the rows it computed"
-    ),
-)
 def test_job_node_run_over_a_pass_through_chain_returns_its_rows() -> None:
     """A job node without a database returns the rows its ``run()`` computed."""
 

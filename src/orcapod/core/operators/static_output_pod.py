@@ -11,6 +11,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import OrcapodConfig
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
+from orcapod.core.function_pod import FunctionPodStream
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import (
     StreamBase,
@@ -411,6 +412,12 @@ class DynamicPodStream(StreamBase):
         self._set_modified_time(None)
         self._cached_time: datetime | None = None
         self._cached_stream: StreamProtocol | None = None
+        # Staleness bookkeeping, in memory only (never hashed, saved or stored): the
+        # upstreams' states when the kept result was made (``_upstream_state``), and a
+        # count of the kept results discarded, which tells a downstream operator stream
+        # that this one changed (ITL-1083).
+        self._kept_states: tuple[tuple[str, object], ...] | None = None
+        self._reset_generation: int = 0
 
     def identity_structure(self) -> Any:
         structure = (self._pod,)
@@ -436,6 +443,8 @@ class DynamicPodStream(StreamBase):
         """Clear the cached stream, forcing recomputation on next access."""
         self._cached_stream = None
         self._cached_time = None
+        self._kept_states = None
+        self._reset_generation += 1
 
     def keys(
         self,
@@ -471,24 +480,49 @@ class DynamicPodStream(StreamBase):
         return self._cached_time
 
     def _update_cache_status(self) -> None:
+        """Discard the kept result if the operator or an upstream changed since it was made.
+
+        A pod stream or an operator stream upstream is changed when its state
+        (``_upstream_state``) differs from the one noted with the kept result: its modified
+        time moves when it completes its first computation, which happens after the result
+        was kept when the operator returned that stream unread (a pass-through), and that is
+        not a change (ITL-1083, the rule ITL-1065 set for pod streams). Any other upstream,
+        and the operator, are changed when their modified time is unknown or newer.
+        """
         if self._cached_time is None:
             return
 
-        upstream_times = [stream.last_modified for stream in self.upstreams]
-        upstream_times.append(self._pod.last_modified)
+        states = _upstream_states(self.upstreams)
+        times = [value for kind, value in states if kind == "time"]
+        times.append(self._pod.last_modified)
 
-        if any(t is None for t in upstream_times):
-            self._cached_stream = None
+        if any(t is None for t in times):
+            self._discard_result()
             self._cached_time = None
             return
 
-        # Get the maximum upstream time
-        max_upstream_time = max(cast(list[datetime], upstream_times))
+        newest = max(cast(list[datetime], times))
+        if states != self._kept_states or newest > self._cached_time:
+            self._discard_result()
+            # Noted so that the next check finds a change only if there is a new one.
+            self._kept_states = states
+            self._cached_time = datetime.now(timezone.utc)
 
-        # Invalidate cache if upstream is newer and update the cache time
-        if max_upstream_time > self._cached_time:
-            self._cached_stream = None
-            self._cached_time = max_upstream_time
+    @property
+    def is_stale(self) -> bool:
+        """Whether the next read must run the operator: no kept result, or an outdated one.
+
+        Judged as ``_update_cache_status`` judges the kept result (which it discards if
+        outdated), not by comparing modified times: an upstream that completed its first
+        computation after the result was kept is newer, but not changed (ITL-1083).
+        """
+        self._update_cache_status()
+        return self._cached_stream is None
+
+    def _discard_result(self) -> None:
+        """Drop the kept result; a downstream operator stream sees the change."""
+        self._cached_stream = None
+        self._reset_generation += 1
 
     def _refresh(self) -> None:
         """Run the operator unless its kept result is current: the one computation
@@ -497,10 +531,14 @@ class DynamicPodStream(StreamBase):
 
         # recompute if cache is invalid
         if self._cached_time is None or self._cached_stream is None:
+            # Noted before the operator reads its inputs, so that a change made while it
+            # reads them is seen by the next check.
+            kept_states = _upstream_states(self.upstreams)
             self._cached_stream = self._pod.static_process(
                 *self.upstreams,
             )
             self._cached_time = datetime.now(timezone.utc)
+            self._kept_states = kept_states
 
     def as_table(
         self,
@@ -552,3 +590,35 @@ class DynamicPodStream(StreamBase):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(kernel={self.producer}, upstreams={self.upstreams})"
+
+
+def _upstream_state(stream: StreamProtocol) -> tuple[str, object]:
+    """What tells a change of an upstream of an operator stream.
+
+    A pod stream or an operator stream computes lazily, so its modified time moves when it
+    completes its first computation, which is not a change of its content: its reset
+    generation tells a change instead (ITL-1083, as ``FunctionPodStream`` judges a pod-stream
+    input, ITL-1065). A stale pod stream counts the reset its next read makes. An operator
+    stream is first asked for its modified time, which discards its own kept result if that
+    is stale. Any other upstream (source, table stream, node) is told by its modified time.
+
+    Args:
+        stream: The upstream.
+
+    Returns:
+        ``("generation", n)`` or ``("time", modified time or None)``.
+    """
+    if isinstance(stream, FunctionPodStream):
+        generation = stream._reset_generation  # pyright: ignore[reportPrivateUsage]  # staleness bookkeeping shared by the stream kinds, never public
+        return ("generation", generation + int(stream.is_stale))
+    if isinstance(stream, DynamicPodStream):
+        _ = stream.last_modified
+        return ("generation", stream._reset_generation)  # pyright: ignore[reportPrivateUsage]  # same class
+    return ("time", stream.last_modified)
+
+
+def _upstream_states(
+    upstreams: tuple[StreamProtocol, ...],
+) -> tuple[tuple[str, object], ...]:
+    """The state of each upstream (``_upstream_state``), in order."""
+    return tuple(_upstream_state(stream) for stream in upstreams)
