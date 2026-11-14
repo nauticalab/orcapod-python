@@ -15,6 +15,7 @@ from orcapod.core.nodes import JobNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
+from orcapod.core.streams.base import StreamBase
 from orcapod.side_effects import SideEffectJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.contexts.stored import (
@@ -465,6 +466,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     schema_hash = job_node.as_node().content_hash().to_string()
                     self._sources_by_hash[schema_hash] = sources[job_node.name]
             self._sources.update(sources)
+            # ``validate`` checks column names only, so a rebound source may give a
+            # column another type: every node predicts its schema again (ITL-1111).
+            for job_node in (self._persistent_node_map or {}).values():
+                if isinstance(job_node, StreamBase):
+                    job_node._forget_output_schema()  # pyright: ignore[reportPrivateUsage]  # the job owns its nodes' bindings
 
         if execution_context is not None:
             self._execution_context = execution_context

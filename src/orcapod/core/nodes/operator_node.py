@@ -31,6 +31,7 @@ from orcapod.core.streams.base import (
     ZERO_ROW_INPUT_COLUMNS,
     StreamBase,
     check_head_size,
+    short_stream_repr,
 )
 from orcapod.core.streams.view import (
     STALE_NOTE,
@@ -319,6 +320,7 @@ class OperatorNodeBase(StreamBase):
     @upstreams.setter
     def upstreams(self, value: tuple[StreamProtocol, ...]) -> None:
         self._input_streams = value
+        self._forget_output_schema()
 
     def keys(
         self,
@@ -367,10 +369,16 @@ class OperatorNodeBase(StreamBase):
                     f"Cannot restore the output schema of loaded node {self.label!r}: "
                     f"{exc}"
                 ) from exc
-        return self._operator.output_schema(
-            *self._input_streams,
-            columns=columns,
-            all_info=all_info,
+        # Memoized (ITL-1111). The prediction depends on the operator's configuration
+        # and on the input streams' schemas and pipeline hashes; the ``upstreams``
+        # setter and a job's ``bind`` clear it when an input changes. Never on rows.
+        operator = self._operator
+        return self._memoized_output_schema(
+            columns,
+            all_info,
+            lambda: operator.output_schema(
+                *self._input_streams, columns=columns, all_info=all_info
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -424,9 +432,11 @@ class OperatorNodeBase(StreamBase):
         self._update_modified_time()
 
     def __repr__(self) -> str:
+        # Upstreams by class and label only: their own repr would nest every path (ITL-1111).
+        upstreams = ", ".join(short_stream_repr(s) for s in self._input_streams)
         return (
-            f"{type(self).__name__}(operator={self._operator!r}, "
-            f"upstreams={self._input_streams!r})"
+            f"{type(self).__name__}(label={self.label!r}, operator={self._operator!r}, "
+            f"upstreams=({upstreams}))"
         )
 
     @abstractmethod

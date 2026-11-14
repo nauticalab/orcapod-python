@@ -18,6 +18,7 @@ from orcapod.core.streams.base import (
     ZERO_ROW_INPUT_COLUMNS,
     StreamBase,
     check_head_size,
+    short_stream_repr,
     typed_zero_row_input,
     typed_zero_row_table,
 )
@@ -165,7 +166,7 @@ class StaticOutputOperatorPod(TraceableBase):
         Returns:
             A ``DynamicPodStream`` wrapping the computation.
         """
-        logger.debug(f"Invoking kernel {self} on streams: {streams}")
+        logger.debug("Invoking kernel %s on streams: %s", self, streams)
 
         # perform input stream validation
         self.validate_inputs(*streams)
@@ -208,7 +209,7 @@ class StaticOutputOperatorPod(TraceableBase):
 
     def __call__(self, *streams: StreamProtocol, **kwargs) -> DynamicPodStream:
         """Convenience alias for ``process``."""
-        logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
+        logger.debug("Invoking pod %s on streams through __call__: %s", self, streams)
         # perform input stream validation
         return self.process(*streams, **kwargs)
 
@@ -684,11 +685,7 @@ class DynamicPodStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Return the (tag_keys, data_keys) column names for this stream."""
-        tag_schema, data_schema = self._pod.output_schema(
-            *self.upstreams,
-            columns=columns,
-            all_info=all_info,
-        )
+        tag_schema, data_schema = self.output_schema(columns=columns, all_info=all_info)
         return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
@@ -698,10 +695,15 @@ class DynamicPodStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         """Return the (tag_schema, data_schema) for this stream."""
-        return self._pod.output_schema(
-            *self.upstreams,
-            columns=columns,
-            all_info=all_info,
+        # Memoized (ITL-1111). The prediction depends on the operator's configuration
+        # and on the upstreams' schemas and pipeline hashes, all fixed for the life of
+        # this stream; never on rows, so recomputing the rows when stale leaves it valid.
+        return self._memoized_output_schema(
+            columns,
+            all_info,
+            lambda: self._pod.output_schema(
+                *self.upstreams, columns=columns, all_info=all_info
+            ),
         )
 
     @property
@@ -820,7 +822,14 @@ class DynamicPodStream(StreamBase):
         )
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(kernel={self.producer}, upstreams={self.upstreams})"
+        # Upstreams by class and label only: their own repr would nest every path (ITL-1111).
+        upstreams = ", ".join(
+            short_stream_repr(upstream) for upstream in self.upstreams
+        )
+        return (
+            f"{self.__class__.__name__}(label={self.label!r}, kernel={self.producer}, "
+            f"upstreams=({upstreams}))"
+        )
 
 
 def _upstream_state(stream: StreamProtocol) -> tuple[str, object]:

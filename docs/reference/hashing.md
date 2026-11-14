@@ -724,6 +724,12 @@ topology suffix, encoding the full join lineage into each column name.
 | **Uniqueness guarantee** | Each post-join system tag column name uniquely identifies `(original schema, input topology, canonical join position)`; no collision even when joining streams with identical schemas |
 | **Known exclusions** | `SemiJoin` passes system tags through unchanged. Aggregating operators (`Batch`, `GroupBy`) use the fold described in site 6b instead. |
 
+Every input keeps its own system tag columns, so the count reflects the join depth: a stream
+split into two branches that are joined again carries each of its system tag columns twice,
+and `k` such stages stacked carry each one `2 ** k` times (ITL-1114). The table of no rows that
+`head()` and the notebook preview of a stream that has not run are built from carries the system
+tag columns too, so those calls are as wide as the joins make them (ITL-1132).
+
 ---
 
 ### Site 6b — Aggregating operator system tag fold

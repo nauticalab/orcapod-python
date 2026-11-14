@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping
 from contextvars import ContextVar
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -53,6 +53,24 @@ def schema_requires_io(stream: object, config: ColumnConfig) -> bool:
     """
     check = getattr(stream, "_schema_requires_io", None)
     return bool(check(config)) if callable(check) else False
+
+
+def short_stream_repr(stream: object) -> str:
+    """Name a stream by its class and label only, as a derived stream's ``repr`` lists it.
+
+    A derived stream's ``repr`` names its upstreams this way, never by their own
+    ``repr``: that one names their upstreams in turn, so a graph whose stages split
+    and join again would print every path, 2 ** stages long (ITL-1111).
+
+    Args:
+        stream: An upstream stream.
+
+    Returns:
+        ``<ClassName 'label'>``, or ``<ClassName>`` when the stream has no label.
+    """
+    label = getattr(stream, "label", None)
+    name = type(stream).__name__
+    return f"<{name} {label!r}>" if label is not None else f"<{name}>"
 
 
 ZERO_ROW_INPUT_COLUMNS = ColumnConfig(system_tags=True, source=True)
@@ -587,6 +605,56 @@ class StreamBase(TraceableBase):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]: ...
 
+    # Predicted output schemas by normalized column config; see
+    # ``_memoized_output_schema``. Set on first use, so a subclass that asks for its
+    # schema before ``StreamBase.__init__`` runs still works.
+    _output_schema_memo: dict[ColumnConfig, tuple[Schema, Schema]] | None = None
+
+    def _memoized_output_schema(
+        self,
+        columns: ColumnConfig | dict[str, Any] | None,
+        all_info: bool,
+        predict: Callable[[], tuple[Schema, Schema]],
+    ) -> tuple[Schema, Schema]:
+        """Return ``predict()``, computed once per normalized column config (ITL-1111).
+
+        A stream derived from upstreams predicts its schema by asking them for
+        theirs. Without a memo, a graph in which one stream feeds two branches that
+        join again asks the shared upstream once per path, so stacked
+        split-and-join stages cost 4x per stage. With it, every graph walk that
+        asks for schemas is linear in the nodes.
+
+        Only the prediction is kept: a ``(tag_schema, data_schema)`` pair of
+        immutable ``Schema`` objects, never rows or a table. The caller states what
+        its prediction depends on, and clears the memo
+        (``_forget_output_schema``) when one of those things changes. A config
+        that cannot be a dict key (``meta`` given as a list of names) is predicted
+        every time.
+
+        Args:
+            columns: The column config as the caller received it.
+            all_info: The ``all_info`` flag as the caller received it.
+            predict: Computes the schema from ``columns`` and ``all_info``.
+
+        Returns:
+            The predicted ``(tag_schema, data_schema)``.
+        """
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
+        try:
+            hash(config)
+        except TypeError:
+            return predict()
+        if self._output_schema_memo is None:
+            self._output_schema_memo = {}
+        memo = self._output_schema_memo
+        if config not in memo:
+            memo[config] = predict()
+        return memo[config]
+
+    def _forget_output_schema(self) -> None:
+        """Drop the memoized output schemas: an input of the prediction changed."""
+        self._output_schema_memo = None
+
     def __iter__(
         self,
     ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
@@ -831,8 +899,25 @@ class StreamBase(TraceableBase):
         True when an upstream's would: a ``PollingSource`` that has not polled yet
         answers its schema only by polling when it declared no schema, or when
         ``config`` asks for a column group known only from rows.
+
+        Each upstream is visited once, however many paths lead to it (ITL-1111): a
+        stream that answers like this one is passed through to its own upstreams,
+        any other is asked. The answer is not kept, because a source's changes once
+        it has polled.
         """
-        return any(schema_requires_io(upstream, config) for upstream in self.upstreams)
+        seen: set[int] = {id(self)}
+        pending: list[StreamProtocol] = list(self.upstreams)
+        while pending:
+            stream = pending.pop()
+            if id(stream) in seen:
+                continue
+            seen.add(id(stream))
+            hook = getattr(type(stream), "_schema_requires_io", None)
+            if hook is StreamBase._schema_requires_io:
+                pending.extend(stream.upstreams)
+            elif schema_requires_io(stream, config):
+                return True
+        return False
 
     def _zero_row_table(self, config: ColumnConfig) -> pa.Table | None:
         """This stream's table with no rows and the column groups of ``config``.
