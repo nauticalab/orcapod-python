@@ -166,31 +166,19 @@ class TestOneSchemaInEveryState:
     def test_after_a_load_only_run_with_nothing_stored(self, orchestrator: str) -> None:
         """A load-only run over an empty store fills every node with zero rows.
 
-        The join's zero-row result has its populated table's fields in another order
-        (ITL-1131), so the fields are compared by name here; the exact
-        schema is ``test_a_join_with_no_input_rows_keeps_its_column_order``.
+        Each has its populated table's schema, column order included (ITL-1131).
         """
         expected = _run_schemas(orchestrator)
         job = _load_only_over_an_empty_store(orchestrator)
         for label in NODES:
             table = job.nodes[label].as_table(all_info=True)
             assert table.num_rows == 0, label
-            assert _fields_by_name(table.schema) == _fields_by_name(expected[label])
-            if label != "joined":
-                assert table.schema.equals(expected[label]), label
+            assert table.schema.equals(expected[label]), label
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "ITL-1131: a join's zero-row result lists its data columns before "
-            "its system tags; its populated table lists them after"
-        ),
-    )
     def test_a_join_with_no_input_rows_keeps_its_column_order(
         self, orchestrator: str
     ) -> None:
-        """The join that received no rows has its populated schema, in order."""
+        """The join that received no rows has its populated schema, in order (ITL-1131)."""
         expected = _run_schemas(orchestrator)["joined"]
         job = _load_only_over_an_empty_store(orchestrator)
         assert job.nodes["joined"].as_table(all_info=True).schema.equals(expected)
@@ -202,8 +190,3 @@ def _load_only_over_an_empty_store(orchestrator: str) -> PipelineJob:
     FAIL["on"] = True  # a load-only run never calls the function
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator](), load_only=True)
     return job
-
-
-def _fields_by_name(schema: pa.Schema) -> dict[str, "pa.Field[Any]"]:
-    """The fields of ``schema`` by name, so that their order is not compared."""
-    return {field.name: field for field in schema}

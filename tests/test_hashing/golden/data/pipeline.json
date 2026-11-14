@@ -28,9 +28,16 @@
   ],
   "column_selection.drop_tag.content_hash": "semantic_v1:918de396eb2329433b82d3ca7f28c8268ad236aad9853191f04218d78125afd4",
   "column_selection.drop_tag.pipeline_hash": "semantic_v1:76f153e7528e3e6f21bc27b2fcab2401f817c1d4595323a8e4409a515da18340",
+  "column_selection.drop_tag.row[{\"cohort\":\"a\"}]._tag_record_id::7d650c4855ec007531f6a110836de7a0ff2ac68b4bfff32e58b2c41d02f44f7c": "37d45a37e6255cd78bb62c4c9d047ca5",
+  "column_selection.drop_tag.row[{\"cohort\":\"a\"}]._tag_source_id::7d650c4855ec007531f6a110836de7a0ff2ac68b4bfff32e58b2c41d02f44f7c": "cohorts",
   "column_selection.drop_tag.row[{\"cohort\":\"a\"}].data_hash": "arrow_v1:00000252e4f32a133cd6a8813f816e08b6bde1cdb467baa95d026fc41c5672b6b98110",
+  "column_selection.drop_tag.row[{\"cohort\":\"b\"}]._tag_record_id::7d650c4855ec007531f6a110836de7a0ff2ac68b4bfff32e58b2c41d02f44f7c": "d0cc03b6594d51788075066f5c81deb0",
+  "column_selection.drop_tag.row[{\"cohort\":\"b\"}]._tag_source_id::7d650c4855ec007531f6a110836de7a0ff2ac68b4bfff32e58b2c41d02f44f7c": "cohorts",
   "column_selection.drop_tag.row[{\"cohort\":\"b\"}].data_hash": "arrow_v1:0000025f33a2f5bf3e956edfb7ca628b6871f52b7bbf788d5a3774ddffe300d7d4aff5",
-  "column_selection.drop_tag.system_tag_columns": [],
+  "column_selection.drop_tag.system_tag_columns": [
+    "_tag_source_id::7d650c4855ec007531f6a110836de7a0ff2ac68b4bfff32e58b2c41d02f44f7c",
+    "_tag_record_id::7d650c4855ec007531f6a110836de7a0ff2ac68b4bfff32e58b2c41d02f44f7c"
+  ],
   "column_selection.select_data.content_hash": "semantic_v1:5296eb99a253bd93c79f8e162af14447fabc9fd02c42fdb19061794fb7ace639",
   "column_selection.select_data.pipeline_hash": "semantic_v1:a64b3ddcd8c16aa17dc18e516e3a49cccf97216d6b7869b32b5bcde06c3b4f4e",
   "column_selection.select_data.row[{\"subject\":\"s1\"}]._tag_record_id::d22029fcc2b0458566a83389c23c1a850dc69499f2456ae83bc6345284f861a5": "e8e02084627f5e1aad83839e421538e8",

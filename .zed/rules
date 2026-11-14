@@ -735,6 +735,15 @@ data. The rules:
   rows is built in one place, StreamBase._head_without_rows, from the stream's
   _zero_row_table(config), which equals as_table(columns=config) with no rows; a kind
   whose as_table shapes its table its own way overrides _zero_row_table with that shaping.
+  The zero-row table has the populated table's columns in the populated order too (ITL-1131).
+  A table built from rows (and a node's or operator input's table with no rows) is in row
+  order, user tags, system tags, data, source info, stated once in
+  StaticOutputOperatorPod._in_row_order; a node that keeps a run with no rows keeps
+  _zero_rows_in_row_order, and an operator's own empty result built from its input
+  goes through _as_row_built_table. An operator node keeps and stores the row order on every
+  path (_kept_output: a job run, sync or async, and node.run() on its own; ITL-1133),
+  and reads a stored operator cache in row order (_in_row_order_on_read). Never change
+  the order of any other populated table: stored tables depend on it.
 - Type strictness (developer, November 10, 2026): Orcapod is type strict. It never
   expands or converts a type implicitly; the only exception is normalization to large variants.
   Inputs that disagree on a column's type are an error naming the column and both types, on

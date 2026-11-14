@@ -261,6 +261,101 @@ class StaticOutputOperatorPod(TraceableBase):
         return full_table, tuple(rows[0][0].keys())
 
     @staticmethod
+    def _in_row_order(table: pa.Table, tag_keys: Sequence[str]) -> pa.Table:
+        """Return ``table`` with its columns in the order of a table built from rows.
+
+        The one statement of that order (ITL-1131): user tags, system tags, data,
+        source info, as ``_rows_to_table`` builds it (each row's tag table with its
+        system tags, then its data table with its source info). Data columns keep their
+        order in ``table``. Every table a node or an operator input holds with no rows
+        takes this order, so it equals the table a run with rows gives.
+
+        Args:
+            table: A table of user tags, system tags, data and source info.
+            tag_keys: The user tag columns, in order.
+
+        Returns:
+            The same columns, reordered; no column is added, dropped or changed.
+        """
+        from orcapod.system_constants import constants
+
+        names = table.column_names
+        system_tags = [n for n in names if n.startswith(constants.SYSTEM_TAG_PREFIX)]
+        source_info = [n for n in names if n.startswith(constants.SOURCE_PREFIX)]
+        placed = {*tag_keys, *system_tags, *source_info}
+        data = [n for n in names if n not in placed]
+        return table.select([*tag_keys, *system_tags, *data, *source_info])
+
+    @staticmethod
+    def _as_row_built_table(table: pa.Table, tag_keys: Sequence[str]) -> pa.Table:
+        """Return ``table`` as ``_rows_to_table`` would build it from the same rows.
+
+        Its columns in row order (``_in_row_order``) and each source-info field flagged
+        nullable only when some row's token is ``None``
+        (``_flag_source_info_nullability``). For a table with no rows: what a result
+        built from rows has, with no row (ITL-1131).
+
+        Args:
+            table: A table of user tags, system tags, data and source info.
+            tag_keys: The user tag columns, in order.
+
+        Returns:
+            The same arrays, reordered, under the new source-info field flags.
+        """
+        return StaticOutputOperatorPod._flag_source_info_nullability(
+            StaticOutputOperatorPod._in_row_order(table, tag_keys)
+        )
+
+    @staticmethod
+    def _zero_rows_in_row_order(result: StreamProtocol) -> StreamProtocol:
+        """Return an operator's result with no rows as a run with rows would keep it.
+
+        The zero-row counterpart of ``_materialize_to_stream``: ``result``'s zero-row
+        table (user tags, system tags, data and source info, with its Arrow types and
+        nullability) in the order of a table built from rows (``_in_row_order``). An
+        operator's own table may order its columns otherwise (a join lists its data
+        before its system tags), so a node that keeps the result of a run with no rows
+        keeps this, and reads with the columns of a run with rows (ITL-1131).
+
+        Args:
+            result: An operator's result that has no rows.
+
+        Returns:
+            A stream over the reordered zero-row table, in ``result``'s data context.
+        """
+        tag_keys = result.keys()[0]
+        table = StaticOutputOperatorPod._in_row_order(
+            result.as_table(columns=ZERO_ROW_INPUT_COLUMNS), tag_keys
+        )
+        return ArrowTableStream(
+            table, tag_columns=tag_keys, data_context=result.data_context_key
+        )
+
+    @staticmethod
+    def _kept_output(
+        result: StreamProtocol,
+        rows: Sequence[tuple[TagProtocol, DataProtocol]],
+    ) -> StreamProtocol:
+        """Return what an operator node keeps, and stores, of a run of its operator.
+
+        The rows of the run as ``_materialize_to_stream`` builds them, or, with no row,
+        the result with no rows in the same order (``_zero_rows_in_row_order``). Every
+        way a node runs its operator (a job run, sync or async, and ``node.run()`` on
+        its own) keeps this, so a node has one column order, the row order, in memory
+        and in its stored table (ITL-1133).
+
+        Args:
+            result: The operator's result of the run.
+            rows: ``result``'s rows, in order.
+
+        Returns:
+            A stream over the rows, in row order.
+        """
+        if rows:
+            return StaticOutputOperatorPod._materialize_to_stream(rows)
+        return StaticOutputOperatorPod._zero_rows_in_row_order(result)
+
+    @staticmethod
     def _flag_source_info_nullability(table: pa.Table) -> pa.Table:
         """Declare each ``_source_*`` field nullable only if some row's token is ``None``.
 
@@ -303,22 +398,12 @@ class StaticOutputOperatorPod(TraceableBase):
             types without rows; the caller then builds its input from the Python
             output schema.
         """
-        from orcapod.system_constants import constants
-
         table = typed_zero_row_input(upstream)
         if table is None:
             return None
-        # The column order of a row-built table (``_rows_to_table``): user tags,
-        # system tags, data, source info.
-        tag_keys, data_keys = upstream.keys()
-        names = table.column_names
-        system_tags = [n for n in names if n.startswith(constants.SYSTEM_TAG_PREFIX)]
-        source_info = [n for n in names if n.startswith(constants.SOURCE_PREFIX)]
-        # A raw stream lists its meta columns as data; the zero-row table has none.
-        data = [n for n in data_keys if not n.startswith(constants.META_PREFIX)]
-        table = table.select([*tag_keys, *system_tags, *data, *source_info])
+        tag_keys = upstream.keys()[0]
         return StaticOutputOperatorPod._as_upstream_stream(
-            StaticOutputOperatorPod._flag_source_info_nullability(table),
+            StaticOutputOperatorPod._as_row_built_table(table, tag_keys),
             tag_keys,
             upstream,
         )

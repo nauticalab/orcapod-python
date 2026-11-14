@@ -371,8 +371,10 @@ class Index(UnaryOperator):
             # The source-info columns are part of it: the projected column's token
             # type is the input's with one list level removed, as for a non-empty
             # result (ITL-1046), and every other token column keeps its input type.
+            # The system tags are part of it too: a result with rows keeps each row's
+            # (ITL-1131).
             input_schema = arrow_utils.normalize_schema_to_large_types(
-                stream.as_table(columns={"source": True}).schema
+                stream.as_table(columns={"source": True, "system_tags": True}).schema
             )
             element_field = pa.field(
                 self.out or self.column,
@@ -404,7 +406,7 @@ class Index(UnaryOperator):
                 output_schema = input_schema.append(element_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
                 output_schema = output_schema.append(token_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
             return ArrowTableStream(
-                output_schema.empty_table(),
+                self._as_row_built_table(output_schema.empty_table(), tag_columns),
                 tag_columns=tag_columns,
                 data_context=stream.data_context,
             )

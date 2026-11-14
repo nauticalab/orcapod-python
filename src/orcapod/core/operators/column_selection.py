@@ -387,10 +387,9 @@ class DropTagColumns(UnaryOperator):
         tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
-        tag_columns, _ = stream.keys()
-        new_tag_columns = [c for c in tag_columns if c not in self.columns]
-
-        new_tag_schema = {k: v for k, v in tag_schema.items() if k in new_tag_columns}
+        # Only the named user tags go: the system-tag columns stay, as in the
+        # computed result (ITL-1135).
+        new_tag_schema = {k: v for k, v in tag_schema.items() if k not in self.columns}
 
         return Schema(new_tag_schema), data_schema
 

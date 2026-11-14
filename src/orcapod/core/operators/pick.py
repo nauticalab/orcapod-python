@@ -12,6 +12,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import InputValidationError
+from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils import arrow_utils, schema_utils
@@ -373,8 +374,10 @@ class Pick(UnaryOperator):
             # The schema is the input's Arrow schema (large-normalized, as for
             # a non-empty result) with only the projected column changed.
             tag_columns, _ = stream.keys()
+            # The system tags and source info are part of it: a result with rows keeps
+            # each row's (ITL-1131).
             input_schema = arrow_utils.normalize_schema_to_large_types(
-                stream.as_table().schema
+                stream.as_table(columns={"source": True, "system_tags": True}).schema
             )
             value_field = pa.field(
                 self.out or self.column,
@@ -383,13 +386,23 @@ class Pick(UnaryOperator):
                 ),
                 nullable=self._output_nullable(),
             )
+            # A picked value's token is a string (``_process_one``), typed by the
+            # source-info type rule.
+            token_name = f"{constants.SOURCE_PREFIX}{self.out or self.column}"
+            token_field = pa.field(
+                token_name, arrow_utils.source_info_arrow_type(token_name)
+            )
             if self.out is None:
                 position = input_schema.get_field_index(self.column)
                 output_schema = input_schema.set(position, value_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+                output_schema = output_schema.set(
+                    output_schema.get_field_index(token_name), token_field
+                )  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
             else:
                 output_schema = input_schema.append(value_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+                output_schema = output_schema.append(token_field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
             return ArrowTableStream(
-                output_schema.empty_table(),
+                self._as_row_built_table(output_schema.empty_table(), tag_columns),
                 tag_columns=tag_columns,
                 data_context=stream.data_context,
             )
