@@ -217,7 +217,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
         Does the work ``as_table()`` does, through the same path and cache; a job node
         runs as it does in a job. Every stream has it, with no argument: it is the one
         way to compute a stream outside a job (ITL-1081). ``head()`` and the notebook
-        preview never compute.
+        preview never compute a row.
 
         Returns:
             StreamView: Every computed row, with the default column configuration.
@@ -234,8 +234,13 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
         """Return at most ``n`` readily available rows, without computing.
 
         The rows are ones the stream already holds, has cached from an earlier
-        computation, has stored, or can read with a bounded read. It never calls a
-        function, runs an operator, delivers a side effect, polls or writes.
+        computation, has stored, or can read with a bounded read. It never computes,
+        polls or delivers a row (it reads only what is held or stored, or makes a bounded
+        read), never calls user code (a function, a predicate,
+        a side effect) and never writes. With no rows to show, it may apply operators
+        to zero-row tables to learn the column types, which processes no data (ITL-912). A
+        user-defined operator's ``static_process`` is applied to zero-row tables and must
+        not have effects.
 
         Returns:
             StreamView: The rows, and a status that tells an empty result from one

@@ -9,10 +9,14 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.datagrams import Datagram
-from orcapod.core.function_pod import FunctionPodStream, WrappedFunctionPod
+from orcapod.core.function_pod import (
+    FunctionPodStream,
+    WrappedFunctionPod,
+    function_zero_row_table,
+)
 from orcapod.core.streams.view import StreamView
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig
+from orcapod.types import ColumnConfig, Schema
 from orcapod.contexts.stored import StaleTables
 from orcapod.core.result_cache import ResultCache
 from orcapod.hooks import InvocationStatus
@@ -457,6 +461,15 @@ class _CachedFunctionPodStream(FunctionPodStream):
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         for tag, data in super().iter_data():
             yield tag, _without_stored_meta(data)
+
+    def _zero_row_output_table(self) -> pa.Table | None:
+        """The table of this stream's rows with no row, ``__computed`` included."""
+        return function_zero_row_table(
+            self._input_stream,
+            self.output_schema()[1],
+            self.data_context,
+            Schema({CachedFunctionPod.RESULT_COMPUTED_FLAG: bool}),
+        )
 
     def _computed_prefix(
         self, limit: int, contiguous: bool = True

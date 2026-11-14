@@ -314,13 +314,26 @@ def _live_replaying(store: ArrowDatabaseProtocol, job: PipelineJob) -> Any:
     return node
 
 
-def _assert_reads_as_live_with_no_rows(loaded_node: Any, live_node: Any) -> None:
-    """The loaded node reads what a running node reads from the same store: no rows."""
+def _assert_reads_as_live_with_no_rows(
+    loaded_node: Any, live_node: Any, *, same_types: bool = True
+) -> None:
+    """The loaded node reads what a running node reads from the same store: no rows.
+
+    ``same_types=False`` where the loaded node's input slots are unbound: a running
+    node types its zero-row table from its sources (ITL-912), while the loaded node has
+    only their Python schema, so only the user columns are compared (ITL-1089).
+    """
+    user_columns = [*live_node.keys()[0], *live_node.keys()[1]]
     for config in ({}, {"all_info": True}):
         table = loaded_node.as_table(**config)
         live = live_node.as_table(**config)
         assert table.num_rows == 0
-        assert table.schema.equals(live.schema), (table.schema, live.schema)
+        if same_types:
+            assert table.schema.equals(live.schema), (table.schema, live.schema)
+        else:
+            assert [n for n in table.column_names if n in user_columns] == [
+                n for n in live.column_names if n in user_columns
+            ]
     assert list(loaded_node.iter_data()) == []
     head = loaded_node.head()
     assert head.status is ViewStatus.NOTHING_STORED
@@ -378,7 +391,30 @@ def test_an_absent_cache_table_gives_an_empty_result(
     node = _load_replaying(_save(job, tmp_path), empty_store).nodes["joined"]
     # The job file records the run's 2 rows: an advisory warning, not an error.
     with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
-        _assert_reads_as_live_with_no_rows(node, _live_replaying(empty_store, job))
+        _assert_reads_as_live_with_no_rows(
+            node, _live_replaying(empty_store, job), same_types=False
+        )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "ITL-1089: a loaded node over an unbound input slot has only a Python schema, "
+        "so its zero-row table cannot have the types a running node's has (ITL-912)"
+    ),
+)
+def test_an_absent_cache_table_gives_the_running_nodes_types(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The loaded node's zero-row table should have the running node's exact schema."""
+    job = _run(InMemoryArrowDatabase(), "non_null")
+    empty_store = InMemoryArrowDatabase()
+    node = _load_replaying(_save(job, tmp_path), empty_store).nodes["joined"]
+    live = _live_replaying(empty_store, job)
+    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
+        table = node.as_table(all_info=True)
+    assert table.schema.equals(live.as_table(all_info=True).schema)
 
 
 def _run_empty_join(store: ArrowDatabaseProtocol) -> PipelineJob:
@@ -422,7 +458,11 @@ def test_a_loaded_run_with_an_empty_result_reads_as_empty(
     job = _run_empty_join(store)
     assert job.nodes["joined"].as_table().num_rows == 0
     node = _load_replaying(_save(job, tmp_path), store).nodes["joined"]
-    _assert_reads_as_live_with_no_rows(node, _live_replaying(store, job))
+    # With other runs' rows the table exists and both read the stored types; without,
+    # the loaded node's unbound slots leave it the Python schema (ITL-1089).
+    _assert_reads_as_live_with_no_rows(
+        node, _live_replaying(store, job), same_types=other_runs_stored
+    )
 
 
 def test_an_empty_nullable_list_means_every_column_is_non_null(

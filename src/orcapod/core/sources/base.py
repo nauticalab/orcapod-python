@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
-from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.base import StreamBase, typed_zero_row_table
 from orcapod.core.streams.view import StreamView
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -170,6 +170,17 @@ class RootSource(StreamBase):
 
     # A source's rows are its own, not computed: a run() view says "all N rows".
     _RUN_ORIGIN: str = "held"
+
+    def _typed_zero_row_table(self) -> "pa.Table | None":
+        """The source's zero-row table, from the stream it holds; see ``typed_zero_row_table``.
+
+        A source that reads its table when it is built (Arrow table, dict, list, data
+        frame, CSV, Delta, SQLite, PostgreSQL) holds it in ``_stream``, and a SpiralDB
+        source holds a zero-row stream with the table's schema: either is cut to no
+        rows, so no row is read. A source with no such stream (polling, cached,
+        derived, proxy) reads or polls its rows later and answers ``None``.
+        """
+        return typed_zero_row_table(getattr(self, "_stream", None))
 
     def _display_name(self) -> str:
         """The name a preview header shows: the label when one was given, else the

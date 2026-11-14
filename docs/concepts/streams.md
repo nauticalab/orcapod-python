@@ -106,9 +106,19 @@ In a notebook, a stream, source or job node shown at the end of a cell renders a
 table: its first rows in tag order, with a line saying what they are. That preview is
 `head()` asked for `sort_by_tags` and rendered, and `head(n, columns={"sort_by_tags": True})`
 gives the same rows to work with. Neither ever computes anything: they show
-only what is readily available, and never call a function, run an operator, deliver a side
-effect, poll a source or write to a database. `run()` computes (see "Computing a stream
-outside a job" below).
+only what is readily available, never compute, poll or deliver a row (they read only what is held or stored, or make a bounded table read), never call your
+code (a function, a predicate, a side effect) and never write to a database. `run()` computes
+(see "Computing a stream outside a job" below).
+
+With no rows to show, a head still has the columns and Arrow types the rows would have. To
+learn them it applies each operator to empty (zero-row) tables, which processes no data: a
+chain of N operators applies up to N operators to empty tables (about 60 ms for 20). A filter
+is not applied at all, since its columns are its input's. A user-defined operator's
+`static_process` is applied to zero-row tables and must not have effects. Two consequences: a pipeline whose
+inputs disagree on a column's Arrow type (say `int8` against `int64`) raises from `head()`
+the same `InputValidationError` its run raises (the notebook preview shows it as "could not
+read"), and a filter whose predicate does not fit its columns shows a table in `head()` and
+raises when it runs.
 
 ```python
 from orcapod import function_pod

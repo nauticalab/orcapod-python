@@ -46,6 +46,11 @@ else:
 logger = logging.getLogger(__name__)
 
 
+def context_key_field() -> pa.Field[Any]:
+    """The field of a datagram's data context column (``_context_key``)."""
+    return pa.field(constants.CONTEXT_KEY, pa.large_string(), nullable=False)
+
+
 class Datagram(ContentIdentifiableBase):
     """
     Immutable datagram backed by either an Arrow table or a Python dict.
@@ -297,9 +302,7 @@ class Datagram(ContentIdentifiableBase):
         Ensure context table is materialized and then returned (relevant for Arrow representation)
         """
         if self._context_table is None:
-            schema = pa.schema(
-                [pa.field(constants.CONTEXT_KEY, pa.large_string(), nullable=False)]
-            )
+            schema = pa.schema([context_key_field()])
             self._context_table = pa.Table.from_pylist(
                 [{constants.CONTEXT_KEY: self._data_context.context_key}],
                 schema=schema,

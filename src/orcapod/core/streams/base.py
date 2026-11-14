@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from contextvars import ContextVar
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.core.base import TraceableBase
 from orcapod.core.streams.view import (
@@ -52,6 +53,109 @@ def schema_requires_io(stream: object, config: ColumnConfig) -> bool:
     """
     check = getattr(stream, "_schema_requires_io", None)
     return bool(check(config)) if callable(check) else False
+
+
+ZERO_ROW_INPUT_COLUMNS = ColumnConfig(system_tags=True, source=True)
+"""The column groups of a zero-row table: what a node's rows carry downstream."""
+
+
+_ZERO_ROW_MEMO: ContextVar[dict[int, tuple[object, pa.Table | None]] | None] = (
+    ContextVar("_ZERO_ROW_MEMO", default=None)
+)
+"""The zero-row tables derived during one outermost ``typed_zero_row_table`` call."""
+
+
+def typed_zero_row_table(stream: object) -> pa.Table | None:
+    """Return ``stream``'s table with no rows and the Arrow types its rows would have.
+
+    The table has the user tags, system tags, data and source-info columns
+    (``ZERO_ROW_INPUT_COLUMNS``; never a meta column) in the order the stream's own table has them, with
+    the Arrow types, nullability and logical types the stream's rows have (ITL-912). Getting it never computes, reads or polls a row:
+    an in-memory table is sliced, a source answers from the table or schema it already
+    holds, and an operator node applies its operator to its inputs' zero-row tables, as
+    the sync path applies it to zero-row inputs.
+
+    A stream that does not say (``_typed_zero_row_table``) cannot know its Arrow types
+    without rows. The caller then builds the table from the Python output schema.
+
+    Within one outermost call each stream is derived once, so an upstream that several
+    inputs share is not derived again per path; the memo is discarded when that call
+    returns and is never shared between threads or tasks.
+
+    Args:
+        stream: The stream, node or source whose zero-row table is wanted.
+
+    Returns:
+        The zero-row table, or ``None`` when ``stream`` cannot type it without rows:
+        a function pod's stream or node (ITL-985), an unbound input slot, a source
+        that reads, polls or derives its rows later, a pod stream not yet computed.
+    """
+    memo = _ZERO_ROW_MEMO.get()
+    if memo is None:
+        # The outermost call: a memo for this derivation only, so an upstream that
+        # several inputs share (a diamond) is derived once. ``reset`` discards it, and
+        # a ContextVar keeps it apart from other threads and tasks.
+        token = _ZERO_ROW_MEMO.set({})
+        try:
+            return typed_zero_row_table(stream)
+        finally:
+            _ZERO_ROW_MEMO.reset(token)
+    known = memo.get(id(stream))
+    if known is not None and known[0] is stream:
+        return known[1]
+    table = _derive_zero_row_table(stream)
+    # The stream is held with its table, so its id is not reused during the call.
+    memo[id(stream)] = (stream, table)
+    return table
+
+
+def typed_zero_row_input(stream: object) -> pa.Table | None:
+    """Return ``stream``'s zero-row table as a pod reads it: in the large-normalized form.
+
+    What a function pod or an operator takes from an input's zero-row table
+    (``typed_zero_row_table``): the input's types in the form its rows have downstream
+    (``arrow_utils.normalize_to_large_types`` with ``keep_null=True``: ``string`` to
+    ``large_string``, ``binary`` to ``large_binary``, ``list`` to ``large_list``,
+    recursively), as the populated path normalizes them (ITL-912). Only layouts change:
+    width, nullability, field names and logical types are kept, and no value is cast
+    (there is none). A source's own table is not changed: ``typed_zero_row_table`` still
+    gives it as it holds it.
+
+    Args:
+        stream: The input whose zero-row table a pod reads.
+
+    Returns:
+        The normalized zero-row table, or ``None`` when ``stream`` cannot type it
+        without rows.
+    """
+    table = typed_zero_row_table(stream)
+    if table is None:
+        return None
+    return table.cast(
+        pa.schema(
+            [
+                field.with_type(
+                    arrow_utils.normalize_to_large_types(field.type, keep_null=True)
+                )
+                for field in table.schema
+            ]
+        ).with_metadata(table.schema.metadata or {})
+    )
+
+
+def _derive_zero_row_table(stream: object) -> pa.Table | None:
+    """Ask ``stream`` for its zero-row table and drop the meta columns; no memo."""
+    method = getattr(stream, "_typed_zero_row_table", None)
+    table = cast("pa.Table | None", method()) if callable(method) else None
+    if table is None:
+        return None
+    # A row passed downstream carries no meta column (``_rows_to_table`` reads a row's
+    # data with source info only), so neither does its zero-row table: a cached
+    # function pod's ``__computed`` stays in that stream's own table.
+    from orcapod.core.operators.meta_columns import without_meta_columns
+
+    tag_columns = cast(StreamProtocol, stream).keys()[0]
+    return without_meta_columns(table, tag_columns)
 
 
 def check_head_size(n: int) -> None:
@@ -594,7 +698,8 @@ class StreamBase(TraceableBase):
         """Compute the whole stream and return a ``StreamView`` of all its rows.
 
         The one way to compute any stream outside a job (developer, November 13, 2026,
-        ITL-1081): ``head()`` and the notebook preview never compute. ``run()`` does
+        ITL-1081): ``head()`` and the notebook preview never compute a row (see
+        ``head``). ``run()`` does
         exactly the work ``as_table()`` does, through the same code path and cache, so
         a stream already computed is not computed again, and one whose inputs changed is
         computed again. The view holds every row with the default column configuration;
@@ -634,8 +739,18 @@ class StreamBase(TraceableBase):
 
         The rows are ones the stream already holds, has cached from an earlier
         computation, has stored, or can read with a bounded read of its table. ``head``
-        never calls a function, runs an operator, delivers a side effect, polls a source
-        or writes anything. ``head`` takes the column configuration of ``as_table``,
+        never computes, polls or delivers a row (it reads only what is held or stored,
+        or makes a bounded table read), never calls user code (a
+        function, a predicate, a side effect) and never writes. With no rows to show, it
+        learns the column types without data (ITL-912): each operator of the stream is
+        applied to zero-row inputs, which processes no data, so a chain of ``N``
+        operators applies up to ``N`` operators to empty tables (about 60 ms for 20); an
+        operator whose output schema is its input's (``OUTPUT_SCHEMA_IS_INPUT_SCHEMA``,
+        such as ``PolarsFilter``) is not applied at all. A user-defined operator's
+        ``static_process`` is applied to zero-row tables and must not have effects. So a pipeline whose inputs
+        disagree on a column's Arrow type raises from ``head`` the
+        ``InputValidationError`` its run raises, and a filter with an ill-typed
+        predicate shows its input's columns: the error appears at the run. ``head`` takes the column configuration of ``as_table``,
         sorting included, and applies it to the rows the stream has, then takes the first
         ``n``. The default configuration does not sort, as ``as_table()`` does not, so
         the rows are the first ``n`` that ``as_table()`` would return. With
@@ -678,10 +793,15 @@ class StreamBase(TraceableBase):
         status: ViewStatus,
         note: str | None = None,
     ) -> StreamView:
-        """Return a head with no rows: the stream's columns from its declared schema.
+        """Return a head with no rows: the stream's columns, typed as its rows are.
 
-        When reading the schema would poll a source (``schema_requires_io``), the head
-        has no columns either, and the note says so.
+        The one place a head's table of no rows is built (ITL-912): the stream's
+        ``_zero_row_table(config)``, which has the columns and Arrow types
+        ``as_table(columns=config)`` gives the stream with no rows; getting it
+        computes, reads, polls and delivers nothing. Only a stream that cannot say its
+        Arrow types without rows (see ``typed_zero_row_table``; ITL-1089) gets a table
+        built from its declared Python schema. When reading the schema would poll a source
+        (``schema_requires_io``), the head has no columns either, and the note says so.
         """
         if schema_requires_io(self, config):
             return StreamView.without_rows(
@@ -692,9 +812,11 @@ class StreamBase(TraceableBase):
                 note=f"{note or default_note(status)}; {SCHEMA_NEEDS_POLL_NOTE}",
             )
         tag_schema, data_schema = self.output_schema(columns=config)
-        table = arrow_utils.make_empty_table(
-            {**tag_schema, **data_schema}, self.data_context.type_converter
-        )
+        table = self._zero_row_table(config)
+        if table is None:
+            table = arrow_utils.make_empty_table(
+                {**tag_schema, **data_schema}, self.data_context.type_converter
+            )
         return StreamView.without_rows(
             self, status, table, tag_columns=tuple(tag_schema.keys()), note=note
         )
@@ -711,6 +833,34 @@ class StreamBase(TraceableBase):
         ``config`` asks for a column group known only from rows.
         """
         return any(schema_requires_io(upstream, config) for upstream in self.upstreams)
+
+    def _zero_row_table(self, config: ColumnConfig) -> pa.Table | None:
+        """This stream's table with no rows and the column groups of ``config``.
+
+        What ``as_table(columns=config)`` gives this stream when it has no rows: its
+        zero-row table (``typed_zero_row_table``) shaped as an ``ArrowTableStream``
+        shapes its table. A kind whose ``as_table`` shapes its table another way
+        overrides this with that shaping. Never computes, reads, polls or delivers.
+
+        Returns:
+            The table, or ``None`` when the stream cannot type it without rows.
+        """
+        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+        typed = typed_zero_row_table(self)
+        if typed is None:
+            return None
+        return ArrowTableStream(
+            typed, tag_columns=self.keys()[0], data_context=self.data_context_key
+        ).as_table(columns=config)
+
+    def _typed_zero_row_table(self) -> pa.Table | None:
+        """This stream's zero-row table; ``None``: unknown without rows.
+
+        See ``typed_zero_row_table``. A stream whose Arrow types are known only from
+        computed rows (a pod's stream) keeps this default.
+        """
+        return None
 
     def _repr_html_(self) -> str:
         """Render ``head()`` in tag order for a notebook; never computes."""

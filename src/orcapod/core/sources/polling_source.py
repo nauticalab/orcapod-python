@@ -26,6 +26,7 @@ from orcapod.core.streams.view import (
 )
 from orcapod.core.streams.base import (
     check_head_size,
+    typed_zero_row_table,
 )
 from orcapod.errors import (
     CursorInvalidatedError,
@@ -442,6 +443,29 @@ class PollingSource(RootSource, Generic[T]):
             return self._batches[0].keys(columns=columns, all_info=all_info)
         self._sync_poll_and_commit()
         return self._get_combined_stream().keys(columns=columns, all_info=all_info)
+
+    def _typed_zero_row_table(self) -> pa.Table | None:
+        """The zero-row table of the rows polled so far; ``None`` before a poll.
+
+        See ``typed_zero_row_table``. Never polls. Before the first poll the source
+        knows only the Python schema ``impl.schema()`` declares, which cannot say an
+        Arrow type such as ``int8`` (a known limitation, ITL-912).
+        """
+        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+        batches = list(self._batches)  # snapshot, as in ``_get_combined_stream``
+        if not batches:
+            return None
+        # Each batch with no rows, combined as the batches themselves are (the same
+        # schema check and promotion), so the cost does not grow with the rows polled.
+        result: ArrowTableStream | None = None
+        for batch in batches:
+            table = typed_zero_row_table(batch)
+            if table is None:
+                return None
+            zero_rows = ArrowTableStream(table=table, tag_columns=self._tag_columns)
+            result = zero_rows if result is None else self._combine(result, zero_rows)
+        return typed_zero_row_table(result)
 
     def _schema_requires_io(self, config: ColumnConfig) -> bool:
         """Whether reading the schema with ``config`` would poll.

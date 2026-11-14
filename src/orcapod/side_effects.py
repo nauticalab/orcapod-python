@@ -23,6 +23,7 @@ from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
     schema_requires_io,
+    typed_zero_row_input,
 )
 from orcapod.core.streams.view import (
     SIDE_EFFECTS_NOTE,
@@ -49,6 +50,7 @@ from orcapod.invocation import (
 from orcapod.system_constants import (
     OLD_TRACKING_DB_SCHEMA_VERSIONS,
     TRACKING_DB_SCHEMA_VERSION,
+    constants,
 )
 from orcapod.types import ColumnConfig
 from orcapod.utils import arrow_utils
@@ -219,9 +221,31 @@ class SideEffectPodStream(StreamBase):
             self.iter_data(),
             column_config,
             tag_keys=lambda: self.keys()[0],
+            zero_rows=self._typed_zero_row_table,
             declared_schema=lambda: self.output_schema(all_info=True),
             type_converter=self._pod.data_context.type_converter,
         )
+
+    def _zero_row_table(self, config: ColumnConfig) -> pa.Table | None:
+        """``as_table(columns=config)`` with no rows; nothing is delivered (ITL-912)."""
+        typed = self._typed_zero_row_table()
+        if typed is None:
+            return None
+        return _table_of_rows(
+            iter(()),
+            config,
+            tag_keys=lambda: self.keys()[0],
+            zero_rows=lambda: typed,
+            declared_schema=lambda: self.output_schema(all_info=True),
+            type_converter=self._pod.data_context.type_converter,
+        )
+
+    def _typed_zero_row_table(self) -> pa.Table | None:
+        """The input's zero-row table: the pod passes its input's rows through.
+
+        See ``typed_zero_row_table``; the pod's function is not called (ITL-912).
+        """
+        return typed_zero_row_input(self._input_stream)
 
 
 def _table_of_rows(
@@ -229,6 +253,7 @@ def _table_of_rows(
     column_config: ColumnConfig,
     *,
     tag_keys: Callable[[], tuple[str, ...]],
+    zero_rows: Callable[[], pa.Table | None],
     declared_schema: Callable[[], tuple[Schema, Schema]],
     type_converter: Any,
 ) -> pa.Table:
@@ -245,8 +270,12 @@ def _table_of_rows(
         column_config: The column groups to keep, and whether to sort by tags.
         tag_keys: Returns the names of the regular tag columns. Called after the rows were
             read: asking a source for its keys can poll it.
+        zero_rows: Returns the rows' table with no row (``typed_zero_row_table``: user
+            tags, system tags, data and source info, typed as the rows are), or ``None``
+            when it is unknown without rows. Called only for the table of no rows.
         declared_schema: Returns the declared (tag, data) schemas with every group. Called
-            only for the table of no rows: asking a source for its schema can poll it.
+            only for the table of no rows that ``zero_rows`` cannot type: asking a source
+            for its schema can poll it.
         type_converter: The data context's type converter, to type the table of no rows.
     """
     tag_tables: list[pa.Table] = []
@@ -266,12 +295,41 @@ def _table_of_rows(
             )
         )
         hashes.append(data.content_hash().to_string())
+    typed = None if tag_tables else zero_rows()
     if tag_tables:
         full = arrow_utils.hstack_tables(
             pa.concat_tables(tag_tables), pa.concat_tables(data_tables)
         )
+    elif typed is not None:
+        # No rows: the rows' columns and types (ITL-912), in the order a row's tag and
+        # data tables give them: tags, system tags, data, context, source info.
+        from orcapod.core.datagrams.datagram import context_key_field
+
+        names = typed.column_names
+        source_info = [n for n in names if n.startswith(constants.SOURCE_PREFIX)]
+        system_tags = [n for n in names if n.startswith(constants.SYSTEM_TAG_PREFIX)]
+        parts = [typed.select([*tag_keys(), *system_tags])]
+        parts.append(
+            typed.select(
+                [
+                    n
+                    for n in names
+                    if n not in parts[0].column_names and n not in source_info
+                ]
+            )
+        )
+        if column_config.context:
+            parts.append(pa.schema([context_key_field()]).empty_table())
+        # A row's data table declares every source-info field nullable
+        # (``Data.as_table``), and the rows' table is those tables concatenated.
+        source_table = typed.select(source_info)
+        nullable = pa.schema([f.with_nullable(True) for f in source_table.schema])
+        # Same arrays, new field flags: no cast.
+        parts.append(pa.Table.from_arrays(source_table.columns, schema=nullable))
+        full = arrow_utils.hstack_tables(*parts)
     else:
-        # No rows: the declared columns, with the declared field nullability.
+        # No rows and no Arrow types without them: the declared columns, with the
+        # declared field nullability.
         tag_schema, data_schema = declared_schema()
         full = arrow_utils.make_empty_table(
             {**tag_schema, **data_schema}, type_converter
@@ -896,9 +954,31 @@ class SideEffectNode(StreamBase):
             self.iter_data(),
             column_config,
             tag_keys=lambda: self.keys()[0],
+            zero_rows=self._typed_zero_row_table,
             declared_schema=lambda: self.output_schema(all_info=True),
             type_converter=self._pod.data_context.type_converter,
         )
+
+    def _zero_row_table(self, config: ColumnConfig) -> pa.Table | None:
+        """``as_table(columns=config)`` with no rows; nothing is delivered (ITL-912)."""
+        typed = self._typed_zero_row_table()
+        if typed is None:
+            return None
+        return _table_of_rows(
+            iter(()),
+            config,
+            tag_keys=lambda: self.keys()[0],
+            zero_rows=lambda: typed,
+            declared_schema=lambda: self.output_schema(all_info=True),
+            type_converter=self._pod.data_context.type_converter,
+        )
+
+    def _typed_zero_row_table(self) -> pa.Table | None:
+        """The input's zero-row table: the pod passes its input's rows through.
+
+        See ``typed_zero_row_table``; the pod's function is not called (ITL-912).
+        """
+        return typed_zero_row_input(self._input_stream)
 
     @property
     def node_uri(self) -> tuple[str, ...]:

@@ -15,9 +15,11 @@ from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams.base import (
+    ZERO_ROW_INPUT_COLUMNS,
     StreamBase,
     check_head_size,
     schema_requires_io,
+    typed_zero_row_input,
 )
 from orcapod.core.streams.view import (
     SCHEMA_NEEDS_POLL_NOTE,
@@ -966,6 +968,56 @@ class FunctionPod(_FunctionPodBase):
         )
 
 
+def function_zero_row_table(
+    input_stream: StreamProtocol,
+    output_schema: Schema,
+    data_context: contexts.DataContext,
+    meta_python_schema: Schema | None = None,
+) -> pa.Table | None:
+    """The table a function pod's output rows give over ``input_stream``, with no row.
+
+    A function pod passes its input's tags through untouched, so the user tags and
+    system tags are the input's zero-row table's (``typed_zero_row_table``). The data
+    columns are those of the ``Data`` the data function returns, with no row
+    (``Data.function_output_zero_row_table``): the declared output types, the data
+    context column and the source-info columns. Nothing is computed and the function
+    is not called (ITL-912). This is the zero-row form of the table the function pod's
+    stream and node build from computed rows.
+
+    Args:
+        input_stream: The function pod's input.
+        output_schema: The function's declared output schema.
+        data_context: The data context the output rows are typed in.
+        meta_python_schema: The meta columns every output row carries, if any.
+
+    Returns:
+        User tags, system tags, data, ``_context_key``, meta and source-info columns, or
+        ``None`` when the input cannot say its Arrow types without rows.
+    """
+    from orcapod.core.datagrams.tag_data import Data
+
+    input_table = typed_zero_row_input(input_stream)
+    if input_table is None:
+        return None
+    system_tags = [
+        name
+        for name in input_table.column_names
+        if name.startswith(constants.SYSTEM_TAG_PREFIX)
+    ]
+    tags = input_table.select([*input_stream.keys()[0], *system_tags])
+    return arrow_utils.hstack_tables(
+        tags,
+        Data.function_output_zero_row_table(
+            output_schema, data_context, meta_python_schema
+        ),
+    )
+
+
+def _no_content_hashes() -> pa.Array[Any]:
+    """The content hashes of no row."""
+    return pa.array([], type=pa.large_string())
+
+
 class FunctionPodStream(StreamBase):
     """Recomputable stream wrapping a data function."""
 
@@ -1326,15 +1378,47 @@ class FunctionPodStream(StreamBase):
             if data is not None:
                 yield tag, data
 
+    def _zero_row_output_table(self) -> pa.Table | None:
+        """This stream's rows' table with no row; see ``function_zero_row_table``.
+
+        A cached data function's rows carry the result cache's ``__computed`` meta
+        column, so its zero-row table does too.
+        """
+        meta = None
+        if isinstance(self._function_pod.data_function, CachedDataFunction):
+            from orcapod.core.result_cache import ResultCache
+
+            meta = Schema({ResultCache.RESULT_COMPUTED_FLAG: bool})
+        return function_zero_row_table(
+            self._input_stream, self.output_schema()[1], self.data_context, meta
+        )
+
+    def _typed_zero_row_table(self) -> pa.Table | None:
+        """This stream's zero-row table, without calling the function (ITL-912)."""
+        return self._zero_row_table(ZERO_ROW_INPUT_COLUMNS)
+
+    def _zero_row_table(self, config: ColumnConfig) -> pa.Table | None:
+        """``as_table(columns=config)`` with no rows, shaped as ``as_table`` shapes it."""
+        table = self._zero_row_output_table()
+        if table is None:
+            return None
+        return self._shape_table(table, config, _no_content_hashes)
+
     def _table_from_pairs(
         self, pairs: list[tuple[TagProtocol, DataProtocol]]
     ) -> pa.Table:
         """Return the output rows ``pairs`` as one table with every column group.
 
-        With no rows the table has the declared columns (tags, system tags and data),
-        typed from the declared schema, as the rest of a head without rows is.
+        With no rows the table is ``function_zero_row_table``: the input's tags and
+        system tags and the declared data, context and source-info columns, with the
+        types computed rows have (ITL-912). Only when the input cannot say its Arrow
+        types without rows is it built from the declared Python schema.
         """
         if not pairs:
+            typed = self._zero_row_output_table()
+            if typed is not None:
+                return typed
+            # The input cannot say its Arrow types without rows: the declared schema.
             tag_schema, data_schema = self.output_schema(all_info=True)
             return arrow_utils.make_empty_table(
                 {**tag_schema, **data_schema}, self.data_context.type_converter

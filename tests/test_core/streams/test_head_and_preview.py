@@ -260,6 +260,18 @@ def _grouped_source() -> ArrowTableSource:
     return ArrowTableSource(table, tag_columns=["id", "grp"], source_id="grouped")
 
 
+def _calls_over_rows(spy: mock.MagicMock) -> int:
+    """How many calls of the spied ``static_process`` were given rows.
+
+    A call over inputs with no rows gives only the operator's zero-row table, which a
+    head with no rows shows without computing a row (ITL-912).
+    """
+    return sum(
+        any(stream.as_table().num_rows for stream in call.args[1:])
+        for call in spy.call_args_list
+    )
+
+
 OPERATOR_CASES = {
     "join": (Join, lambda: Join()(_source(), _other_source())),
     "group_by": (GroupBy, lambda: GroupBy(by=["grp"])(_grouped_source())),
@@ -282,13 +294,13 @@ def test_operator_stream_is_not_run_by_head_or_preview(case: str) -> None:
     ) as spy:
         head = stream.head()
         _ = stream._repr_html_()
-        assert spy.call_count == 0
+        assert _calls_over_rows(spy) == 0
         assert head.status is ViewStatus.NOT_COMPUTED
         assert len(head) == 0
         table = stream.as_table()
-        assert spy.call_count == 1
+        assert _calls_over_rows(spy) == 1
         after = stream.head(2)
-        assert spy.call_count == 1
+        assert _calls_over_rows(spy) == 1
     assert after.status is ViewStatus.ROWS
     assert after.table.equals(table.slice(0, 2))
 

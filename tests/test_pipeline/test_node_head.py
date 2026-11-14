@@ -23,6 +23,7 @@ from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.streams import ViewStatus
 from orcapod.types import CacheMode, Schema
@@ -81,7 +82,18 @@ def _job(store: ArrowDatabaseProtocol) -> PipelineJob:
 def test_nodes_before_a_run_show_no_rows_and_compute_nothing() -> None:
     """Before a run, nodes show no rows and run neither the function nor the operator."""
     job = _job(InMemoryArrowDatabase())
-    # The operator must not run: either entry point raises if it is called.
+    original = SelectDataColumns.static_process
+
+    def static_process_over_no_rows(
+        operator: SelectDataColumns, *streams: StreamProtocol
+    ) -> StreamProtocol:
+        # Over inputs with no rows it gives only the zero-row table a head shows
+        # (ITL-912); over rows it would compute them.
+        if any(stream.as_table().num_rows for stream in streams):
+            raise AssertionError("static_process ran over rows")
+        return original(operator, *streams)
+
+    # The operator must not run over rows: either entry point raises if it does.
     with (
         mock.patch.object(
             SelectDataColumns, "process", side_effect=AssertionError("process ran")
@@ -89,7 +101,8 @@ def test_nodes_before_a_run_show_no_rows_and_compute_nothing() -> None:
         mock.patch.object(
             SelectDataColumns,
             "static_process",
-            side_effect=AssertionError("static_process ran"),
+            autospec=True,
+            side_effect=static_process_over_no_rows,
         ),
     ):
         fn_head = job.nodes["triple"].head()

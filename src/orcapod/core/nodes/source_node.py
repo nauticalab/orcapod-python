@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
-from orcapod.core.streams.base import schema_requires_io
+from orcapod.core.streams.base import schema_requires_io, typed_zero_row_table
 from orcapod.core.streams.view import (
     ViewStatus,
     StreamView,
@@ -633,6 +633,13 @@ class SourceJobNode(SourceNodeBase):
                 "Call job.bind(sources={'<name>': source}) before running."
             )
         return self._bound_source.iter_data()
+
+    def _typed_zero_row_table(self) -> "pa.Table | None":
+        """The bound source's zero-row table; ``None`` when unbound or unknown.
+
+        See ``typed_zero_row_table``.
+        """
+        return typed_zero_row_table(self._bound_source)
 
     def _schema_requires_io(self, config: ColumnConfig) -> bool:
         """Whether reading the schema with ``config`` would poll: as for the bound source."""

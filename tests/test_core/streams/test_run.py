@@ -362,6 +362,18 @@ def test_cached_function_pod_stream_computes_each_row_once() -> None:
     assert len(calls) == ROWS
 
 
+def _calls_over_rows(spy: mock.MagicMock) -> int:
+    """How many calls of the spied ``static_process`` were given rows.
+
+    A call over inputs with no rows gives only the operator's zero-row table, which a
+    head with no rows shows without computing a row (ITL-912).
+    """
+    return sum(
+        any(stream.as_table().num_rows for stream in call.args[1:])
+        for call in spy.call_args_list
+    )
+
+
 def test_operator_stream_run_recomputes_after_its_upstream_changed() -> None:
     """``run()`` on an operator stream recomputes a stale result, as ``as_table()`` does."""
     calls: list[int] = []
@@ -374,13 +386,13 @@ def test_operator_stream_run_recomputes_after_its_upstream_changed() -> None:
         MapData, "static_process", autospec=True, side_effect=original
     ) as spy:
         first = out.run()
-        assert spy.call_count == 1
+        assert _calls_over_rows(spy) == 1
         _ = out.run()
-        assert spy.call_count == 1
+        assert _calls_over_rows(spy) == 1
         fn_stream.clear_cache()  # the upstream is modified after the result was kept
         assert out.head().status is ViewStatus.NOT_COMPUTED
         second = out.run()
-        assert spy.call_count == 2
+        assert _calls_over_rows(spy) == 2
     assert first.as_table().equals(second.as_table())
     assert len(calls) == 2 * ROWS
 

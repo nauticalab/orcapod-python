@@ -516,7 +516,11 @@ Key methods: `output_schema()`, `keys()`, `iter_data()`, `as_table()`.
 Every stream, source and node has `run()` with no arguments (developer, November 13, 2026,
 ITL-1081): it does the work `as_table()` does (a job node runs as in a job) and returns a
 `StreamView` of every row; the view's `head`/`tail`/`sort_by_tags` choose what is shown.
-`head()` and the notebook preview never compute. Never give `run()` arguments.
+`head()` and the notebook preview never compute (ITL-991, ITL-912): they never compute, poll or deliver a row (they read only what is held or stored, or a bounded table read), never call user code (a function, a predicate, a side effect) and never
+write. With no rows to show they learn the column types by applying operators to zero-row
+tables, which processes no data; an operator whose output schema is its input's
+(`OUTPUT_SCHEMA_IS_INPUT_SCHEMA`, `PolarsFilter`) is not applied at all. A user-defined operator's `static_process` is applied to zero-row tables and must not have effects. Never give `run()`
+arguments.
 
 **Source** (`core/sources/`) — produces a stream from external data. `ArrowTableSource` is the
 core implementation; CSV/Delta/DataFrame/Dict/List sources all delegate to it internally. Each
@@ -758,6 +762,21 @@ then through the data context's type converter — never call `pa.array(values)`
 inference widens `int8` to `int64`, `float32` to `double`, and takes decimal precision from the
 data. The rules:
 
+- **The Arrow schema is never computed** (developer, November 13, 2026, ITL-912): "Generally
+  Orcapod should never have to compute anything to get the arrow schema, all function pods and
+  operator pods can deterministically derive the output stream schema from the input stream
+  schemas, and ultimately no source can be created without having schema specified somehow."
+  A table with no rows (before a run, after `clear_cache()`, a zero-row result or input) has
+  exactly the types of the rows: get it from `streams/base.typed_zero_row_table`, never from
+  the Python schema (except when a stream cannot type itself without rows: an unbound input or a
+  `PollingSource` not yet polled, ITL-1089, which fall back to the declared schema), and never by
+  computing, reading or polling a row or calling a function.
+  An operator's is its result over its inputs' zero-row tables; a function pod's is the
+  input's tags plus the declared outputs (`function_zero_row_table`); a source's is the table
+  or schema it holds. A new stream kind implements `_typed_zero_row_table`. A head with no
+  rows is built in one place, `StreamBase._head_without_rows`, from the stream's
+  `_zero_row_table(config)`, which equals `as_table(columns=config)` with no rows; a kind
+  whose `as_table` shapes its table its own way overrides `_zero_row_table` with that shaping.
 - **Type strictness** (developer, November 10, 2026): Orcapod is type strict. It never
   expands or converts a type implicitly; the only exception is normalization to large variants.
   Inputs that disagree on a column's type are an error naming the column and both types, on

@@ -21,6 +21,7 @@ from orcapod.core.streams.view import (
 from orcapod.types import ColumnConfig
 from orcapod.core.streams.base import (
     check_head_size,
+    typed_zero_row_table,
 )
 from orcapod.protocols.core_protocols import SourceProtocol
 from orcapod.types import ContentHash, Schema
@@ -198,6 +199,14 @@ class SourceProxy(RootSource):
                 f"Use bind() to attach a live source."
             )
         return self._delegate
+
+    def _typed_zero_row_table(self) -> pa.Table | None:
+        """The bound delegate's zero-row table; ``None`` while unbound.
+
+        See ``typed_zero_row_table``. An unbound proxy knows only its stored Python
+        schema (a known limitation, ITL-912).
+        """
+        return typed_zero_row_table(self._delegate)
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         return self._require_delegate().iter_data()

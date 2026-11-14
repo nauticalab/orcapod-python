@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.core.datagrams import Data, Tag
 from orcapod.core.streams.base import (
+    ZERO_ROW_INPUT_COLUMNS,
     StreamBase,
     check_head_size,
 )
@@ -278,6 +279,10 @@ class ArrowTableStream(StreamBase):
             tag_columns=self.keys(columns=config)[0],
             total_rows=self._table.num_rows,
         )
+
+    def _typed_zero_row_table(self) -> "pa.Table":
+        """This stream's table cut to no rows: its own Arrow types, no row assembled."""
+        return self._assemble_table(ZERO_ROW_INPUT_COLUMNS, limit=0)
 
     def _assemble_table(
         self, columns_config: ColumnConfig, limit: int | None

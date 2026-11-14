@@ -653,8 +653,8 @@ silent widening; convert explicitly.
   the outputs of other operators and function pods. An input that delivers no rows gives no
   rows on both paths. One limit remains: an async channel carries rows, not a schema, so
   where the sync path returns an empty stream with typed columns the async path emits
-  nothing, and an operator node that received no rows reads back columns typed from its
-  Python output schema (ITL-858, ITL-912).
+  nothing. An operator node that received no rows still reads back the sync path's columns
+  and Arrow types: its operator applied to its inputs' zero-row tables (ITL-858, ITL-912).
 
 ```python
 import pyarrow as pa

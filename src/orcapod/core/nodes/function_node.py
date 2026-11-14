@@ -31,6 +31,7 @@ from orcapod.config import OrcapodConfig
 from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import (
+    ZERO_ROW_INPUT_COLUMNS,
     StreamBase,
     check_head_size,
 )
@@ -594,6 +595,27 @@ class FunctionNodeBase(StreamBase):
             self._cached_output_table, column_config, all_content_hashes
         )
 
+    def _zero_row_output_table(self) -> "pa.Table | None":
+        """This node's rows' table with no row; see ``function_zero_row_table``."""
+        from orcapod.core.function_pod import function_zero_row_table
+
+        return function_zero_row_table(
+            self._input_stream, self.output_schema()[1], self.data_context
+        )
+
+    def _typed_zero_row_table(self) -> "pa.Table | None":
+        """This node's zero-row table, without calling the function (ITL-912)."""
+        return self._zero_row_table(ZERO_ROW_INPUT_COLUMNS)
+
+    def _zero_row_table(self, config: ColumnConfig) -> "pa.Table | None":
+        """``as_table(columns=config)`` with no rows, shaped as ``as_table`` shapes it."""
+        table = self._zero_row_output_table()
+        if table is None:
+            return None
+        return self._shape_table(
+            table, config, lambda: pa.array([], type=pa.large_string())
+        )
+
     def _table_from_pairs(
         self, pairs: "list[tuple[TagProtocol, DataProtocol]]"
     ) -> "pa.Table":
@@ -603,8 +625,11 @@ class FunctionNodeBase(StreamBase):
         row has: a tag the type of the input's tag, never a type inferred from
         Python values (ITL-928). A row's meta columns (a computed row's
         ``__computed`` flag) are its own bookkeeping, not part of the node's
-        output, as for the pod's stream outside a job. With no rows the table has
-        the declared columns, typed from the declared output schema.
+        output, as for the pod's stream outside a job. With no rows the table is
+        ``function_zero_row_table``: the input's tags and system tags and the
+        declared data, context and source-info columns, typed as computed rows are
+        (ITL-912); only when the input cannot say its Arrow types without rows is
+        it built from the declared Python schema.
 
         Raises:
             InputValidationError: If two rows give one column different Arrow
@@ -612,9 +637,11 @@ class FunctionNodeBase(StreamBase):
         """
         if not pairs:
             # No data was produced (node has not been run yet or produced zero
-            # outputs).  Build a zero-row table whose schema is derived from the
-            # pod's declared output so that callers always receive a well-formed
-            # schema regardless of whether the node has actually executed.
+            # outputs): the table computed rows would have, with no row (ITL-912).
+            typed = self._zero_row_output_table()
+            if typed is not None:
+                return typed
+            # The input cannot say its Arrow types without rows: the declared schema.
             tag_python_schema, data_python_schema = self.output_schema(all_info=True)
             return pa.Table.from_pylist(
                 [],

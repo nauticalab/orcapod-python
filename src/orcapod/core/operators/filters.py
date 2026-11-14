@@ -29,6 +29,9 @@ class PolarsFilter(UnaryOperator):
     Operator that applies Polars filtering to a stream
     """
 
+    # A filter chooses rows and never changes a column (ITL-912).
+    OUTPUT_SCHEMA_IS_INPUT_SCHEMA = True
+
     def __init__(
         self,
         predicates: Collection[
@@ -42,6 +45,19 @@ class PolarsFilter(UnaryOperator):
         self.predicates = tuple(predicates)
         self.constraints = constraints if constraints is not None else {}
         super().__init__(**kwargs)
+
+    def zero_row_result(self, *inputs: StreamProtocol) -> StreamProtocol:
+        """This filter's result over a zero-row input, for a table with no rows (ITL-912).
+
+        A filter with no predicate and no constraint passes its input through
+        unaltered (``unary_static_process``), so its result is the input with the types
+        it has. Any other filter gives its input's columns in the large-normalized
+        form a run gives them, without evaluating the predicate.
+        """
+        if len(self.predicates) == 0 and len(self.constraints) == 0:
+            (only,) = inputs
+            return only
+        return super().zero_row_result(*inputs)
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         if len(self.predicates) == 0 and len(self.constraints) == 0:

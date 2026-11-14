@@ -2,8 +2,10 @@
 
 ``head(n)`` on a stream, source or node returns a ``StreamView`` of at most ``n`` rows the
 object already holds, has cached from an earlier computation, has stored, or can read from
-its table with a bounded read. It never computes: no user function is called, no operator
-is run, no side effect is delivered, no source is polled and nothing is written. The
+its table with a bounded read. It never computes: no row is computed, read, polled or
+delivered, no user code (a function, a predicate, a side effect) is called and nothing is
+written. With no rows to show, the column types come from applying operators to zero-row
+tables, which processes no data (ITL-912; see ``StreamBase.head``). The
 notebook preview of a stream is its ``head()`` rendered by ``StreamView._repr_html_``.
 
 ``run()`` on a stream computes it (the work ``as_table()`` does) and returns a

@@ -426,6 +426,32 @@ class TestPollingSourceSyncMode:
         assert len(fake.fetch_cursors) == 1
         assert len(fake.poll_cursors) == 1
 
+    def test_zero_row_table_is_the_polled_batches_and_never_polls(self):
+        """``typed_zero_row_table``: ``None`` before a poll; then the polled table's.
+
+        Non-public on purpose: the test is about the helper's contract (ITL-912).
+        """
+        from orcapod.core.streams.base import typed_zero_row_table
+
+        fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
+        src = PollingSource(
+            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+        )
+        assert typed_zero_row_table(src) is None
+        assert fake.fetch_cursors == [] and fake.poll_cursors == []
+
+        list(src.iter_data())
+        list(src.iter_data())  # two batches polled and combined
+        expected = src.as_table(columns={"system_tags": True, "source": True})
+        polls = (len(fake.poll_cursors), len(fake.fetch_cursors))
+
+        table = typed_zero_row_table(src)
+
+        assert table is not None
+        assert table.num_rows == 0
+        assert table.schema == expected.schema
+        assert (len(fake.poll_cursors), len(fake.fetch_cursors)) == polls
+
     def test_sync_cache_miss_refetches_and_combines(self):
         """Second iter_data() re-fetches when poll returns True."""
         fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
