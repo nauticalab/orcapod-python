@@ -109,12 +109,26 @@ def _all_stream_classes() -> list[type]:
 
 
 @pytest.mark.parametrize("cls", _all_stream_classes(), ids=lambda c: c.__qualname__)
-def test_every_stream_class_has_run_without_arguments(cls: type) -> None:
-    """``run`` exists on every stream class and takes no argument (developer decision)."""
+def test_every_stream_class_has_run_without_positional_arguments(cls: type) -> None:
+    """``run`` exists on every stream class and takes no positional argument (developer
+    decision, ITL-1081); a job node's ``run`` takes one keyword-only argument,
+    ``load_only`` (ITL-1095)."""
     run = getattr(cls, "run", None)
     assert callable(run), f"{cls.__qualname__} has no run()"
-    parameters = list(inspect.signature(run).parameters)
-    assert parameters == ["self"], f"{cls.__qualname__}.run{parameters}"
+    parameters = inspect.signature(run).parameters
+    names = list(parameters)
+    if cls.__name__ in (
+        "FunctionJobNode",
+        "OperatorJobNode",
+        "SideEffectJobNode",
+        "SourceJobNode",
+    ):
+        assert names == ["self", "load_only"], f"{cls.__qualname__}.run{names}"
+        load_only = parameters["load_only"]
+        assert load_only.kind is inspect.Parameter.KEYWORD_ONLY
+        assert load_only.default is False
+    else:
+        assert names == ["self"], f"{cls.__qualname__}.run{names}"
 
 
 def test_the_stream_protocol_declares_run() -> None:

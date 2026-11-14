@@ -233,9 +233,10 @@ def test_saved_job_equals_the_uncached_pods_and_loads(
         doc["bindings"].pop("database")
     assert cached_saved == plain_saved
 
-    # A loaded job reads its stored results; the pod cache is not part of it.
+    # A loaded job's stored results are read through the stored view (its nodes are
+    # empty until it runs, ITL-1095); the pod cache is not part of it.
     loaded = PipelineJob.load(tmp_path / "cached.json", database=store)
-    assert loaded.nodes["add"].as_table().to_pylist() == [
+    assert loaded.nodes["add"].as_source().as_table().to_pylist() == [
         {"k": 1, "total": 5},
         {"k": 2, "total": 10},
     ]

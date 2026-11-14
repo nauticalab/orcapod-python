@@ -231,6 +231,7 @@ class TestPhase1Phase2PipelineEntryId:
         # Create a second node with the same stream and shared DB
         stream2 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
         node2, _ = _make_node(stream2, db=db)
+        node2.run()  # a node shows its rows only after a run (ITL-1095)
         results = list(node2.iter_data())
 
         # All results should come from Phase 1 (DB), not recomputed
@@ -319,6 +320,7 @@ class TestPhase1Phase2PipelineEntryId:
             node2._versioned_pipeline_path
         ).num_rows
 
+        node2.run()
         results = list(node2.iter_data())
         assert len(results) == 2
 

@@ -89,7 +89,10 @@ def test_a_fresh_job_on_the_store_reads_the_stored_ids() -> None:
     _ = first.run(orchestrator=SyncPipelineOrchestrator())
     stored = stored_ids(first)
 
-    fresh = build(store)  # never run: every row comes from the store
+    fresh = build(store)
+    # A node shows rows only after a run (ITL-1095): this run computes nothing, every
+    # row comes from the store.
+    _ = fresh.run(orchestrator=SyncPipelineOrchestrator())
     assert read_back_ids(fresh) == stored
 
 

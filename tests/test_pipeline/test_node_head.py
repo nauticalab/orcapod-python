@@ -111,10 +111,12 @@ def test_nodes_before_a_run_show_no_rows_and_compute_nothing() -> None:
         op_html = job.nodes["sel"]._repr_html_()
     assert "could not read" not in op_html
     assert CALLS == []
-    assert fn_head.status is ViewStatus.NOTHING_STORED
+    # A node that has not run says so and names both ways in (ITL-1095).
+    for head in (fn_head, op_head):
+        assert head.status is ViewStatus.NOT_COMPUTED
+        assert "not run" in head.header()
+        assert "as_source()" in head.header()
     assert fn_head.table.column_names == ["id", "y"]
-    assert op_head.status is ViewStatus.NOT_COMPUTED
-    assert "cache mode OFF" in op_head.header()
 
 
 @pytest.mark.parametrize("store_kind", ["in_memory", "delta"])
@@ -142,26 +144,33 @@ def test_nodes_after_a_run_show_their_first_rows(
 
 
 @pytest.mark.parametrize("store_kind", ["in_memory", "delta"])
-def test_a_new_job_over_a_filled_store_reads_stored_rows_without_computing(
+def test_a_new_job_over_a_filled_store_shows_rows_once_its_run_reads_the_store(
     store_kind: str, tmp_path: Path
 ) -> None:
-    """A new job over a filled store shows stored rows without computing."""
+    """A new job over a filled store shows no rows until it runs (ITL-1095); its run
+    reads every result from the store and computes nothing."""
     store = _store(store_kind, tmp_path)
     _ = _job(store).run()
     CALLS.clear()
 
-    node = _job(store).nodes["triple"]
+    job = _job(store)
+    node = job.nodes["triple"]
+    assert node.head(4).status is ViewStatus.NOT_COMPUTED
+    # The stored view shows the stored rows meanwhile.
+    assert node.as_source().head(4).status is ViewStatus.ROWS
+    _ = job.run()
     head = node.head(4)
     assert CALLS == []
     assert head.status is ViewStatus.ROWS
-    # The whole stored slice is read, so the header states the exact count and
-    # makes no claim of a bounded read.
-    assert head.header() == "FunctionJobNode[triple] — first 4 of 25 stored rows"
+    assert head.header() == "FunctionJobNode[triple] — first 4 of 25 rows"
     assert head.table.equals(node.as_table().slice(0, 4))
 
 
-def test_a_loaded_job_shows_stored_rows_and_never_raises(tmp_path: Path) -> None:
-    """A loaded job's nodes show stored rows, or say why there are none."""
+def test_a_loaded_job_shows_no_rows_until_it_runs_and_never_raises(
+    tmp_path: Path,
+) -> None:
+    """A loaded job's nodes show no rows before a run (ITL-1095) and say where the
+    stored rows are; ``as_source()`` shows them."""
     store = DeltaTableDatabase(base_path=tmp_path / "store")
     job = _job(store)
     _ = job.run()
@@ -173,10 +182,12 @@ def test_a_loaded_job_shows_stored_rows_and_never_raises(tmp_path: Path) -> None
     fn_head = loaded.nodes["triple"].head()
     op_head = loaded.nodes["sel"].head()
     assert CALLS == []
-    assert fn_head.status is ViewStatus.ROWS
-    assert fn_head.header().endswith("first 10 of 25 stored rows")
-    assert op_head.status is ViewStatus.UNAVAILABLE
-    assert "cache mode OFF" in op_head.header()
+    for head in (fn_head, op_head):
+        assert head.status is ViewStatus.NOT_COMPUTED
+        assert "as_source()" in head.header()
+    stored = loaded.nodes["triple"].as_source().head()
+    assert stored.status is ViewStatus.ROWS
+    assert stored.header().endswith("first 10 of 25 stored rows")
 
 
 def test_blueprint_nodes_are_unavailable() -> None:
@@ -220,27 +231,27 @@ def _operator_node(
 
 
 def test_operator_node_cache_modes() -> None:
-    """Operator nodes show stored rows in REPLAY and none in LOG before a run."""
+    """Before a run an operator node shows no rows in every cache mode (ITL-1095); a
+    REPLAY node shows the stored rows once it has run."""
     store = InMemoryArrowDatabase()
     assert _operator_node(CacheMode.REPLAY, store).head().status is (
-        ViewStatus.NOTHING_STORED
+        ViewStatus.NOT_COMPUTED
     )
     seed = _operator_node(CacheMode.LOG, store)
     _ = seed.execute(_source())
 
     replay = _operator_node(CacheMode.REPLAY, store)
+    assert replay.head(3).status is ViewStatus.NOT_COMPUTED
+    _ = replay.run()
     head = replay.head(3)
     assert head.status is ViewStatus.ROWS
-    assert (
-        head.header()
-        == "OperatorJobNode[SelectDataColumns] — first 3 of 25 stored rows"
-    )
+    assert head.header() == "OperatorJobNode[SelectDataColumns] — first 3 of 25 rows"
     assert head.table.equals(replay.as_table().slice(0, 3))
 
     log = _operator_node(CacheMode.LOG, store)
     log_head = log.head()
     assert log_head.status is ViewStatus.NOT_COMPUTED
-    assert "not replayed" in log_head.header()
+    assert "as_source()" in log_head.header()
 
 
 @pytest.mark.parametrize("orchestrator", list(ORCHESTRATORS))
@@ -281,7 +292,7 @@ def test_head_keeps_the_tag_arrow_type_of_the_input(
     """A node's head keeps an ``int8`` tag ``int8`` and is the prefix of ``as_table``.
 
     ``head`` and ``as_table`` share one table build (ITL-928 typing), in memory after a
-    run and from the store in a new job.
+    run and in a new job whose run reads its rows from the store.
     """
     table = pa.table(
         {"id": pa.array(range(12), pa.int8()), "x": pa.array(range(12), pa.int64())},
@@ -306,7 +317,10 @@ def test_head_keeps_the_tag_arrow_type_of_the_input(
     store = _store(store_kind, tmp_path)
     job = build(store)
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator]())
-    for node in (job.nodes["triple"], build(store).nodes["triple"]):
+    # The new job shows rows once its run has read them from the store (ITL-1095).
+    fresh = build(store)
+    _ = fresh.run(orchestrator=ORCHESTRATORS[orchestrator]())
+    for node in (job.nodes["triple"], fresh.nodes["triple"]):
         head = node.head(5, all_info=True)
         assert head.status is ViewStatus.ROWS
         assert head.table.schema.field("id").type == pa.int8()

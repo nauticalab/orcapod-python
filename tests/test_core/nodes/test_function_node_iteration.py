@@ -59,14 +59,17 @@ class TestIterDatasReadOnly:
             list(node.iter_data())
             mock_proc.assert_not_called()
 
-    def test_iter_after_db_populated_hot_loads_without_compute(self):
-        """iter_data() on a node with DB records hot-loads without _process_data_internal."""
+    def test_iter_after_db_populated_yields_nothing_until_a_run_loads(self):
+        """A node over a populated DB yields nothing before a run (ITL-1095); its run
+        loads every result from the DB without _process_data_internal."""
         db = InMemoryArrowDatabase()
         node1 = _make_node(n=3, db=db)
         node1.run()  # populate DB
 
         node2 = _make_node(n=3, db=db)
+        assert list(node2.iter_data()) == []
         with patch.object(node2, "_process_data_internal") as mock_proc:
+            node2.run()
             results = list(node2.iter_data())
             mock_proc.assert_not_called()
         assert len(results) == 3
@@ -120,10 +123,10 @@ class TestIterDatasReadOnly:
         assert "id" in table.column_names
         assert "result" in table.column_names
 
-    def test_run_cache_only_is_noop(self):
-        """run() on a CACHE_ONLY node computes nothing and returns the stored rows' view."""
+    def test_run_cache_only_raises_and_points_to_the_stored_view(self):
+        """run() on a CACHE_ONLY node computes nothing: its input is unavailable, so it
+        has nothing to run or look up, and it says to read ``as_source()`` (ITL-1095)."""
         from orcapod.pipeline.serialization import LoadStatus
-        from orcapod.streams import StreamView
 
         node = _make_node()
         # A loaded node whose upstream is unavailable keeps that input stream; only its
@@ -131,9 +134,10 @@ class TestIterDatasReadOnly:
         node._load_status = LoadStatus.CACHE_ONLY
 
         with patch.object(node, "execute") as mock_exec:
-            view = node.run()
+            for load_only in (False, True):
+                with pytest.raises(RuntimeError, match=r"as_source\(\)"):
+                    node.run(load_only=load_only)
             mock_exec.assert_not_called()
-        assert isinstance(view, StreamView)
 
     def test_run_unavailable_raises(self):
         """run() on an UNAVAILABLE node raises RuntimeError."""

@@ -230,7 +230,7 @@ def test_as_table_mixing_stored_and_new_rows_keeps_tag_type() -> None:
 def test_store_read_back_keeps_tag_type(
     name: str, store: str, tmp_path: pathlib.Path
 ) -> None:
-    """Reads from the store (``get_all_records``, a fresh job's reads) keep the tag type."""
+    """Reads from the store (``get_all_records``, a fresh job's run) keep the tag type."""
     database = _new_store(store, tmp_path)
     table = _source_table(name)
     _build(database, table).run()
@@ -238,11 +238,14 @@ def test_store_read_back_keeps_tag_type(
         # A new store object sees the committed tables, as a new process would.
         database = _new_store(store, tmp_path)
 
-    fresh = _build(database, table).nodes["double"]
+    fresh_job = _build(database, table)
+    fresh = fresh_job.nodes["double"]
 
     records = fresh.get_all_records()
     assert records is not None
     assert records.schema.field("k").type == _expected(name)
+    # The node shows rows once its run has read them from the store (ITL-1095).
+    fresh_job.run()
     tag, _ = next(iter(fresh.iter_data()))
     assert tag.as_table().schema.field("k").type == _expected(name)
     assert fresh.as_table().schema.field("k").type == _expected(name)

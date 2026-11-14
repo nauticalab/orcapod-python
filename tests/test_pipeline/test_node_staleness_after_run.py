@@ -325,8 +325,8 @@ def test_a_function_node_is_stamped_before_its_output_closes(with_store: bool) -
         pipeline_database=store,
         result_database=store,
     )
-    constructed = node.last_modified
-    assert constructed is not None
+    # A node that has not run holds nothing and has no modified time (ITL-1095).
+    assert node.last_modified is None
     seen_at_close: list[Any] = []
 
     async def run() -> None:
@@ -353,4 +353,4 @@ def test_a_function_node_is_stamped_before_its_output_closes(with_store: bool) -
 
     asyncio.run(run())
     (stamp,) = seen_at_close
-    assert stamp is not None and stamp > constructed
+    assert stamp is not None

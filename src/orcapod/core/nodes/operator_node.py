@@ -17,6 +17,8 @@ directly from ``OperatorNodeBase``, neither from the other.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import sys
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping, Sequence
@@ -34,6 +36,8 @@ from orcapod.core.streams.base import (
     short_stream_repr,
 )
 from orcapod.core.streams.view import (
+    JOB_NODE_NOT_RUN_NOTE,
+    LOADED_ONLY_OPERATOR_NOTE,
     STALE_NOTE,
     BLUEPRINT_NOTE,
     ViewStatus,
@@ -41,6 +45,7 @@ from orcapod.core.streams.view import (
     head_of,
 )
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+from orcapod.core.nodes.staleness import RunHoldingNode
 from orcapod.errors import (
     PipelineJobRequiredError,
     StoreReadError,
@@ -679,7 +684,7 @@ class OperatorNode(OperatorNodeBase):
 # ---------------------------------------------------------------------------
 
 
-class OperatorJobNode(OperatorNodeBase):
+class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
     """DB-backed execution node for operator pod invocations.
 
     Stream node representing an operator invocation with optional DB persistence.
@@ -780,6 +785,8 @@ class OperatorJobNode(OperatorNodeBase):
                 pipeline_database=pipeline_database,
                 cache_mode=cache_mode,
             )
+        # A node that has not run in this process holds nothing and is stale (ITL-1095).
+        self._set_modified_time(None)
 
     # ------------------------------------------------------------------
     # as_node — return the lightweight OperatorNode equivalent
@@ -809,10 +816,17 @@ class OperatorJobNode(OperatorNodeBase):
     # ------------------------------------------------------------------
 
     def clear_cache(self) -> None:
-        """Clear output caches and node identity path cache."""
+        """Clear output caches and node identity path cache.
+
+        The node then holds no run: it is stale and reads empty, as before its first run
+        in this process (ITL-1095). Rows it stored stay stored (``as_source()``).
+        """
         super().clear_cache()  # clears _node_identity_path_cache + _update_modified_time
         self._cached_output_stream = None
         self._cached_output_table = None
+        self._run_load_only = False
+        # No content established: the node, and every node downstream, is stale.
+        self._set_modified_time(None)
 
     # ------------------------------------------------------------------
     # attach_databases
@@ -1066,7 +1080,9 @@ class OperatorJobNode(OperatorNodeBase):
         """Describe why this loaded node cannot execute an operator."""
         return RuntimeError(
             f"OperatorJobNode {self.label!r} was loaded by PipelineJob.load and "
-            "cannot compute; create a fresh PipelineJob to run the pipeline again."
+            "cannot compute; fill it from the store with run(load_only=True), read "
+            "its stored results with as_source(), or create a fresh PipelineJob to "
+            "run the pipeline again."
         )
 
     def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
@@ -1299,6 +1315,50 @@ class OperatorJobNode(OperatorNodeBase):
             self.data_context.type_converter,
         )
 
+    def _read_run_records(self) -> "pa.Table | None":
+        """Read the stored rows of this node's run: its content hash, current context.
+
+        A loaded node names its run by the content hash its job file records. A file
+        saved before Orcapod recorded it leaves the node only the hash the loaded job
+        computes; when the store holds no rows under that hash, an empty answer would
+        make stored results look dropped, so this raises instead (ITL-1043).
+
+        Returns:
+            The run's stored rows (``_read_stored_records``), or ``None`` when the table
+            does not exist.
+
+        Raises:
+            RuntimeError: If a loaded node's job file does not record its run's
+                content hash and the store holds no rows under the hash the loaded
+                job computes.
+        """
+        stored = self._read_current_context_records()
+        records = None if stored is None else self._filter_by_content_hash(stored)
+        if (
+            self._loaded
+            and self._saved_run_content_hash is None
+            and (records is None or records.num_rows == 0)
+        ):
+            found = (
+                "is absent from the attached store"
+                if stored is None
+                else f"holds {stored.num_rows} stored rows, none of them under the "
+                f"content hash the loaded job computes ({self.content_hash().to_string()})"
+            )
+            raise _LoadedCacheUnreadableError(
+                f"OperatorJobNode {self.label!r}: the job file does not record the "
+                "content hash of this node's run (a file saved before Orcapod recorded "
+                "it), so the loaded job cannot name the run's rows, and its cache table "
+                f"({'/'.join(self._stored_table_path)}) {found}. Upgrading such files is "
+                "left to the migration tool after v0.3 (ITL-1048); until then build the "
+                "job from code and attach the node with CacheMode.REPLAY to read them.",
+                head_note=(
+                    "loaded node: the job file does not record its run's content hash "
+                    "(an older file; ITL-1048)"
+                ),
+            )
+        return records
+
     def _load_cached_stream_from_db(self) -> "ArrowTableStream | None":
         """Read from DB in CacheMode.REPLAY only, without modifying node state.
 
@@ -1330,31 +1390,7 @@ class OperatorJobNode(OperatorNodeBase):
             return None
         if self._cache_mode != CacheMode.REPLAY:
             return None
-        stored = self._read_current_context_records()
-        records = None if stored is None else self._filter_by_content_hash(stored)
-        if (
-            self._loaded
-            and self._saved_run_content_hash is None
-            and (records is None or records.num_rows == 0)
-        ):
-            found = (
-                "is absent from the attached store"
-                if stored is None
-                else f"holds {stored.num_rows} stored rows, none of them under the "
-                f"content hash the loaded job computes ({self.content_hash().to_string()})"
-            )
-            raise _LoadedCacheUnreadableError(
-                f"OperatorJobNode {self.label!r}: the job file does not record the "
-                "content hash of this node's run (a file saved before Orcapod recorded "
-                "it), so the loaded job cannot name the run's rows, and its cache table "
-                f"({'/'.join(self._stored_table_path)}) {found}. Upgrading such files is "
-                "left to the migration tool after v0.3 (ITL-1048); until then build the "
-                "job from code and attach the node with CacheMode.REPLAY to read them.",
-                head_note=(
-                    "loaded node: the job file does not record its run's content hash "
-                    "(an older file; ITL-1048)"
-                ),
-            )
+        records = self._read_run_records()
         if self._loaded:
             self._check_expected_rows(0 if records is None else records.num_rows)
         if records is None:
@@ -1398,19 +1434,25 @@ class OperatorJobNode(OperatorNodeBase):
         self,
         *input_streams: StreamProtocol,
         observer: ExecutionObserverProtocol | None = None,
+        load_only: bool = False,
     ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
         Args:
             *input_streams: Input streams to execute.
             observer: Optional execution observer for hooks.
+            load_only: A load-only run (ITL-1095): the operator still runs on the rows
+                that reach it (it is not a stored computation), but nothing is
+                written: a ``LOG`` node does not store its output. ``REPLAY`` replays
+                as in any run.
 
         Returns:
             Materialized list of (tag, data) pairs.
         """
         from orcapod.pipeline.observer import NoOpObserver
 
-        if self._loaded:
+        # A loaded node runs only in a load-only run, with its rebuilt operator.
+        if self._loaded and (not load_only or self._operator is None):
             raise self._cannot_compute_error()
 
         node_label = self.label
@@ -1419,49 +1461,60 @@ class OperatorJobNode(OperatorNodeBase):
         obs = observer if observer is not None else NoOpObserver()
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
-        ctx_obs.on_node_start(node_label, node_hash)
+        try:
+            ctx_obs.on_node_start(node_label, node_hash)
 
-        # Check REPLAY cache first
-        cached_output = self.get_cached_output()
-        if cached_output is not None:
-            output = list(cached_output.iter_data())
+            self._run_load_only = load_only
+            # Check REPLAY cache first
+            cached_output = self.get_cached_output()
+            if cached_output is not None:
+                output = list(cached_output.iter_data())
+                ctx_obs.on_node_end(node_label, node_hash)
+                return output
+
+            # Compute
+            result_stream = self._operator.process(*input_streams)
+
+            # Materialize
+            output = list(result_stream.iter_data())
+
+            # Cache
+            if output:
+                self._cached_output_stream = (
+                    StaticOutputOperatorPod._materialize_to_stream(output)
+                )
+            else:
+                self._cached_output_stream = result_stream
+
+            self._update_modified_time()
+
+            # Persist to DB only in LOG mode, and never in a load-only run.
+            if (
+                not load_only
+                and self._pipeline_database is not None
+                and self._cache_mode == CacheMode.LOG
+                and self._cached_output_stream is not None
+            ):
+                self._store_output_stream(self._cached_output_stream)
+
             ctx_obs.on_node_end(node_label, node_hash)
             return output
+        except BaseException:
+            # A run that raised (its store write or an observer included) defines no rows.
+            self.clear_cache()
+            raise
 
-        # Compute
-        result_stream = self._operator.process(*input_streams)
+    def _compute_and_store(self, *, store: bool = True) -> None:
+        """Compute operator output, optionally store in DB.
 
-        # Materialize
-        output = list(result_stream.iter_data())
-
-        # Cache
-        if output:
-            self._cached_output_stream = StaticOutputOperatorPod._materialize_to_stream(
-                output
-            )
-        else:
-            self._cached_output_stream = result_stream
-
-        self._update_modified_time()
-
-        # Persist to DB only in LOG mode
-        if (
-            self._pipeline_database is not None
-            and self._cache_mode == CacheMode.LOG
-            and self._cached_output_stream is not None
-        ):
-            self._store_output_stream(self._cached_output_stream)
-
-        ctx_obs.on_node_end(node_label, node_hash)
-        return output
-
-    def _compute_and_store(self) -> None:
-        """Compute operator output, optionally store in DB."""
+        Args:
+            store: Whether a ``LOG`` node stores the output (not in a load-only run).
+        """
         self._cached_output_stream = self._operator.process(
             *self._input_streams,
         )
 
-        if self._cache_mode == CacheMode.OFF:
+        if self._cache_mode == CacheMode.OFF or not store:
             self._update_modified_time()
             return
 
@@ -1502,12 +1555,15 @@ class OperatorJobNode(OperatorNodeBase):
         )
         self._update_modified_time()
 
-    def run(self) -> StreamView:
-        """Execute the operator according to the current cache mode, and return a
-        ``StreamView`` of the node's rows.
+    def run(self, *, load_only: bool = False) -> StreamView:
+        """Run the node as a job run would, and return a ``StreamView`` of its rows.
 
-        Computes as a job run computes this node, unlike ``as_table()``, which only
-        reads.
+        State-driven (developer, November 13, 2026; ITL-1095): a node that holds the
+        output of a completed run and is not stale is not run again; the view shows it.
+        Otherwise the node runs, after every job node it depends on that holds no
+        current run (each once, in dependency order, as ``job.run()`` would run them;
+        ``last_run`` reports the counts), and the run's writes are committed. A node
+        built over streams outside a job runs its operator on them directly.
 
         Without a database:
             Always compute via the operator's ``process()`` method.
@@ -1517,30 +1573,79 @@ class OperatorJobNode(OperatorNodeBase):
             - **LOG**: always compute, write results to DB.
             - **REPLAY**: skip computation, load from DB.
 
+        Args:
+            load_only: As ``job.run(load_only=True)``: the operator runs on the rows
+                that reach it, a ``LOG`` node writes nothing, and the nodes run first
+                load their stored results only.
+
         Returns:
             A ``StreamView`` of every row ``as_table()`` then returns, naming its rows
             as ``head()`` then names them.
+
+        Raises:
+            RuntimeError: If the node was loaded by ``PipelineJob.load`` and
+                ``load_only`` is false.
         """
+        from orcapod.pipeline.node_run import (
+            depends_on_job_nodes,
+            run_with_dependencies,
+        )
+        from orcapod.pipeline.run_summary import warn_row_failures
+
+        if self._loaded and not load_only:
+            raise self._cannot_compute_error()
+        if self.holds_current_run(load_only=load_only):
+            return self._run_view(computed=False)
+        if depends_on_job_nodes(self):
+            summary = run_with_dependencies(self, load_only=load_only)
+            self._last_run = summary
+            if not summary.ok:
+                warn_row_failures(summary, sys._getframe(1))  # pyright: ignore[reportPrivateUsage]  # the caller's line is where the warning is shown
+            return self._run_view(computed=False)
         if self._loaded:
             raise self._cannot_compute_error()
-        if self.is_stale:
+        if self.is_stale or not self._holds_run(load_only=load_only):
+            # Stale, or a load-only run's output asked for by a full run: run again.
             self.clear_cache()
 
         computed = False
         if self._cached_output_stream is None:
-            if self._pipeline_database is not None:
-                if self._cache_mode == CacheMode.REPLAY:
-                    self._replay_from_cache()
+            try:
+                if self._pipeline_database is not None:
+                    if self._cache_mode == CacheMode.REPLAY:
+                        self._replay_from_cache()
+                    else:
+                        self._compute_and_store(store=not load_only)
+                        computed = True
+                        if self._cache_mode == CacheMode.LOG and not load_only:
+                            # Committed before run() returns, as at the end of a job
+                            # run.
+                            from orcapod.pipeline.node_run import commit_run
+
+                            commit_run([self._pipeline_database], [self])
+                    self._run_load_only = load_only
                 else:
-                    self._compute_and_store()
+                    self._cached_output_stream = self._operator.process(
+                        *self._input_streams,
+                    )
+                    self._update_modified_time()
                     computed = True
-            else:
-                self._cached_output_stream = self._operator.process(
-                    *self._input_streams,
-                )
-                self._update_modified_time()
-                computed = True
-        table = self.as_table()
+            except BaseException:
+                # A run that raised defines no rows.
+                self.clear_cache()
+                raise
+        return self._run_view(computed=computed)
+
+    def _run_view(self, *, computed: bool) -> StreamView:
+        """The ``run()`` view of the node's output.
+
+        Args:
+            computed: Whether this ``run()`` computed the output lazily just now.
+        """
+        # Read the kept output itself: a lazy input that finishes computing during this
+        # read stamps itself after the node, which would make as_table() judge it stale.
+        assert self._cached_output_stream is not None
+        table = self._cached_output_stream.as_table()
         if computed:
             # Without a database and in OFF mode the output stream is lazy: as_table()
             # computes it, and an uncomputed input finishes only then. Stamp the node
@@ -1551,28 +1656,47 @@ class OperatorJobNode(OperatorNodeBase):
         # computation, plain rows when replayed from the store or kept by execute().
         kept = self._cached_output_stream
         origin = "computed" if kept is None else head_of(kept.head(1), self).origin
-        return self._view_of_rows(table, origin)
+        view = self._view_of_rows(table, origin)
+        if self._run_load_only:
+            return dataclasses.replace(
+                view, status=ViewStatus.LOADED_ONLY, note=LOADED_ONLY_OPERATOR_NOTE
+            )
+        return view
+
+    # Whether the output the node holds came from a load-only run (ITL-1095): its
+    # input may lack rows, so a full run does not take it as complete.
+    _run_load_only: bool = False
+
+    def _holds_run(self, *, load_only: bool) -> bool:
+        """Whether the node holds a run's output; a load-only run's only for ``load_only``."""
+        return self._cached_output_stream is not None and (
+            load_only or not self._run_load_only
+        )
+
+    def _current_output(self) -> StreamProtocol | None:
+        """The output of the node's current run, or ``None`` when it holds none.
+
+        A node holds a run's output from the end of ``run()``, ``execute()`` or
+        ``async_execute()`` until it is cleared or becomes stale (an input or the
+        operator changed since). Before a run in this process it holds none, whatever
+        its cache mode and store hold (ITL-1095).
+        """
+        if self._cached_output_stream is None or self.is_stale:
+            return None
+        return self._cached_output_stream
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-        """Return an iterator over (tag, data) pairs.
+        """Return an iterator over the (tag, data) rows of the node's current run.
 
-        Read-only: never triggers computation. Yields the rows of the latest
-        ``run()``, ``execute()`` or ``async_execute()``. With nothing cached in
-        memory (before a run, or after ``clear_cache()``), a node in
-        ``CacheMode.REPLAY`` with a database yields the rows stored there; in
-        any other mode it yields nothing. Call ``node.is_stale`` before
-        iterating if you need to detect outdated cached data.
-
-        Loaded nodes raise when no readable stored cache is available.
+        Read-only: never computes and never reads the store. Yields the rows of the
+        latest ``run()``, ``execute()`` or ``async_execute()``; nothing before a run in
+        this process, after ``clear_cache()`` or once the node is stale, in every cache
+        mode (ITL-1095). ``as_source()`` reads what the node stored (``LOG``).
         """
-        if self._cached_output_stream is not None:
-            return self._cached_output_stream.iter_data()
-        db_stream = self._load_cached_stream_from_db()
-        if db_stream is not None:
-            return db_stream.iter_data()
-        if self._loaded:
-            raise self._no_stored_results_error()
-        return iter([])
+        current = self._current_output()
+        if current is None:
+            return iter([])
+        return current.iter_data()
 
     def as_table(
         self,
@@ -1580,13 +1704,12 @@ class OperatorJobNode(OperatorNodeBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> "pa.Table":
-        """Return the output as a PyArrow table.
+        """Return the output of the node's current run as a PyArrow table.
 
-        Read-only: never triggers computation. Returns the rows of the latest
-        ``run()``, ``execute()`` or ``async_execute()``. With nothing cached in
-        memory (before a run, or after ``clear_cache()``), a node in
-        ``CacheMode.REPLAY`` with a database returns the rows stored there; in
-        any other mode it returns a zero-row table with the node's columns.
+        Read-only: never computes and never reads the store. Returns the rows of the
+        latest ``run()``, ``execute()`` or ``async_execute()``; before a run in this
+        process, after ``clear_cache()`` or once the node is stale, a zero-row table
+        with the node's columns, in every cache mode (ITL-1095).
 
         That zero-row table has the columns, Arrow types and nullability of the
         node's rows, system tags and source info included: it is the operator's
@@ -1595,29 +1718,29 @@ class OperatorJobNode(OperatorNodeBase):
         types without rows (a ``PollingSource`` before its first poll, an unbound
         input slot or ``SourceProxy``, a ``DerivedSource``, or a loaded node with
         no live upstream), the table is built from the node's Python output
-        schema, as before: an ``int8`` column reads as ``int64`` and the
-        system-tag columns are absent (ITL-1089, ITL-985).
-
-        Loaded nodes raise when no readable stored cache is available.
+        schema: an ``int8`` column reads as ``int64`` and the system-tag columns
+        are absent (ITL-1089, ITL-985).
         """
-        if self._cached_output_stream is not None:
-            return self._cached_output_stream.as_table(
-                columns=columns, all_info=all_info
-            )
-        db_stream = self._load_cached_stream_from_db()
-        if db_stream is not None:
-            return db_stream.as_table(columns=columns, all_info=all_info)
-        if self._loaded:
-            raise self._no_stored_results_error()
-        # No cached or stored records yet: construct a zero-row table with the
-        # correct schema and route it through ArrowTableStream so that the
-        # ColumnConfig / all_info shaping is applied consistently.
-        # Requires a live operator for schema derivation (pre-existing limitation).
+        current = self._current_output()
+        if current is not None:
+            return current.as_table(columns=columns, all_info=all_info)
         if self._operator is None:
-            return pa.table({})
-        empty_records = self._make_empty_table()
-        tag_keys = self.keys()[0]
-        empty_stream = ArrowTableStream(empty_records, tag_columns=tag_keys)
+            # A node rebuilt without its operator: the columns of its saved schema.
+            tag_schema, data_schema = self.output_schema()
+            empty = pa.Table.from_pylist(
+                [],
+                schema=self.data_context.type_converter.python_schema_to_arrow_schema(
+                    tag_schema + data_schema
+                ),
+            )
+            return ArrowTableStream(
+                empty, tag_columns=tuple(tag_schema), data_context=self.data_context
+            ).as_table(columns=columns, all_info=all_info)
+        empty_stream = ArrowTableStream(
+            self._make_empty_table(),
+            tag_columns=self.keys()[0],
+            data_context=self.data_context,
+        )
         return empty_stream.as_table(columns=columns, all_info=all_info)
 
     def head(
@@ -1627,66 +1750,31 @@ class OperatorJobNode(OperatorNodeBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> StreamView:
-        """Return the first rows the node holds or has stored; never runs it over rows.
+        """Return the first rows of the node's current run; never runs the operator.
 
-        After a run (or ``execute``) the rows are the node's output in memory. Before
-        that, a node in ``CacheMode.REPLAY`` shows the first of its stored rows, read
-        from its whole stored table; in ``LOG`` and ``OFF`` it shows none, as
-        ``as_table`` does. A loaded node never raises here. See ``StreamBase.head``.
+        After a run (or ``execute``) the rows are the node's output in memory. Before a
+        run in this process the node shows no rows and says so, pointing to ``run()``
+        and to ``as_source()``, in every cache mode; once stale it says its inputs
+        changed (ITL-1095). The store is never read. See ``StreamBase.head``.
         """
         check_head_size(n)
         config = ColumnConfig.handle_config(columns, all_info=all_info)
-        if self._cached_output_stream is not None:
-            if not self._loaded and self.is_stale:
-                # run() would recompute; the kept rows are not the current result.
-                return self._head_without_rows(
-                    config, ViewStatus.NOT_COMPUTED, note=STALE_NOTE
-                )
-            return head_of(self._cached_output_stream.head(n, columns=config), self)
-        if self._cache_mode == CacheMode.REPLAY and self._pipeline_database is not None:
-            return self._head_from_store(n, config)
-        if self._loaded:
+        if self._cached_output_stream is None:
             return self._head_without_rows(
-                config,
-                ViewStatus.UNAVAILABLE,
-                note=(
-                    "loaded node whose results are not stored (cache mode OFF)"
-                    if self._cache_mode == CacheMode.OFF
-                    else "loaded node whose stored results are not replayed "
-                    f"(cache mode {self._cache_mode.value.upper()})"
-                ),
+                config, ViewStatus.NOT_COMPUTED, note=JOB_NODE_NOT_RUN_NOTE
             )
-        if self._cache_mode == CacheMode.LOG and self._pipeline_database is not None:
-            note = (
-                "not run in this session; rows of earlier runs are stored but not "
-                "replayed (cache mode LOG)"
-            )
-        else:
-            note = "not run; cache mode OFF stores nothing"
-        return self._head_without_rows(config, ViewStatus.NOT_COMPUTED, note=note)
-
-    def _head_from_store(self, n: int, config: ColumnConfig) -> StreamView:
-        """Return the first ``n`` of this node's stored rows.
-
-        Reads the node's whole stored slice (no bounded read exists yet) through the
-        same path as ``as_table`` and keeps nothing on the node. A loaded node whose
-        run's rows cannot be read (its cache table is absent, or none of its rows is the
-        run's) shows no rows and says why, where ``as_table`` raises.
-        """
-        try:
-            stream = self._load_cached_stream_from_db()
-        except _LoadedCacheUnreadableError as exc:
+        if self.is_stale:
+            # run() would recompute; the kept rows are not the current result.
             return self._head_without_rows(
-                config, ViewStatus.UNAVAILABLE, note=exc.head_note
+                config, ViewStatus.NOT_COMPUTED, note=STALE_NOTE
             )
-        if stream is None or stream.as_table().num_rows == 0:
-            return self._head_without_rows(
-                config,
-                ViewStatus.NOTHING_STORED,
-                # A loaded job cannot run: say what the store holds instead.
-                note="the store holds no rows for its run" if self._loaded else None,
+        head = head_of(self._cached_output_stream.head(n, columns=config), self)
+        if self._run_load_only:
+            # Output of a load-only run: its input may lack rows (ITL-1095).
+            return dataclasses.replace(
+                head, status=ViewStatus.LOADED_ONLY, note=LOADED_ONLY_OPERATOR_NOTE
             )
-        return stream.head(n, columns=config).for_stream(self, origin="stored")
+        return head
 
     # ------------------------------------------------------------------
     # DB retrieval
@@ -1707,7 +1795,9 @@ class OperatorJobNode(OperatorNodeBase):
         if self._pipeline_database is None:
             return None
 
-        results = self._read_stored_records()
+        # A loaded node that cannot name its run's rows raises rather than show the
+        # stored rows as none (ITL-1043): this is the read behind node.as_source().
+        results = self._read_run_records()
         if self._loaded:
             # The advisory check of every read of a loaded node (ITL-1043).
             self._check_expected_rows(0 if results is None else results.num_rows)
@@ -1795,6 +1885,7 @@ class OperatorJobNode(OperatorNodeBase):
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         observer: "ExecutionObserverProtocol | None" = None,
+        load_only: bool = False,
     ) -> None:
         """Async execution with cache mode handling when DB is attached.
 
@@ -1816,10 +1907,12 @@ class OperatorJobNode(OperatorNodeBase):
             inputs: Sequence of readable channels from upstream nodes.
             output: Writable channel for output (tag, data) pairs.
             observer: Optional execution observer for hooks.
+            load_only: As for ``execute``: a ``LOG`` node stores nothing (ITL-1095).
         """
         from orcapod.pipeline.observer import NoOpObserver
 
-        if self._loaded:
+        # A loaded node runs only in a load-only run, with its rebuilt operator.
+        if self._loaded and (not load_only or self._operator is None):
             await output.close()
             raise self._cannot_compute_error()
 
@@ -1830,6 +1923,7 @@ class OperatorJobNode(OperatorNodeBase):
 
         try:
             ctx_obs.on_node_start(node_label, node_hash)
+            self._run_load_only = load_only
 
             if (
                 self._pipeline_database is not None
@@ -1846,6 +1940,9 @@ class OperatorJobNode(OperatorNodeBase):
                     for tag, data in self._cached_output_stream.iter_data():
                         await output.send((tag, data))
                     _ = await asyncio.gather(*discards)
+                    # The inputs are closed, so every upstream node has stamped itself:
+                    # stamp after them, or the replayed rows would read as stale.
+                    self._update_modified_time()
                 finally:
                     for discard in discards:
                         _ = discard.cancel()
@@ -1858,7 +1955,8 @@ class OperatorJobNode(OperatorNodeBase):
             # Delegate to the operator, forward its rows downstream and keep them.
             intermediate: Channel[tuple[TagProtocol, DataProtocol]] = Channel()
             should_store = (
-                self._pipeline_database is not None
+                not load_only
+                and self._pipeline_database is not None
                 and self._cache_mode == CacheMode.LOG
             )
             if should_store:
@@ -1925,5 +2023,14 @@ class OperatorJobNode(OperatorNodeBase):
             self._update_modified_time()
 
             ctx_obs.on_node_end(node_label, node_hash)
+        except BaseException:
+            # A run that raised or was cancelled defines no rows.
+            self.clear_cache()
+            raise
         finally:
-            await output.close()
+            try:
+                await output.close()
+            except BaseException:
+                # A close that raises or is cancelled fails the run: no rows.
+                self.clear_cache()
+                raise

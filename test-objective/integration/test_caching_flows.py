@@ -85,6 +85,8 @@ class TestFunctionNodeCaching:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
+        # A node shows rows only after a run (ITL-1095); this run reads them all.
+        node2.run()
         data = list(node2.iter_data())
         assert len(data) == 3
 

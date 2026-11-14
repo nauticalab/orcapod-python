@@ -121,7 +121,8 @@ def _held_order(node: Any) -> list[int]:
 def test_a_function_nodes_head_is_the_prefix_of_as_table_in_any_completion_order(
     run_kind: str, store_kind: str, n: int, config: str, tmp_path: Path
 ) -> None:
-    """After a run, and from the store in a new job, head(n, cfg) == as_table(cfg)[:n]."""
+    """After a run, and in a new job whose run reads every row from the store,
+    head(n, cfg) == as_table(cfg)[:n]."""
     store = _store(store_kind, tmp_path)
     job = _run(run_kind, store)
     assert _held_order(job.nodes["node"]) != sorted(_held_order(job.nodes["node"]))
@@ -131,6 +132,9 @@ def test_a_function_nodes_head_is_the_prefix_of_as_table_in_any_completion_order
         store,
         list(range(N_ROWS)),
     )
+    # A node shows its current run only (ITL-1095): the new job's run reads its rows from
+    # the store, in the store's order, and computes nothing.
+    fresh.run()
     for node in (job.nodes["node"], fresh.nodes["node"]):
         head = node.head(n, **CONFIGS[config])
         assert head.status is ViewStatus.ROWS
@@ -175,11 +179,14 @@ def test_an_operator_nodes_head_is_the_prefix_of_as_table(
 
     ran = node(CacheMode.LOG)
     ran.execute(_source(order))
-    for each in (ran, node(CacheMode.REPLAY)):
+    # A REPLAY node shows the stored rows once it has run (ITL-1095).
+    replayed = node(CacheMode.REPLAY)
+    replayed.run()
+    for each in (ran, replayed):
         head = each.head(3, **CONFIGS[config])
         assert head.status is ViewStatus.ROWS
         assert head.table.equals(each.as_table(**CONFIGS[config]).slice(0, 3))
-    sorted_ids = node(CacheMode.REPLAY).head(3, all_info=True).table.column("id")
+    sorted_ids = replayed.head(3, all_info=True).table.column("id")
     assert sorted_ids.to_pylist() == [0, 1, 2]
 
 

@@ -226,7 +226,10 @@ class TestSideEffectNodeChecksEveryRun:
         # A log of the same pod at the layout Orcapod v0.2 wrote, under another hash.
         old_path = _add_table_written_before_v03(store, "tdb_v2", "tdb_v1")
 
-        # The same job object runs again: the check is not remembered from the first run.
+        # The same job object runs the sink again (a node holding a current run is not
+        # run, ITL-1095, so it is cleared first): the check is not remembered from the
+        # first run.
+        job.nodes["sink"].clear_cache()
         with pytest.raises(SideEffectLogDataContextError) as info:
             _ = job.run()
         assert old_path in info.value.record_paths
@@ -239,11 +242,13 @@ class TestSideEffectNodeChecksEveryRun:
         _ = job.run()
         assert sorted(delivered) == [1, 2]
         delivered.clear()
+        job.nodes["notify"].clear_cache()  # a current node is not run again (ITL-1095)
         _ = job.run()  # nothing new in the store: runs, and delivers nothing again
         assert delivered == []
 
         old_path = _add_table_written_before_v03(store, "pdb_v2", "pdb_v1")
 
+        job.nodes["notify"].clear_cache()
         with pytest.raises(SideEffectLogDataContextError) as info:
             _ = job.run()
         assert old_path in info.value.record_paths

@@ -103,6 +103,10 @@ def test_v02_rows_are_ignored_recomputed_and_kept(
     # Read through a newly built job: a Delta database object that read a table before
     # the run does not see the rows the run added to it (not specific to hash labels).
     stored = build_job(store)
+    # A node shows rows only after a run (ITL-1095): a load-only run reads them from the
+    # store and computes nothing.
+    stored.run(orchestrator=orchestrator, load_only=True)
+    assert CALLS == ["plus_two"] * len(ARRAYS)
     rows = [
         (t.as_dict()["k"], d.as_dict()["y"])
         for t, d in stored.nodes["double"].iter_data()
@@ -154,5 +158,8 @@ def test_second_run_reuses_the_rows_of_this_version(store: Path) -> None:
 
     assert CALLS == []
     stored = build_job(store)
+    # A node shows rows only after a run (ITL-1095): a load-only run reads them.
+    stored.run(load_only=True)
+    assert CALLS == []
     for label in ("double", "total", "direct_sum", "plus_one", "after_drop"):
         assert stored.nodes[label].as_table().num_rows == len(ARRAYS), label

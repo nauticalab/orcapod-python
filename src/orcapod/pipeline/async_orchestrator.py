@@ -31,6 +31,9 @@ from orcapod.protocols.node_protocols import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from orcapod.channels import WritableChannel
     from orcapod.pipeline.dag import GraphProtocol
     from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
@@ -75,6 +78,8 @@ class AsyncPipelineOrchestrator:
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",
+        load_only: bool = False,
+        held_rows: Mapping[Any, list[tuple[TagProtocol, DataProtocol]]] | None = None,
     ) -> OrchestratorResult:
         """Synchronous entry point — runs the async pipeline to completion.
 
@@ -118,6 +123,8 @@ class AsyncPipelineOrchestrator:
                     observer=observer,
                     run_id=run_id,
                     pipeline_uri=pipeline_uri,
+                    load_only=load_only,
+                    held_rows=held_rows,
                 )
             )
 
@@ -138,6 +145,8 @@ class AsyncPipelineOrchestrator:
                 observer=watched,
                 run_id=run_id,
                 pipeline_uri=pipeline_uri,
+                load_only=load_only,
+                held_rows=held_rows,
             )
 
         return _run_on_own_thread(make_run, rows_in_flight)
@@ -150,6 +159,8 @@ class AsyncPipelineOrchestrator:
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",
+        load_only: bool = False,
+        held_rows: Mapping[Any, list[tuple[TagProtocol, DataProtocol]]] | None = None,
     ) -> OrchestratorResult:
         """Async entry point for callers already inside an event loop.
 
@@ -161,6 +172,9 @@ class AsyncPipelineOrchestrator:
                 generated automatically.
             pipeline_uri: Opaque URI string identifying this pipeline run.
                 Forwarded verbatim to ``observer.on_run_start``.
+            load_only: As for ``SyncPipelineOrchestrator.run``.
+            held_rows: As for ``SyncPipelineOrchestrator.run``: nodes not run, whose
+                rows feed their successors.
 
         Returns:
             OrchestratorResult with node outputs.
@@ -171,6 +185,8 @@ class AsyncPipelineOrchestrator:
             observer=observer,
             run_id=run_id,
             pipeline_uri=pipeline_uri,
+            load_only=load_only,
+            held_rows=held_rows,
         )
 
     async def _run_async(
@@ -181,6 +197,8 @@ class AsyncPipelineOrchestrator:
         observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
         pipeline_uri: str = "",
+        load_only: bool = False,
+        held_rows: Mapping[Any, list[tuple[TagProtocol, DataProtocol]]] | None = None,
     ) -> OrchestratorResult:
         """Core async logic: wire channels, launch tasks, collect results."""
         from orcapod.pipeline.observer import NoOpObserver
@@ -242,7 +260,16 @@ class AsyncPipelineOrchestrator:
                         collector = collectors[node]
                         writer = _CollectingWriter(writer, collector)
 
-                    if is_source_node(node):
+                    if held_rows is not None and node in held_rows:
+                        # Not run: the rows of its current run feed its successors. Its
+                        # own inputs are read and discarded, so no producer blocks on
+                        # a channel nobody reads.
+                        for upstream in in_edges.get(node, []):
+                            tg.create_task(_drain(edge_readers[(upstream, node)]))
+                        _start_node(
+                            tg, failed_nodes, node, _send_held(held_rows[node], writer)
+                        )
+                    elif is_source_node(node):
                         _start_node(
                             tg,
                             failed_nodes,
@@ -266,6 +293,7 @@ class AsyncPipelineOrchestrator:
                                 observer=effective_observer,
                                 error_policy=self._error_policy,
                                 run_id=run_id,
+                                load_only=load_only,
                             ),
                         )
                     elif is_operator_node(node):
@@ -286,7 +314,10 @@ class AsyncPipelineOrchestrator:
                             failed_nodes,
                             node,
                             node.async_execute(
-                                input_readers, writer, observer=effective_observer
+                                input_readers,
+                                writer,
+                                observer=effective_observer,
+                                load_only=load_only,
                             ),
                         )
                     elif is_side_effect_node(node):
@@ -296,6 +327,8 @@ class AsyncPipelineOrchestrator:
                                 "SideEffectNode expects exactly 1 upstream, got 0"
                             )
                         input_reader = edge_readers[(predecessors[0], node)]
+                        # In a load-only run the node passes its rows on and delivers
+                        # nothing.
                         _start_node(
                             tg,
                             failed_nodes,
@@ -305,6 +338,7 @@ class AsyncPipelineOrchestrator:
                                 writer,
                                 observer=effective_observer,
                                 run_id=run_id,
+                                load_only=load_only,
                             ),
                         )
                     else:
@@ -602,6 +636,24 @@ class _RowsInFlight:
         from orcapod.pipeline.observer import NoOpLogger
 
         return NoOpLogger()
+
+
+async def _drain(reader: Any) -> None:
+    """Read ``reader`` to its end, keeping nothing."""
+    async for _ in reader:
+        pass
+
+
+async def _send_held(
+    rows: list[tuple[TagProtocol, DataProtocol]],
+    writer: WritableChannel[tuple[TagProtocol, DataProtocol]],
+) -> None:
+    """Send the rows of a node the run holds rather than runs, then close."""
+    try:
+        for row in rows:
+            await writer.send(row)
+    finally:
+        await writer.close()
 
 
 def _start_node(

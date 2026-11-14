@@ -498,14 +498,14 @@ conversion. Two specializations:
 
 Stream (core/streams/arrow_table_stream.py) — immutable (Tag, Data) sequence.
 Key methods: output_schema(), keys(), iter_data(), as_table().
-Every stream, source and node has run() with no arguments (developer, November 13, 2026,
-ITL-1081): it does the work as_table() does (a job node runs as in a job) and returns a
+Every stream, source and node has run() with no positional arguments (developer, November 13,
+2026, ITL-1081): it does the work as_table() does (a job node runs as in a job) and returns a
 StreamView of every row; the view's head/tail/sort_by_tags choose what is shown.
 head() and the notebook preview never compute (ITL-991, ITL-912): they never compute, poll or deliver a row (they read only what is held or stored, or a bounded table read), never call user code (a function, a predicate, a side effect) and never
 write. With no rows to show they learn the column types by applying operators to zero-row
 tables, which processes no data; an operator whose output schema is its input's
-(OUTPUT_SCHEMA_IS_INPUT_SCHEMA, PolarsFilter) is not applied at all. A user-defined operator's static_process is applied to zero-row tables and must not have effects. Never give run()
-arguments.
+(OUTPUT_SCHEMA_IS_INPUT_SCHEMA, PolarsFilter) is not applied at all. A user-defined operator's static_process is applied to zero-row tables and must not have effects. A job node's run() takes one keyword-only
+argument, load_only (ITL-1095); never give any other run() an argument.
 
 Source (core/sources/) — produces a stream from external data. ArrowTableSource is the core
 implementation; CSV/Delta/DataFrame/Dict/List sources all delegate to it internally. Each
@@ -800,23 +800,44 @@ data. The rules:
   by the user is never changed. SourceStreamBuilder.build has no bare-hash default: it
   needs a source_id or a source_kind.
 - ArrowTableStream requires at least one data column; raises ValueError otherwise.
-- After a run, a FunctionJobNode returns exactly the rows of that run's inputs, sync or
-  async (ITL-1093; a run that raised defines no rows). Read without a completed run in this
-  process (a fresh or loaded job), it returns every record stored under its content hash for
-  the current data context, not only its current inputs. A run skips inputs whose entry is
-  already stored.
+- A job node shows its current run; node.as_source() shows everything stored for it
+  (developer, November 13, 2026, ITL-1095). After a run, a FunctionJobNode returns exactly
+  the rows of that run's inputs, sync or async (ITL-1093). Before a run in this process (a
+  fresh or loaded job), after a run that raised, after clear_cache(), and while stale, every
+  function and operator job node reads empty (zero typed rows; head() is not_computed and
+  points to run() and as_source()), in every cache mode: no read touches the store. A
+  never-run or cleared node has no modified time, so it is stale; a job node is stale also
+  when any function or operator job node it depends on is (core/nodes/staleness.py), and a
+  SourceJobNode is modified when it is bound or its bound source is. A run skips inputs
+  whose entry is already stored. A loaded operator's stored view raises when its run's rows
+  cannot be named (ITL-1043). job.run(load_only=True) computes nothing and writes nothing: function nodes
+  load their own stored entries for this run's inputs and skip (and count) the others,
+  operators run without storing, side-effect nodes pass rows on undelivered.
+  A job node's run(*, load_only=False) is state-driven: a node that holds a completed,
+  non-stale run (for a full run: not load-only, nor anything above it) runs nothing;
+  otherwise its non-current dependencies run first, each once, on the sync orchestrator
+  (pipeline/node_run.py), and the run commits as job.run() does. A failed end-of-run
+  commit clears every node of the run. A load-only run's rows have status
+  loaded_only. Only job nodes' run() takes an argument (load_only).
+  A loaded job (PipelineJob.load) runs only with load_only=True.
+  job.run()/run_async() use the same state rule and plan (node_run.plan_run): a current node is
+  held (not run; its rows feed its successors, both orchestrators take held rows), sources
+  are read only for nodes that run, a failed end-of-run commit clears only the nodes that ran,
+  and the summary reports held nodes (NodeRunSummary.held). REPLAY replays every logged run
+  of its key (ITL-1098).
 - Empty data → ArrowTableSource raises ValueError("Table is empty").
 - A side-effect job node delivers only when it runs (developer, November 13, 2026, ITL-1091):
-  job.run(), node.run() (the job run's work for that node: with track_completion only
-  what the invocation log does not record, without it every row again), execute,
-  async_execute. Every read (iter_data, as_table, dataframes, flow, head, preview, a
+  job.run(), node.run() (state-driven, ITL-1095: a node holding a current run delivers
+  nothing, so clear_cache() it first to deliver again; otherwise the job run's work for that
+  node: with track_completion only what the invocation log does not record, without it every
+  row), execute, async_execute; a load-only run delivers nothing. Every read (iter_data, as_table, dataframes, flow, head, preview, a
   downstream node's read) returns the rows its last run in this process passed on, held in
   memory (SideEffectJobNode._held_rows), and delivers nothing; with none (no run, a run that
   raised, or stale by is_stale) a read returns zero rows. Never route a job node's read to
   the standalone delivery path. The standalone SideEffectPodStream still delivers on every
   consuming read (iter_data, as_table, dataframes, flow, run); its head() and
   preview deliver nothing.
-- DerivedSource over a job node before run() → presents zero rows with the origin's columns
+- DerivedSource over a job node with nothing stored → presents zero rows with the origin's columns
   (no computed records; no error), in the plain form and with tags_as_data.
 - Join requires non-overlapping data columns; raises InputValidationError on collision.
 - MergeJoin requires colliding data columns to have identical Python types; merges into sorted

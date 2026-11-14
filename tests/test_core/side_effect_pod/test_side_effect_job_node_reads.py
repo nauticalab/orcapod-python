@@ -184,15 +184,26 @@ def test_node_run_delivers_what_the_log_does_not_record(
 
 
 @pytest.mark.parametrize("orchestrator", ["sync", "async"])
-def test_node_run_without_track_completion_delivers_every_row_as_a_job_run_does(
+def test_node_run_without_track_completion_delivers_again_only_after_clear_cache(
     orchestrator: Orchestrator,
 ) -> None:
-    """Without ``track_completion``, ``node.run()`` delivers every row again, as ``job.run()`` does."""
+    """Without ``track_completion``, a node that holds a current run delivers nothing on
+    ``node.run()`` (ITL-1095); after ``clear_cache()`` it delivers every row again, as
+    ``job.run()`` does."""
     job, sent = _job(track_completion=False)
     _run(job, orchestrator)
     view = job.nodes["delivered"].run()
+    assert len(sent) == ROWS
+    assert len(view) == ROWS
+    job.nodes["delivered"].clear_cache()
+    view = job.nodes["delivered"].run()
     assert len(sent) == 2 * ROWS
     assert len(view) == ROWS
+    # job.run() follows the same rule: the node holds a current run, so it delivers
+    # nothing; cleared, it delivers every row again.
+    _run(job, orchestrator)
+    assert len(sent) == 2 * ROWS
+    job.nodes["delivered"].clear_cache()
     _run(job, orchestrator)
     assert len(sent) == 3 * ROWS
     # The reads after either kind of run deliver nothing.
@@ -218,6 +229,8 @@ def test_an_async_run_holds_exactly_its_own_rows(track_completion: bool) -> None
     """After two async runs, the node holds the rows of the last run only."""
     job, sent = _job(track_completion=track_completion)
     _run(job, "async")
+    # A node holding a current run is not run again (ITL-1095): clear it first.
+    job.nodes["delivered"].clear_cache()
     _run(job, "async")
     node = job.nodes["delivered"]
     assert len(node.as_table()) == ROWS
@@ -319,6 +332,9 @@ def test_rows_held_from_a_run_are_dropped_when_an_upstream_changes(
     _run(job, orchestrator)
     node = job.nodes["delivered"]
     assert len(node.as_table()) == ROWS
+    # The upstream runs again: a node that holds a current run runs nothing (ITL-1095),
+    # so it is cleared first.
+    job.nodes["up"].clear_cache()
     _ = job.nodes["up"].run()
     for name, read in _reads(node).items():
         _ = read()

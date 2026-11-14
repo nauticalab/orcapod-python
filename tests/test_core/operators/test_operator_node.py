@@ -375,6 +375,9 @@ class TestOperatorNodeRunAndStorage:
         node_replay = _make_node(
             op, (simple_stream,), db=db, cache_mode=CacheMode.REPLAY
         )
+        # A node shows rows only after a run (ITL-1095); REPLAY's run reads the cache.
+        assert node_replay.as_table().num_rows == 0
+        node_replay.run()
         table = node_replay.as_table()
         assert table.num_rows == 3
         assert "renamed_x" in table.column_names

@@ -202,8 +202,9 @@ def ks(job: PipelineJob, label: str) -> list[str]:
 
 
 def stored(store: Any, build: Callable[[Any, list[int]], PipelineJob], label: str):
-    """The rows a fresh job over ``store`` reads for ``label`` without running."""
-    return build(store, xs_failing_at(0)).nodes[label].as_table()
+    """Every row ``store`` holds for ``label``: the node's stored view (``as_source()``;
+    a node itself shows only its current run, ITL-1095)."""
+    return build(store, xs_failing_at(0)).nodes[label].as_source().as_table()
 
 
 @pytest.fixture(params=list(ORCHESTRATORS))
@@ -355,10 +356,10 @@ def test_fail_fast_leaves_the_nodes_with_no_run(
 ) -> None:
     """After a fail_fast raise, the failing node and the node after it hold no run.
 
-    A run that raised defines no rows (ITL-1093): each node reads as a node with no run,
-    every row stored under its content hash, also the downstream node the async run
-    cancelled. Another job stores rows of other values first, so a node still holding
-    its previous run's rows reads fewer rows than a node with no run.
+    A run that raised defines no rows (ITL-1093): each node it ran reads as a node with no
+    run, which is empty (ITL-1095), also the downstream node the async run cancelled; what
+    was stored stays readable through ``as_source()``. Another job stores rows of other
+    values first, so the stored view holds both jobs' rows.
     """
     store = InMemoryArrowDatabase()
     run_job(build(store, [100 + i for i in range(N_ROWS)]), orchestrator, "continue")
@@ -372,10 +373,11 @@ def test_fail_fast_leaves_the_nodes_with_no_run(
         run_job(job, orchestrator, "fail_fast")
 
     for label in ("f", "down"):
-        no_run = rows_of(build(store, xs).nodes[label].as_table())
-        assert rows_of(job.nodes[label].as_table()) == no_run, label
-        # Also the other job's rows: not the previous run's rows only.
-        assert len(no_run) == 2 * N_ROWS - 1, label
+        node = job.nodes[label]
+        assert node.as_table().num_rows == 0, label
+        assert node.is_stale, label
+        # Every stored row stays: the other job's rows and this job's.
+        assert len(rows_of(node.as_source().as_table())) == 2 * N_ROWS - 1, label
 
 
 # The row ``sibling`` leaves uncomputed until the run that is cancelled.
@@ -407,7 +409,8 @@ def test_a_node_cancelled_on_another_branch_holds_no_run() -> None:
     """A node the async run cancels, not downstream of the failure, holds no run either.
 
     ``g`` waits at its one uncomputed row until the failure of ``f`` cancels it. Its
-    previous run's rows are not held: it reads as a node with no run (ITL-1093).
+    previous run's rows are not held: it reads as a node with no run (ITL-1093), which is
+    empty (ITL-1095); its stored rows stay readable through ``as_source()``.
     """
     store = InMemoryArrowDatabase()
     other = [100 + i for i in range(N_ROWS)]
@@ -425,9 +428,10 @@ def test_a_node_cancelled_on_another_branch_holds_no_run() -> None:
     finally:
         sibling_mode["mode"] = "fail"
 
-    no_run = rows_of(branches_job(store, xs).nodes["g"].as_table())
-    assert rows_of(job.nodes["g"].as_table()) == no_run
-    assert len(no_run) == 2 * N_ROWS - 1
+    g = job.nodes["g"]
+    assert g.as_table().num_rows == 0
+    assert g.is_stale
+    assert len(rows_of(g.as_source().as_table())) == 2 * N_ROWS - 1
 
 
 def test_an_observer_failing_at_node_end_is_called_once(orchestrator: str) -> None:

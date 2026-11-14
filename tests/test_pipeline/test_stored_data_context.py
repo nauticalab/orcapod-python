@@ -48,6 +48,7 @@ from orcapod.errors import (
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 from orcapod.side_effects import SideEffectPod, sink_pod
 from orcapod.sources import ArrowTableSource, DictSource
+from orcapod.core.streams import ViewStatus
 from orcapod.types import CacheMode, NodeConfig
 
 Orchestrator = SyncPipelineOrchestrator | AsyncPipelineOrchestrator
@@ -764,9 +765,15 @@ class TestRowsOfAnotherDataContext:
     def test_function_node_reads_current_rows_only(
         self, new_store: Callable[[], Store]
     ):
-        """Every read method of a function node returns only the rows of ``CURRENT``."""
+        """Every read method of a function node returns only the rows of ``CURRENT``.
+
+        A node shows rows only after a run (ITL-1095); the run reads them from the store.
+        """
         store = both_contexts_store(new_store)
-        node = build_job(store).nodes["dbl"]
+        job = build_job(store)
+        _ = job.run()
+        assert calls == []
+        node = job.nodes["dbl"]
         assert rows_of(node.as_table()) == [2, 4]
         assert rows_of(node.get_all_records()) == [2, 4]
         assert sorted(d.as_dict()["double"] for _, d in node.iter_data()) == [2, 4]
@@ -980,7 +987,9 @@ class TestSideEffects:
             _ = build_job(store, with_sink=True).run()
 
         assert delivered == []
-        assert rows_of(build_job(store).nodes["dbl"].as_table()) == [2, 4]
+        # The function node's stored rows are readable (the stored view: a node shows
+        # rows only after a run, ITL-1095).
+        assert rows_of(build_job(store).nodes["dbl"].as_source().as_table()) == [2, 4]
 
     def test_completions_logged_by_this_version_are_not_delivered_again(
         self, store: Store, orchestrator: Orchestrator
@@ -1258,9 +1267,10 @@ class TestInputOfAnotherDataContext:
         """A run refused for its input's data context defines no rows (ITL-1093).
 
         After a good run the node holds that run's rows; a later sync run refused for its
-        input's data context drops them, and the node reads its stored rows, as with no
-        run in this process. (On the async path the context checked is the node's own
-        input stream's, so a node refused there never had a run.)
+        input's data context drops them, and the node reads as with no run in this
+        process: empty (ITL-1095); its stored view keeps the rows. (On the async path the
+        context checked is the node's own input stream's, so a node refused there never
+        had a run.)
         """
         table = pa.table(
             {"k": ["a", "b"], "x": [1, 2]},
@@ -1283,8 +1293,10 @@ class TestInputOfAnotherDataContext:
         with pytest.raises(InputValidationError):
             node.execute(_other_context_stream())
 
-        assert node.head(10).origin == "stored"
-        assert sorted(row["double"] for row in node.as_table().to_pylist()) == [2, 4]
+        assert node.head(10).status is ViewStatus.NOT_COMPUTED
+        assert node.as_table().num_rows == 0
+        stored = node.as_source().as_table().to_pylist()
+        assert sorted(row["double"] for row in stored) == [2, 4]
 
     def test_add_pipeline_record_refuses_an_input_of_another_data_context(
         self, store: Store

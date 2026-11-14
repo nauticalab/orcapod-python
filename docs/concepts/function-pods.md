@@ -332,12 +332,20 @@ database. Each recorded step becomes a node, available afterwards as `job.nodes[
 listed under its `source_id`). A node is a
 stream, so `as_table()`, `iter_data()` and `output_schema()` all work on it.
 
-After `job.run()`, a function node returns exactly the rows of that run's inputs, on either
-orchestrator. The database may hold more under the same node: results of an earlier run
-over other rows of the source stay stored and are reused when those rows come back, but
-they are not rows of this run. A run that raised defines no rows. A node read with no
-finished run in this process (a job built but not run, or a loaded job) returns every row
-stored under its key.
+A job node shows the current run; `node.as_source()` shows everything stored for it
+(developer, November 13, 2026). After `job.run()`, a function node returns exactly the rows
+of that run's inputs, on either orchestrator. The database may hold more under the same
+node: results of an earlier run over other rows of the source stay stored and are reused
+when those rows come back, but they are not rows of this run. Before a run in this process
+(a job built over a store that already holds results, or a loaded job) every node is empty:
+`as_table()`, `iter_data()`, `head()` and the preview show no rows, and the preview says the
+node has not run and points to `run()` and to `as_source()`. A run fills it, also when every
+result is read from the store and nothing is computed. A run that raised defines no rows,
+and so does `clear_cache()`; a node whose input changed since its run (an upstream node ran
+again, or a source was bound again) is stale and empty until it runs again. The stored view,
+`node.as_source()`, reads every record stored under the node's key, whether or not the node
+has run: the node's stored history, which keeps an entry's earlier result next to its
+recomputed one, where a run loads only the latest.
 
 `InMemoryArrowDatabase` lasts only as long as the Python process. Use
 `DeltaTableDatabase("some/directory")` from `orcapod.databases` to keep results on disk
@@ -533,6 +541,92 @@ print(summary.ok, summary.failed_rows)
 # False 3
 ```
 
+### Loading without computing: `run(load_only=True)`
+
+A job node shows the rows of its current run, so a job built over a store that already holds
+its results is empty until it runs. A run that finds every result stored computes nothing,
+but it does compute the results that are missing. `job.run(load_only=True)` fills the nodes
+with what is already stored for this run's inputs and never computes: sources are read,
+operators run on the rows that reach them, each function node takes the stored results of
+its inputs and skips the inputs that have none, no side effect is delivered and nothing is
+written to the store. The summary counts what each node loaded and skipped:
+
+```python
+more_mice = mice + [{"subject_id": "mouse_04", "weight": 30.0, "height": 0.12}]
+
+load_job = PipelineJob(name="bmi_demo", database=db)
+with load_job:
+    source = DictSource(data=more_mice, tag_columns=["subject_id"], source_id="mice")
+    compute_bmi.pod(source, label="bmi")
+
+print(load_job.nodes["bmi"].as_table().num_rows)  # not run in this process: empty
+# 0
+calls.clear()
+summary = load_job.run(load_only=True)
+print(summary)
+# Load-only run of job 'bmi_demo': 1 row without a stored result skipped.
+#   bmi: 4 rows: 3 loaded, 1 not stored (skipped)
+print(load_job.nodes["bmi"].as_table().num_rows, "rows; function calls:", len(calls))
+# 3 rows; function calls: 0
+```
+
+`summary.nodes["bmi"].not_stored` is the number of skipped inputs, and
+`summary.nodes[label].inputs_incomplete` names the function nodes above a node that skipped
+inputs. A function node passes on only the rows it loaded, so the rows below it are
+incomplete: a group formed after it may lack members, and the result stored for a smaller
+group by an earlier run may then be loaded for it. `run_async(load_only=True)` does the same
+on the asynchronous orchestrator.
+
+### Running again: what a run runs
+
+`job.run()`, `await job.run_async()` and `job.nodes[label].run()` decide what to run from
+each node's state (developer, November 13 and 14, 2026). `node.run()` runs that node
+together with the job nodes it depends on and returns a view of its rows; `job.run()` does
+the same for every node of the job.
+
+| State of a node | What it shows | A run | A load-only run |
+|---|---|---|---|
+| Not run in this process (a fresh or loaded job), cleared, or stale | nothing: `head()` says "not run" (`not_computed`) | runs it | loads it |
+| Filled by a load-only run | the rows it loaded: status `loaded_only`, "N loaded, M inputs without a stored result" | runs it, computing what it skipped | holds it |
+| Filled by a run | that run's rows (`rows`) | holds it | holds it |
+
+A node that is held is not run: its rows feed the nodes after it, and nothing is computed,
+read from the store, written or delivered for it. So running an unchanged job again does
+nothing, also on the asynchronous orchestrator, and the summary says so per node:
+"rowwise: 6 rows: held from the previous run" (`summary.nodes["rowwise"].held`). A load-only
+run's rows are never held by a full run, nor are the rows of any node below them. A source
+is read only when a node that runs reads it.
+
+A node whose last run left failed rows (with the default `error_policy="continue"`) is not
+held either: the next run computes only the failed rows and reads the rest from the store,
+so running the job again after fixing a transient failure retries exactly those rows.
+
+A node is stale, and runs, when:
+
+- it has not run in this process, its last run raised, or the commit at the end of its run
+  failed;
+- `clear_cache()` was called on it, or on any job node above it;
+- a job node above it ran again;
+- its source was bound again (`job.bind(sources=...)`), or the bound source's own modified
+  time moved (a `CachedSource` that read new rows, a `PollingSource` that polled).
+
+Staleness comes from modified times only, so a re-run does not notice new data in a source
+whose object is unchanged (a start-of-run check for new data is planned, ITL-1102). Most
+sources hold the data they read when they were built: an in-memory source (a `DictSource`
+copies the list it is given), a CSV, Delta or database table source, and a
+`SpiralDBTableSource` pinned to the table version it found. For those, build a new source
+object and bind it (`job.bind(sources=...)`): every node that reads it becomes stale and
+runs; clearing the nodes below would only read the same data again. A `PollingSource` polls
+when it is read, so `clear_cache()` on each node that reads it directly (one per branch)
+makes the next run poll it and process its new rows. To deliver a side effect again (with
+`track_completion=False`), call `clear_cache()` on its node first.
+
+`node.last_run` holds the counts of a `node.run()`, as `job.last_run` does for `job.run()`,
+and a run's writes are committed when it ends; when everything is held there is nothing to
+commit. If that commit fails, the nodes the run ran are cleared (they read as not run); the
+nodes it held keep their rows. A held node fires no observer hook and cannot fail, so the
+orchestrator's `error_policy` has nothing to apply to it.
+
 ### Stopping at the first failed row
 
 Pass an orchestrator with `error_policy="fail_fast"` to stop the run at the first row whose
@@ -568,9 +662,9 @@ has finished. When rows of several nodes fail before the run stops, one error is
 the others are noted on it (`error.__notes__`): a store error first (see "When the store
 cannot be written" below), then a `TypeIdentityError`, and otherwise the error of the node
 that comes first in the pipeline. A node cancelled by the failure commits the results it
-wrote before it stops. A run that raised defines no rows: afterwards the failing node, and
-every node the run cancelled, reads as a node with no finished run, every row stored under
-its key.
+wrote before it stops. A run that raised defines no rows: afterwards every node the run ran,
+the failing node and every node the run cancelled included, reads as a node that has not
+run (empty; its stored rows are read with `as_source()`), and the next run runs it again.
 
 What is stored after such a run:
 
@@ -650,6 +744,9 @@ keeps that output in memory and, with the default `cache_mode=OFF`, stores nothi
 `get_all_records()` returns `None` when no matching records exist; records from an earlier
 LOG run remain readable after switching to OFF. Calling `clear_cache()` on it discards the
 output, and it then reads as a zero-row table, as before the first run, until the job runs again.
+An operator node attached in `CacheMode.REPLAY` does not compute: its run replays the rows
+stored under its key by `CacheMode.LOG` runs, every logged run of that key, not only the
+latest; before its run it shows nothing, like every node (a narrower replay is ITL-1098).
 
 ### When the store cannot be written
 
@@ -784,37 +881,52 @@ with job:
 job.run()
 job.save(workdir / "bmi_job.json")
 
-loaded = PipelineJob.load(workdir / "bmi_job.json")
-print(loaded.nodes["bmi"].as_table().sort_by("subject_id").to_pandas())
+loaded = PipelineJob.load(workdir / "bmi_job.json")  # its nodes are empty until it runs
+print(loaded.nodes["bmi"].as_table().num_rows)  # not run in this process: empty
+# 0
+print(loaded.nodes["bmi"].as_source().as_table().sort_by("subject_id").to_pandas())
 #   subject_id          bmi
 # 0   mouse_01  1756.944444
 # 1   mouse_02  2210.000000
 # 2   mouse_03  2297.520661
 ```
 
-A loaded job is for reading stored results. It cannot be run again: function pods are not
-saved with the job, so `loaded.run()` raises. To compute again, build the job from your code
-as before.
+A loaded job is for reading stored results. Its nodes have not run in this process, so
+they are empty; each node's stored view, `node.as_source()`, reads what the store holds. A
+loaded job cannot compute: function pods are not saved with it, so `loaded.run()` raises.
+`loaded.run(load_only=True)` fills its nodes from the store instead, as for any job (see
+*Loading without computing* above): the sources are read (an in-memory source must be bound
+first, since its data is not saved), the rebuilt operators run, and each function node takes
+the results stored for those inputs. Nodes below a source that is not available stay empty.
+`node.run(load_only=True)` does the same for one node and what it depends on.
 
-The store is the source of truth: a loaded job shows what the store holds for it. The job
-file names each run's rows by the content hash the run stored them under, so a loaded node
-reads exactly what the same node built from your code would read from that store, and no
-rows under that key is an empty result, not an error.
+```python
+loaded.bind(sources={"mice": DictSource(data=mice, tag_columns=["subject_id"], source_id="mice")})
+summary = loaded.run(load_only=True)
+print(loaded.nodes["bmi"].as_table().num_rows, summary.nodes["bmi"].not_stored)
+# 3 0
+```
 
-- A function node's `as_table()`, `iter_data()` and `get_all_records()` return the rows
-  stored under the saved run's key, with the types they were stored with: those of every
-  run of that node over the same sources, not only the saved run's inputs. Rows come in the order the store
-  returns them; sort them if order matters.
+To compute again, build the job from your code as before.
+
+The store is the source of truth: a loaded job's stored views show what the store holds for
+it. The job file names each run's rows by the content hash the run stored them under, so a
+loaded node's stored view reads exactly what the same node built from your code would read
+from that store, and no rows under that key is an empty result, not an error.
+
+- A function node's `as_source()` and `get_all_records()` return the rows stored under the
+  saved run's key, with the types they were stored with: those of every run of that node
+  over the same sources, not only the saved run's inputs. Rows come in the order the store
+  returns them; sort them if order matters. The node itself (`as_table()`, `iter_data()`,
+  `head()`) is empty: it has not run in this process.
 - Operators (a join, a filter) store outputs only when caching is enabled, under `odb_v1`.
   The saved file does not record an operator's cache mode (follow-up ITL-977), so attach a
   loaded operator node in `CacheMode.REPLAY` to read the rows its run stored:
   `loaded.nodes["joined"].attach_databases(pipeline_database=store.at("<job name>"),
-  cache_mode=CacheMode.REPLAY)`. A loaded operator node reads exactly as the same node built
-  from your code and attached in `CacheMode.REPLAY`; when the store holds no rows under the
-  node's key (no table, or none of its rows), the answer is an empty result, as for that
-  node. A loaded operator not attached in `REPLAY` has no readable cache and raises from
-  `as_table()` and `iter_data()`; read its input nodes instead (an in-memory input source
-  must be bound first, see below), or build the job from your code.
+  cache_mode=CacheMode.REPLAY)`, then read its stored view, `as_source()`, which reads
+  exactly as the same node built from your code would; when the store holds no rows under
+  the node's key (no table, or none of its rows), the answer is an empty result, as for that
+  node. A loaded operator node itself is empty, like every node that has not run.
 - A loaded node has the pipeline hash, content hash, table path and output schema its run
   had (a source node whose data was not saved gets its run's content hash once its source is
   bound). The file records which columns may be null (`T | None`), because the Arrow type text
@@ -823,8 +935,8 @@ rows under that key is an empty result, not an error.
   file's format version: a file without them (format `0.1.0`, or a `0.2.0` file written
   before they existed) still loads, but lossy: its schemas read every column as non-null,
   and a loaded operator node cannot name its run's rows. When the store holds none under the
-  content hash the loaded job computes, `as_table()` and `iter_data()` raise, and `head()`
-  shows no rows and says why, rather than presenting stored rows as none. An empty record is
+  content hash the loaded job computes, its stored view (`as_source()`, `get_all_records()`)
+  raises and says why, rather than presenting stored rows as none. An empty record is
   not a missing one: it says that no column may be null. Saving such a loaded job again does
   not record what its file did not. Upgrading such files is left to a migration tool after
   v0.3.
@@ -837,9 +949,9 @@ rows under that key is an empty result, not an error.
   `PipelineJob.load(path, database=...)` if the store has moved.
 - The job file may also hold an optional, advisory section, `run.expected_rows`: for each
   node, how many rows the store held under its run's key when the job was saved (written
-  only when that is certain: after a run that finished). Reading a loaded node always
-  returns what the store holds; when the store holds another number of rows, the read
-  issues one `StoreContentWarning` per node, naming the node, both numbers and the store:
+  only when that is certain: after a run that finished). Reading a loaded node's stored
+  view always returns what the store holds; when the store holds another number of rows,
+  the read issues one `StoreContentWarning` per node, naming the node, both numbers and the store:
   the store may not be the one the run wrote, or it may have changed since. Deleting the
   section from the file changes nothing but this check.
 

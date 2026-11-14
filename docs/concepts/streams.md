@@ -215,8 +215,8 @@ What `run()` does on each kind of object:
 | A `PollingSource` | polls, as `as_table()` does |
 | A `CachedSource` | reads its cache and writes the wrapped source's new rows to it |
 | A function pod's or operator's output stream | computes what is not computed yet |
-| A job node | runs the node as a job run would (`as_table()` of a job node only reads), then returns the view |
-| A job's side-effect node | runs the node as `job.run()` does: delivers what its invocation log does not record (every row again without `track_completion`), then returns the rows it passed on; every read after it only reads |
+| A job node | runs the node as a job run would, after every job node it depends on that holds no current run (each once), commits, and returns the view of that run's rows; a node that holds a current run (completed in this process and not stale) runs nothing. `run(load_only=True)` loads stored results only. `as_table()` of a job node only reads |
+| A job's side-effect node | runs as a job node does (row above): delivers what its invocation log does not record (every row again without `track_completion`), then returns the rows it passed on; a node that holds a current run delivers nothing (`clear_cache()` it first to deliver again); every read only reads |
 | A side-effect stream outside a job | delivers its side effects for every row, on every call, and returns the rows it passed on; `head()` still shows none |
 | A pipeline blueprint node, an unbound input slot | raises, as `as_table()` does |
 
@@ -226,7 +226,7 @@ What each kind of object shows:
 |---|---|
 | A source | its first rows (a bounded read for a source that reads its table lazily) |
 | An operator's or function pod's output stream | the rows already computed, or none with status `not_computed` |
-| A job node | the rows it holds after `job.run()`, else the first of its stored rows, else none (`nothing_stored`) |
+| A job node | the rows of its current run (after `job.run()` or `node.run()`); before a run in this process, or once stale, none (`not_computed`), pointing to `run()` and to `node.as_source()`, the view of every stored result |
 | A pipeline blueprint node, an unbound input slot | none (`unavailable`) |
 | A job's side-effect node | the rows its last run passed on, else none (`not_computed`); it never delivers, and neither do its `as_table()`, `iter_data()` and other reads |
 | A side-effect stream outside a job | none: showing it never delivers its side effects |
@@ -252,7 +252,7 @@ print(unordered.head(2, all_info=True).as_table().column("subject_id").to_pylist
 # ['mouse_01', 'mouse_02']
 ```
 
-A stream that has all of its rows (a job node's stored rows, a computed stream, an in-memory
+A stream that has all of its rows (a job node after its run, a computed stream, an in-memory
 source) then gives exactly the first `n` rows of `as_table` with the same configuration,
 whatever order the rows were computed in. A stream that has only some of its rows sorts
 those: a source that reads a bounded number of rows (such as a `SpiralDBTableSource`) shows
@@ -272,7 +272,8 @@ rows, can be missing from it even when `columns` or `all_info` asks for them.
 A stream or node records that its results are current when it has read its input to the end.
 So after `job.run()` on either orchestrator, sync or async, every node shows the rows of that
 run: `head()`, `as_table()` and `iter_data()` serve them from memory, without reading the
-store (a function node whose run left no rows in memory reads its stored rows). Likewise, once a chain of streams such as `g.pod(f.pod(source))` has been read to the
+store. Before its run in this process a job node holds nothing and shows no rows, whatever
+its store holds; `node.as_source()` reads the store. Likewise, once a chain of streams such as `g.pod(f.pod(source))` has been read to the
 end, reading it again computes nothing. A change upstream (`clear_cache()`) makes every stream
 after it out of date, and its next read computes it again.
 Two reads of one stream open at the same time, or a read that picks up one left partway, share

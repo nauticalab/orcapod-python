@@ -127,7 +127,8 @@ def test_registered_logical_output_keeps_join_available(
 
     loaded = op.PipelineJob.load(path)
     assert loaded.nodes["value"].output_schema()[1]["value"] is expected_type
-    assert loaded.nodes["value"].as_table().num_rows == 1
+    # A loaded node is empty until it runs (ITL-1095): read its stored view.
+    assert loaded.nodes["value"].as_source().as_table().num_rows == 1
     assert loaded.nodes["joined"].load_status == LoadStatus.FULL
     assert loaded.nodes["joined"].output_schema()[1]["value"] is expected_type
 

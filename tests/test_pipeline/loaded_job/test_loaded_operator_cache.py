@@ -4,10 +4,11 @@ ITL-1043. The job joins a function node over one in-memory ``ArrowTableSource`` 
 second one and stores the join's output (``CacheMode.LOG``). Columns are declared nullable
 or not. A job file records each column's nullability and the run content hash of every
 operator node, so the loaded job reproduces each node's pipeline hash, content hash, table
-path and output schema, and a loaded operator node attached in ``CacheMode.REPLAY`` reads
-the rows its run stored. A file without those fields (``0.1.0``, or a ``0.2.0`` file written
-before them) loads as before, lossy: the operator node still looks under its run's path,
-and raises rather than show the stored rows as none.
+path and output schema, and the stored view (``as_source()``) of a loaded operator node
+attached in ``CacheMode.REPLAY`` reads the rows its run stored. A loaded node itself is
+empty until it runs (ITL-1095). A file without those fields (``0.1.0``, or a ``0.2.0`` file
+written before them) loads as before, lossy: the operator node still looks under its run's
+path, and its stored view raises rather than show the stored rows as none.
 """
 
 from __future__ import annotations
@@ -178,17 +179,20 @@ def test_every_node_keeps_its_identity_and_schema_through_save_and_load(
 def test_loaded_replay_operator_reads_the_rows_its_run_stored(
     store_kind: str, nullability: str, read: str, tmp_path: pathlib.Path
 ) -> None:
-    """A loaded operator node in REPLAY reads exactly the rows read before saving."""
+    """A loaded operator node's stored view reads exactly the rows read before saving;
+    the node itself is empty until it runs (ITL-1095)."""
     store = _store(store_kind, tmp_path)
     job = _run(store, nullability)
     expected = _sorted(job.nodes["joined"].as_table())
     node = _load_replaying(_save(job, tmp_path), store).nodes["joined"]
+    assert node.as_table().num_rows == 0
+    stored = node.as_source()
     if read == "as_table":
-        assert _sorted(node.as_table()).equals(expected)
+        assert _sorted(stored.as_table()).equals(expected)
     elif read == "iter_data":
-        assert len(list(node.iter_data())) == expected.num_rows
+        assert len(list(stored.iter_data())) == expected.num_rows
     else:
-        assert _sorted(node.head().table).equals(expected)
+        assert _sorted(stored.head().table).equals(expected)
 
 
 @pytest.mark.parametrize("nullability", list(NULLABILITY))
@@ -214,9 +218,9 @@ def test_a_pipeline_loaded_and_bound_to_its_sources_reuses_the_operator_cache(
         )
         return again
 
-    assert _sorted(rebuilt(CacheMode.REPLAY).nodes["joined"].as_table()).equals(
-        expected
-    )
+    replaying = rebuilt(CacheMode.REPLAY)
+    _ = replaying.run()  # a node shows rows only after a run (ITL-1095)
+    assert _sorted(replaying.nodes["joined"].as_table()).equals(expected)
     _ = rebuilt(CacheMode.LOG).run()
     assert set(store.at(JOB_NAME).list_table_paths()) == tables_after_run
 
@@ -238,7 +242,9 @@ def test_without_saved_nullability_the_operator_still_reads_its_runs_table(
     node = _load_replaying(saved, store).nodes["joined"]
     assert node.pipeline_hash() == job.nodes["joined"].pipeline_hash()
     assert node.node_identity_path == job.nodes["joined"].node_identity_path
-    assert _sorted(node.as_table()).equals(_sorted(job.nodes["joined"].as_table()))
+    assert _sorted(node.as_source().as_table()).equals(
+        _sorted(job.nodes["joined"].as_table())
+    )
 
 
 def _drop_both(data: dict[str, Any]) -> None:
@@ -259,12 +265,13 @@ UNKNOWN_KEY = (
 def test_without_the_run_content_hash_the_loaded_operator_raises(
     store_kind: str, nullability: str, read: str, tmp_path: pathlib.Path
 ) -> None:
-    """A node that cannot name its run's rows never shows the stored rows as none."""
+    """A node that cannot name its run's rows never shows the stored rows as none: its
+    stored view raises."""
     store = _store(store_kind, tmp_path)
     job = _run(store, nullability)
     node = _load_replaying(_save(job, tmp_path, _drop_both), store).nodes["joined"]
     with pytest.raises(RuntimeError, match=UNKNOWN_KEY) as excinfo:
-        result = getattr(node, read)()
+        result = getattr(node.as_source(), read)()
         if read == "iter_data":
             _ = list(result)
     assert "holds 2 stored rows, none of them under the content hash" in str(
@@ -279,23 +286,24 @@ def test_without_the_run_content_hash_an_absent_table_raises_too(
     saved = _save(_run(InMemoryArrowDatabase(), "non_null"), tmp_path, _drop_both)
     node = _load_replaying(saved, InMemoryArrowDatabase()).nodes["joined"]
     with pytest.raises(RuntimeError, match=UNKNOWN_KEY) as excinfo:
-        _ = node.as_table()
+        _ = node.as_source().as_table()
     assert "is absent from the attached store" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("store_kind", STORES)
-def test_without_the_run_content_hash_head_says_why_it_shows_no_rows(
+def test_without_the_run_content_hash_head_never_raises_and_the_stored_view_says_why(
     store_kind: str, tmp_path: pathlib.Path
 ) -> None:
-    """``head()`` never raises on a loaded node: it shows no rows and names the cause."""
+    """``head()`` never raises on a loaded node: it has not run (ITL-1095). Its stored
+    view raises and names the cause."""
     store = _store(store_kind, tmp_path)
     job = _run(store, "nullable_tag")
     node = _load_replaying(_save(job, tmp_path, _drop_both), store).nodes["joined"]
     head = node.head()
-    assert head.status is ViewStatus.UNAVAILABLE
+    assert head.status is ViewStatus.NOT_COMPUTED
     assert head.table.num_rows == 0
-    assert "does not record its run's content hash" in head.header()
-    assert "ITL-1048" in head.header()
+    with pytest.raises(RuntimeError, match=UNKNOWN_KEY):
+        _ = node.as_source().head()
 
 
 # ---------------------------------------------------------------------------
@@ -317,16 +325,19 @@ def _live_replaying(store: ArrowDatabaseProtocol, job: PipelineJob) -> Any:
 def _assert_reads_as_live_with_no_rows(
     loaded_node: Any, live_node: Any, *, same_types: bool = True
 ) -> None:
-    """The loaded node reads what a running node reads from the same store: no rows.
+    """The loaded node's stored view reads what a running node's reads from the same
+    store: no rows.
 
     ``same_types=False`` where the loaded node's input slots are unbound: a running
     node types its zero-row table from its sources (ITL-912), while the loaded node has
     only their Python schema, so only the user columns are compared (ITL-1089).
     """
     user_columns = [*live_node.keys()[0], *live_node.keys()[1]]
+    loaded_stored = loaded_node.as_source()
+    live_stored = live_node.as_source()
     for config in ({}, {"all_info": True}):
-        table = loaded_node.as_table(**config)
-        live = live_node.as_table(**config)
+        table = loaded_stored.as_table(**config)
+        live = live_stored.as_table(**config)
         assert table.num_rows == 0
         if same_types:
             assert table.schema.equals(live.schema), (table.schema, live.schema)
@@ -334,12 +345,10 @@ def _assert_reads_as_live_with_no_rows(
             assert [n for n in table.column_names if n in user_columns] == [
                 n for n in live.column_names if n in user_columns
             ]
-    assert list(loaded_node.iter_data()) == []
-    head = loaded_node.head()
-    assert head.status is ViewStatus.NOTHING_STORED
+    assert list(loaded_stored.iter_data()) == []
+    head = loaded_stored.head()
     assert head.table.num_rows == 0
-    assert "the store holds no rows for its run" in head.header()
-    assert live_node.head().status is ViewStatus.NOTHING_STORED
+    assert head.status is live_stored.head().status
 
 
 def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
@@ -412,8 +421,9 @@ def test_an_absent_cache_table_gives_the_running_nodes_types(
     empty_store = InMemoryArrowDatabase()
     node = _load_replaying(_save(job, tmp_path), empty_store).nodes["joined"]
     live = _live_replaying(empty_store, job)
-    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
-        table = node.as_table(all_info=True)
+    # Neither node has run: both read their zero-row tables, and neither reads the
+    # store (ITL-1095), so the job file's row count is not checked here.
+    table = node.as_table(all_info=True)
     assert table.schema.equals(live.as_table(all_info=True).schema)
 
 
@@ -596,7 +606,8 @@ def _store_the_fixture_join(store: ArrowDatabaseProtocol) -> Any:
 def test_a_format_0_1_0_file_finds_its_join_table_and_never_shows_its_rows_as_none() -> (
     None
 ):
-    """The real 0.1.0 file: the run's path, ``head()`` says why, ``as_table()`` raises."""
+    """The real 0.1.0 file: the run's path; the node has not run (ITL-1095) and its
+    stored view raises."""
     store = InMemoryArrowDatabase()
     run_join = _store_the_fixture_join(store)
     loaded = PipelineJob.load(str(FORMAT_0_1_0), database=store)
@@ -607,13 +618,11 @@ def test_a_format_0_1_0_file_finds_its_join_table_and_never_shows_its_rows_as_no
     )
     assert node.pipeline_hash() == run_join.pipeline_hash()
     assert node.node_identity_path == run_join.node_identity_path
-    head = node.head()
-    assert head.status is ViewStatus.UNAVAILABLE
-    assert "ITL-1048" in head.header()
+    assert node.head().status is ViewStatus.NOT_COMPUTED
     with pytest.raises(
         RuntimeError, match=r"'Join': the job file does not record .*ITL-1048"
     ):
-        _ = node.as_table()
+        _ = node.as_source().as_table()
 
 
 # ---------------------------------------------------------------------------
@@ -636,14 +645,15 @@ def test_get_cached_output_of_a_loaded_node_reads_its_runs_rows(
 def test_get_cached_output_of_a_loaded_node_never_caches_unreadable_rows_as_none(
     tmp_path: pathlib.Path,
 ) -> None:
-    """``get_cached_output()`` raises as ``as_table()`` does; later reads raise too."""
+    """``get_cached_output()`` raises as the stored view does; the node keeps nothing."""
     store = InMemoryArrowDatabase()
     job = _run(store, "nullable_tag")
     node = _load_replaying(_save(job, tmp_path, _drop_both), store).nodes["joined"]
     with pytest.raises(RuntimeError, match="the job file does not record"):
         _ = node.get_cached_output()
     with pytest.raises(RuntimeError, match="the job file does not record"):
-        _ = node.as_table()
+        _ = node.as_source().as_table()
+    assert node.as_table().num_rows == 0
 
 
 # ---------------------------------------------------------------------------
@@ -680,11 +690,12 @@ READ_NODES = ["inc", "joined"]
 
 
 def _read_all(job: PipelineJob, label: str) -> pa.Table:
-    """Read a loaded node three ways and return its table."""
-    node = job.nodes[label]
-    _ = list(node.iter_data())
-    _ = node.head()
-    return node.as_table()
+    """Read a loaded node's stored view three ways and return its table (the node itself
+    is empty until it runs, ITL-1095)."""
+    stored = job.nodes[label].as_source()
+    _ = list(stored.iter_data())
+    _ = stored.head()
+    return stored.as_table()
 
 
 def _loaded(saved: pathlib.Path, store: ArrowDatabaseProtocol) -> PipelineJob:
@@ -757,7 +768,7 @@ def test_matching_counts_and_zero_expected_zero_found_do_not_warn(
             "joined": 0
         }
         node = _load_replaying(empty_saved, InMemoryArrowDatabase()).nodes["joined"]
-        assert node.as_table().num_rows == 0
+        assert node.as_source().as_table().num_rows == 0
 
 
 def test_deleting_the_section_by_hand_loads_identically_without_a_check(

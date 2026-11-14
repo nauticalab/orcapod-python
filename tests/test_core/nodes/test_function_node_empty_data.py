@@ -13,6 +13,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import NodeConfig
 from orcapod.errors import EphemeralResultMissingError
@@ -174,6 +175,20 @@ class TestLoadCachedEntriesEmptyData:
             assert isinstance(data, Data)
 
 
+def _entries(node: FunctionJobNode) -> list[tuple[TagProtocol, DataProtocol]]:
+    """The node's entries for its input rows, as its cache façade returns them.
+
+    These tests drive ``execute_data`` (one row, not a run), so the node shows no rows
+    of a run (ITL-1095); ``get_cached_results`` gives the entries it holds or has
+    stored, an ``EmptyData`` placeholder for a result whose ephemeral store is gone.
+    """
+    entry_ids = [
+        node.compute_base_entry_id(tag, data)
+        for tag, data in node._input_stream.iter_data()
+    ]
+    return list(node.get_cached_results(entry_ids).values())
+
+
 class TestProcessDataInternalEmptyData:
     def test_cache_hit_returns_cached_result(self, ephemeral_node):
         """Downstream cache hit on EmptyData input returns the cached result."""
@@ -203,7 +218,7 @@ class TestProcessDataInternalEmptyData:
         )
 
         # Step 3: Run downstream with real data to populate its result cache
-        for tag, data in node.iter_data():
+        for tag, data in _entries(node):
             downstream.execute_data(tag, data)
 
         # Step 4: Simulate upstream ephemeral expiry
@@ -211,7 +226,7 @@ class TestProcessDataInternalEmptyData:
         node._cached_output_datas.clear()
 
         # Step 5: Upstream now emits EmptyData
-        upstream_items = list(node.iter_data())
+        upstream_items = _entries(node)
         assert len(upstream_items) == 1
         tag_in, data_in = upstream_items[0]
         assert isinstance(data_in, EmptyData)
@@ -252,7 +267,7 @@ class TestProcessDataInternalEmptyData:
             result_database=InMemoryArrowDatabase(),
         )
 
-        upstream_items = list(node.iter_data())
+        upstream_items = _entries(node)
         tag_in, data_in = upstream_items[0]
         assert isinstance(data_in, EmptyData)
 
@@ -296,7 +311,7 @@ class TestAsyncProcessDataInternalEmptyData:
         )
 
         # Populate downstream result cache with real data (sync)
-        for tag, data in node.iter_data():
+        for tag, data in _entries(node):
             downstream.execute_data(tag, data)
 
         # Simulate ephemeral expiry
@@ -304,7 +319,7 @@ class TestAsyncProcessDataInternalEmptyData:
         node._cached_output_datas.clear()
 
         # Upstream now emits EmptyData
-        upstream_items = list(node.iter_data())
+        upstream_items = _entries(node)
         assert len(upstream_items) == 1
         tag_in, data_in = upstream_items[0]
         assert isinstance(data_in, EmptyData)
@@ -341,7 +356,7 @@ class TestAsyncProcessDataInternalEmptyData:
             result_database=InMemoryArrowDatabase(),
         )
 
-        upstream_items = list(node.iter_data())
+        upstream_items = _entries(node)
         tag_in, data_in = upstream_items[0]
         assert isinstance(data_in, EmptyData)
 

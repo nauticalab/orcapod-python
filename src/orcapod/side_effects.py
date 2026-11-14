@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from typing_extensions import override
 
 from orcapod.core.base import TraceableBase
-from orcapod.core.nodes.function_node import _build_record_id_preimage
+from orcapod.core.nodes.staleness import RunHoldingNode
+from orcapod.core.nodes.function_node import _build_record_id_preimage, run_job_node
 from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
@@ -26,6 +27,7 @@ from orcapod.core.streams.base import (
     typed_zero_row_input,
 )
 from orcapod.core.streams.view import (
+    LOADED_ONLY_SIDE_EFFECT_NOTE,
     SIDE_EFFECTS_NOTE,
     ViewStatus,
     StreamView,
@@ -995,7 +997,7 @@ class SideEffectNode(StreamBase):
 # ---------------------------------------------------------------------------
 
 
-class SideEffectJobNode(SideEffectNode):
+class SideEffectJobNode(RunHoldingNode, SideEffectNode):
     """DB-backed execution node for side-effect pods.
 
     Created at pipeline compile time by ``PipelineJob``. Receives a
@@ -1030,6 +1032,28 @@ class SideEffectJobNode(SideEffectNode):
         # The rows the last completed run passed on, in the order it passed them;
         # ``None`` when no run in this process completed (ITL-1091).
         self._held_rows: list[tuple[TagProtocol, DataProtocol]] | None = None
+        # Whether those rows came from a load-only run, which delivers nothing.
+        self._run_load_only = False
+        # A node that has not run in this process holds nothing and is stale (ITL-1095).
+        self._set_modified_time(None)
+
+    def _holds_run(self, *, load_only: bool) -> bool:
+        """Whether the node holds a run's rows; a load-only run's only for ``load_only``.
+
+        A load-only run delivers nothing, so a full run does not take its rows as the
+        result of a delivery.
+        """
+        return self._held_rows is not None and (load_only or not self._run_load_only)
+
+    def clear_cache(self) -> None:
+        """Drop the rows the last run passed on: the node is stale and reads empty.
+
+        Its next ``run()`` (or job run) delivers again what its invocation log does not
+        record (every row without ``track_completion``) (ITL-1095).
+        """
+        self._held_rows = None
+        self._run_load_only = False
+        self._set_modified_time(None)
 
     def _refuse_log_of_another_data_context(self) -> None:
         """Refuse an invocation log holding deliveries of another data context.
@@ -1116,6 +1140,7 @@ class SideEffectJobNode(SideEffectNode):
         *,
         observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
+        load_only: bool = False,
     ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute side-effect delivery for all rows in ``input_stream``.
 
@@ -1123,6 +1148,8 @@ class SideEffectJobNode(SideEffectNode):
             input_stream: Stream of ``(tag, data)`` pairs to process.
             observer: Optional execution observer (currently unused).
             run_id: Pipeline run identifier forwarded from the orchestrator.
+            load_only: A load-only run (ITL-1095): every row passes on and nothing is
+                delivered or logged.
 
         The node keeps the rows it passed on, which every later read returns without
         delivering (ITL-1091). A run that raises leaves the node with no rows.
@@ -1135,6 +1162,24 @@ class SideEffectJobNode(SideEffectNode):
                 logged under another data context; nothing is delivered then.
         """
         self._held_rows = None
+        if load_only:
+            rows = list(input_stream.iter_data())
+            self._hold(rows, load_only=True)
+            return rows
+        try:
+            results = self._deliver_rows(input_stream, run_id=run_id)
+        except BaseException:
+            # A run that raised defines no rows: the node is stale, and so is every
+            # node below it (ITL-1095).
+            self.clear_cache()
+            raise
+        self._hold(results)
+        return results
+
+    def _deliver_rows(
+        self, input_stream: StreamProtocol, *, run_id: str | None
+    ) -> list[tuple[TagProtocol, DataProtocol]]:
+        """Deliver every row of ``input_stream``; return the rows passed on."""
         self._refuse_log_of_another_data_context()
         results: list[tuple[TagProtocol, DataProtocol]] = []
         for tag, data in input_stream.iter_data():
@@ -1154,16 +1199,22 @@ class SideEffectJobNode(SideEffectNode):
             )
             if result is not None:
                 results.append(result)
-        self._hold(results)
         return results
 
-    def _hold(self, rows: list[tuple[TagProtocol, DataProtocol]]) -> None:
+    def _hold(
+        self, rows: list[tuple[TagProtocol, DataProtocol]], *, load_only: bool = False
+    ) -> None:
         """Keep the rows a completed run passed on and stamp the node as modified.
 
         Stamped after the upstream nodes, which stamp at the end of their own run, so the
         rows are current until an upstream changes again (``is_stale``).
+
+        Args:
+            rows: The rows the run passed on.
+            load_only: Whether the run was load-only (it delivered nothing).
         """
         self._held_rows = rows
+        self._run_load_only = load_only
         self._update_modified_time()
 
     def _current_rows(self) -> list[tuple[TagProtocol, DataProtocol]] | None:
@@ -1221,27 +1272,44 @@ class SideEffectJobNode(SideEffectNode):
             return self._head_without_rows(
                 config, ViewStatus.ROWS, note="its last run passed on no rows"
             )
-        return StreamView.of_rows(
+        view = StreamView.of_rows(
             self,
             self.as_table(columns=config).slice(0, n),
             tag_columns=self.keys(columns=config)[0],
             total_rows=len(rows),
             origin="held",
         )
+        return self._with_run_status(view)
+
+    def _with_run_status(self, view: StreamView) -> StreamView:
+        """``view`` with the status of the node's last run: ``loaded_only`` after a
+        load-only run, which passed the rows on and delivered nothing (ITL-1095)."""
+        if not self._run_load_only:
+            return view
+        return dataclasses.replace(
+            view, status=ViewStatus.LOADED_ONLY, note=LOADED_ONLY_SIDE_EFFECT_NOTE
+        )
 
     @override
-    def run(self) -> StreamView:
+    def run(self, *, load_only: bool = False) -> StreamView:
         """Run the node as ``job.run()`` runs it and return a ``StreamView`` of its rows.
 
-        Reads the input and delivers through the invocation log, as a job run does:
-        with ``track_completion`` only the rows the log does not record as delivered are
-        delivered; without it every row is delivered again, as a second ``job.run()``
-        delivers it. With no database attached nothing is logged and every row is
-        delivered. The node then holds the rows it passed on, which ``as_table()`` and
-        every other read return without delivering. The invocation log is committed
-        before ``run()`` returns, as at the end of a job run; after a failed delivery
-        the log rows of the deliveries that succeeded are committed too, and the
-        delivery's error is raised.
+        State-driven, as every job node's ``run()`` (developer, November 13, 2026;
+        ITL-1095): a node that holds the rows of a completed, non-stale run delivers
+        nothing and returns them; call ``clear_cache()`` first to deliver again.
+        Otherwise the job nodes it depends on that hold no current run run first, and
+        the node reads its input and delivers through the invocation log, as a job run
+        does: with ``track_completion`` only the rows the log does not record as
+        delivered; without it every row. With no database attached nothing is logged
+        and every row is delivered. The node then holds the rows it passed on, which
+        ``as_table()`` and every other read return without delivering. The run's writes
+        (the invocation log included) are committed before ``run()`` returns; after a
+        failed delivery the log rows of the deliveries that succeeded are committed too,
+        and the delivery's error is raised.
+
+        Args:
+            load_only: Deliver nothing: the rows pass on, and the nodes run first load
+                their stored results only (as ``job.run(load_only=True)``).
 
         Returns:
             A ``StreamView`` of the rows this run passed on.
@@ -1250,9 +1318,22 @@ class SideEffectJobNode(SideEffectNode):
             SideEffectLogDataContextError: As for ``execute``.
             StoreWriteError: If committing the invocation log fails.
         """
-        database = self._pipeline_database
+        import sys
+
+        run_job_node(
+            self,
+            load_only=load_only,
+            run_alone=lambda: self._run_alone(load_only=load_only),
+            caller=sys._getframe(1),  # pyright: ignore[reportPrivateUsage]  # the caller's line is where a failure warning is shown
+        )
+        return self._with_run_status(self._view_of_rows(self.as_table(), "held"))
+
+    def _run_alone(self, *, load_only: bool) -> None:
+        """Run this node over an input stream that is not a job node; commit its log."""
+        # A load-only run writes nothing, so it commits nothing (ITL-1095).
+        database = None if load_only else self._pipeline_database
         try:
-            _ = self.execute(self._input_stream)
+            _ = self.execute(self._input_stream, load_only=load_only)
         except Exception as run_error:
             if database is not None:
                 flush_best_effort(run_error, database)
@@ -1264,12 +1345,11 @@ class SideEffectJobNode(SideEffectNode):
             except StoreReadError:
                 # A stored table could not be read: report the read failure itself.
                 # The run raised, so it leaves the node no rows.
-                self._held_rows = None
+                self.clear_cache()
                 raise
             except Exception as exc:
-                self._held_rows = None
+                self.clear_cache()
                 raise StoreWriteError(database.base_path, flush=True) from exc
-        return self._view_of_rows(self.as_table(), "held")
 
     # ------------------------------------------------------------------
     # Async execution
@@ -1282,6 +1362,7 @@ class SideEffectJobNode(SideEffectNode):
         *,
         observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
+        load_only: bool = False,
     ) -> None:
         """Async side-effect delivery with semaphore-bounded concurrency.
 
@@ -1302,6 +1383,8 @@ class SideEffectJobNode(SideEffectNode):
             output: Writable channel for pass-through ``(tag, data)`` pairs.
             observer: Optional execution observer (currently unused).
             run_id: Pipeline run identifier from the orchestrator.
+            load_only: A load-only run (ITL-1095): every row passes on and nothing is
+                delivered or logged.
 
         Raises:
             ValueError: If ``inputs`` does not contain exactly one channel.
@@ -1311,12 +1394,26 @@ class SideEffectJobNode(SideEffectNode):
                 f"SideEffectJobNode.async_execute expects exactly 1 input channel; "
                 f"got {len(inputs)}."
             )
+        self._held_rows = None
+        # A load-only run reads no pod configuration: it delivers nothing.
+        if load_only:
+            try:
+                rows: list[tuple[TagProtocol, DataProtocol]] = []
+                async for item in inputs[0]:
+                    rows.append(item)
+                    await output.send(item)
+                # Held and stamped before the output closes (ITL-1042).
+                self._hold(rows, load_only=True)
+            except BaseException:
+                self.clear_cache()
+                raise
+            finally:
+                await self._close_output(output)
+            return
         max_concurrency = self._pod.pod_config.max_concurrency
         sem = (
             asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
         )
-
-        self._held_rows = None
         # This run's rows, in the order they were sent downstream.
         passed_on: list[tuple[TagProtocol, DataProtocol]] = []
         # Makes recording a row and sending it one step: a send blocked by a full channel
@@ -1358,5 +1455,19 @@ class SideEffectJobNode(SideEffectNode):
             # Held and stamped before the output closes, so every downstream node, which
             # stamps after it has seen that close, is newer than this one (ITL-1042).
             self._hold(passed_on)
+        except BaseException:
+            # A run that raised or was cancelled defines no rows (ITL-1095).
+            self.clear_cache()
+            raise
         finally:
+            await self._close_output(output)
+
+    async def _close_output(
+        self, output: WritableChannel[tuple[TagProtocol, DataProtocol]]
+    ) -> None:
+        """Close ``output``; a close that fails fails the run, which then holds no rows."""
+        try:
             await output.close()
+        except BaseException:
+            self.clear_cache()
+            raise

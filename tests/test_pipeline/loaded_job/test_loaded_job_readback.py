@@ -69,6 +69,39 @@ def _rewrite_job_file(
     return str(path)
 
 
+def _loaded_and_filled(saved: pathlib.Path) -> PipelineJob:
+    """Load the saved job, bind its in-memory sources and fill it from the store.
+
+    A loaded node is empty until a load-only run fills it (ITL-1095). The sources bound
+    are those of ``save_job_script.py``; the CSV and Delta sources are rebuilt.
+    """
+    from orcapod.sources import ArrowTableSource, ListSource
+
+    loaded = _load(saved)
+    arrow = ArrowTableSource(
+        pa.table(
+            {"id": [0, 1], "y": [3, 4]},
+            schema=pa.schema(
+                [
+                    pa.field("id", pa.int64(), nullable=False),
+                    pa.field("y", pa.int64(), nullable=False),
+                ]
+            ),
+        ),
+        tag_columns=["id"],
+        source_id="asrc",
+    )
+    loaded.bind(
+        sources={
+            "dsrc": _dict_source(),
+            "asrc": arrow,
+            "lsrc": ListSource("z", [1, 2], source_id="lsrc"),
+        }
+    )
+    _ = loaded.run(load_only=True)
+    return loaded
+
+
 def _dict_source() -> DictSource:
     """Return a two-row in-memory source with tag ``id`` and data ``x``."""
     return DictSource(
@@ -142,7 +175,8 @@ def test_datetime_output_feeding_an_operator_loads_with_its_type(
     path = _save_small_job(tmp_path, record)
     node = PipelineJob.load(path).nodes["stamp"]
     assert dict(node.output_schema()[1]) == {"t": datetime.datetime}
-    assert node.as_table().num_rows == 2
+    # A loaded node is empty until it runs (ITL-1095); its stored view reads the rows.
+    assert node.as_source().as_table().num_rows == 2
 
 
 def test_datetime_output_with_nothing_stored_returns_typed_zero_rows(
@@ -189,8 +223,9 @@ def test_logical_type_output_schema_fails_naming_the_column_and_saved_type(
 
     node = PipelineJob.load(_save_small_job(tmp_path, record)).nodes["paths"]
     assert node.output_schema()[1]["p"] is pathlib.Path
-    # The stored rows are still readable, with their stored logical type.
-    table = node.as_table()
+    # The stored rows are still readable, with their stored logical type (through the
+    # stored view: a loaded node is empty until it runs, ITL-1095).
+    table = node.as_source().as_table()
     assert table.num_rows == 2
     assert isinstance(table.schema.field("p").type, pa.ExtensionType)
 
@@ -219,16 +254,16 @@ def test_path_output_feeding_join_still_allows_job_load(tmp_path: pathlib.Path) 
         Join()(paths, other, label="joined")
 
     loaded = PipelineJob.load(_save_small_job(tmp_path, record))
-    assert loaded.nodes["paths"].as_table().num_rows == 2
+    assert loaded.nodes["paths"].as_source().as_table().num_rows == 2
 
 
 @pytest.mark.parametrize("label", FUNCTION_NODES)
 def test_loaded_function_node_as_table_returns_stored_rows(
     saved: pathlib.Path, label: str
 ) -> None:
-    """A loaded node's table equals the live table: schema and values."""
+    """A loaded node's stored view equals the live table: schema and values."""
     expected = pq.read_table(saved / "expected" / f"{label}.parquet")
-    table = _load(saved).nodes[label].as_table()
+    table = _load(saved).nodes[label].as_source().as_table()
     assert table.schema == expected.schema
     assert _sorted(table, TAG_OF[label]).equals(_sorted(expected, TAG_OF[label]))
 
@@ -237,13 +272,14 @@ def test_loaded_function_node_as_table_returns_stored_rows(
 def test_loaded_function_node_as_table_all_info_has_stream_columns(
     saved: pathlib.Path, label: str
 ) -> None:
-    """With ``all_info``, a loaded node's table has every live column and more."""
+    """With ``all_info``, a loaded node's table, once a load-only run has filled it,
+    has every live column and more."""
     # The loaded table follows the documented stream semantics: every column of the
     # live table, with the same values and types, plus the data context and the
     # source-info columns. (The live FunctionJobNode.as_table() drops those two
     # groups -- a separate, pre-existing bug the loaded node does not copy.)
     expected = pq.read_table(saved / "expected" / f"{label}.all_info.parquet")
-    table = _load(saved).nodes[label].as_table(all_info=True)
+    table = _loaded_and_filled(saved).nodes[label].as_table(all_info=True)
     data_column = next(iter(_load(saved).nodes[label].output_schema()[1]))
     assert "_context_key" in table.column_names
     assert f"_source_{data_column}" in table.column_names
@@ -258,7 +294,7 @@ def test_loaded_function_node_iter_data_yields_stored_rows(saved: pathlib.Path) 
     rows = sorted(
         (
             (tag.as_dict(), data.as_dict())
-            for tag, data in _load(saved).nodes["dbl"].iter_data()
+            for tag, data in _load(saved).nodes["dbl"].as_source().iter_data()
         ),
         key=lambda row: row[0]["id"],
     )
@@ -373,8 +409,10 @@ def test_other_context_records_do_not_satisfy_saved_expectation(
     node = PipelineJob.load(path, database=other).nodes["dbl"]
     # The store is the source of truth (ITL-1043): it holds none of the run's
     # records, so none is read; the job file's count makes it a warning.
+    # A loaded node is empty until it runs (ITL-1095): its stored view reads the store.
+    reader = node if read_method == "get_all_records" else node.as_source()
     with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
-        result = getattr(node, read_method)()
+        result = getattr(reader, read_method)()
         rows = list(result) if read_method == "iter_data" else result
     assert rows is None or len(rows) == 0
 
@@ -382,15 +420,20 @@ def test_other_context_records_do_not_satisfy_saved_expectation(
 def test_recomputed_entry_is_read_once_with_its_latest_result(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A loaded node reads one row per entry: the greatest recomputation index wins."""
+    """A loaded node's load-only run reads one row per entry: the greatest recomputation
+    index wins."""
     path = _save_small_job(tmp_path, _record_double)
     node = PipelineJob.load(path).nodes["dbl"]
-    entry_id = next(iter(node.iter_data()))[0].as_dict()["id"]
+    # A loaded node is empty until it runs (ITL-1095): read its stored view.
+    entry_id = next(iter(node.as_source().iter_data()))[0].as_dict()["id"]
     # Index 2 is stored before index 1, so "last record wins" would pick 111.
     _append_recomputed_record(node, entry_id, recomputation_index=2, value=222)
     _append_recomputed_record(node, entry_id, recomputation_index=1, value=111)
 
-    reloaded = PipelineJob.load(path).nodes["dbl"]
+    reloaded_job = PipelineJob.load(path)
+    reloaded_job.bind(sources={"dsrc": _dict_source()})
+    _ = reloaded_job.run(load_only=True)
+    reloaded = reloaded_job.nodes["dbl"]
     table = reloaded.as_table()
     assert table.num_rows == 2
     rows = {row["id"]: row["dbl"] for row in table.to_pylist()}
@@ -418,6 +461,8 @@ def test_live_node_hot_load_reads_the_latest_recomputed_result(
     fresh = PipelineJob(name="small", database=store)
     with fresh:
         _record_double()
+    # A node shows rows only after a run (ITL-1095): the run loads every stored entry.
+    _ = fresh.run()
     values = {
         t.as_dict()["id"]: d.as_dict()["dbl"] for t, d in fresh.nodes["dbl"].iter_data()
     }
@@ -428,7 +473,8 @@ def test_live_node_hot_load_reads_the_latest_recomputed_result(
 def test_loaded_node_with_ephemeral_results_does_not_crash(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Ephemeral results come back as placeholders; the table says why it has none."""
+    """Results kept in an ephemeral store are gone after the run: a load-only run of the
+    loaded job counts them as not stored and shows no rows; it does not crash."""
 
     @function_pod(output_keys="dbl")
     def double(x: int) -> int:
@@ -446,18 +492,12 @@ def test_loaded_node_with_ephemeral_results_does_not_crash(
         node.set_ephemeral_store(InMemoryArrowDatabase())
 
     path = _save_small_job(tmp_path, record, configure=make_ephemeral)
-    node = PipelineJob.load(path).nodes["dbl"]
-    assert [type(data).__name__ for _, data in node.iter_data()] == [
-        "EmptyData",
-        "EmptyData",
-    ]
-    with pytest.raises(RuntimeError) as excinfo:
-        _ = node.as_table()
-    assert str(excinfo.value) == (
-        "FunctionJobNode 'dbl': the saved run kept 2 of its results in an ephemeral "
-        "store, which is not saved with the job, so they cannot be read into a table. "
-        "iter_data() yields them as EmptyData placeholders."
-    )
+    loaded = PipelineJob.load(path)
+    loaded.bind(sources={"dsrc": _dict_source()})
+    summary = loaded.run(load_only=True)
+    assert summary.nodes["dbl"].not_stored == 2
+    assert summary.nodes["dbl"].reused == 0
+    assert loaded.nodes["dbl"].as_table().num_rows == 0
 
 
 def test_newer_unavailable_result_does_not_expose_old_persistent_result(
@@ -482,10 +522,13 @@ def test_newer_unavailable_result_does_not_expose_old_persistent_result(
         records = records.set_column(index, field, pa.array(values, type=field.type))
     store.add_records(table_path, records, record_id_column="__rid", flush=True)
 
-    node = PipelineJob.load(path).nodes["dbl"]
-    assert [type(data).__name__ for _, data in node.iter_data()] == ["EmptyData"] * 2
-    with pytest.raises(RuntimeError, match="ephemeral store"):
-        node.as_table()
+    # The newest result of each entry is gone with its ephemeral store: a load-only run
+    # counts the entry as not stored and never shows the older persistent result.
+    loaded = PipelineJob.load(path)
+    loaded.bind(sources={"dsrc": _dict_source()})
+    summary = loaded.run(load_only=True)
+    assert summary.nodes["dbl"].not_stored == 2
+    assert loaded.nodes["dbl"].as_table().num_rows == 0
 
 
 # ---------------------------------------------------------------------------
@@ -503,11 +546,14 @@ def test_loaded_function_node_warns_once_on_a_store_without_its_runs_records(
     issued once per node.
     """
     node = _load(saved, database=InMemoryArrowDatabase()).nodes["dbl"]
+    # A loaded node is empty until it runs (ITL-1095): the store is read through its
+    # stored view, which warns once.
+    stored = node.as_source()
     with pytest.warns(StoreContentWarning) as record:
-        table = node.as_table()
-        rows = list(node.iter_data())
+        table = stored.as_table()
+        rows = list(stored.iter_data())
         records = node.get_all_records()
-        head = node.head()
+        head = stored.head()
     assert table.num_rows == 0
     assert table.column_names == ["id", "dbl"]
     assert rows == []
@@ -532,7 +578,7 @@ def test_store_content_warning_names_a_delta_stores_location(
     other = tmp_path / "other_store"
     node = _load(saved, database=DeltaTableDatabase(str(other))).nodes["dbl"]
     with pytest.warns(StoreContentWarning, match="the store at '") as record:
-        _ = node.as_table()
+        _ = node.as_source().as_table()
     assert str(other) in str(record[0].message)
 
 
@@ -568,7 +614,7 @@ def test_store_with_only_another_runs_records_reads_none_with_a_warning(
     assert node._pipeline_database is not None
     assert node._pipeline_database.table_exists(node._versioned_pipeline_path)
     with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
-        assert node.as_table().num_rows == 0
+        assert node.as_source().as_table().num_rows == 0
 
 
 def test_saved_file_records_the_rows_each_node_had_in_the_store(
@@ -598,7 +644,7 @@ def test_saving_a_loaded_job_keeps_the_expected_rows(
     assert run["expected_rows"] == original
     node = PipelineJob.load(str(resaved), database=InMemoryArrowDatabase()).nodes["dbl"]
     with pytest.warns(StoreContentWarning, match="records 2 rows"):
-        assert node.as_table().num_rows == 0
+        assert node.as_source().as_table().num_rows == 0
 
 
 def test_loaded_function_node_with_nothing_stored_returns_zero_rows(
@@ -634,8 +680,9 @@ def test_file_without_the_expected_rows_section_reads_without_a_check(
     with warnings.catch_warnings():
         warnings.simplefilter("error", StoreContentWarning)
         job = PipelineJob.load(path, database=InMemoryArrowDatabase())
-        assert job.nodes["dbl"].as_table().num_rows == 0
-        assert PipelineJob.load(path).nodes["dbl"].as_table().num_rows == 2
+        assert job.nodes["dbl"].as_source().as_table().num_rows == 0
+        stored = PipelineJob.load(path).nodes["dbl"].as_source()
+        assert stored.as_table().num_rows == 2
 
 
 def test_a_file_with_the_old_stored_records_flag_loads_without_a_check(
@@ -689,7 +736,7 @@ def test_binding_a_store_makes_a_storeless_loaded_node_readable(
 
     job = PipelineJob.load(_rewrite_job_file(saved, tmp_path, drop_store))
     job.bind(database=DeltaTableDatabase(str(saved / "store")))
-    assert job.nodes["dbl"].as_table().num_rows == 2
+    assert job.nodes["dbl"].as_source().as_table().num_rows == 2
 
 
 def test_loaded_job_still_cannot_run(saved: pathlib.Path) -> None:
@@ -770,8 +817,8 @@ def test_loaded_function_node_cannot_execute(saved: pathlib.Path) -> None:
         _ = job.nodes["dbl"].execute(job.nodes["dsrc"])
     assert str(excinfo.value) == (
         "FunctionJobNode 'dbl' was loaded by PipelineJob.load and has no function "
-        "pod, so it cannot compute; read its stored results with as_table() or "
-        "iter_data()."
+        "pod, so it cannot compute; fill it from the store with run(load_only=True), "
+        "or read its stored results with as_source()."
     )
 
 
@@ -799,21 +846,19 @@ def test_loaded_function_node_cannot_async_execute(saved: pathlib.Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_loaded_operator_node_raises_instead_of_returning_empty(
+def test_loaded_operator_node_reads_empty_and_says_it_has_not_run(
     saved: pathlib.Path,
 ) -> None:
-    """A loaded operator node, with nothing stored, raises and names its inputs."""
+    """A loaded operator node, like every node, is empty until it runs (ITL-1095): no
+    read raises, and its head points to ``run()`` and ``as_source()``."""
+    from orcapod.core.streams import ViewStatus
+
     node = _load(saved).nodes["joined"]
-    expected = (
-        "OperatorJobNode 'joined' has no stored results available for this read. "
-        "Operator outputs require a stored cache and replay configuration. Read the stored results of "
-        "its input nodes ('dbl', 'asrc') instead; an input source whose data was not "
-        "saved must be bound first with job.bind(sources=...)."
-    )
-    for read in (node.as_table, lambda: list(node.iter_data())):
-        with pytest.raises(RuntimeError) as excinfo:
-            _ = read()
-        assert str(excinfo.value) == expected
+    assert node.as_table().num_rows == 0
+    assert list(node.iter_data()) == []
+    head = node.head()
+    assert head.status is ViewStatus.NOT_COMPUTED
+    assert "as_source()" in head.header()
 
 
 # ---------------------------------------------------------------------------
@@ -867,7 +912,7 @@ def test_unreconstructable_file_source_is_a_warning_with_the_reason(
         "source node 'csrc' itself, bind a source: job.bind(sources={'csrc': <source>})."
     )
     # The stored results downstream of the missing source are still readable.
-    assert job.nodes["inc"].as_table().num_rows == 2
+    assert job.nodes["inc"].as_source().as_table().num_rows == 2
 
 
 def test_unreconstructable_store_is_a_warning_with_the_remedy(
@@ -976,5 +1021,8 @@ def test_latest_readable_result_wins_across_both_stores(
         assert result is not None
         expected = result["value"]
     node.clear_cache()
-    assert node.as_table().column("value").to_pylist() == [expected]
-    assert [result["value"] for _, result in node.iter_data()] == [expected]
+    # A cleared node is empty until it runs (ITL-1095); the readback of the entry, the
+    # lookup a run makes, picks the newest recomputation from whichever store holds it.
+    assert node.as_table().num_rows == 0
+    loaded = node.get_cached_results([node.compute_base_entry_id(tag, data)])
+    assert [result["value"] for _, result in loaded.values()] == [expected]

@@ -694,6 +694,7 @@ class TestStoreWrittenBeforeFix:
         )
 
         replay = self._node(db, CacheMode.REPLAY)
+        _ = replay.run()  # a node shows rows only after a run (ITL-1095)
         assert len(list(replay.iter_data())) == 5
 
     def test_v014_store_is_not_read(self, tmp_path: Path):
@@ -739,6 +740,7 @@ class TestStoreWrittenBeforeFix:
         tokens = _source_info_tokens(list(_pin_source().iter_data()))
         assert _stored_source(new) == tokens
         replay = self._node(db, CacheMode.REPLAY)
+        _ = replay.run()  # a node shows rows only after a run (ITL-1095)
         assert _source_info_tokens(list(replay.iter_data())) == tokens
 
 

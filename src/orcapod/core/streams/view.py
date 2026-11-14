@@ -47,14 +47,19 @@ class ViewStatus(str, Enum):
         ROWS: The rows are the first rows of the stream's complete content. Zero rows
             means the content is empty.
         PARTIAL: A computation stopped part way; the rows are those computed so far.
+        LOADED_ONLY: A job node filled by a load-only run (``run(load_only=True)``):
+            the rows are the stored results of its inputs; inputs without one were
+            skipped, so the rows may be fewer than a full run gives (ITL-1095).
         NOT_COMPUTED: Nothing is computed, or what was computed is out of date.
-        NOTHING_STORED: A job node whose store holds no rows for it yet.
+        NOTHING_STORED: A stored view (``node.as_source()``) whose store holds no rows
+            for its node yet.
         UNAVAILABLE: No rows can exist here: a pipeline blueprint, an input slot with no
             source bound, or a source that is not available.
     """
 
     ROWS = "rows"
     PARTIAL = "partial"
+    LOADED_ONLY = "loaded_only"
     NOT_COMPUTED = "not_computed"
     NOTHING_STORED = "nothing_stored"
     UNAVAILABLE = "unavailable"
@@ -65,9 +70,25 @@ STALE_NOTE = (
     "not computed: inputs changed since the last computation; run() recomputes it"
 )
 NOTHING_STORED_NOTE = "nothing stored; run the job"
+# A job node shows the rows of its current run only; before one it shows none (ITL-1095).
+JOB_NODE_NOT_RUN_NOTE = (
+    "not run; run() fills it; node.as_source() shows every stored result"
+)
 BLUEPRINT_NOTE = "pipeline blueprint; run it in a PipelineJob"
 SIDE_EFFECTS_NOTE = (
     "not run; run() delivers its side effects; displaying never delivers side effects"
+)
+
+# An operator node whose output came from a load-only run: its input may lack rows that a
+# full run computes (ITL-1095).
+LOADED_ONLY_OPERATOR_NOTE = (
+    "loaded only: the output of a load-only run, whose inputs may lack rows"
+)
+
+# A side-effect node whose rows came from a load-only run: it passed them on and delivered
+# nothing (ITL-1095).
+LOADED_ONLY_SIDE_EFFECT_NOTE = (
+    "loaded only: a load-only run passed these rows on and delivered nothing"
 )
 
 _DEFAULT_NOTES = {
@@ -369,7 +390,7 @@ class StreamView:
         can be named by position: a ``ROWS`` view with no ``description``, unsorted or
         sorted among all of the stream's rows."""
         return (
-            self.status is ViewStatus.ROWS
+            self.status in (ViewStatus.ROWS, ViewStatus.LOADED_ONLY)
             and self.description is None
             and (not self.sorted_by_tags or self._total_is_exact())
         )
@@ -389,7 +410,11 @@ class StreamView:
     def _cuttable(self) -> StreamView:
         """Return this view in a form whose rows can be cut by position: itself when its
         rows are a run of the stream's rows (or of a pool), else a pool of its rows."""
-        if self.status not in (ViewStatus.ROWS, ViewStatus.PARTIAL):
+        if self.status not in (
+            ViewStatus.ROWS,
+            ViewStatus.PARTIAL,
+            ViewStatus.LOADED_ONLY,
+        ):
             return self
         if self.pool is not None or self._is_window():
             return self
@@ -420,7 +445,7 @@ class StreamView:
         shown = self.table.num_rows
         if self.pool is not None:
             return _window_text(self.pool, shown, self.start, self.pool_rows)
-        if self.status is ViewStatus.ROWS:
+        if self.status in (ViewStatus.ROWS, ViewStatus.LOADED_ONLY):
             text = self._describe_rows(shown)
         elif self.status is ViewStatus.PARTIAL:
             total = self.total_rows if self.total_rows is not None else shown

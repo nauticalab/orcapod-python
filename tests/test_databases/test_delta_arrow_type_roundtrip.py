@@ -194,7 +194,9 @@ def _chained_job(root: pathlib.Path, table: pa.Table) -> PipelineJob:
 def test_a_rerun_on_the_same_store_writes_no_pipeline_rows(
     name: str, mode: str, tmp_path: pathlib.Path
 ) -> None:
-    """The ITL-990 case: source -> pod -> pod, run twice; a fresh job reads 3 rows."""
+    """The ITL-990 case: source -> pod -> pod, run twice; a fresh job's run shows 3 rows
+    and the store holds 3 records per node (a node shows rows only after a run,
+    ITL-1095)."""
     from orcapod.pipeline import AsyncPipelineOrchestrator
 
     table = _source_table(TAGS[name])
@@ -206,6 +208,7 @@ def test_a_rerun_on_the_same_store_writes_no_pipeline_rows(
             job.run()
 
     fresh = _chained_job(tmp_path, table)
+    fresh.run()
     for label in ("double", "increment"):
         node = fresh.nodes[label]
         assert node.as_table().num_rows == 3
@@ -217,11 +220,14 @@ def test_a_rerun_on_the_same_store_writes_no_pipeline_rows(
 
 @pytest.mark.parametrize("name", list(TAGS))
 def test_a_fresh_job_reads_the_tag_type(name: str, tmp_path: pathlib.Path) -> None:
-    """A new job on the same store reads the tag type through every read of a node."""
+    """A new job on the same store, run, reads the tag type through every read of a
+    node (a node shows rows only after a run, ITL-1095)."""
     table = _source_table(TAGS[name])
     _chained_job(tmp_path, table).run()
 
-    fresh = _chained_job(tmp_path, table).nodes["double"]
+    fresh_job = _chained_job(tmp_path, table)
+    fresh_job.run()
+    fresh = fresh_job.nodes["double"]
 
     assert fresh.as_table().schema.field("k").type == TAGS[name].type
     tag, _ = next(iter(fresh.iter_data()))
@@ -232,7 +238,8 @@ def test_a_fresh_job_reads_the_tag_type(name: str, tmp_path: pathlib.Path) -> No
 
 
 # Run in a child process by ``test_a_loaded_job_reads_the_tag_type``: load the job
-# saved under ``argv[1]`` and print each function node's tag type as JSON.
+# saved under ``argv[1]`` and print each function node's stored tag type as JSON (a
+# loaded node is empty until it runs, ITL-1095: its stored rows are its stored view).
 _READ_LOADED_TAG_TYPES = """
 import json, pathlib, sys
 from orcapod import PipelineJob
@@ -240,7 +247,7 @@ from orcapod.databases import DeltaTableDatabase
 root = pathlib.Path(sys.argv[1])
 job = PipelineJob.load(root / "job.json", database=DeltaTableDatabase(root / "store"))
 print(json.dumps({
-    label: str(job.nodes[label].as_table().schema.field("k").type)
+    label: str(job.nodes[label].as_source().as_table().schema.field("k").type)
     for label in ("double", "increment")
 }))
 """
@@ -299,7 +306,9 @@ def test_an_operator_replay_reads_the_tag_type(
 
     build(CacheMode.LOG).run()
 
-    replayed = build(CacheMode.REPLAY).nodes["sel"].as_table()
+    replay_job = build(CacheMode.REPLAY)
+    replay_job.run()  # a node shows rows only after a run (ITL-1095)
+    replayed = replay_job.nodes["sel"].as_table()
 
     assert replayed.schema.field("k").type == TAGS[name].type
 

@@ -167,8 +167,8 @@ names them. To see more rows, use `as_df()` with a `limit=` or `where=` source.
 **Restrictions are not part of identity.** `where`, `limit` and `asof` choose rows of the
 same table, so two sources on one table have the same `source_id` and `content_hash`
 whatever their restrictions, and a row's result is computed once and shared. One
-consequence: with a shared store, reading a job's node back (`get_all_records()`, a loaded
-job, and `as_table()` after an async run) returns every row that any job with the same
+consequence: with a shared store, reading a job node's stored records back
+(`get_all_records()`, `node.as_source()`) returns every row that any job with the same
 pipeline has read from that table, not only the rows of the latest restriction. The rows
 sent downstream during a run are only the rows that run read.
 

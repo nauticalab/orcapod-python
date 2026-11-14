@@ -462,19 +462,23 @@ class TestPipelineStores:
         node = loaded.nodes["make"]
         _, data_schema = node.output_schema()
         assert data_schema["df"] is pl.DataFrame
-        got = {tag["k"]: data["df"] for tag, data in node.iter_data()}
+        # A loaded job's nodes are empty until it runs (ITL-1095); its stored results
+        # are read through the stored view.
+        stored_view = node.as_source()
+        got = {tag["k"]: data["df"] for tag, data in stored_view.iter_data()}
         _assert_exact(got["a"], _frame(1))
         _assert_exact(got["b"], _frame(3))
         stored = dict(
             zip(
-                node.as_table().column("k").to_pylist(),
-                _stored_frames(node.as_table().column("df")),
+                stored_view.as_table().column("k").to_pylist(),
+                _stored_frames(stored_view.as_table().column("df")),
                 strict=True,
             )
         )
         _assert_exact(stored["a"], _frame(1))
         heights = {
-            tag["k"]: data["height"] for tag, data in loaded.nodes["height"].iter_data()
+            tag["k"]: data["height"]
+            for tag, data in loaded.nodes["height"].as_source().iter_data()
         }
         assert heights == {"a": 1, "b": 3}
 

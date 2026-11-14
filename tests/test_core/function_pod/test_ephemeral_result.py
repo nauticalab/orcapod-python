@@ -581,8 +581,8 @@ class TestEphemeralWritePath:
         iter_data() serves the fresh result without triggering additional computation.
 
         Verifies that:
-        - after clearing the in-memory cache, iter_data() hot-loads the recomputed
-          result from the pipeline + ephemeral DBs (exercises _load_cached_entries)
+        - after clearing the node, its next run loads the recomputed result from the
+          pipeline + ephemeral DBs (exercises _load_cached_entries)
         - repeated iter_data() calls return the same result without recomputing
         """
         call_count = {"n": 0}
@@ -621,11 +621,12 @@ class TestEphemeralWritePath:
         node2.execute(stream)
         assert call_count["n"] == 2  # recomputed once due to cross-session miss
 
-        # execute() calls _update_modified_time() at the end, so is_stale is False here.
-        # Manually clearing forces the iter_data() hot-load branch (_load_cached_entries →
-        # _fetch_joined_records) without relying on staleness, so this tests the DB join
-        # path explicitly rather than the in-memory dict fast-path.
-        node2._cached_output_datas.clear()
+        # Clearing the node drops its in-memory results; running it again loads the
+        # recomputed result through the DB join path (_load_cached_entries →
+        # _fetch_joined_records) rather than the in-memory dict fast-path. A node shows
+        # rows only after a run (ITL-1095).
+        node2.clear_cache()
+        node2.execute(stream)
 
         # iter_data() must serve the recomputed result — no additional computation
         results = list(node2.iter_data())

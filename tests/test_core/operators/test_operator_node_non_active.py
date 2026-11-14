@@ -160,8 +160,11 @@ class TestCacheModeNonActive:
         result = list(node.iter_data())
         assert result == []
 
-    def test_iter_data_replay_mode_returns_db_contents(self, simple_source, map_op):
-        """REPLAY + prior LOG run → iter_data returns DB records without run()."""
+    def test_iter_data_replay_mode_returns_db_contents_after_its_run(
+        self, simple_source, map_op
+    ):
+        """REPLAY + prior LOG run → iter_data returns nothing before the REPLAY node's
+        run (ITL-1095) and the DB records after it."""
         db = InMemoryArrowDatabase()
         # Populate DB via LOG run
         node_log = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)
@@ -171,6 +174,8 @@ class TestCacheModeNonActive:
         node_replay = _node(
             map_op, (simple_source,), db=db, cache_mode=CacheMode.REPLAY
         )
+        assert list(node_replay.iter_data()) == []
+        node_replay.run()
         result = list(node_replay.iter_data())
         assert len(result) == 3
         for _, data in result:

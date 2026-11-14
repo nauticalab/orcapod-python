@@ -85,7 +85,8 @@ def test_a_loaded_job_reads_its_stored_tensors(
     assert loaded.nodes["value"].output_schema()[1]["value"] is torch.Tensor
     assert loaded.nodes["joined"].load_status == LoadStatus.FULL
     assert loaded.nodes["joined"].output_schema()[1]["value"] is torch.Tensor
-    got = _values(loaded.nodes["value"])
+    # A loaded node is empty until it runs (ITL-1095): read the stored view.
+    got = _values(loaded.nodes["value"].as_source())
     assert sorted(got) == [1, 2]
     for row_id, n in ((1, 3), (2, 4)):
         expected = function(n)
