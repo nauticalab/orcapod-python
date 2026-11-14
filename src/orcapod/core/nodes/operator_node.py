@@ -31,11 +31,11 @@ from orcapod.core.streams.base import (
     StreamBase,
     check_head_size,
 )
-from orcapod.core.streams.head import (
+from orcapod.core.streams.view import (
     STALE_NOTE,
     BLUEPRINT_NOTE,
-    HeadStatus,
-    StreamHead,
+    ViewStatus,
+    StreamView,
     head_of,
 )
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
@@ -432,12 +432,12 @@ class OperatorNode(OperatorNodeBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return no rows: a blueprint node holds no data."""
         check_head_size(n)
         return self._head_without_rows(
             ColumnConfig.handle_config(columns, all_info=all_info),
-            HeadStatus.UNAVAILABLE,
+            ViewStatus.UNAVAILABLE,
             note=BLUEPRINT_NOTE,
         )
 
@@ -1386,8 +1386,12 @@ class OperatorJobNode(OperatorNodeBase):
         )
         self._update_modified_time()
 
-    def run(self) -> None:
-        """Execute the operator according to the current cache mode.
+    def run(self) -> StreamView:
+        """Execute the operator according to the current cache mode, and return a
+        ``StreamView`` of the node's rows.
+
+        Computes as a job run computes this node, unlike ``as_table()``, which only
+        reads.
 
         Without a database:
             Always compute via the operator's ``process()`` method.
@@ -1396,25 +1400,42 @@ class OperatorJobNode(OperatorNodeBase):
             - **OFF**: always compute, no DB writes.
             - **LOG**: always compute, write results to DB.
             - **REPLAY**: skip computation, load from DB.
+
+        Returns:
+            A ``StreamView`` of every row ``as_table()`` then returns, naming its rows
+            as ``head()`` then names them.
         """
         if self._loaded:
             raise self._cannot_compute_error()
         if self.is_stale:
             self.clear_cache()
 
-        if self._cached_output_stream is not None:
-            return
-
-        if self._pipeline_database is not None:
-            if self._cache_mode == CacheMode.REPLAY:
-                self._replay_from_cache()
+        computed = False
+        if self._cached_output_stream is None:
+            if self._pipeline_database is not None:
+                if self._cache_mode == CacheMode.REPLAY:
+                    self._replay_from_cache()
+                else:
+                    self._compute_and_store()
+                    computed = True
             else:
-                self._compute_and_store()
-        else:
-            self._cached_output_stream = self._operator.process(
-                *self._input_streams,
-            )
+                self._cached_output_stream = self._operator.process(
+                    *self._input_streams,
+                )
+                self._update_modified_time()
+                computed = True
+        table = self.as_table()
+        if computed:
+            # Without a database and in OFF mode the output stream is lazy: as_table()
+            # computes it, and an uncomputed input finishes only then. Stamp the node
+            # after that, or it would be older than its input and judged stale. A run
+            # that reused the kept result computed nothing and is not stamped.
             self._update_modified_time()
+        # The view names its rows as head() names them afterwards: computed by a live
+        # computation, plain rows when replayed from the store or kept by execute().
+        kept = self._cached_output_stream
+        origin = "computed" if kept is None else head_of(kept.head(1), self).origin
+        return self._view_of_rows(table, origin)
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         """Return an iterator over (tag, data) pairs.
@@ -1479,7 +1500,7 @@ class OperatorJobNode(OperatorNodeBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return the first rows the node holds or has stored; never runs the operator.
 
         After a run (or ``execute``) the rows are the node's output in memory. Before
@@ -1493,7 +1514,7 @@ class OperatorJobNode(OperatorNodeBase):
             if not self._loaded and self.is_stale:
                 # run() would recompute; the kept rows are not the current result.
                 return self._head_without_rows(
-                    config, HeadStatus.NOT_COMPUTED, note=STALE_NOTE
+                    config, ViewStatus.NOT_COMPUTED, note=STALE_NOTE
                 )
             return head_of(self._cached_output_stream.head(n, columns=config), self)
         if self._cache_mode == CacheMode.REPLAY and self._pipeline_database is not None:
@@ -1501,7 +1522,7 @@ class OperatorJobNode(OperatorNodeBase):
         if self._loaded:
             return self._head_without_rows(
                 config,
-                HeadStatus.UNAVAILABLE,
+                ViewStatus.UNAVAILABLE,
                 note=(
                     "loaded node whose results are not stored (cache mode OFF)"
                     if self._cache_mode == CacheMode.OFF
@@ -1516,9 +1537,9 @@ class OperatorJobNode(OperatorNodeBase):
             )
         else:
             note = "not run; cache mode OFF stores nothing"
-        return self._head_without_rows(config, HeadStatus.NOT_COMPUTED, note=note)
+        return self._head_without_rows(config, ViewStatus.NOT_COMPUTED, note=note)
 
-    def _head_from_store(self, n: int, config: ColumnConfig) -> StreamHead:
+    def _head_from_store(self, n: int, config: ColumnConfig) -> StreamView:
         """Return the first ``n`` of this node's stored rows.
 
         Reads the node's whole stored slice (no bounded read exists yet) through the
@@ -1530,12 +1551,12 @@ class OperatorJobNode(OperatorNodeBase):
             stream = self._load_cached_stream_from_db()
         except _LoadedCacheUnreadableError as exc:
             return self._head_without_rows(
-                config, HeadStatus.UNAVAILABLE, note=exc.head_note
+                config, ViewStatus.UNAVAILABLE, note=exc.head_note
             )
         if stream is None or stream.as_table().num_rows == 0:
             return self._head_without_rows(
                 config,
-                HeadStatus.NOTHING_STORED,
+                ViewStatus.NOTHING_STORED,
                 # A loaded job cannot run: say what the store holds instead.
                 note="the store holds no rows for its run" if self._loaded else None,
             )

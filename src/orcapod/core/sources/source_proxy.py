@@ -13,9 +13,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
-from orcapod.core.streams.head import (
-    HeadStatus,
-    StreamHead,
+from orcapod.core.streams.view import (
+    ViewStatus,
+    StreamView,
     head_of,
 )
 from orcapod.types import ColumnConfig
@@ -216,7 +216,7 @@ class SourceProxy(RootSource):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return the bound source's head, or no rows when no live source is bound."""
         if self._delegate is not None:
             return head_of(
@@ -226,7 +226,7 @@ class SourceProxy(RootSource):
         config = ColumnConfig.handle_config(columns, all_info=all_info)
         return self._head_without_rows(
             config,
-            HeadStatus.UNAVAILABLE,
+            ViewStatus.UNAVAILABLE,
             note="source not available; bind a live source",
         )
 

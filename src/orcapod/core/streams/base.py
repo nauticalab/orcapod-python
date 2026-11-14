@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import TraceableBase
-from orcapod.core.streams.head import (
+from orcapod.core.streams.view import (
     SCHEMA_NEEDS_POLL_NOTE,
-    HeadStatus,
-    StreamHead,
+    ViewStatus,
+    StreamView,
     default_note,
     preview_html,
 )
@@ -587,13 +587,48 @@ class StreamBase(TraceableBase):
         """
         return [e for e in self.iter_data()]
 
+    # The origin a ``run()`` view gives its rows: computed by this stream.
+    _RUN_ORIGIN: str = "computed"
+
+    def run(self) -> StreamView:
+        """Compute the whole stream and return a ``StreamView`` of all its rows.
+
+        The one way to compute any stream outside a job (developer, November 13, 2026,
+        ITL-1081): ``head()`` and the notebook preview never compute. ``run()`` does
+        exactly the work ``as_table()`` does, through the same code path and cache, so
+        a stream already computed is not computed again, and one whose inputs changed is
+        computed again. The view holds every row with the default column configuration;
+        its ``head``, ``tail`` and ``sort_by_tags`` choose what is shown. For other
+        column groups, use ``as_table(columns=...)`` or ``head(columns=...)`` after
+        ``run()``. On a stream that keeps its rows (a pod's or operator's output stream,
+        a job node, an in-memory source) they read the rows ``run()`` gave; a stream that
+        keeps none does its ``as_table()`` work again (a side-effect stream delivers
+        again, a polling source polls again).
+
+        Returns:
+            A ``StreamView`` of all the rows ``as_table()`` returns, with status
+            ``ROWS``.
+        """
+        return self._view_of_rows(self.as_table(), self._RUN_ORIGIN)
+
+    def _view_of_rows(self, table: "pa.Table", origin: str) -> StreamView:
+        """Return the ``run()`` view of ``table``, every row of this stream."""
+        return StreamView.of_rows(
+            self,
+            table,
+            tag_columns=self.keys()[0],
+            total_rows=table.num_rows,
+            origin=origin,
+            display_all_rows=False,
+        )
+
     def head(
         self,
         n: int = 10,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return at most ``n`` rows that are readily available, without computing.
 
         The rows are ones the stream already holds, has cached from an earlier
@@ -625,7 +660,7 @@ class StreamBase(TraceableBase):
             all_info: Include every column group and sort by tags, as for ``as_table``.
 
         Returns:
-            A ``StreamHead`` with the rows and a ``status`` that tells an empty result
+            A ``StreamView`` with the rows and a ``status`` that tells an empty result
             from one that is not computed.
 
         Raises:
@@ -634,21 +669,21 @@ class StreamBase(TraceableBase):
         """
         check_head_size(n)
         config = ColumnConfig.handle_config(columns, all_info=all_info)
-        return self._head_without_rows(config, HeadStatus.NOT_COMPUTED)
+        return self._head_without_rows(config, ViewStatus.NOT_COMPUTED)
 
     def _head_without_rows(
         self,
         config: ColumnConfig,
-        status: HeadStatus,
+        status: ViewStatus,
         note: str | None = None,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return a head with no rows: the stream's columns from its declared schema.
 
         When reading the schema would poll a source (``schema_requires_io``), the head
         has no columns either, and the note says so.
         """
         if schema_requires_io(self, config):
-            return StreamHead.without_rows(
+            return StreamView.without_rows(
                 self,
                 status,
                 pa.table({}),
@@ -659,7 +694,7 @@ class StreamBase(TraceableBase):
         table = arrow_utils.make_empty_table(
             {**tag_schema, **data_schema}, self.data_context.type_converter
         )
-        return StreamHead.without_rows(
+        return StreamView.without_rows(
             self, status, table, tag_columns=tuple(tag_schema.keys()), note=note
         )
 

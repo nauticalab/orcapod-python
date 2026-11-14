@@ -549,7 +549,7 @@ class TestNotebookDisplay:
             == sorted_head._repr_html_().split("</strong>")[1:]
         )
         assert "ArrowTableStream[numbers] — first 10 of 25 rows, sorted by tags" in html
-        assert "tags: id" in html
+        assert "bold = tag" in html
         assert "shape: (10, 2)" in html
 
     def test_head_is_the_first_rows_of_the_table(self):

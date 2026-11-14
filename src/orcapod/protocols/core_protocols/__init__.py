@@ -8,7 +8,7 @@ from .operator_pod import OperatorPodProtocol
 from .data_function import DataFunctionProtocol
 from .pod import ArgumentGroup, PodProtocol
 from .sources import DynamicSourceProtocol, SourceProtocol
-from .streams import StreamHeadProtocol, StreamProtocol
+from .streams import StreamViewProtocol, StreamProtocol
 from .side_effect_pod import SideEffectPodProtocol
 from .trackers import TrackerProtocol, TrackerManagerProtocol
 
@@ -19,7 +19,7 @@ __all__ = [
     "DataProtocol",
     "DynamicSourceProtocol",
     "SourceProtocol",
-    "StreamHeadProtocol",
+    "StreamViewProtocol",
     "StreamProtocol",
     "PodProtocol",
     "ArgumentGroup",

@@ -34,7 +34,7 @@ from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.streams import HeadStatus
+from orcapod.streams import ViewStatus
 from orcapod.types import CacheMode
 
 # The input order of A's rows (not in tag order), and the order the async rows complete
@@ -258,7 +258,7 @@ def test_heads_show_the_rows_after_the_function_node_is_read(
     for label, node in _computed_nodes(job).items():
         head = node.head(100)
         table = node.as_table()
-        assert head.status is HeadStatus.ROWS, (label, head.header())
+        assert head.status is ViewStatus.ROWS, (label, head.header())
         assert head.table.num_rows == table.num_rows == len(list(node.iter_data()))
         assert head.table.equals(table), label
         assert not node.is_stale, label
@@ -299,7 +299,7 @@ def test_a_second_run_leaves_no_node_stale(
     assert CALLS == []
     for label, node in _computed_nodes(job).items():
         assert not node.is_stale, label
-        assert node.head(100).status is HeadStatus.ROWS, label
+        assert node.head(100).status is ViewStatus.ROWS, label
 
 
 @pytest.mark.parametrize("with_store", [False, True], ids=["no_store", "store"])

@@ -25,7 +25,7 @@ from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
-from orcapod.streams import HeadStatus
+from orcapod.streams import ViewStatus
 
 from .test_pod_stream_staleness import _ConcurrentExecutor
 
@@ -339,7 +339,7 @@ def test_the_head_after_an_abandoned_read_shows_its_rows(
     assert not _stale(stream)
     head = stream.head(2)
     assert head.status is (
-        HeadStatus.PARTIAL if executor == "sequential" else HeadStatus.ROWS
+        ViewStatus.PARTIAL if executor == "sequential" else ViewStatus.ROWS
     ), head.header()
     assert head.table.num_rows == 2
     assert CALLS == calls

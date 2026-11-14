@@ -8,9 +8,9 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.source_ids import hash_source_id
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.core.streams.head import (
-    HeadStatus,
-    StreamHead,
+from orcapod.core.streams.view import (
+    ViewStatus,
+    StreamView,
 )
 from orcapod.core.streams.base import (
     check_head_size,
@@ -470,7 +470,7 @@ class DerivedSource(RootSource):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return the first rows of the origin's records, without computing.
 
         The records are the ones this source already read. Otherwise, an origin source
@@ -497,7 +497,7 @@ class DerivedSource(RootSource):
             origin_head = self._origin.head(n)
             if (
                 config.sort_by_tags
-                and origin_head.status is HeadStatus.ROWS
+                and origin_head.status is ViewStatus.ROWS
                 and not origin_head.total_is_estimate
                 and origin_head.total_rows is not None
                 and origin_head.total_rows > n
@@ -507,7 +507,7 @@ class DerivedSource(RootSource):
                 # order, so the origin is not sorted first. A bounded origin (an
                 # estimated total) is sorted among the rows it read.
                 origin_head = self._origin.head(origin_head.total_rows)
-            if origin_head.status is not HeadStatus.ROWS:
+            if origin_head.status is not ViewStatus.ROWS:
                 if origin_head.table.num_columns == 0:
                     # The origin's columns are not known without polling it.
                     return origin_head.for_stream(self)
@@ -515,7 +515,7 @@ class DerivedSource(RootSource):
                 # origin's status and explanation.
                 empty = self._stream_over(origin_head.table.slice(0, 0))
                 return dataclasses.replace(
-                    StreamHead.without_rows(
+                    StreamView.without_rows(
                         self,
                         origin_head.status,
                         empty.as_table(columns=config),
@@ -537,9 +537,9 @@ class DerivedSource(RootSource):
         records = self._origin_records()
         if records is None or records.num_rows == 0:
             stream = self._stream_over(self._empty_origin_table())
-            return StreamHead.without_rows(
+            return StreamView.without_rows(
                 self,
-                HeadStatus.NOTHING_STORED,
+                ViewStatus.NOTHING_STORED,
                 stream.as_table(columns=config),
                 tag_columns=stream.keys(columns=config)[0],
                 note="nothing stored: its origin has not run",

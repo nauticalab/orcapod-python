@@ -24,7 +24,7 @@ from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.streams import HeadStatus
+from orcapod.streams import ViewStatus
 from orcapod.types import CacheMode, Schema
 
 CALLS: list[int] = []
@@ -98,9 +98,9 @@ def test_nodes_before_a_run_show_no_rows_and_compute_nothing() -> None:
         op_html = job.nodes["sel"]._repr_html_()
     assert "could not read" not in op_html
     assert CALLS == []
-    assert fn_head.status is HeadStatus.NOTHING_STORED
+    assert fn_head.status is ViewStatus.NOTHING_STORED
     assert fn_head.table.column_names == ["id", "y"]
-    assert op_head.status is HeadStatus.NOT_COMPUTED
+    assert op_head.status is ViewStatus.NOT_COMPUTED
     assert "cache mode OFF" in op_head.header()
 
 
@@ -121,7 +121,7 @@ def test_nodes_after_a_run_show_their_first_rows(
             type(store), "get_all_records", side_effect=AssertionError("store read")
         ):
             head = node.head()
-        assert head.status is HeadStatus.ROWS, label
+        assert head.status is ViewStatus.ROWS, label
         assert head.total_rows == 25
         assert head.table.equals(node.as_table().slice(0, 10)), label
         assert "first 10 of 25" in node._repr_html_()
@@ -140,7 +140,7 @@ def test_a_new_job_over_a_filled_store_reads_stored_rows_without_computing(
     node = _job(store).nodes["triple"]
     head = node.head(4)
     assert CALLS == []
-    assert head.status is HeadStatus.ROWS
+    assert head.status is ViewStatus.ROWS
     # The whole stored slice is read, so the header states the exact count and
     # makes no claim of a bounded read.
     assert head.header() == "FunctionJobNode[triple] — first 4 of 25 stored rows"
@@ -160,9 +160,9 @@ def test_a_loaded_job_shows_stored_rows_and_never_raises(tmp_path: Path) -> None
     fn_head = loaded.nodes["triple"].head()
     op_head = loaded.nodes["sel"].head()
     assert CALLS == []
-    assert fn_head.status is HeadStatus.ROWS
+    assert fn_head.status is ViewStatus.ROWS
     assert fn_head.header().endswith("first 10 of 25 stored rows")
-    assert op_head.status is HeadStatus.UNAVAILABLE
+    assert op_head.status is ViewStatus.UNAVAILABLE
     assert "cache mode OFF" in op_head.header()
 
 
@@ -172,7 +172,7 @@ def test_blueprint_nodes_are_unavailable() -> None:
     for label in ("triple", "sel"):
         blueprint = job.nodes[label].as_node()
         head = blueprint.head()
-        assert head.status is HeadStatus.UNAVAILABLE
+        assert head.status is ViewStatus.UNAVAILABLE
         assert "pipeline blueprint" in blueprint._repr_html_()
 
 
@@ -181,12 +181,12 @@ def test_source_nodes() -> None:
     slot = SourceNode(
         name="nums", tag_schema=Schema({"id": int}), data_schema=Schema({"x": int})
     )
-    assert slot.head().status is HeadStatus.UNAVAILABLE
+    assert slot.head().status is ViewStatus.UNAVAILABLE
     assert "input slot" in slot._repr_html_()
     unbound = SourceJobNode(
         name="nums", tag_schema=Schema({"id": int}), data_schema=Schema({"x": int})
     )
-    assert unbound.head().status is HeadStatus.UNAVAILABLE
+    assert unbound.head().status is ViewStatus.UNAVAILABLE
     assert "no source bound" in unbound.head().header()
     source = _source()
     bound = SourceJobNode(name="nums", bound_source=source)
@@ -210,14 +210,14 @@ def test_operator_node_cache_modes() -> None:
     """Operator nodes show stored rows in REPLAY and none in LOG before a run."""
     store = InMemoryArrowDatabase()
     assert _operator_node(CacheMode.REPLAY, store).head().status is (
-        HeadStatus.NOTHING_STORED
+        ViewStatus.NOTHING_STORED
     )
     seed = _operator_node(CacheMode.LOG, store)
     _ = seed.execute(_source())
 
     replay = _operator_node(CacheMode.REPLAY, store)
     head = replay.head(3)
-    assert head.status is HeadStatus.ROWS
+    assert head.status is ViewStatus.ROWS
     assert (
         head.header()
         == "OperatorJobNode[SelectDataColumns] — first 3 of 25 stored rows"
@@ -226,7 +226,7 @@ def test_operator_node_cache_modes() -> None:
 
     log = _operator_node(CacheMode.LOG, store)
     log_head = log.head()
-    assert log_head.status is HeadStatus.NOT_COMPUTED
+    assert log_head.status is ViewStatus.NOT_COMPUTED
     assert "not replayed" in log_head.header()
 
 
@@ -242,7 +242,7 @@ def test_an_operator_node_with_an_empty_result_reads_as_computed(
         _ = PolarsFilter(constraints={"x": -1})(_source(), label="none")
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator]())
     head = job.nodes["none"].head()
-    assert head.status is HeadStatus.ROWS
+    assert head.status is ViewStatus.ROWS
     assert len(head) == 0
     assert head.table.column_names == ["id", "x"]
 
@@ -253,10 +253,10 @@ def test_an_operator_node_with_changed_inputs_shows_no_stale_rows() -> None:
     assert isinstance(fn_stream, FunctionPodStream)
     node = OperatorJobNode(operator=SelectDataColumns(["y"]), input_streams=[fn_stream])
     _ = node.execute(fn_stream)
-    assert node.head().status is HeadStatus.ROWS
+    assert node.head().status is ViewStatus.ROWS
     fn_stream.clear_cache()  # the input is modified after the run
     head = node.head()
-    assert head.status is HeadStatus.NOT_COMPUTED
+    assert head.status is ViewStatus.NOT_COMPUTED
     assert "inputs changed" in head.header()
 
 
@@ -295,6 +295,6 @@ def test_head_keeps_the_tag_arrow_type_of_the_input(
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator]())
     for node in (job.nodes["triple"], build(store).nodes["triple"]):
         head = node.head(5, all_info=True)
-        assert head.status is HeadStatus.ROWS
+        assert head.status is ViewStatus.ROWS
         assert head.table.schema.field("id").type == pa.int8()
         assert head.table.equals(node.as_table(all_info=True).slice(0, 5))

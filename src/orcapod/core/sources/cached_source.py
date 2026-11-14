@@ -10,9 +10,9 @@ from orcapod.config import OrcapodConfig
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import check_head_size, schema_requires_io
-from orcapod.core.streams.head import (
-    HeadStatus,
-    StreamHead,
+from orcapod.core.streams.view import (
+    ViewStatus,
+    StreamView,
     head_of,
 )
 from orcapod.contexts.stored import (
@@ -422,7 +422,7 @@ class CachedSource(RootSource):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return the first rows without reading or writing the cache.
 
         Once the source has been used, its merged stream is in memory and this is a slice
@@ -439,14 +439,14 @@ class CachedSource(RootSource):
         wrapped = head_of(
             self._source.head(0, columns=columns, all_info=all_info), self
         )
-        if wrapped.status is not HeadStatus.ROWS:
+        if wrapped.status is not ViewStatus.ROWS:
             return wrapped
-        return StreamHead.without_rows(
+        return StreamView.without_rows(
             self,
-            HeadStatus.NOT_COMPUTED,
+            ViewStatus.NOT_COMPUTED,
             wrapped.table,
             tag_columns=wrapped.tag_columns,
-            note="not read yet; as_table() or iter_data() reads and updates the cache",
+            note="not read yet; run() reads and updates the cache",
         )
 
     def get_all_records(

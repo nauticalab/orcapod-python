@@ -19,7 +19,7 @@ from orcapod.core.function_pod import FunctionPodStream
 from orcapod.core.operators import PolarsFilter, SelectDataColumns
 from orcapod.core.sources import ArrowTableSource, DerivedSource, DictSource
 from orcapod.core.sources.polling_source import PollingSource
-from orcapod.streams import HeadStatus
+from orcapod.streams import ViewStatus
 from orcapod.types import ColumnConfig, Cursor, Schema
 
 ROWS = 8
@@ -107,7 +107,7 @@ def test_head_is_the_prefix_of_as_table_for_every_configuration(
     """A stream whose rows are all held: head(n, cfg) is as_table(cfg) cut to n rows."""
     stream = STREAMS[kind]()
     head = stream.head(n, **CONFIGS[config])
-    assert head.status is HeadStatus.ROWS
+    assert head.status is ViewStatus.ROWS
     assert head.table.equals(stream.as_table(**CONFIGS[config]).slice(0, n))
     assert CALLS == []
 
@@ -142,7 +142,7 @@ def test_a_partly_computed_stream_sorts_the_rows_computed_so_far() -> None:
     unsorted_head = stream.head(3)
 
     assert CALLS == [5, 2, 7, 0]
-    assert head.status is HeadStatus.PARTIAL
+    assert head.status is ViewStatus.PARTIAL
     # The rows computed so far in tag order, not the first 3 of the whole result in tag order.
     assert head.table.column("id").to_pylist() == [0, 2, 5]
     assert unsorted_head.table.column("id").to_pylist() == [5, 2, 7]
@@ -187,7 +187,7 @@ def test_a_polling_source_sorts_the_rows_it_has_polled_and_polls_nothing() -> No
     """Before a poll there are no rows to sort; after one, the polled rows sort."""
     fake = _OneBatch()
     source = PollingSource(fake, tag_columns="id")
-    assert source.head(3, all_info=True).status is HeadStatus.NOT_COMPUTED
+    assert source.head(3, all_info=True).status is ViewStatus.NOT_COMPUTED
     assert (fake.polls, fake.fetches) == (0, 0)
 
     _ = list(source.iter_data())
@@ -231,7 +231,7 @@ def test_an_unbound_source_proxy_head_accepts_a_sorted_configuration() -> None:
         pipeline_hash_str=live.pipeline_hash().to_string(),
     )
     head = proxy.head(3, all_info=True)
-    assert head.status is HeadStatus.UNAVAILABLE
+    assert head.status is ViewStatus.UNAVAILABLE
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +243,7 @@ def _preview_ids(html: str) -> list[int]:
     """The ``id`` cells of a preview, in the order they are shown."""
     import re
 
-    return [int(v) for v in re.findall(r"<td>(\d+)</td>", html)][::2]
+    return [int(v) for v in re.findall(r"<td[^>]*>(\d+)</td>", html)][::2]
 
 
 def test_the_preview_of_a_source_shows_rows_in_tag_order_and_says_so() -> None:

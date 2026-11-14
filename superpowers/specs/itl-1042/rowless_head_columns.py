@@ -20,7 +20,7 @@ from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
-from orcapod.streams import StreamHead
+from orcapod.streams import StreamView
 from orcapod.types import CacheMode
 
 CONFIGS: dict[str, dict[str, Any]] = {
@@ -82,12 +82,12 @@ def _job(store: InMemoryArrowDatabase) -> PipelineJob:
     return job
 
 
-def _schema(head: StreamHead) -> dict[str, str]:
+def _schema(head: StreamView) -> dict[str, str]:
     """The head's columns and their Arrow types."""
     return {field.name: str(field.type) for field in head.table.schema}
 
 
-def _report(kind: str, config: str, empty: StreamHead, full: StreamHead) -> bool:
+def _report(kind: str, config: str, empty: StreamView, full: StreamView) -> bool:
     """Print how ``empty``'s columns differ from ``full``'s; True when they differ."""
     empty_schema, full_schema = _schema(empty), _schema(full)
     if empty_schema == full_schema:

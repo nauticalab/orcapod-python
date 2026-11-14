@@ -619,7 +619,9 @@ class TestNotebookPreview:
             in html
         )
         assert "shape: (10, 3)" in html
-        assert "tags: subject_id, timestamp" in html
+        # The two tag columns are marked in the display (ITL-1081).
+        assert "bold = tag" in html
+        assert html.count("font-weight:bold") == 2
 
     def test_head_reads_one_bounded_scan(self, big):
         """``head()`` reads one scan of at most 10 rows and says the table's size."""
@@ -752,4 +754,6 @@ class TestNotebookPreview:
         )
         assert head.table.num_rows == 0
         assert head.table.num_columns == 3
-        assert "tags: subject_id, timestamp" in html
+        # The two tag columns are marked in the display (ITL-1081).
+        assert "bold = tag" in html
+        assert html.count("font-weight:bold") == 2

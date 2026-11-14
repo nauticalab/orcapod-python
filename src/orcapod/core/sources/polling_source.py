@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
-from orcapod.core.streams.head import (
-    HeadStatus,
-    StreamHead,
+from orcapod.core.streams.view import (
+    ViewStatus,
+    StreamView,
 )
 from orcapod.core.streams.base import (
     check_head_size,
@@ -464,7 +464,7 @@ class PollingSource(RootSource, Generic[T]):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return the first rows already polled; never polls.
 
         Before the first poll there are no rows. The columns are the declared schema's,
@@ -505,12 +505,12 @@ class PollingSource(RootSource, Generic[T]):
         else:
             table = pa.table({})
             tag_columns = ()
-        return StreamHead.without_rows(
+        return StreamView.without_rows(
             self,
-            HeadStatus.NOT_COMPUTED,
+            ViewStatus.NOT_COMPUTED,
             table,
             tag_columns=tag_columns,
-            note="nothing polled yet; iterating it or a job run polls it",
+            note="nothing polled yet; run() polls it",
         )
 
     def iter_data(self):

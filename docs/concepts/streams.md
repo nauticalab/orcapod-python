@@ -107,7 +107,8 @@ table: its first rows in tag order, with a line saying what they are. That previ
 `head()` asked for `sort_by_tags` and rendered, and `head(n, columns={"sort_by_tags": True})`
 gives the same rows to work with. Neither ever computes anything: they show
 only what is readily available, and never call a function, run an operator, deliver a side
-effect, poll a source or write to a database.
+effect, poll a source or write to a database. `run()` computes (see "Computing a stream
+outside a job" below).
 
 ```python
 from orcapod import function_pod
@@ -131,7 +132,7 @@ print(subjects.head(3).as_table().column("age").to_pylist())
 # [9, 10, 11]
 ```
 
-`head()` returns a `StreamHead`: the rows as a PyArrow table (`.table`, `.as_table()`,
+`head()` returns a `StreamView`: the rows as a PyArrow table (`.table`, `.as_table()`,
 `.as_polars_df()`), the row count when it is known without computing (`.total_rows`), and a
 `.status` that says where the rows came from. A stream downstream of a computation shows rows
 only once they are computed:
@@ -144,14 +145,69 @@ def to_months(age: int) -> int:
 
 months = to_months.pod(subjects, label="months")
 print(months.head().header())
-# FunctionPodStream[months] — not computed; as_table(), iter_data() or a job run computes it
+# FunctionPodStream[months] — not computed; run() computes it
 print(months.head().status.value, months.head().table.column_names)
 # not_computed ['subject_id', 'age_months']
 
-table = months.as_table()  # computes every row
+view = months.run()  # computes every row
+print(view.header())
+# FunctionPodStream[months] — all 25 computed rows
 print(months.head(3).header())
 # FunctionPodStream[months] — first 3 of 25 computed rows
 ```
+
+### Computing a stream outside a job: `run()`
+
+Every stream, source and node has `run()`, with no arguments: it is the one way to compute
+any of them outside a job (developer, November 13, 2026). It does exactly the work
+`as_table()` does, through the same cache, and returns a `StreamView` of every row with the
+default columns. A stream already computed is not computed a second time; one whose input
+changed is recomputed. In a notebook, `stream.run()` at the end of a cell computes and displays.
+
+The view's own methods choose what is shown. Each returns a new view and never reads or
+computes anything; the header says which rows are shown:
+
+```python
+print(view.head(5).header())
+# FunctionPodStream[months] — first 5 of 25 computed rows
+print(view.tail(5).header())
+# FunctionPodStream[months] — last 5 of 25 computed rows
+print(view.head(20).tail(10).header())
+# FunctionPodStream[months] — rows 11–20 of 25 computed rows
+print(view.sort_by_tags().head(3).header())
+# FunctionPodStream[months] — first 3 of 25 computed rows, sorted by tags
+print(view.head(3).sort_by_tags().header())
+# FunctionPodStream[months] — first 3 of 25 computed rows, then sorted by tags
+```
+
+`view.sort_by_tags()` orders rows as `as_table(columns={"sort_by_tags": True})` does,
+except for rows with equal tags: those are ordered by their system tags, which a `run()`
+view does not hold, so it keeps them in the order it has them. The display of a view cut by
+`head(n)` or `tail(n)` (on the stream or on a view) shows all its rows; a view nobody cut,
+such as the one `run()` returns, shows its first and last five rows when it has more than
+ten, and its header gives the count.
+
+A view holds the default column groups only. For system tags, source info, the data context
+or content hashes, ask the stream after `run()`. A function pod's or operator's output stream,
+a job node, an in-memory source and a `CachedSource` keep the rows `run()` gave: their
+`as_table(columns=...)` and `head(columns=...)` read those rows and compute nothing. Other
+streams do their `as_table()` work again: a side-effect stream delivers its side effects again
+(its `head()` shows no rows), a polling source polls again and a `SpiralDBTableSource` reads
+its whole table again. A view never asks its stream for more columns, because for those
+streams asking again is not a read.
+
+What `run()` does on each kind of object:
+
+| Object | `run()` |
+|---|---|
+| An in-memory source (`DictSource`, `ArrowTableSource`, ...), a Delta or SQL table source | nothing to compute: a view of the rows it holds |
+| A `SpiralDBTableSource` | reads the whole table into memory (`head()` is the bounded read); every call reads again |
+| A `PollingSource` | polls, as `as_table()` does |
+| A `CachedSource` | reads its cache and writes the wrapped source's new rows to it |
+| A function pod's or operator's output stream | computes what is not computed yet |
+| A job node | runs the node as a job run would (`as_table()` of a job node only reads), then returns the view |
+| A side-effect stream | delivers its side effects for every row, on every call, and returns the rows it passed on; `head()` still shows none |
+| A pipeline blueprint node, an unbound input slot | raises, as `as_table()` does |
 
 What each kind of object shows:
 
@@ -195,7 +251,7 @@ with no tag columns previews its rows in stream order.
 
 A head of an operator is never the operator applied to the heads of its inputs: a group over
 the first ten rows has the wrong members. So an uncomputed stream shows its columns and
-"not computed" until `as_table()`, `iter_data()` or a job run computes it. An empty result
+"not computed" until `run()`, `as_table()`, `iter_data()` or a job run computes it. An empty result
 shows status `rows` with zero rows, so it is never mistaken for "not computed". A head without
 rows because nothing is computed or stored yet shows the stream's declared columns: the
 source-info (`_source_*`), `_context_key` and content-hash columns, which are known only from
@@ -211,6 +267,11 @@ Two reads of one stream open at the same time, or a read that picks up one left 
 the stream's results: each row is computed once and every read yields the same rows, whatever
 feeds the stream. An upstream finishing its first computation during the read is not a change;
 a `clear_cache()` upstream between the reads is, and the next read starts again.
+
+The display marks the tag columns, which come first: in a notebook their headers are bold
+(in an accent colour), a vertical rule separates them from the data columns and a line under
+the header says "bold = tag"; as text, each tag column's name starts with `*` ("* = tag").
+Only the display is marked: the view's table and `as_table()` keep the plain names.
 
 In the preview, large cells are summarised (an array as `ndarray float64 (2, 3)`, bytes as
 `bytes (300 B)`, long text and long lists shortened); `head().table` keeps the full values.

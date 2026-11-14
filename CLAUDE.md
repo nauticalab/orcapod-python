@@ -513,6 +513,10 @@ conversion. Two specializations:
 
 **Stream** (`core/streams/arrow_table_stream.py`) — immutable (Tag, Data) sequence.
 Key methods: `output_schema()`, `keys()`, `iter_data()`, `as_table()`.
+Every stream, source and node has `run()` with no arguments (developer, November 13, 2026,
+ITL-1081): it does the work `as_table()` does (a job node runs as in a job) and returns a
+`StreamView` of every row; the view's `head`/`tail`/`sort_by_tags` choose what is shown.
+`head()` and the notebook preview never compute. Never give `run()` arguments.
 
 **Source** (`core/sources/`) — produces a stream from external data. `ArrowTableSource` is the
 core implementation; CSV/Delta/DataFrame/Dict/List sources all delegate to it internally. Each

@@ -23,7 +23,7 @@ import pytest
 
 from orcapod import PipelineJob, function_pod
 from orcapod.core.operators import Join
-from orcapod.core.streams import HeadStatus
+from orcapod.core.streams import ViewStatus
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
 from orcapod.errors import StoreContentWarning
 from orcapod.pipeline import Pipeline, SyncPipelineOrchestrator
@@ -292,7 +292,7 @@ def test_without_the_run_content_hash_head_says_why_it_shows_no_rows(
     job = _run(store, "nullable_tag")
     node = _load_replaying(_save(job, tmp_path, _drop_both), store).nodes["joined"]
     head = node.head()
-    assert head.status is HeadStatus.UNAVAILABLE
+    assert head.status is ViewStatus.UNAVAILABLE
     assert head.table.num_rows == 0
     assert "does not record its run's content hash" in head.header()
     assert "ITL-1048" in head.header()
@@ -323,10 +323,10 @@ def _assert_reads_as_live_with_no_rows(loaded_node: Any, live_node: Any) -> None
         assert table.schema.equals(live.schema), (table.schema, live.schema)
     assert list(loaded_node.iter_data()) == []
     head = loaded_node.head()
-    assert head.status is HeadStatus.NOTHING_STORED
+    assert head.status is ViewStatus.NOTHING_STORED
     assert head.table.num_rows == 0
     assert "the store holds no rows for its run" in head.header()
-    assert live_node.head().status is HeadStatus.NOTHING_STORED
+    assert live_node.head().status is ViewStatus.NOTHING_STORED
 
 
 def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
@@ -568,7 +568,7 @@ def test_a_format_0_1_0_file_finds_its_join_table_and_never_shows_its_rows_as_no
     assert node.pipeline_hash() == run_join.pipeline_hash()
     assert node.node_identity_path == run_join.node_identity_path
     head = node.head()
-    assert head.status is HeadStatus.UNAVAILABLE
+    assert head.status is ViewStatus.UNAVAILABLE
     assert "ITL-1048" in head.header()
     with pytest.raises(
         RuntimeError, match=r"'Join': the job file does not record .*ITL-1048"

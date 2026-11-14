@@ -121,16 +121,19 @@ class TestIterDatasReadOnly:
         assert "result" in table.column_names
 
     def test_run_cache_only_is_noop(self):
-        """run() on a CACHE_ONLY node returns without error and without computation."""
+        """run() on a CACHE_ONLY node computes nothing and returns the stored rows' view."""
         from orcapod.pipeline.serialization import LoadStatus
+        from orcapod.streams import StreamView
 
         node = _make_node()
+        # A loaded node whose upstream is unavailable keeps that input stream; only its
+        # status says it cannot be read (FunctionJobNode.from_descriptor).
         node._load_status = LoadStatus.CACHE_ONLY
-        node._input_stream = None  # simulate no upstream
 
         with patch.object(node, "execute") as mock_exec:
-            node.run()
+            view = node.run()
             mock_exec.assert_not_called()
+        assert isinstance(view, StreamView)
 
     def test_run_unavailable_raises(self):
         """run() on an UNAVAILABLE node raises RuntimeError."""

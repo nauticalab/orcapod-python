@@ -28,7 +28,7 @@ from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
-from orcapod.streams import HeadStatus
+from orcapod.streams import ViewStatus
 
 # Rows of the source, not in tag order.
 IDS = [3, 1, 4, 0, 2]
@@ -187,7 +187,7 @@ def _read(stream: StreamProtocol, how: str) -> int:
     if how == "as_table":
         return stream.as_table().num_rows
     head = stream.head(100)
-    assert head.status is HeadStatus.ROWS, head.header()
+    assert head.status is ViewStatus.ROWS, head.header()
     return head.table.num_rows
 
 

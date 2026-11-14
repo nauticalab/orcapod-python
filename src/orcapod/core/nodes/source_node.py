@@ -17,9 +17,9 @@ from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
 from orcapod.core.streams.base import schema_requires_io
-from orcapod.core.streams.head import (
-    HeadStatus,
-    StreamHead,
+from orcapod.core.streams.view import (
+    ViewStatus,
+    StreamView,
     head_of,
     preview_html,
 )
@@ -308,7 +308,7 @@ class SourceNodeBase(TraceableBase, ABC):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return no rows: an input slot holds no data until a source is bound.
 
         See ``StreamBase.head``.
@@ -316,25 +316,44 @@ class SourceNodeBase(TraceableBase, ABC):
         check_head_size(n)
         return self._head_without_rows(
             ColumnConfig.handle_config(columns, all_info=all_info),
-            HeadStatus.UNAVAILABLE,
+            ViewStatus.UNAVAILABLE,
             note="input slot; bind a source",
         )
 
     def _head_without_rows(
-        self, config: ColumnConfig, status: HeadStatus, note: str | None = None
-    ) -> StreamHead:
+        self, config: ColumnConfig, status: ViewStatus, note: str | None = None
+    ) -> StreamView:
         """Return a head with no rows: the slot's columns from its declared schema."""
         tag_schema, data_schema = self.output_schema(columns=config)
         table = arrow_utils.make_empty_table(
             {**tag_schema, **data_schema}, self.data_context.type_converter
         )
-        return StreamHead.without_rows(
+        return StreamView.without_rows(
             self, status, table, tag_columns=tuple(tag_schema.keys()), note=note
         )
 
     def _repr_html_(self) -> str:
         """Render ``head()`` in tag order for a notebook; never computes."""
         return preview_html(self)
+
+    def run(self) -> StreamView:
+        """Read the bound source's rows and return a ``StreamView`` of all of them.
+
+        Does the work ``as_table()`` does (``StreamBase.run``): a ``SourceJobNode`` reads
+        its bound source (polling or reading it as that source's own ``run()`` does), and
+        an input slot with no source bound raises.
+
+        Raises:
+            UnboundSourceError: When no concrete source is bound.
+        """
+        table = self.as_table()
+        return StreamView.of_rows(
+            self,
+            table,
+            tag_columns=self.keys()[0],
+            total_rows=table.num_rows,
+            display_all_rows=False,
+        )
 
     async def async_iter_data(self):
         """Asynchronous iterator over (tag, data) pairs.
@@ -627,13 +646,13 @@ class SourceJobNode(SourceNodeBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> StreamHead:
+    ) -> StreamView:
         """Return the bound source's head, or no rows when no source is bound."""
         if self._bound_source is None:
             check_head_size(n)
             return self._head_without_rows(
                 ColumnConfig.handle_config(columns, all_info=all_info),
-                HeadStatus.UNAVAILABLE,
+                ViewStatus.UNAVAILABLE,
                 note="no source bound",
             )
         return head_of(
