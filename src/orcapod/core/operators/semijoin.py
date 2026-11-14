@@ -1,8 +1,11 @@
+import asyncio
+import contextlib
 import warnings
-from collections.abc import Collection, Sequence
-from typing import TYPE_CHECKING, Any
+from collections import deque
+from collections.abc import AsyncGenerator, AsyncIterator, Collection, Sequence
+from typing import TYPE_CHECKING, Any, final
 
-from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod.channels import ChannelClosed, ReadableChannel, WritableChannel
 from orcapod.core.operators.base import BinaryOperator, require_shared_arrow_type
 from orcapod.core.operators.key_nullability import reconcile_key_nullability
 from orcapod.core.operators.match_keys import frozen_scalar
@@ -293,9 +296,16 @@ class SemiJoin(BinaryOperator):
         """Build-probe: collect right input, then stream left through a hash lookup.
 
         Phase 1 — Build: collect all rows from the right (filter) channel and
-        index them by the common-key values.
-        Phase 2 — Probe: stream left rows one at a time; for each row whose
-        common-key values appear in the right-side index, emit immediately.
+        index them by the common-key values. The left channel is read at the
+        same time (ITL-1075): the left rows that arrive before the right input
+        ends are kept, at most the whole left input, as the sync path and
+        ``MergeJoin``'s barrier path hold their inputs. Reading the left input
+        only after the right one ended deadlocked a run in which one node fed
+        both inputs.
+        Phase 2 — Probe: the kept left rows, then the rest of the left input
+        one at a time with backpressure; for each row whose common-key values
+        appear in the right-side index, emit immediately. Left rows keep their
+        arrival order.
 
         Falls back to barrier mode when the right input is empty (schema
         cannot be inferred from data) or when there are no common keys.
@@ -312,11 +322,12 @@ class SemiJoin(BinaryOperator):
                 their system-tag names, so no column is named after an
                 input's pipeline hash.
         """
+        left_rows: _LeftRows | None = None
         try:
-            left_ch, right_ch = inputs[0], inputs[1]
-
-            # Phase 1: Build right-side lookup
-            right_rows = await right_ch.collect()
+            # Phase 1: Build right-side lookup, reading the left input meanwhile
+            right_rows, left_rows = await _collect_right_reading_left(
+                inputs[0], inputs[1]
+            )
 
             if not right_rows:
                 # Empty right: determine common keys from the validated
@@ -325,10 +336,11 @@ class SemiJoin(BinaryOperator):
                 common = self._common_keys_from_schema()
                 if common:
                     # Drain left channel (discard) — result is empty
-                    await left_ch.collect()
+                    async for _ in left_rows:
+                        pass
                     return
                 # No common keys — pass all left rows through unchanged
-                async for tag, data in left_ch:
+                async for tag, data in left_rows:
                     await output.send((tag, data))
                 return
 
@@ -339,7 +351,7 @@ class SemiJoin(BinaryOperator):
             common_keys: tuple[str, ...] | None = None
             right_lookup: set[tuple[object, ...]] = set()
 
-            async for tag, data in left_ch:
+            async for tag, data in left_rows:
                 if common_keys is None:
                     # First left row — determine common keys (the shared tag
                     # columns, ITL-1088) and build index
@@ -359,7 +371,7 @@ class SemiJoin(BinaryOperator):
                     if not common_keys:
                         # No common keys — pass all left rows through
                         await output.send((tag, data))
-                        async for t, p in left_ch:
+                        async for t, p in left_rows:
                             await output.send((t, p))
                         return
 
@@ -384,6 +396,8 @@ class SemiJoin(BinaryOperator):
                     await output.send((tag, data))
         finally:
             await output.close()
+            if left_rows is not None:
+                await left_rows.aclose()
 
     @staticmethod
     def _key_table(tag: TagProtocol, data: DataProtocol, key: str) -> "pa.Table":
@@ -431,3 +445,131 @@ class SemiJoin(BinaryOperator):
 
     def identity_structure(self) -> Any:
         return self.__class__.__name__
+
+
+_Row = tuple[TagProtocol, DataProtocol]
+
+
+async def _collect_right_reading_left(
+    left: ReadableChannel[_Row],
+    right: ReadableChannel[_Row],
+) -> tuple[list[_Row], "_LeftRows"]:
+    """Collect ``right`` while reading ``left``, so neither input stops being read.
+
+    A task collects ``right``; meanwhile the rows of ``left`` are read and kept, until
+    ``right`` ends or ``left`` does. A semi-join that waited for its right input before
+    reading its left one blocked a node feeding both inputs: the channel into the left
+    input filled, that node could not finish its right-side rows, and the run waited
+    forever (ITL-1075).
+
+    Each left receive runs as a task, awaited together with the right one, so the end
+    (or failure) of ``right`` is acted on at once, not when ``left`` next sends or
+    closes. A receive still pending then is handed to the returned rows, which await
+    it in its place: it is never cancelled while its row may still be read.
+
+    Args:
+        left: The left input channel.
+        right: The right input channel.
+
+    Returns:
+        The rows of ``right``, and every row of ``left`` in arrival order: the rows
+        kept while ``right`` was collected, the pending receive's row, then the rest
+        of ``left`` as it arrives.
+
+    Raises:
+        Exception: Whatever collecting ``right`` raises. A pending left receive is
+            then cancelled, since the left rows are not going to be read.
+    """
+    right_task = asyncio.create_task(right.collect())
+    kept: deque[_Row] = deque()
+    receive: asyncio.Task[_Row] | None = None
+    left_ended = False
+    try:
+        while not right_task.done():
+            if receive is None:
+                receive = asyncio.create_task(left.receive())
+            _ = await asyncio.wait(
+                (receive, right_task), return_when=asyncio.FIRST_COMPLETED
+            )
+            if receive.done():
+                finished, receive = receive, None
+                try:
+                    kept.append(finished.result())
+                except ChannelClosed:
+                    left_ended = True
+                    break
+        right_rows = await right_task
+    except BaseException:
+        if receive is not None:
+            await _cancel_receive(receive)
+        raise
+    finally:
+        if not right_task.done():
+            _ = right_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await right_task
+    return right_rows, _LeftRows(left, kept, receive, left_ended)
+
+
+async def _cancel_receive(receive: "asyncio.Task[_Row]") -> None:
+    """Cancel a left receive whose row is not going to be read, and wait for it to end.
+
+    Args:
+        receive: The receive task; it may already be done.
+    """
+    _ = receive.cancel()
+    _ = await asyncio.wait((receive,))
+    if not receive.cancelled():
+        # Retrieve its outcome (a row, or ``ChannelClosed``) so it is not reported.
+        _ = receive.exception()
+
+
+@final
+class _LeftRows:
+    """Every row of the left input in arrival order, for one pass.
+
+    The rows kept while the right input was collected come first, then the row of
+    the receive that was pending when it ended, then the rest of the left channel.
+    """
+
+    def __init__(
+        self,
+        left: ReadableChannel[_Row],
+        kept: deque[_Row],
+        pending: "asyncio.Task[_Row] | None",
+        left_ended: bool,
+    ) -> None:
+        self._left = left
+        self._kept = kept
+        self._pending = pending
+        self._left_ended = left_ended
+        self._rows = self._iterate()
+
+    def __aiter__(self) -> AsyncIterator[_Row]:
+        return self._rows
+
+    async def _iterate(self) -> AsyncGenerator[_Row, None]:
+        while self._kept:
+            yield self._kept.popleft()
+        if self._pending is not None:
+            try:
+                row = await self._pending
+            except ChannelClosed:
+                return
+            finally:
+                self._pending = None
+            yield row
+        if not self._left_ended:
+            async for row in self._left:
+                yield row
+
+    async def aclose(self) -> None:
+        """Release the left input when its rows are not all read.
+
+        A pending receive is cancelled. After a complete pass there is none, so this
+        does nothing.
+        """
+        await self._rows.aclose()
+        if self._pending is not None:
+            pending, self._pending = self._pending, None
+            await _cancel_receive(pending)
