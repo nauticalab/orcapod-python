@@ -304,8 +304,10 @@ A logical type's identifier is its Arrow extension name plus its Arrow extension
   both as `set[int]`, as for lists), so it is
   registered by identifier only, never bound to a Python type (`binds_python_type`), and
   `set[T]` maps to Arrow through `T`. `list[T]` of a primitive stays a plain
-  `large_list`: never wrap it. Inside a dict value or tuple field a set of a primitive keeps
-  its plain storage (Arrow has no extension type in a struct field). A container's elements
+  `large_list`: never wrap it. A native container, like any logical type, inside a dict key
+  or value or a tuple field is refused at definition (Arrow has no extension type in a struct
+  field; developer, November 15, 2026, ITL-1150): one guard, `nested_storage.require_storable_in_struct_field`,
+  never a silent strip to storage. A container's elements
   are value-hashed only when its innermost element is a logical type. A saved schema rebuilds
   an unregistered native container from its identifier (`serialization.parse_arrow_type_string`).
   `frozenset[T]` is refused (ITL-1140).

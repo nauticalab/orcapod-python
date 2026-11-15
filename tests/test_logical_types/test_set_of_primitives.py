@@ -245,12 +245,12 @@ def test_nested_and_optional_sets_reach_a_downstream_pod_as_sets(
     assert _out_values(job.nodes["produce"].as_source()) == [value]
 
 
-def test_a_set_inside_a_dict_value_is_still_stored() -> None:
-    """``dict[str, set[int]]`` keeps working (plain storage inside the dict value)."""
-    job = _run_job(
-        InMemoryArrowDatabase(), dict[str, set[int]], {"a": {2, 1}}, use_async=False
-    )
-    assert len(job.nodes["produce"].as_table()) == 1
+def test_a_set_inside_a_dict_value_is_refused() -> None:
+    """``dict[str, set[int]]`` is refused: a set there would read back as a list (ITL-1150)."""
+    with pytest.raises(ValueError, match="ITL-1150"):
+        _run_job(
+            InMemoryArrowDatabase(), dict[str, set[int]], {"a": {2, 1}}, use_async=False
+        )
 
 
 def test_frozenset_stays_refused() -> None:
@@ -702,22 +702,15 @@ def test_two_integer_widths_of_a_list_of_sets_live_in_one_process(
     }
 
 
-def test_a_list_of_sets_inside_a_dict_value_keeps_plain_storage() -> None:
-    """``dict[str, list[set[int]]]`` is stored as it was before sets were containers."""
-    source = DictSource(
-        [{"k": 0, "v": {"a": [{2, 1}]}}],
-        tag_columns=["k"],
-        data_schema={"k": int, "v": dict[str, list[set[int]]]},
-        source_id="one_row",
-    )
-    assert source.as_table().schema.field("v").type == pa.large_list(
-        pa.struct(
-            [
-                pa.field("key", pa.large_string()),
-                pa.field("value", pa.large_list(pa.large_list(pa.int64()))),
-            ]
+def test_a_list_of_sets_inside_a_dict_value_is_refused() -> None:
+    """``dict[str, list[set[int]]]`` is refused as a source schema (ITL-1150)."""
+    with pytest.raises(ValueError, match="ITL-1150"):
+        DictSource(
+            [{"k": 0, "v": {"a": [{2, 1}]}}],
+            tag_columns=["k"],
+            data_schema={"k": int, "v": dict[str, list[set[int]]]},
+            source_id="one_row",
         )
-    )
 
 
 def test_the_factory_reads_a_set_element_as_its_arrow_type_does() -> None:

@@ -35,6 +35,10 @@ from orcapod.semantic_types.nested_none import (
     unrestorable_none_error,
     with_context,
 )
+from orcapod.semantic_types.nested_storage import (
+    NestedTypeNotStorableError,
+    require_storable_in_struct_field,
+)
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils import arrow_utils
@@ -253,6 +257,13 @@ class UniversalTypeConverter:
             NestedNoneNotRestorableError: If an annotation declares a None at a
                 nested position that a read cannot restore (ITL-1144), naming the
                 column.
+            NestedTypeNotStorableError: If an annotation declares a logical type as
+                a dict key or value (ITL-1150), naming the column. A tuple
+                annotation is not covered here: registration does not support
+                tuples and raises a plain ``ValueError`` (``Unsupported
+                annotation``). The tuple-field refusal applies where a tuple is
+                converted to Arrow, in ``python_type_to_arrow_type`` and
+                ``python_schema_to_arrow_schema``.
         """
         if self._logical_type_registry is None:
             return
@@ -260,7 +271,10 @@ class UniversalTypeConverter:
             for name, annotation in schema.items():
                 try:
                     self._register_annotation(annotation)
-                except NestedNoneNotRestorableError as exc:
+                except (
+                    NestedNoneNotRestorableError,
+                    NestedTypeNotStorableError,
+                ) as exc:
                     raise with_context(f"Column {name!r} ({annotation})", exc) from exc
 
     def _register_annotation(self, annotation: Any) -> None:
@@ -421,34 +435,20 @@ class UniversalTypeConverter:
             raise ValueError(_FROZENSET_UNSUPPORTED.format(annotation=annotation))
 
         # dict[K, V] → pa.large_list(struct{key: K, value: V}).
-        # Raise if K or V resolves to an extension type: the key/value land inside struct
-        # fields, which also forbids extension types (ET1 in design_issues/).
+        # Refuse K or V that resolves to an extension type (a logical type or a native
+        # container): the key/value land inside struct fields, which cannot hold one
+        # (ITL-1150).
         if origin is dict:
             if len(args) < 2:
                 raise ValueError(
                     "Unparameterized 'dict' is not supported. Use 'dict[K, V]' with concrete "
                     "key and value types (e.g. dict[str, int])."
                 )
-            # A set of a plain type keeps its plain storage inside a dict: Arrow
-            # cannot hold its extension type in a struct field (ITL-611). The guard
-            # sees the stored value type, the type a read of the value decides on.
-            key_arrow = self._plain_set_storage(self.register_python_class(args[0]))
-            val_arrow = self._plain_set_storage(self.register_python_class(args[1]))
+            key_arrow = self.register_python_class(args[0])
+            val_arrow = self.register_python_class(args[1])
+            require_storable_in_struct_field(key_arrow)
+            require_storable_in_struct_field(val_arrow)
             require_restorable_none(args[1], val_arrow, self._is_user_class_extension)
-            if isinstance(key_arrow, pa.ExtensionType):
-                raise ValueError(
-                    f"'dict[{args[0]}, ...]' is not yet supported: the key type maps to Arrow "
-                    f"extension type {key_arrow.extension_name!r}, which cannot be preserved "
-                    f"inside a struct field due to an Arrow limitation (ET1 in design_issues/). "
-                    f"Native dict-of-logical-type support is tracked in PLT-1732."
-                )
-            if isinstance(val_arrow, pa.ExtensionType):
-                raise ValueError(
-                    f"'dict[..., {args[1]}]' is not yet supported: the value type maps to Arrow "
-                    f"extension type {val_arrow.extension_name!r}, which cannot be preserved "
-                    f"inside a struct field due to an Arrow limitation (ET1 in design_issues/). "
-                    f"Native dict-of-logical-type support is tracked in PLT-1732."
-                )
             return pa.large_list(
                 pa.struct([pa.field("key", key_arrow), pa.field("value", val_arrow)])
             )
@@ -570,38 +570,6 @@ class UniversalTypeConverter:
             self._logical_type_registry.register_logical_type(lt)
             existing = lt
         return existing.get_arrow_extension_type()
-
-    def _plain_set_storage(self, arrow_type: "pa.DataType") -> "pa.DataType":
-        """Return a set of a plain element as its storage; any other type as it is.
-
-        Arrow cannot hold an extension type inside a struct field, so a set of a
-        plain element type keeps the plain ``large_list`` storage it had before it
-        was a native container where it is a dict value or a tuple field (ITL-611).
-        So does a native container whose innermost element is such a set
-        (``list[set[int]]``): its storage holds no extension type either.
-
-        Args:
-            arrow_type: An Arrow type the converter produced.
-
-        Returns:
-            The storage type of a set of a plain element, or of a native container
-            whose innermost element is one; otherwise ``arrow_type``.
-        """
-        from orcapod.logical_types.list_logical_type_factory import ListLogicalType
-
-        if not isinstance(arrow_type, pa.ExtensionType) or (
-            self._logical_type_registry is None
-        ):
-            return arrow_type
-        lt = self._logical_type_registry.get_by_arrow_extension_name(
-            arrow_type.extension_name
-        )
-        innermost = lt
-        while isinstance(innermost, ListLogicalType):
-            if innermost.element_logical_type is None:
-                return arrow_type.storage_type
-            innermost = innermost.element_logical_type
-        return arrow_type
 
     def _find_factory_for_class(
         self,
@@ -1048,7 +1016,12 @@ class UniversalTypeConverter:
         """
         fields = []
         for field_name, python_type in python_schema.items():
-            arrow_type = self.python_type_to_arrow_type(python_type)
+            try:
+                arrow_type = self.python_type_to_arrow_type(python_type)
+            except (NestedNoneNotRestorableError, NestedTypeNotStorableError) as exc:
+                raise with_context(
+                    f"Column {field_name!r} ({python_type})", exc
+                ) from exc
             nullable = _is_optional_type(python_type)
             fields.append(pa.field(field_name, arrow_type, nullable=nullable))
         return pa.schema(fields)
@@ -1475,31 +1448,15 @@ class UniversalTypeConverter:
 
             if len(set(args)) == 1:
                 # Homogeneous tuple → fixed-size list
-                element_type = self._plain_set_storage(
-                    self.python_type_to_arrow_type(args[0])
-                )
-                if hasattr(element_type, "extension_name"):
-                    raise ValueError(
-                        f"'tuple[{args[0]}, ...]' is not supported: the element type maps to "
-                        f"Arrow extension type {element_type.extension_name!r}, which cannot be "
-                        f"preserved inside a list or struct field due to an Arrow limitation "
-                        f"(ET1 in design_issues/)."
-                    )
+                element_type = self.python_type_to_arrow_type(args[0])
+                require_storable_in_struct_field(element_type)
                 return pa.list_(element_type, len(args))
             else:
                 # Heterogeneous tuple → struct with indexed fields
                 fields = []
                 for i, arg_type in enumerate(args):
-                    field_type = self._plain_set_storage(
-                        self.python_type_to_arrow_type(arg_type)
-                    )
-                    if hasattr(field_type, "extension_name"):
-                        raise ValueError(
-                            f"'tuple[..., {arg_type}, ...]' is not supported: element type "
-                            f"maps to Arrow extension type {field_type.extension_name!r}, which "
-                            f"cannot be preserved inside a struct field due to an Arrow limitation "
-                            f"(ET1 in design_issues/)."
-                        )
+                    field_type = self.python_type_to_arrow_type(arg_type)
+                    require_storable_in_struct_field(field_type)
                     fields.append((f"f{i}", field_type))
                 return pa.struct(fields)
 
@@ -1509,10 +1466,10 @@ class UniversalTypeConverter:
                 raise ValueError(
                     f"dict type must have exactly two type arguments, got: {args}"
                 )
-            key_type = self._plain_set_storage(self.python_type_to_arrow_type(args[0]))
-            value_type = self._plain_set_storage(
-                self.python_type_to_arrow_type(args[1])
-            )
+            key_type = self.python_type_to_arrow_type(args[0])
+            value_type = self.python_type_to_arrow_type(args[1])
+            require_storable_in_struct_field(key_type)
+            require_storable_in_struct_field(value_type)
             require_restorable_none(args[1], value_type, self._is_user_class_extension)
             key_value_struct = pa.struct([("key", key_type), ("value", value_type)])
             return pa.large_list(key_value_struct)

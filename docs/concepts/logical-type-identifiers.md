@@ -163,9 +163,14 @@ print(labels_type.storage_type)
 - The elements are stored in the canonical set order (see the hashing reference, section 1e),
   so equal sets store, and hash, identically. A set row never hashes like the list row with
   the same elements, because the container's identifier is part of the row hash.
-- **Known limit:** inside a dict value or a tuple field (`dict[str, set[int]]`,
-  `dict[str, list[set[int]]]`), a set of a primitive keeps its plain `large_list` storage, because Arrow cannot hold an extension
-  type inside a struct field; read back without the declared type, such a value is a list.
+- A native container, like any logical type, cannot be a dict key or value or a tuple field
+  yet (`dict[str, set[int]]`, `dict[str, list[set[int]]]`, `dict[set[int], int]`,
+  `list[dict[str, set[int]]]`): Arrow cannot hold an extension type inside a struct field, so
+  the value would read back as a list. Such a declared type is refused where it is declared
+  (a pod's parameter or output, a source's schema, a user-class field), with a
+  `NestedTypeNotStorableError` that names the column or `Class.field` (ITL-1150). Hold the set
+  in a dataclass field, where it keeps its type, or declare the plain type
+  (`dict[str, list[int]]`).
 - `frozenset[T]` is not supported: declare `set[T]`. Support is to be evaluated in ITL-1140.
 
 A container type you implement yourself is not a native container. It is an ordinary logical

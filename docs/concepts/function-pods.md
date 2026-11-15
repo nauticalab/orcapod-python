@@ -250,6 +250,16 @@ before standalone iteration, table materialization, or sync/async storage can di
 Errors name the function, output, declared type and returned type; nested locations show
 structure without including returned dictionary keys or converter messages.
 
+A declared type that storage cannot keep is refused when the pod is defined, before any value
+is returned. A dictionary is stored as a list of key/value structs, and Arrow cannot hold a
+logical type inside a struct field, so a logical type or native container (`Path`, `UUID`, a
+user class, `numpy.ndarray`, `set[int]`, `list[set[int]]`, `list[Path]`) as a dictionary key
+or value, at any depth (`dict[str, set[int]]`, `list[dict[str, set[int]]]`, a dataclass field
+typed `dict[str, set[int]]`), raises `NestedTypeNotStorableError` naming the parameter or
+output (ITL-1150). The same types are faithful as a column, inside a list, and as a field of a
+dataclass, an `orcapod.dataclass` or a pydantic model: hold such a value in a dataclass
+field, or declare the plain type (`dict[str, list[int]]`).
+
 Outputs are validated against the declared storage schema immediately, and accepted numeric
 exceptions are normalized so downstream pods, hashes and stored rows see the same value.
 Eager validation never replaces a compatible user-class object; stored reads keep their

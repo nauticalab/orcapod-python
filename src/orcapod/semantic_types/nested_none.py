@@ -13,7 +13,7 @@ from __future__ import annotations
 import types
 import typing
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, get_args, get_origin
+from typing import TYPE_CHECKING, Any, TypeVar, get_args, get_origin
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -110,10 +110,14 @@ def unrestorable_none_error(arrow_type: pa.DataType) -> NestedNoneNotRestorableE
     )
 
 
-def with_context(
-    context: str, error: NestedNoneNotRestorableError
-) -> NestedNoneNotRestorableError:
-    """The same refusal with the column or field it concerns put first.
+_Refusal = TypeVar("_Refusal", bound=ValueError)
+
+
+def with_context(context: str, error: _Refusal) -> _Refusal:
+    """The same refusal, of the same class, with the column or field it concerns put first.
+
+    Used for every refusal of a declared nested type: a None a read cannot restore
+    (ITL-1144) and a logical type storage cannot keep (ITL-1150).
 
     Args:
         context: What the caller knows the refusal concerns, e.g. ``"Column 'v'"``.
@@ -122,4 +126,4 @@ def with_context(
     Returns:
         A new error whose message starts with ``context``.
     """
-    return NestedNoneNotRestorableError(f"{context}: {error}")
+    return type(error)(f"{context}: {error}")

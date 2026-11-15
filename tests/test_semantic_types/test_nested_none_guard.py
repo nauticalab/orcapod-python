@@ -385,17 +385,14 @@ class TestConverterWithoutRegistry:
 class TestSetOfAPrimitive:
     """The guard against a set of a primitive, now a native container (ITL-611).
 
-    Inside a dict value a set of a primitive keeps its plain ``large_list`` storage; the
-    guard decides on that stored type, and its decision is the one it made when the set
-    was plain storage everywhere: a set read back where a None was is never a None.
+    A set as a dict value is refused before this guard looks at it: storage cannot keep
+    a native container inside a struct field (ITL-1150).
     """
 
     @pytest.mark.parametrize(
         "annotation",
         [
-            dict[str, set[int] | None],
             dict[str, list[set[int] | None]],
-            dict[str, set[Path] | None],
             list[set[int] | None],
             set[uuid.UUID | None],
         ],
@@ -405,25 +402,23 @@ class TestSetOfAPrimitive:
         with pytest.raises(ValueError, match=r"(?s)Column 'v'.*ITL-1144"):
             _source(None, annotation)
 
-    def test_a_dict_of_sets_of_a_primitive_is_accepted(self) -> None:
-        value = {"a": {2, 1}, "b": set()}
-        read, written_hash = _read_v(_source(value, dict[str, set[int]]))
-        # Plain storage inside a dict value: the elements come back as stored (ITL-611).
-        assert {k: sorted(v) for k, v in read.items()} == {"a": [1, 2], "b": []}
-        _, read_hash = _read_v(_source(value, dict[str, set[int]]))
-        assert read_hash == written_hash
-
-    def test_a_none_element_inside_a_set_in_a_dict_is_accepted(self) -> None:
-        value = {"a": {None, 1}}
-        read, written_hash = _read_v(_source(value, dict[str, set[int | None]]))
-        assert read == {"a": [None, 1]}
-        _, read_hash = _read_v(_source(value, dict[str, set[int | None]]))
-        assert read_hash == written_hash
-
-    def test_a_dict_of_sets_of_a_logical_type_stays_refused(self) -> None:
-        """No None involved: the set's extension type cannot sit in a struct field."""
-        with pytest.raises(ValueError, match="ET1") as info:
-            _source({"a": {P}}, dict[str, set[Path]])
+    @pytest.mark.parametrize(
+        ("annotation", "value"),
+        [
+            (dict[str, set[int]], {"a": {2, 1}, "b": set()}),
+            (dict[str, set[int | None]], {"a": {None, 1}}),
+            (dict[str, set[int] | None], {"a": None}),
+            (dict[str, set[Path] | None], {"a": None}),
+            (dict[str, set[Path]], {"a": {P}}),
+        ],
+        ids=str,
+    )
+    def test_a_set_as_a_dict_value_is_refused_before_the_none_guard(
+        self, annotation: Any, value: Any
+    ) -> None:
+        """The set's extension type cannot sit in a struct field (ITL-1150)."""
+        with pytest.raises(ValueError, match=r"(?s)Column 'v'.*ITL-1150") as info:
+            _source(value, annotation)
         assert "ITL-1144" not in str(info.value)
 
     @pytest.mark.parametrize(
