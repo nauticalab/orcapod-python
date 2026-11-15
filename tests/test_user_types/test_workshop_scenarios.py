@@ -173,7 +173,7 @@ def test_subclass_identity_and_fields_do_not_depend_on_registration_order(
 ) -> None:
     """A subclass keeps its own identity and all its fields in both orders.
 
-    Each order runs in a fresh process against a fresh store. On ``main`` the subclass
+    Each order runs in a fresh process against a fresh database. On ``main`` the subclass
     was stored as its base when the base was registered first: its extra field was
     dropped, and the pod's hash and stored path depended on the order.
     """

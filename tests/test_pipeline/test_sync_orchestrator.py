@@ -561,7 +561,7 @@ class TestSyncObserverInjection:
                 return self
 
         # A node holding a current run is not run again (ITL-1095): clear it, so its
-        # second run reads its result from the store.
+        # second run reads its result from the database.
         job.nodes["doubler"].clear_cache()
         job.run(observer=Obs2())
         assert events2 == [True]

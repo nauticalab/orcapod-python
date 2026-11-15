@@ -88,7 +88,7 @@ def _stored_outputs(stream: Any, column: str) -> dict[str, Any]:
     """Read a pod's outputs back from the stored rows (``as_table``).
 
     In memory, a pod's output datagram holds the very object the function
-    returned; the canonical CPU form is what is stored and read back from a store.
+    returned; the canonical CPU form is what is stored and read back from a database.
     """
     table = stream.as_table().select(["k", column])
     return _read(ArrowTableSource(table, tag_columns=["k"]), column)

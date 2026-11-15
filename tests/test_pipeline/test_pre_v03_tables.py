@@ -49,13 +49,13 @@ Orchestrator = SyncPipelineOrchestrator | AsyncPipelineOrchestrator
 
 
 def _local_name(name: str) -> str:
-    """The name a store path component has on disk on this platform."""
+    """The name a database path component has on disk on this platform."""
     # Windows forbids ':' in file names; DeltaTableDatabase stores it as '!' there.
     return name.replace(":", "!") if sys.platform == "win32" else name
 
 
 def _extract(target: Path) -> None:
-    """Unpack the store Orcapod v0.2.0 wrote into ``target``."""
+    """Unpack the database Orcapod v0.2.0 wrote into ``target``."""
     with tarfile.open(FIXTURE) as tar:
         for member in tar.getmembers():
             member.name = _local_name(member.name)
@@ -97,7 +97,7 @@ def _files(root: Path) -> dict[str, bytes]:
 
 
 def _table_under(root: Path, *prefix: str) -> list[tuple[str, ...]]:
-    """The tables of the store whose path starts with ``prefix``, sorted."""
+    """The tables of the database whose path starts with ``prefix``, sorted."""
     return sorted(t for t in _tables(root) if t[: len(prefix)] == prefix)
 
 
@@ -298,7 +298,7 @@ class TestOrdinaryTables:
     def test_a_second_run_reuses_what_this_version_stored(
         self, root: Path, orchestrator: Orchestrator
     ):
-        """A second run over the same store computes nothing."""
+        """A second run over the same database computes nothing."""
         pods.build_job(
             DeltaTableDatabase(root), with_notify=False, with_sink=False
         ).run(orchestrator)
@@ -337,7 +337,7 @@ class TestStoreOfThisVersion:
         orchestrator: Orchestrator,
         caplog: pytest.LogCaptureFixture,
     ):
-        """A second run on a store of this version logs no warning and repeats no work."""
+        """A second run on a database of this version logs no warning and repeats no work."""
         pods.build_job(DeltaTableDatabase(tmp_path)).run(orchestrator)
         _ = pods.build_cached_source(DeltaTableDatabase(tmp_path)).as_table()
         assert sorted(pods.DELIVERED) == [2, 3, 4]
@@ -429,7 +429,7 @@ class TestTablesCountedByNameAlone:
 
 
 class TestStoreThatCannotListItsTables:
-    """Runs against a store that does not support listing its tables."""
+    """Runs against a database that does not support listing its tables."""
 
     @pytest.fixture
     def unlistable(self, monkeypatch: pytest.MonkeyPatch) -> InMemoryArrowDatabase:
@@ -437,7 +437,7 @@ class TestStoreThatCannotListItsTables:
 
         def refuse(self: object, prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
             """Stand in for ``list_table_paths`` and raise that listing is unsupported."""
-            raise TableListingNotSupportedError("this store has no table listing")
+            raise TableListingNotSupportedError("this database has no table listing")
 
         monkeypatch.setattr(InMemoryArrowDatabase, "list_table_paths", refuse)
         return InMemoryArrowDatabase()
@@ -465,7 +465,7 @@ class TestStoreThatCannotListItsTables:
             f"'{JOB}/_result/side_effect_function/notify'" in message
             for message in warned
         )
-        assert all("this store has no table listing" in m for m in warned)
+        assert all("this database has no table listing" in m for m in warned)
 
     def test_the_sibling_path_check_still_raises(
         self, unlistable: InMemoryArrowDatabase

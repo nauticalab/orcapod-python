@@ -357,10 +357,10 @@ class NodeConfig:
     Attributes:
         is_result_ephemeral: ``None`` inherits the default (``False``).
             ``True`` writes new computation results to the pipeline-scoped
-            ephemeral store instead of the persistent result database.
+            ephemeral database instead of the persistent result database.
             Persistent cache hits are still served when available. Raises
             ``RuntimeError`` at execution time if ``True`` but no ephemeral
-            store has been injected via ``set_ephemeral_store()``.
+            database has been injected via ``set_ephemeral_database()``.
     """
 
     is_result_ephemeral: bool | None = None

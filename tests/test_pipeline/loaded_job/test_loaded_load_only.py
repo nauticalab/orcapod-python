@@ -3,7 +3,7 @@
 Developer, November 13, 2026: "the initially loaded job is empty", and a load-only run
 fills the nodes from what is stored. A loaded job has no function pods, so it can never
 compute; with its sources available (rebuilt from files, or bound), a load-only run reads
-them, runs the rebuilt operators, and gives each function node the results its store
+them, runs the rebuilt operators, and gives each function node the results its database
 holds for those inputs. ``loaded.run()`` without ``load_only`` still raises.
 """
 

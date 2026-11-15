@@ -15,7 +15,7 @@
 | Task | Lines in `function_node.py` | Code path |
 |------|----------------------------|-----------|
 | 1 | 1311–1342 | `_async_process_data_internal` ephemeral branch (happy path) |
-| 2 | 1318–1324 | `_async_process_data_internal` RuntimeError guard (no store) |
+| 2 | 1318–1324 | `_async_process_data_internal` RuntimeError guard (no database) |
 | 3 | 1430, 1436–1439 | `add_pipeline_record` early return when duplicate detected (`skip_cache_lookup=False`) |
 | 4 | 1611, 1637–1638 | `_fetch_joined_records` no-DB guard + backward-compat IS_EPHEMERAL_COL-absent branch |
 
@@ -70,7 +70,7 @@ Covers `_async_process_data_internal` lines 1311–1342: the `if ephemeral_resul
   class TestAsyncEphemeralExecution:
       @pytest.mark.asyncio
       async def test_async_execute_ephemeral_happy_path(self):
-          """async_execute with is_result_ephemeral=True writes to ephemeral store and emits results."""
+          """async_execute with is_result_ephemeral=True writes to ephemeral database and emits results."""
           stream = _make_stream([{"id": 0, "x": 5}, {"id": 1, "x": 10}])
           pipeline_db = InMemoryArrowDatabase()
           ephemeral_store = InMemoryArrowDatabase()
@@ -99,7 +99,7 @@ Covers `_async_process_data_internal` lines 1311–1342: the `if ephemeral_resul
           values = sorted(data.as_dict()["result"] for _, data in results)
           assert values == [10, 20]
 
-          # Result records must be in the ephemeral store, not the persistent store
+          # Result records must be in the ephemeral database, not the persistent store
           eph_records = ephemeral_store.get_all_records(
               node._ephemeral_cached_pod.record_path,
           )
@@ -108,7 +108,7 @@ Covers `_async_process_data_internal` lines 1311–1342: the `if ephemeral_resul
 
       @pytest.mark.asyncio
       async def test_async_process_data_internal_raises_when_no_store(self):
-          """_async_process_data_internal raises RuntimeError when is_result_ephemeral=True but no store."""
+          """_async_process_data_internal raises RuntimeError when is_result_ephemeral=True but no database."""
           stream = _make_stream([{"id": 0, "x": 5}])
           pipeline_db = InMemoryArrowDatabase()
 

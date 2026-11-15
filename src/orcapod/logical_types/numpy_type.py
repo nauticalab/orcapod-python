@@ -12,7 +12,7 @@ Fortran contiguity (a strided view is stored C-contiguous), the subclass, the
 ``writeable`` flag, dtype metadata, the ``align`` flag of a structured dtype (its
 offsets are kept) and padding bytes between structured fields (NumPy does not
 define their content; they are written as zero, so memory the array happened
-to sit on never reaches a store).
+to sit on never reaches a database).
 
 Value hash ``D`` (label ``ndarray_v1``), in two steps. With
 ``lp(x) = u64le(len(utf8(x))) || utf8(x)``:

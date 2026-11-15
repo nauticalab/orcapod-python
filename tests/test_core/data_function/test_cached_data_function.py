@@ -521,7 +521,7 @@ class TestConflictResolution:
         time.sleep(0.01)  # ensure distinct timestamps
         cpf.call(input_data, skip_cache_lookup=True)
 
-        # Two records in the store
+        # Two records in the database
         all_records = db.get_all_records(cpf.record_path)
         assert all_records is not None
         assert all_records.num_rows == 2

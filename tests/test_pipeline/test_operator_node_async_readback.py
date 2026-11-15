@@ -2,7 +2,7 @@
 
 ``job.nodes[label]`` is a stream: ``as_table()`` and ``iter_data()`` must return the rows the
 operator produced, whether the job ran on ``SyncPipelineOrchestrator`` or
-``AsyncPipelineOrchestrator``, with either store and either ``materialize_results`` setting.
+``AsyncPipelineOrchestrator``, with either database and either ``materialize_results`` setting.
 An operator node in a job runs with the default ``cache_mode=OFF`` and stores nothing, so
 ``get_all_records()`` returns ``None`` on both.
 """
@@ -162,7 +162,7 @@ CASES = [
 
 
 def _make_store(kind: str, tmp_path: Path) -> ArrowDatabaseProtocol:
-    """A fresh store of the given kind (``in_memory`` or ``delta``)."""
+    """A fresh database of the given kind (``in_memory`` or ``delta``)."""
     if kind == "in_memory":
         return InMemoryArrowDatabase()
     return DeltaTableDatabase(base_path=tmp_path / "store")
@@ -175,7 +175,7 @@ def _run_job(
     tmp_path: Path,
     materialize_results: bool = True,
 ) -> PipelineJob:
-    """Build ``case`` in a new job on a fresh store and run it on ``orchestrator``."""
+    """Build ``case`` in a new job on a fresh database and run it on ``orchestrator``."""
     job = PipelineJob(
         name="itl896", database=_make_store(store_kind, tmp_path / orchestrator)
     )

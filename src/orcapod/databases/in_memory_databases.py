@@ -29,7 +29,7 @@ class InMemoryArrowDatabase:
 
     Supports the same pending-batch semantics as DeltaTableDatabase:
     records are buffered in a pending batch and become part of the committed
-    store only after flush() is called (or flush=True is passed to a write method).
+    database only after flush() is called (or flush=True is passed to a write method).
 
     Lookups by record ID or by a binary or string column value use hash indexes over
     the committed rows, and each flush appends without copying the stored rows, so the
@@ -176,7 +176,7 @@ class InMemoryArrowDatabase:
     def _filter_existing_records(
         self, record_key: str, table: "pa.Table"
     ) -> "pa.Table":
-        """Filter out records whose IDs are already in pending or committed store."""
+        """Filter out records whose IDs are already in pending or committed database."""
         input_ids = set(table[self.RECORD_ID_COLUMN].to_pylist())
         pending_ids = self._pending_record_ids[record_key]
         committed_ids = self._committed_id_index(record_key)
@@ -460,7 +460,7 @@ class InMemoryArrowDatabase:
             if filtered.num_rows > 0:
                 return self._handle_record_id_column(filtered, record_id_column)
 
-        # Check committed store
+        # Check committed database
         committed = self._tables.get(record_key)
         if committed is None:
             return None

@@ -163,7 +163,7 @@ class TestPipelineJobBind:
         assert "a" in job.sources and "b" in job.sources
 
     def test_bind_store_mutates_job(self, store):
-        """bind(database=...) updates the store in place and returns None."""
+        """bind(database=...) updates the database in place and returns None."""
         src_a, src_b = _make_two_sources()
         job = PipelineJob()
         with job:
@@ -289,7 +289,7 @@ class TestPipelineJobCompleteness:
 
     def test_is_complete_false_when_store_missing(self):
         src_a, src_b = _make_two_sources()
-        job = PipelineJob()  # no store
+        job = PipelineJob()  # no database
         with job:
             Join()(src_a, src_b)
 
@@ -510,10 +510,10 @@ class TestPipelineJobRun:
         )
 
     def test_run_requires_store(self):
-        """run() without a store raises ValueError."""
+        """run() without a database raises ValueError."""
         src_a, src_b = _make_two_sources()
 
-        job = PipelineJob()  # no store
+        job = PipelineJob()  # no database
         with job:
             Join()(src_a, src_b)
 

@@ -1,7 +1,7 @@
 """A function node in a job keeps the Arrow type of every tag column (ITL-928).
 
 A function pod never touches tags, so a function node's tag columns must have the
-input's exact Arrow types (large-normalized) whatever the store, the orchestrator and
+input's exact Arrow types (large-normalized) whatever the database, the orchestrator and
 the read: ``as_table()``, ``iter_data()``, ``get_all_records()``, a fresh job on the same
 store, and a re-run. Before ITL-928 a node's ``as_table()`` rebuilt its table from Python
 values typed by the node's Python output schema, so an ``int8`` tag came back ``int64``
@@ -115,7 +115,7 @@ def _expected(name: str) -> pa.DataType:
 
 
 def _new_store(kind: str, tmp_path: pathlib.Path):
-    """A store of the given kind (``memory`` or ``delta``); a Delta store under ``tmp_path``."""
+    """A store of the given kind (``memory`` or ``delta``); a Delta database under ``tmp_path``."""
     if kind == "delta":
         return DeltaTableDatabase(tmp_path / "store")
     return InMemoryArrowDatabase()
@@ -206,7 +206,7 @@ def test_join_after_a_function_node_on_a_typed_tag(name: str) -> None:
 
 
 def test_as_table_mixing_stored_and_new_rows_keeps_tag_type() -> None:
-    """Rows served from the store and rows computed now make one correctly typed table."""
+    """Rows served from the database and rows computed now make one correctly typed table."""
     store = InMemoryArrowDatabase()
     first = _build(store, _source_table("uint32").slice(0, 2))
     first.run()
@@ -221,7 +221,7 @@ def test_as_table_mixing_stored_and_new_rows_keeps_tag_type() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Reads from the store: get_all_records() and a fresh job (part B on Delta)
+# Reads from the database: get_all_records() and a fresh job (part B on Delta)
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +230,7 @@ def test_as_table_mixing_stored_and_new_rows_keeps_tag_type() -> None:
 def test_store_read_back_keeps_tag_type(
     name: str, store: str, tmp_path: pathlib.Path
 ) -> None:
-    """Reads from the store (``get_all_records``, a fresh job's run) keep the tag type."""
+    """Reads from the database (``get_all_records``, a fresh job's run) keep the tag type."""
     database = _new_store(store, tmp_path)
     table = _source_table(name)
     _build(database, table).run()
@@ -244,7 +244,7 @@ def test_store_read_back_keeps_tag_type(
     records = fresh.get_all_records()
     assert records is not None
     assert records.schema.field("k").type == _expected(name)
-    # The node shows rows once its run has read them from the store (ITL-1095).
+    # The node shows rows once its run has read them from the database (ITL-1095).
     fresh_job.run()
     tag, _ = next(iter(fresh.iter_data()))
     assert tag.as_table().schema.field("k").type == _expected(name)
@@ -282,9 +282,9 @@ def test_new_rows_over_a_store_written_before_the_fix_raise_naming_the_column(
 ) -> None:
     """Rows of one node never make a column of a type none of them has.
 
-    A Delta store written before ITL-928 gives a ``uint32`` tag back as ``int32``:
+    A Delta database written before ITL-928 gives a ``uint32`` tag back as ``int32``:
     rows served from it and rows computed now disagree, and the node says so instead
-    of picking a type. Such a store must be rebuilt.
+    of picking a type. Such a database must be rebuilt.
     """
     _build(DeltaTableDatabase(tmp_path), _source_table("uint32").slice(0, 2)).run()
     _as_written_before_the_fix(tmp_path)
@@ -303,7 +303,7 @@ def test_new_rows_over_a_store_written_before_the_fix_raise_naming_the_column(
 def test_new_rows_over_a_store_written_after_the_fix_keep_the_tag_type(
     tmp_path: pathlib.Path,
 ) -> None:
-    """The same run over a store this build wrote: one table, typed as the input."""
+    """The same run over a database this build wrote: one table, typed as the input."""
     _build(DeltaTableDatabase(tmp_path), _source_table("uint32").slice(0, 2)).run()
     job = _build(DeltaTableDatabase(tmp_path), _source_table("uint32"))
     job.run()

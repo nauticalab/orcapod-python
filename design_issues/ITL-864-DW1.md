@@ -26,7 +26,7 @@ pipeline; the async orchestrator runs only user functions in worker threads. Reg
 `tests/test_databases/test_delta_read_your_writes.py` and
 `tests/test_pipeline/test_delta_node_records_after_run.py`. Stored ids come from
 `_stored_ids`: the snapshot of the loaded table version reads them on first use, through an
-id-only scan (a one-column schema); a failed scan raises `StoreReadError` and leaves the
+id-only scan (a one-column schema); a failed scan raises `OrcapodDatabaseReadError` and leaves the
 snapshot's ids unset (`None`), so the next read scans again instead of treating every stored
 id as unstored and returning duplicates. A handle that loaded the table before it had any
 stored ids (a fresh root over an existing table) reads them on its first read with pending

@@ -1,4 +1,4 @@
-"""``list_table_paths``: the tables a store holds under a path prefix (ITL-954).
+"""``list_table_paths``: the tables a database holds under a path prefix (ITL-954).
 
 Every database lists, without opening a table, the paths of the tables whose path starts
 with a prefix, relative to its ``base_path`` like ``table_exists``. Tables nested below
@@ -50,7 +50,7 @@ def _fill(store: ArrowDatabaseProtocol, paths: list[tuple[str, ...]] = PATHS) ->
 
 @pytest.fixture(params=["in_memory", "delta", "sqlite"])
 def make_store(request: pytest.FixtureRequest, tmp_path: Path) -> Callable[[], Store]:
-    """A factory of database objects over one empty store of each backend."""
+    """A factory of database objects over one empty database of each backend."""
     connector = SQLiteConnector(str(tmp_path / "store.db"))
     shared = InMemoryArrowDatabase()
 
@@ -66,7 +66,7 @@ def make_store(request: pytest.FixtureRequest, tmp_path: Path) -> Callable[[], S
 
 
 class TestEveryBackend:
-    """Listing behaviour that every store from the ``make_store`` fixture shares."""
+    """Listing behaviour that every database from the ``make_store`` fixture shares."""
 
     def test_lists_every_table_sorted(self, make_store: Callable[[], Store]):
         """Without a prefix, a second store object lists every written path in sorted
@@ -368,7 +368,7 @@ class TestWrappers:
     """Listing through ``ExtensionAwareDatabase`` and ``NoOpArrowDatabase``."""
 
     def test_extension_aware_database_delegates(self):
-        """The wrapper lists the same paths as the store it wraps."""
+        """The wrapper lists the same paths as the database it wraps."""
         inner = InMemoryArrowDatabase()
         _fill(inner)
         wrapper = ExtensionAwareDatabase(inner, UniversalTypeConverter())
@@ -386,7 +386,7 @@ class TestWrappers:
 
 @pytest.mark.s3
 def test_s3_lists_tables_and_nested_tables(s3_base_uri, s3_storage_options):
-    """A Delta store on an S3 endpoint lists the tables under a prefix, nested ones
+    """A Delta database on an S3 endpoint lists the tables under a prefix, nested ones
     included.
     """
     store = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)

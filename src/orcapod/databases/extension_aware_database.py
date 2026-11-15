@@ -213,7 +213,7 @@ class ExtensionAwareDatabase:
             The table paths, relative to ``self.base_path``, sorted.
 
         Raises:
-            TableListingNotSupportedError: If the wrapped store cannot enumerate
+            TableListingNotSupportedError: If the wrapped database cannot enumerate
                 its tables.
         """
         return self._db.list_table_paths(prefix)

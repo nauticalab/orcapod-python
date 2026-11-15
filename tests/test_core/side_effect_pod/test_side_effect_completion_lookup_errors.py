@@ -1,7 +1,7 @@
 """A failed prior-completion lookup names the side-effect node and the row (ITL-919).
 
 A side-effect pod that tracks completion looks up each row's invocation record before
-delivering it. When that lookup cannot read the store, the ``StoreReadError`` names the
+delivering it. When that lookup cannot read the database, the ``OrcapodDatabaseReadError`` names the
 pod and the row's tag, as a failed write of the same record does (CodeRabbit on #290).
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.errors import StoreReadError
+from orcapod.errors import OrcapodDatabaseReadError
 from orcapod.pipeline.job import PipelineJob
 from orcapod.side_effects import SideEffectPod, SideEffectPodConfig
 from orcapod.sources import DictSource
@@ -31,7 +31,9 @@ class UnreadableCompletions:
 
     def get_record_by_id(self, record_path: tuple[str, ...], *args: Any, **kwargs: Any):
         """Fail as an unreadable stored table would."""
-        raise StoreReadError("/store/" + "/".join(record_path), tuple(record_path))
+        raise OrcapodDatabaseReadError(
+            "/store/" + "/".join(record_path), tuple(record_path)
+        )
 
     def __getattr__(self, name: str) -> Any:
         """Delegate everything else."""
@@ -39,7 +41,7 @@ class UnreadableCompletions:
 
 
 def test_completion_lookup_failure_names_the_node_and_row() -> None:
-    """The lookup's ``StoreReadError`` carries the pod's label and the row's tag."""
+    """The lookup's ``OrcapodDatabaseReadError`` carries the pod's label and the row's tag."""
     delivered: list[int] = []
 
     def deliver(value: int, ctx: Any) -> None:
@@ -51,7 +53,7 @@ def test_completion_lookup_failure_names_the_node_and_row() -> None:
     with job:
         pod.process(DictSource([{"id": 0, "value": 10}], tag_columns=["id"]))
 
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run()
     assert info.value.tag == {"id": 0}
     assert info.value.node_label is not None

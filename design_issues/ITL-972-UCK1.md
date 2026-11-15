@@ -15,7 +15,7 @@ dropping its extra fields.
 PR #292 (ITL-881, not merged) identified every class by a declared name, kind and ordered
 fields, so two different classes with the same description were interchangeable. A
 measurement on November 12, 2026 showed the consequence: in memory a pod annotated with one
-class received the other class's object unchanged, while through a store it received its
+class received the other class's object unchanged, while through a database it received its
 own class.
 
 **Fix:** two explicit kinds (developer, November 12, 2026; spec
@@ -35,7 +35,7 @@ own class.
   and the record is the extension metadata, so a structural class is rebuilt from metadata
   when no class is defined (`orcapod.synthesized`).
 - Kept from PR #292: a subclass has its own identity; field order is identity;
-  `TypeIdentityError` is not a `StoreReadError` and fails the run under every error policy;
+  `TypeIdentityError` is not a `OrcapodDatabaseReadError` and fails the run under every error policy;
   the registry binds an identifier to the newest class object with that identity.
   Removed: `op.register_type`, declared names for exact classes, equivalence of exact
   classes.

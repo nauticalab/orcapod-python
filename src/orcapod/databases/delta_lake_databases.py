@@ -19,7 +19,7 @@ from orcapod.databases._row_index import (
 from orcapod.databases.utils import coerce_record_id
 from orcapod.errors import (
     InputValidationError,
-    StoreReadError,
+    OrcapodDatabaseReadError,
     TableListingNotSupportedError,
     TypeIdentityError,
 )
@@ -402,10 +402,10 @@ def _types_conflict(stored: pa.DataType, incoming: pa.DataType) -> bool:
     return stored != incoming
 
 
-def _store_error_to_raise(errors: list[Exception]) -> Exception | None:
-    """Pick the store error a failed flush raises as itself.
+def _database_error_to_raise(errors: list[Exception]) -> Exception | None:
+    """Pick the database error a failed flush raises as itself.
 
-    A ``StoreReadError`` is preferred, because it is the error that fails a run
+    A ``OrcapodDatabaseReadError`` is preferred, because it is the error that fails a run
     whatever the orchestrator's ``error_policy``; failing that, an
     ``InputValidationError`` from a refused append.
 
@@ -413,10 +413,10 @@ def _store_error_to_raise(errors: list[Exception]) -> Exception | None:
         errors: The error of every batch that failed, in flush order.
 
     Returns:
-        The first ``StoreReadError``, else the first ``InputValidationError``, or
-        ``None`` when no batch failed with a store error.
+        The first ``OrcapodDatabaseReadError``, else the first ``InputValidationError``, or
+        ``None`` when no batch failed with a database error.
     """
-    for kind in (StoreReadError, InputValidationError):
+    for kind in (OrcapodDatabaseReadError, InputValidationError):
         chosen = next((e for e in errors if isinstance(e, kind)), None)
         if chosen is not None:
             return chosen
@@ -428,7 +428,7 @@ class _CommittedSnapshot:
     """What one version of a stored Delta table holds, kept in memory (ITL-919).
 
     Per-row lookups are answered from this snapshot instead of re-reading the table.
-    Each part is read on first use and extended in place after this store's own
+    Each part is read on first use and extended in place after this database's own
     commits, so its cost follows the rows written, not the rows stored.
 
     Attributes:
@@ -654,17 +654,17 @@ class DeltaTableDatabase:
             self._delta_table_cache.pop(record_key, None)
             raise self._read_failed(record_path) from e
 
-    def _read_failed(self, record_path: tuple[str, ...]) -> StoreReadError:
+    def _read_failed(self, record_path: tuple[str, ...]) -> OrcapodDatabaseReadError:
         """Build the error for a table at ``record_path`` that exists but cannot be read.
 
         Args:
             record_path: Path components relative to this database view.
 
         Returns:
-            A ``StoreReadError`` naming the table; the caller raises it from the
+            A ``OrcapodDatabaseReadError`` naming the table; the caller raises it from the
             backend's exception.
         """
-        return StoreReadError(
+        return OrcapodDatabaseReadError(
             self._get_table_uri(record_path), self._path_prefix + record_path
         )
 
@@ -677,11 +677,11 @@ class DeltaTableDatabase:
         v0.2 stored it), and never enters ``_delta_log``. No table is opened. Only
         flushed tables are listed, as with ``table_exists``.
 
-        A local store is listed exactly. A cloud store is listed through ``fsspec``
+        A local database is listed exactly. A cloud database is listed through ``fsspec``
         with one list request per directory: ``s3://`` and ``s3a://`` through
         ``s3fs`` with the credentials, endpoint and region of this database's
         storage options; ``gs://``, ``az://`` and ``abfs://`` only when the matching
-        ``fsspec`` package is installed and reaches the store with its default
+        ``fsspec`` package is installed and reaches the database with its default
         credentials.
 
         Args:
@@ -691,9 +691,9 @@ class DeltaTableDatabase:
             The table paths, relative to ``self.base_path``, sorted.
 
         Raises:
-            TableListingNotSupportedError: If the store is on cloud storage and
+            TableListingNotSupportedError: If the database is on cloud storage and
                 could not be listed; the reason is chained.
-            StoreReadError: If a local directory could not be listed.
+            OrcapodDatabaseReadError: If a local directory could not be listed.
         """
         full_prefix = self._path_prefix + prefix
         if self._is_cloud:
@@ -724,10 +724,10 @@ class DeltaTableDatabase:
             except Exception as exc:
                 if self._is_cloud:
                     raise TableListingNotSupportedError(
-                        f"Could not list the tables of the Delta store at "
+                        f"Could not list the tables of the Delta database at "
                         f"{self._root_uri!r}: {type(exc).__name__}: {exc}"
                     ) from exc
-                raise StoreReadError(directory, full_prefix + below) from exc
+                raise OrcapodDatabaseReadError(directory, full_prefix + below) from exc
             for name in children:
                 if name == _DELTA_LOG_DIRECTORY:
                     found.append(prefix + below)
@@ -744,7 +744,7 @@ class DeltaTableDatabase:
 
         Raises:
             TableListingNotSupportedError: If no ``fsspec`` file system is available
-                for this store's scheme.
+                for this database's scheme.
         """
         import fsspec
 
@@ -764,7 +764,7 @@ class DeltaTableDatabase:
             # deltalake refuses a plain-HTTP endpoint unless AWS_ALLOW_HTTP is set;
             # the listing follows the same rule and sends no credentials over it.
             raise TableListingNotSupportedError(
-                f"The Delta store at {self._root_uri!r} cannot list its tables: its "
+                f"The Delta database at {self._root_uri!r} cannot list its tables: its "
                 "endpoint uses plain HTTP and AWS_ALLOW_HTTP is not set."
             )
         try:
@@ -774,7 +774,7 @@ class DeltaTableDatabase:
             )
         except Exception as exc:
             raise TableListingNotSupportedError(
-                f"The Delta store at {self._root_uri!r} cannot list its tables: no "
+                f"The Delta database at {self._root_uri!r} cannot list its tables: no "
                 f"usable fsspec file system for {scheme!r} "
                 f"({type(exc).__name__}: {exc})."
             ) from exc
@@ -926,7 +926,7 @@ class DeltaTableDatabase:
         """Return the record ids stored at ``record_path`` (in the loaded version).
 
         Raises:
-            StoreReadError: If the table exists but its ids could not be read.
+            OrcapodDatabaseReadError: If the table exists but its ids could not be read.
         """
         delta_table = self._get_delta_table(record_path)
         if delta_table is None:
@@ -946,7 +946,7 @@ class DeltaTableDatabase:
         """Return the indexed rows stored at ``record_path``, or ``None`` if no table.
 
         Raises:
-            StoreReadError: If the table exists but could not be read.
+            OrcapodDatabaseReadError: If the table exists but could not be read.
         """
         delta_table = self._get_delta_table(record_path)
         if delta_table is None:
@@ -1273,7 +1273,7 @@ class DeltaTableDatabase:
         ``when_not_matched_insert_all``), so a pending row with a stored id is
         never returned by a read: the stored row is. The stored ids are read even
         when ``pending`` is empty, so a read with rows pending raises
-        ``StoreReadError`` whenever the stored ids cannot be read.
+        ``OrcapodDatabaseReadError`` whenever the stored ids cannot be read.
 
         Args:
             record_path: Path components relative to this database view.
@@ -1388,7 +1388,7 @@ class DeltaTableDatabase:
             Combined Arrow table with all records, or None if no records exist
 
         Raises:
-            StoreReadError: If the Delta table exists but could not be read.
+            OrcapodDatabaseReadError: If the Delta table exists but could not be read.
         """
         tables_to_combine = []
 
@@ -1570,7 +1570,7 @@ class DeltaTableDatabase:
         if pending is not None:
             id_type = pending.table.schema.field(self.RECORD_ID_COLUMN).type
             # Reading the stored ids drops the pending rows a flush would not
-            # insert; it raises StoreReadError when the stored table cannot be read.
+            # insert; it raises OrcapodDatabaseReadError when the stored table cannot be read.
             pending_matches = self._without_stored_ids(
                 record_path, self._rows_with_ids(pending, record_ids_list, id_type)
             )
@@ -1628,10 +1628,10 @@ class DeltaTableDatabase:
         stays queued, so a later flush tries it again, and each failure is logged.
 
         Raises:
-            StoreReadError: If a batch's existing table could not be loaded. It is
+            OrcapodDatabaseReadError: If a batch's existing table could not be loaded. It is
                 raised as itself; every other batch that failed in this flush is
                 added to it as a note.
-            InputValidationError: If no batch failed with ``StoreReadError`` but a
+            InputValidationError: If no batch failed with ``OrcapodDatabaseReadError`` but a
                 batch's column types differ from its stored table's. Other failed
                 batches are added to it as notes.
             RuntimeError: If batches failed with other errors only, naming the
@@ -1645,16 +1645,16 @@ class DeltaTableDatabase:
                 logger.error(f"Error flushing batch for {record_key}: {e}")
                 errors.append((record_key, e))
         if errors:
-            store_error = _store_error_to_raise([e for _, e in errors])
-            if store_error is not None:
+            database_error = _database_error_to_raise([e for _, e in errors])
+            if database_error is not None:
                 # Keep every other failure visible on the error that is raised.
                 for record_key, other in errors:
-                    if other is not store_error:
-                        store_error.add_note(
+                    if other is not database_error:
+                        database_error.add_note(
                             f"Another batch also failed to flush ({record_key}): "
                             f"{type(other).__name__}: {other}"
                         )
-                raise store_error
+                raise database_error
             failed_keys = [k for k, _ in errors]
             raise RuntimeError(
                 f"Failed to flush {len(errors)} batch(es): {failed_keys}"
@@ -1727,7 +1727,9 @@ class DeltaTableDatabase:
             except TableNotFoundError:
                 delta_table = None
             except Exception as load_error:
-                raise StoreReadError(table_uri, abs_path_components) from load_error
+                raise OrcapodDatabaseReadError(
+                    table_uri, abs_path_components
+                ) from load_error
 
             if delta_table is None:
                 # TODO: reconsider mode="overwrite" here
@@ -1772,7 +1774,7 @@ class DeltaTableDatabase:
                         "the new rows have "
                         f"{original_table.schema.field(overflowing).type} values it "
                         "cannot hold. The stored rows are unchanged and nothing was "
-                        "written; rebuild the store."
+                        "written; rebuild the database."
                     )
                 base = self._snapshot_for_commit(
                     record_key, delta_table, table_uri, abs_path_components
@@ -1927,7 +1929,7 @@ class DeltaTableDatabase:
             A snapshot of the loaded version with its ``ids`` read.
 
         Raises:
-            StoreReadError: If the stored ids could not be read.
+            OrcapodDatabaseReadError: If the stored ids could not be read.
         """
         cached = self._snapshots.get(record_key)
         if (
@@ -1939,7 +1941,7 @@ class DeltaTableDatabase:
         try:
             ids = self._scan_ids(delta_table)
         except Exception as e:
-            raise StoreReadError(table_uri, abs_path_components) from e
+            raise OrcapodDatabaseReadError(table_uri, abs_path_components) from e
         return _CommittedSnapshot(delta_table.version(), ids=ids)
 
     def _extend_snapshot(

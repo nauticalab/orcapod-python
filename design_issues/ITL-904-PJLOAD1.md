@@ -8,7 +8,7 @@
 Saving a job and loading it with `PipelineJob.load` failed in four ways:
 
 - On a loaded function node, `as_table()` and `iter_data()` raised "no function pod and no
-  database attached", although the store was attached and `get_all_records()` read the rows.
+  database attached", although the database was attached and `get_all_records()` read the rows.
   The cause: `FunctionJobNode.from_descriptor` set `LoadStatus.UNAVAILABLE`, and attaching the
   store never changed that status.
 - A loaded node's `output_schema()` returned the serialized type strings (`'int64'`), and its
@@ -21,16 +21,16 @@ Saving a job and loading it with `PipelineJob.load` failed in four ways:
 
 **Fix:**
 
-- Attaching a store makes a loaded function node `READ_ONLY`. `iter_data()` yields the stored
+- Attaching a database makes a loaded function node `READ_ONLY`. `iter_data()` yields the stored
   rows: those whose `_node_content_hash` is the content hash saved in
   `run.node_job_content_hashes`, the same set `get_all_records()` returns. `as_table()` is an
   `ArrowTableStream` over the stored Arrow records, so stored types are kept and `all_info`
   includes system tags, source info and the data context.
-- Without a store, reading names `PipelineJob.load(path, store=...)` and `job.bind(store=...)`.
-- `save()` records `run.node_has_stored_records`: whether the store held at least one pipeline
+- Without a database, reading names `PipelineJob.load(path, database=...)` and `job.bind(database=...)`.
+- `save()` records `run.node_has_stored_records`: whether the database held at least one pipeline
   record carrying each function node's content hash. This is an additive, optional field, and
-  the format version is unchanged. A node saved with records raises, naming the store and the
-  table, when the attached store holds none of them, instead of reading zero rows. Records
+  the format version is unchanged. A node saved with records raises, naming the database and the
+  table, when the attached database holds none of them, instead of reading zero rows. Records
   that other runs wrote to a shared table do not count. Files saved without the field read
   zero rows, as before.
 - A loaded node's `output_schema()` returns Python types (`deserialize_output_schema`), and its
@@ -45,20 +45,20 @@ Saving a job and loading it with `PipelineJob.load` failed in four ways:
   registration is reported by node and column, leaving affected operators as stubs.
   Incompatible identifiers raise `LogicalTypeIdentifierError`; legacy name-only text raises
   an earlier-version error. This narrow saved-file change was approved November 12, 2026.
-- `get_all_records()` on a loaded node raises the same store errors as `as_table()`.
+- `get_all_records()` on a loaded node raises the same database errors as `as_table()`.
 - Re-saving a loaded job keeps each node's saved expectation of stored records.
 - One row per base entry, for `as_table()` and `iter_data()` alike. When an entry has several
   records (it was recomputed), the record with the greatest recomputation index wins. This
-  also changes a live node's hot-load from the store: it used to keep whichever record the
+  also changes a live node's hot-load from the database: it used to keep whichever record the
   join returned last.
-- A loaded node whose results lived in an ephemeral store yields `EmptyData` placeholders from
-  `iter_data()`. Its `as_table()` raises an error saying the ephemeral store is not saved.
+- A loaded node whose results lived in an ephemeral database yields `EmptyData` placeholders from
+  `iter_data()`. Its `as_table()` raises an error saying the ephemeral database is not saved.
   A newer missing ephemeral recomputation takes precedence over an older persistent row.
 - A loaded operator node with nothing stored raises, names its input nodes, and says to bind an
   unsaved input source first.
 - Stored-record expectations constrain both the node content hash and the saved data context.
   Rows of another data context cannot satisfy the expectation while reads omit those rows.
-- Loading logs in-memory sources at INFO, and any other source or store failure at WARNING
+- Loading logs in-memory sources at INFO, and any other source or database failure at WARNING
   with the exception. Each message states the consequence and the remedy.
 - `PipelineJob.run()` rejects every loaded job, including an operator-only one whose
   operators were rebuilt: a loaded job is read-only by design (developer, November 11,
@@ -90,11 +90,11 @@ when their cache table is absent; loaded function `run()` rejects computation, a
 loaded jobs report `is_runnable()` as false even after binding sources. Source-schema
 restoration uses the saved context converter in both normal and fallback branches.
 
-**Superseded in part (ITL-1043, developer decision, November 12, 2026):** the store is the
+**Superseded in part (ITL-1043, developer decision, November 12, 2026):** the database is the
 source of truth, with one rule for function and operator nodes. `run.node_has_stored_records`
 is no longer written, and is ignored when an older file has it: a loaded function node no
-longer raises on a store without its run's records; it returns what the store holds. The job
-file's optional, advisory `run.expected_rows` makes a difference one `StoreContentWarning`
+longer raises on a database without its run's records; it returns what the database holds. The job
+file's optional, advisory `run.expected_rows` makes a difference one `OrcapodDatabaseContentWarning`
 per node. Likewise, a loaded REPLAY operator whose job file records its run's content hash
 reads an absent cache table as no rows instead of raising. See
 `design_issues/ITL-1043-LJ1.md`.

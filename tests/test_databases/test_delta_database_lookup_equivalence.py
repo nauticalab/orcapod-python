@@ -160,7 +160,7 @@ def test_scoped_views_share_records(tmp_path: Path) -> None:
 
 
 def test_another_writer_is_seen_after_the_next_commit(tmp_path: Path) -> None:
-    """Rows another writer committed are read after this store's next commit."""
+    """Rows another writer committed are read after this database's next commit."""
     db = DeltaTableDatabase(tmp_path)
     _write(db, 0, 10, 5)
     _assert_all_lookups(db)

@@ -20,7 +20,7 @@ path or stored schema changes. A run with no rows clears the previous run's outp
 never serves stale rows (CodeRabbit on PR #302). `get_all_records()` still returns `None` for an
 operator node in a job, since with the default `cache_mode=OFF` (the only mode a job sets) it
 stores nothing. `clear_cache()` still returns the node to its zero-row "not yet run"
-state on both paths (a function node instead reloads from its store).
+state on both paths (a function node instead reloads from its database).
 Regressions: `tests/test_pipeline/test_operator_node_async_readback.py`, which compares the sync
 and async reads of every operator. Open, pinned by strict xfails there: a zero-row async result
 reads back the table built from the Python output schema (ITL-858, ITL-865); that table widens

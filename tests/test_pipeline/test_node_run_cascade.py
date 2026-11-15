@@ -193,12 +193,12 @@ class TestState:
             mock.patch.object(
                 InMemoryArrowDatabase,
                 "get_all_records",
-                side_effect=AssertionError("store read"),
+                side_effect=AssertionError("database read"),
             ),
             mock.patch.object(
                 InMemoryArrowDatabase,
                 "add_records",
-                side_effect=AssertionError("store write"),
+                side_effect=AssertionError("database write"),
             ),
         ):
             second = job.nodes["summed"].run()
@@ -379,7 +379,7 @@ class TestFailedFinalCommit:
     def test_a_job_run_whose_commit_fails_leaves_every_node_empty(
         self, orchestrator: str
     ) -> None:
-        from orcapod.errors import StoreWriteError
+        from orcapod.errors import OrcapodDatabaseWriteError
         from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 
         kinds = {"sync": SyncPipelineOrchestrator, "async": AsyncPipelineOrchestrator}
@@ -389,7 +389,7 @@ class TestFailedFinalCommit:
             )
         )
         job = _build(ROWS, InMemoryArrowDatabase())
-        with self._failing_last_flush(total), pytest.raises(StoreWriteError):
+        with self._failing_last_flush(total), pytest.raises(OrcapodDatabaseWriteError):
             job.run(orchestrator=kinds[orchestrator]())
         for label in ("rowwise", "grouped", "summed"):
             node = job.nodes[label]
@@ -400,13 +400,13 @@ class TestFailedFinalCommit:
         assert _totals(job.nodes["summed"].as_table()) == [(0, 63), (1, 93)]
 
     def test_a_cascade_whose_commit_fails_leaves_every_node_empty(self) -> None:
-        from orcapod.errors import StoreWriteError
+        from orcapod.errors import OrcapodDatabaseWriteError
 
         total = self._flush_calls(
             lambda: _build(ROWS, InMemoryArrowDatabase()).nodes["summed"].run()
         )
         job = _build(ROWS, InMemoryArrowDatabase())
-        with self._failing_last_flush(total), pytest.raises(StoreWriteError):
+        with self._failing_last_flush(total), pytest.raises(OrcapodDatabaseWriteError):
             job.nodes["summed"].run()
         for label in ("rowwise", "grouped", "summed"):
             assert job.nodes[label].as_table().num_rows == 0, label

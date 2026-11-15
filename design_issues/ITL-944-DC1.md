@@ -46,7 +46,7 @@ Known limits, follow-ups:
 - The content hash of a stream without a producer covers its `_context_key` column, so it
   moves with the data context key.
 - Old-layout tables are reported once per reader object, not once per process or job, and
-  counting their rows reads the whole table (the store protocol has no row count).
+  counting their rows reads the whole table (the database protocol has no row count).
 - The manifest has the fields of the ITL-938 design document, section 7.4 (`released_in`,
   `previous`, `definitions`, `libraries`, `golden`, `changes`), and the logical types and
   their value handlers moved to the unfrozen `contexts/logical_types.json`. The names under

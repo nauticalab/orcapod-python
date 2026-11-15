@@ -112,7 +112,7 @@ def test_rerun_inside_running_loop_reuses_stored_rows(tmp_path: Path) -> None:
 
 def test_store_error_inside_running_loop_reaches_the_caller(tmp_path: Path) -> None:
     """A failure inside the run reaches the cell with its own type, not wrapped."""
-    from orcapod.errors import StoreWriteError
+    from orcapod.errors import OrcapodDatabaseWriteError
 
     class FailingWrites:
         """A store whose every write fails."""
@@ -138,7 +138,7 @@ def test_store_error_inside_running_loop_reaches_the_caller(tmp_path: Path) -> N
             return getattr(self._inner, name)
 
     job = make_job(FailingWrites(InMemoryArrowDatabase()))
-    with pytest.raises(StoreWriteError):
+    with pytest.raises(OrcapodDatabaseWriteError):
         run_inside_running_loop(job)
 
 
@@ -309,7 +309,7 @@ def test_second_interrupt_returns_and_a_late_function_writes_nothing(
     The first interrupt cancels the run, which then waits for row 0's function, still
     running on a thread where it cannot be interrupted. The second interrupt returns
     control with a warning naming the node. When the function returns afterwards, no
-    store write happens and no row reaches the next node, and row 0's result is never
+    database write happens and no row reaches the next node, and row 0's result is never
     stored: a later run computes it.
     """
     stuck_release.clear()
@@ -337,7 +337,7 @@ def test_second_interrupt_returns_and_a_late_function_writes_nothing(
     messages = [str(w.message) for w in caught if w.category is RuntimeWarning]
     assert len(messages) == 1, messages
     assert "but a function in node 'stuck' has not returned yet" in messages[0]
-    assert "Nothing more will be written to the store" in messages[0]
+    assert "Nothing more will be written to the database" in messages[0]
     assert "restart the kernel" in messages[0]
     assert bridge_threads(), "control returned before the stuck function did"
 
@@ -352,7 +352,7 @@ def test_second_interrupt_returns_and_a_late_function_writes_nothing(
     assert writes == writes_when_returned
     assert after_calls == rows_after_when_returned
 
-    # Row 0's result was never stored: a later run on the same store computes it.
+    # Row 0's result was never stored: a later run on the same database computes it.
     inner.flush()
     stuck_calls.clear()
     press_interrupt.clear()

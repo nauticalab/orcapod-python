@@ -896,7 +896,7 @@ data. The rules:
   the rows of that run's inputs, sync or async (ITL-1093). Before a run in this process (a
   fresh or loaded job), after a run that raised, after `clear_cache()`, and while stale, every
   function and operator job node reads empty (zero typed rows; `head()` is `not_computed` and
-  points to `run()` and `as_source()`), in every cache mode: no read touches the store. A
+  points to `run()` and `as_source()`), in every cache mode: no read touches the database. A
   never-run or cleared node has no modified time, so it is stale; a job node is stale also
   when any function or operator job node it depends on is (`core/nodes/staleness.py`), and a
   `SourceJobNode` is modified when it is bound or its bound source is. A run skips inputs

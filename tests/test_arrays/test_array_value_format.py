@@ -568,7 +568,7 @@ def test_a_cell_with_trailing_bytes_is_refused() -> None:
 
 
 def test_padding_bytes_are_stored_as_zero_and_do_not_change_the_hash() -> None:
-    """Garbage in structured padding never reaches the store, and is not part of the hash."""
+    """Garbage in structured padding never reaches the database, and is not part of the hash."""
     aligned = np.dtype([("a", "i1"), ("b", "<f8")], align=True)
     marker = b"\xa5" * 7
     dirty = np.frombuffer(

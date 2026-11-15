@@ -3,7 +3,7 @@
 A function node's per-row lookups, writes and flushes used to filter, copy, rebuild or
 re-read the whole stored table, so a run was quadratic in its rows: 400 rows took 7 s on
 an ``InMemoryArrowDatabase`` and 80 s on a ``DeltaTableDatabase`` (the same pod outside a
-job took 0.04 s). The tests count the Arrow bytes the store's calls allocate during a run,
+job took 0.04 s). The tests count the Arrow bytes the database's calls allocate during a run,
 which is deterministic, and require the cost per row to stay flat when the rows quadruple.
 """
 
@@ -29,7 +29,7 @@ def double(x: int) -> int:
 def _store_bytes_per_row(
     n_rows: int, orchestrator: str, store_kind: str, tmp_path: Path
 ) -> float:
-    """Run a one-pod job over ``n_rows`` rows and return the store's Arrow bytes per row."""
+    """Run a one-pod job over ``n_rows`` rows and return the database's Arrow bytes per row."""
     inner = (
         DeltaTableDatabase(tmp_path / f"store-{n_rows}")
         if store_kind == "delta"
@@ -56,7 +56,7 @@ def _store_bytes_per_row(
 def test_store_work_per_row_does_not_grow_with_rows(
     orchestrator: str, store_kind: str, tmp_path: Path
 ) -> None:
-    """A job's store work per row stays flat when its rows quadruple."""
+    """A job's database work per row stays flat when its rows quadruple."""
     small = _store_bytes_per_row(150, orchestrator, store_kind, tmp_path)
     large = _store_bytes_per_row(600, orchestrator, store_kind, tmp_path)
     # Four times the rows: a per-row scan of the stored rows costs about four times as

@@ -1,4 +1,4 @@
-"""Reading a local Delta store returns exactly what deltalake's default reader returns (ITL-892).
+"""Reading a local Delta database returns exactly what deltalake's default reader returns (ITL-892).
 
 Orcapod scans local Delta tables through a native pyarrow filesystem instead of deltalake's
 default ``PyFileSystem(DeltaStorageHandler)``, to avoid a hang at interpreter exit. Orcapod is
@@ -91,7 +91,7 @@ def test_pipeline_store_reads_match_default_reader_for_logical_types(
 
     @op.function_pod(output_keys=["path"])
     def same_path(f: Path) -> Path:
-        """Return the input path, so the store holds a ``Path`` column."""
+        """Return the input path, so the database holds a ``Path`` column."""
         return f
 
     @op.function_pod(output_keys=["m"])
@@ -295,7 +295,7 @@ def test_database_reads_a_store_under_a_special_character_root(
     (table_dir,) = _delta_table_dirs(store_dir)
     expected = _default_reader(table_dir)
     assert expected.num_rows == 3
-    assert actual is not None, f"the store under {root_name!r} read as empty"
+    assert actual is not None, f"the database under {root_name!r} read as empty"
     _assert_identical(actual, expected, sort_by=DeltaTableDatabase.RECORD_ID_COLUMN)
 
 

@@ -3,7 +3,7 @@
 ``head(n, cfg)`` is ``as_table(cfg).slice(0, n)`` for every column configuration, whatever
 order the rows were computed in: input order on the sync path, and on the async path an
 order forced here (events, no sleeps) to be the reverse of tag order. Operator nodes are
-tested after a sync run, or from a store a sync run filled: an operator node's head after
+tested after a sync run, or from a database a sync run filled: an operator node's head after
 an async run says NOT_COMPUTED until ITL-1042 is fixed.
 """
 
@@ -121,7 +121,7 @@ def _held_order(node: Any) -> list[int]:
 def test_a_function_nodes_head_is_the_prefix_of_as_table_in_any_completion_order(
     run_kind: str, store_kind: str, n: int, config: str, tmp_path: Path
 ) -> None:
-    """After a run, and in a new job whose run reads every row from the store,
+    """After a run, and in a new job whose run reads every row from the database,
     head(n, cfg) == as_table(cfg)[:n]."""
     store = _store(store_kind, tmp_path)
     job = _run(run_kind, store)
@@ -133,7 +133,7 @@ def test_a_function_nodes_head_is_the_prefix_of_as_table_in_any_completion_order
         list(range(N_ROWS)),
     )
     # A node shows its current run only (ITL-1095): the new job's run reads its rows from
-    # the store, in the store's order, and computes nothing.
+    # the database, in the database's order, and computes nothing.
     fresh.run()
     for node in (job.nodes["node"], fresh.nodes["node"]):
         head = node.head(n, **CONFIGS[config])

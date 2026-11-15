@@ -3,10 +3,10 @@
 Developer, November 13, 2026: a job node itself (``as_table``, ``iter_data``, the dataframe
 methods, ``flow``, ``head``, the preview, ``run``) is the current run view; ``as_source()``
 is the view of everything stored for the node. Before a run in this process a node is empty
-and stale, whatever its store holds; a run fills it.
+and stale, whatever its database holds; a run fills it.
 
-One store holds the results of two earlier runs (6 source rows, then 3). A fresh job over
-that store, and a job loaded from a saved file, read empty from every node until they run.
+One database holds the results of two earlier runs (6 source rows, then 3). A fresh job over
+that database, and a job loaded from a saved file, read empty from every node until they run.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ def _assert_points_to_run_and_stored_view(node: Any) -> None:
 
 
 class TestFreshJobOverAPopulatedStore:
-    """A job built over a store that holds results reads empty until it runs."""
+    """A job built over a database that holds results reads empty until it runs."""
 
     @pytest.mark.parametrize("orchestrator", list(ORCHESTRATORS))
     def test_every_read_of_every_node_is_empty_before_a_run(
@@ -193,7 +193,7 @@ class TestAfterARun:
 
 
 def test_a_loaded_job_reads_empty_until_it_runs(tmp_path: Path) -> None:
-    """A loaded job's nodes are empty and do not raise; ``as_source()`` reads the store."""
+    """A loaded job's nodes are empty and do not raise; ``as_source()`` reads the database."""
     db = InMemoryArrowDatabase()
     job = _build(ROWS, db)
     job.run()

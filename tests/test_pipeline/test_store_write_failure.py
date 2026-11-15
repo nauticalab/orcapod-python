@@ -1,6 +1,6 @@
-"""A failed store write must fail ``PipelineJob.run()`` (ITL-878).
+"""A failed database write must fail ``PipelineJob.run()`` (ITL-878).
 
-Before the fix, a node whose write to the store failed was skipped like a row whose
+Before the fix, a node whose write to the database failed was skipped like a row whose
 function had raised: ``run()`` returned normally and the node read back fewer rows (often
 zero). These tests drive ``PipelineJob`` through its public interface on both orchestrators,
 with a test-double store that fails chosen writes, and with the SQLite trigger from the
@@ -20,7 +20,7 @@ import pytest
 from orcapod import PipelineJob, function_pod
 from orcapod.channels import Channel
 from orcapod.core.operators import SelectDataColumns
-from orcapod.errors import StoreWriteError
+from orcapod.errors import OrcapodDatabaseWriteError
 from orcapod.databases import (
     ConnectorArrowDatabase,
     InMemoryArrowDatabase,
@@ -67,7 +67,7 @@ class FaultyStore:
         self._faults = faults
 
     def at(self, *path_components: str) -> FaultyStore:
-        """Return a view at ``path_components`` that shares this store's faults."""
+        """Return a view at ``path_components`` that shares this database's faults."""
         return FaultyStore(self._inner.at(*path_components), self._faults)
 
     def _check_write(self, record_path: tuple[str, ...]) -> None:
@@ -112,7 +112,7 @@ class FaultyStore:
         )
 
     def flush(self) -> None:
-        """Flush the wrapped store, or raise ``OSError`` if flushes fail.
+        """Flush the wrapped database, or raise ``OSError`` if flushes fail.
 
         With ``flush_marker`` set, a flush fails only while a write to a matching
         table is pending, whichever view the flush is called on: every view shares
@@ -128,7 +128,7 @@ class FaultyStore:
         faults.pending_paths.clear()
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate everything else to the wrapped store."""
+        """Delegate everything else to the wrapped database."""
         return getattr(self._inner, name)
 
 
@@ -194,7 +194,7 @@ def orchestrator_cls(request):
     ]
 
 
-def assert_store_error(
+def assert_database_error(
     err: BaseException,
     faults: Faults,
     *,
@@ -202,8 +202,8 @@ def assert_store_error(
     names_row: bool,
     flush: bool = False,
 ) -> None:
-    """The run's error is a plain ``StoreWriteError`` naming node, row and table."""
-    assert isinstance(err, StoreWriteError), f"{type(err).__name__}: {err}"
+    """The run's error is a plain ``OrcapodDatabaseWriteError`` naming node, row and table."""
+    assert isinstance(err, OrcapodDatabaseWriteError), f"{type(err).__name__}: {err}"
     message = str(err)
     if node_label is not None:
         assert err.node_label == node_label
@@ -255,10 +255,10 @@ class TestFunctionNodeWriteFailure:
         faults = Faults(write_marker=RESULT_TABLE)
         job = build_job(FaultyStore(inner, faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
-        assert_store_error(exc_info.value, faults, node_label="dbl", names_row=True)
+        assert_database_error(exc_info.value, faults, node_label="dbl", names_row=True)
 
     def test_result_table_failure_on_later_row_keeps_earlier_rows(
         self, orchestrator_cls
@@ -268,10 +268,10 @@ class TestFunctionNodeWriteFailure:
         faults = Faults(write_marker=RESULT_TABLE, succeed_first=1)
         job = build_job(FaultyStore(inner, faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
-        assert_store_error(exc_info.value, faults, node_label="dbl", names_row=True)
+        assert_database_error(exc_info.value, faults, node_label="dbl", names_row=True)
         assert stored_rows(inner) == 1
 
         # A re-run on a healthy store does not recompute the stored rows.
@@ -287,10 +287,10 @@ class TestFunctionNodeWriteFailure:
         faults = Faults(write_marker=PIPELINE_TABLE)
         job = build_job(FaultyStore(inner, faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
-        assert_store_error(exc_info.value, faults, node_label="dbl", names_row=True)
+        assert_database_error(exc_info.value, faults, node_label="dbl", names_row=True)
 
         # The failing row's result was stored before its pipeline record failed, so a
         # healthy re-run reuses it instead of computing it again. (On the async
@@ -313,24 +313,24 @@ class TestFunctionNodeWriteFailure:
 
         faults = Faults(write_marker=RESULT_TABLE)
         job = build_job(FaultyStore(inner, faults), ROWS)
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
-        assert_store_error(exc_info.value, faults, node_label="dbl", names_row=True)
+        assert_database_error(exc_info.value, faults, node_label="dbl", names_row=True)
         assert stored_rows(inner) == 2
 
     @pytest.mark.parametrize("error_policy", ["continue", "fail_fast"])
     def test_store_failure_raises_under_any_error_policy(
         self, orchestrator_cls, error_policy
     ):
-        """A store failure raises under both error policies."""
+        """A database failure raises under both error policies."""
         faults = Faults(write_marker=RESULT_TABLE)
         job = build_job(FaultyStore(InMemoryArrowDatabase(), faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls(error_policy=error_policy))
 
-        assert_store_error(exc_info.value, faults, node_label="dbl", names_row=True)
+        assert_database_error(exc_info.value, faults, node_label="dbl", names_row=True)
 
     def test_auto_flush_failure_raises_naming_the_node(self, orchestrator_cls):
         """A failure of the result cache's flush after a row raises, naming the node."""
@@ -338,10 +338,10 @@ class TestFunctionNodeWriteFailure:
         store = FaultyStore(InMemoryArrowDatabase(), faults)
         job = build_job(store, ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
-        assert_store_error(
+        assert_database_error(
             exc_info.value, faults, node_label="dbl", names_row=False, flush=True
         )
 
@@ -359,25 +359,25 @@ class TestFunctionNodeWriteFailure:
         faults = Faults(flush_marker=PIPELINE_TABLE)
         job = build_job(FaultyStore(InMemoryArrowDatabase(), faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
         err = exc_info.value
-        assert_store_error(err, faults, node_label=None, names_row=False, flush=True)
+        assert_database_error(err, faults, node_label=None, names_row=False, flush=True)
         if orchestrator_cls is SyncPipelineOrchestrator:
             assert err.node_label == "dbl"
         assert RESULT_TABLE not in "/".join(err.record_path)
         assert RESULT_TABLE not in str(err)
 
     def test_final_flush_failure_raises(self, orchestrator_cls):
-        """A failure of the job's final flush raises ``StoreWriteError``."""
+        """A failure of the job's final flush raises ``OrcapodDatabaseWriteError``."""
         faults = Faults()
         job = build_job(FaultyStore(InMemoryArrowDatabase(), faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls(), observer=FailFlushAtRunEnd(faults))
 
-        assert_store_error(
+        assert_database_error(
             exc_info.value, faults, node_label=None, names_row=False, flush=True
         )
         assert exc_info.value.record_path == (JOB_NAME,)
@@ -408,10 +408,10 @@ class TestOperatorNodeWriteFailure:
         faults = Faults(write_marker=OPERATOR_TABLE)
         job = build_job(FaultyStore(inner, faults), ROWS, with_operator=True)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
-        assert_store_error(exc_info.value, faults, node_label="sel", names_row=False)
+        assert_database_error(exc_info.value, faults, node_label="sel", names_row=False)
         # The upstream function node wrote all its rows before the operator failed;
         # none of them may look dropped.
         assert stored_rows(inner) == 3
@@ -424,11 +424,11 @@ class TestOperatorNodeWriteFailure:
         )
         job = build_job(FaultyStore(inner, faults), ROWS, with_operator=True)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
         err = exc_info.value
-        assert_store_error(err, faults, node_label="sel", names_row=False)
+        assert_database_error(err, faults, node_label="sel", names_row=False)
         notes = getattr(err, "__notes__", [])
         assert any(
             "disk unavailable while flushing" in note
@@ -443,11 +443,11 @@ class TestOperatorNodeWriteFailure:
             FaultyStore(InMemoryArrowDatabase(), faults), ROWS, with_operator=True
         )
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls(), observer=FailFlushAtRunEnd(faults))
 
         err = exc_info.value
-        assert_store_error(err, faults, node_label=None, names_row=False, flush=True)
+        assert_database_error(err, faults, node_label=None, names_row=False, flush=True)
         notes = getattr(err, "__notes__", [])
         assert any(
             "pending" in note
@@ -470,7 +470,7 @@ class TestSQLiteTrigger:
         store = ConnectorArrowDatabase(SQLiteConnector(str(tmp_path / "store.db")))
         job = build_job(store, ROWS, pod=to_path)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls())
 
         assert exc_info.value.node_label == "dbl"
@@ -479,7 +479,7 @@ class TestSQLiteTrigger:
 
 
 # ---------------------------------------------------------------------------
-# A failing hook or observer callback never replaces a store error
+# A failing hook or observer callback never replaces a database error
 # ---------------------------------------------------------------------------
 
 
@@ -514,8 +514,8 @@ def make_outer(inner: Any):
 
 
 def assert_hook_failure_noted(err: BaseException) -> None:
-    """The error is the store error, with the hook failure recorded as a note."""
-    assert isinstance(err, StoreWriteError), f"{type(err).__name__}: {err}"
+    """The error is the database error, with the hook failure recorded as a note."""
+    assert isinstance(err, OrcapodDatabaseWriteError), f"{type(err).__name__}: {err}"
     assert isinstance(err.__cause__, OSError)
     notes = getattr(err, "__notes__", [])
     assert any("post-run hook failed" in note for note in notes), notes
@@ -545,21 +545,21 @@ class CrashingObserver(NoOpObserver):
 
 
 class TestCallbackFailureKeepsStoreError:
-    """A hook or observer that raises never replaces a store error."""
+    """A hook or observer that raises never replaces a database error."""
 
     def test_failing_hook_keeps_store_error_standalone(self):
-        """A standalone cached pod raises its store error, not the hook's."""
+        """A standalone cached pod raises its database error, not the hook's."""
         faults = Faults(write_marker="")
         triple = make_hooked_triple(FaultyStore(InMemoryArrowDatabase(), faults))
         stream = DictSource(data=ROWS, tag_columns=["k"])
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             triple.pod(stream).as_table()
 
         assert_hook_failure_noted(exc_info.value)
 
     def test_failing_hook_keeps_store_error_standalone_async(self):
-        """The async path raises the store error too, rather than skipping the row."""
+        """The async path raises the database error too, rather than skipping the row."""
         faults = Faults(write_marker="")
         triple = make_hooked_triple(FaultyStore(InMemoryArrowDatabase(), faults))
         stream = DictSource(data=ROWS, tag_columns=["k"])
@@ -582,7 +582,9 @@ class TestCallbackFailureKeepsStoreError:
             asyncio.run(run())
 
         leaves = exc_info.value.exceptions
-        assert all(isinstance(leaf, StoreWriteError) for leaf in leaves), leaves
+        assert all(isinstance(leaf, OrcapodDatabaseWriteError) for leaf in leaves), (
+            leaves
+        )
         for leaf in leaves:
             assert_hook_failure_noted(leaf)
 
@@ -595,21 +597,21 @@ class TestCallbackFailureKeepsStoreError:
         inner = make_hooked_triple(FaultyStore(InMemoryArrowDatabase(), faults))
         job = build_job(InMemoryArrowDatabase(), ROWS, pod=make_outer(inner))
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls(error_policy=error_policy))
 
         assert_hook_failure_noted(exc_info.value)
 
-    def test_failing_observer_keeps_store_error(self, orchestrator_cls):
-        """Observer failures on the way out are noted on the store error."""
+    def test_failing_observer_keeps_database_error(self, orchestrator_cls):
+        """Observer failures on the way out are noted on the database error."""
         faults = Faults(write_marker=RESULT_TABLE)
         job = build_job(FaultyStore(InMemoryArrowDatabase(), faults), ROWS)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(orchestrator=orchestrator_cls(), observer=CrashingObserver())
 
         err = exc_info.value
-        assert_store_error(err, faults, node_label="dbl", names_row=True)
+        assert_database_error(err, faults, node_label="dbl", names_row=True)
         notes = getattr(err, "__notes__", [])
         assert any("observer failed in on_data_crash" in note for note in notes), notes
         assert any("observer failed in on_run_end" in note for note in notes), notes
@@ -661,21 +663,21 @@ def build_siblings(store: Any, other_pod: Any):
 
 
 class TestConcurrentFailures:
-    """Concurrent node failures still give one plain ``StoreWriteError``."""
+    """Concurrent node failures still give one plain ``OrcapodDatabaseWriteError``."""
 
-    def test_store_error_and_other_failure_raise_one_store_error(self):
-        """A store error mixed with another failure raises the store error alone."""
+    def test_store_error_and_other_failure_raise_one_database_error(self):
+        """A database error mixed with another failure raises the database error alone."""
         faults = Faults(write_marker=RESULT_TABLE)
         job = build_siblings(FaultyStore(InMemoryArrowDatabase(), faults), fail_async)
 
-        with pytest.raises(StoreWriteError) as exc_info:
+        with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             job.run(
                 orchestrator=AsyncPipelineOrchestrator(),
                 observer=FailingCrashObserver(),
             )
 
         err = exc_info.value
-        assert_store_error(err, faults, node_label="dbl", names_row=True)
+        assert_database_error(err, faults, node_label="dbl", names_row=True)
         notes = getattr(err, "__notes__", [])
         assert any("observer failed for node 'other'" in note for note in notes), notes
         # The whole group stays reachable for diagnosis.
@@ -684,28 +686,28 @@ class TestConcurrentFailures:
     def test_several_store_errors_raise_the_first_in_node_order(
         self, orchestrator_cls, caplog
     ):
-        """Several store errors raise the first node's, the same on both orchestrators."""
+        """Several database errors raise the first node's, the same on both orchestrators."""
         faults = Faults(write_marker=RESULT_TABLE)
         job = build_siblings(FaultyStore(InMemoryArrowDatabase(), faults), triple_async)
 
         with caplog.at_level("WARNING"):
-            with pytest.raises(StoreWriteError) as exc_info:
+            with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
                 job.run(orchestrator=orchestrator_cls())
 
         # The sync orchestrator meets ``dbl`` first; the async one raises the same.
-        assert_store_error(exc_info.value, faults, node_label="dbl", names_row=True)
+        assert_database_error(exc_info.value, faults, node_label="dbl", names_row=True)
         if orchestrator_cls is AsyncPipelineOrchestrator:
             others = [
                 record
                 for record in caplog.records
                 if record.levelname == "WARNING"
-                and "Another store write failed" in record.getMessage()
+                and "Another database write failed" in record.getMessage()
             ]
             assert any("node 'other'" in r.getMessage() for r in others), others
 
 
 # ---------------------------------------------------------------------------
-# An output that cannot be turned into a record is a row failure, not a store error
+# An output that cannot be turned into a record is a row failure, not a database error
 # ---------------------------------------------------------------------------
 
 
@@ -813,7 +815,9 @@ class TestUnstorableOutputIsARowFailure:
             pod, orchestrator_cls(error_policy=error_policy), caplog
         )
 
-        assert not isinstance(actual["raised"], StoreWriteError), actual["raised"]
+        assert not isinstance(actual["raised"], OrcapodDatabaseWriteError), actual[
+            "raised"
+        ]
         assert (actual["raised"] is None) == (expected["raised"] is None), actual
         assert actual["rows"] == expected["rows"]
         assert actual["crashes"] == expected["crashes"] == [("dbl", "r1")]

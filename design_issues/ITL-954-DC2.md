@@ -29,7 +29,7 @@ would deliver everything again on a v0.2 store.
   job that no node claims by name (operator caches, cached sources, nodes that left the job).
 - A store that cannot list its tables: a side-effecting node logs one warning and proceeds
   (developer, November 11, 2026).
-- Proven on a store written by Orcapod v0.2.0 itself
+- Proven on a database written by Orcapod v0.2.0 itself
   (`tests/test_arrays/data/v02_full_store.tar.gz`), as written and with every hash in its
   paths replaced (`tests/test_pipeline/test_pre_v03_tables.py`).
 

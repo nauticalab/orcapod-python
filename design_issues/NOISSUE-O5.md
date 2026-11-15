@@ -12,7 +12,7 @@ executes, and its result is persisted with nothing marking it incomplete. The ne
 the full set and the group is recomputed correctly.
 
 Measured with two upstream pod stages (`source → sync_like → stringify → [GroupBy] → pod`),
-one member of one group changed, same Delta store, fresh objects per run:
+one member of one group changed, same Delta database, fresh objects per run:
 
 ```
 CONTROL (per-row, no GroupBy)

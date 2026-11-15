@@ -1,4 +1,4 @@
-"""One store, two orchestrators: a run on one extends a store written by the other (ITL-885).
+"""One store, two orchestrators: a run on one extends a database written by the other (ITL-885).
 
 A job run by ``SyncPipelineOrchestrator`` and then by ``AsyncPipelineOrchestrator`` on the same
 store, or the other way round, must find every stored result: the second run computes

@@ -148,7 +148,7 @@ def _function_pod_stream() -> Any:
 
 
 def _cached_function_pod_stream() -> Any:
-    """The stream of a ``CachedFunctionPod`` (in-memory result store) over ``_source()``."""
+    """The stream of a ``CachedFunctionPod`` (in-memory result database) over ``_source()``."""
     pod = CachedFunctionPod(
         _counting_pod([]).pod, result_database=InMemoryArrowDatabase()
     )

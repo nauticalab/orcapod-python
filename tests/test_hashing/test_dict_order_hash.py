@@ -432,7 +432,7 @@ def _extract_data_only(archive: tarfile.TarFile, target: Path) -> None:
 
 
 def _delta_db(tmp_path: Path) -> DeltaTableDatabase:
-    """Return a Delta result store under ``tmp_path``."""
+    """Return a Delta result database under ``tmp_path``."""
     return DeltaTableDatabase(tmp_path / "store")
 
 
@@ -495,7 +495,7 @@ class TestCachedPodHit:
 
 
 class TestV020Store:
-    """A Delta result store written by the released v0.2.0 code.
+    """A Delta result database written by the released v0.2.0 code.
 
     ``data/v0_2_0_dict_store.tar.gz`` was produced by v0.2.0 running ``total`` over two
     inputs: ``k=unsorted`` holding ``{"b": 2, "a": 1}`` (stored in that order) and
@@ -512,7 +512,7 @@ class TestV020Store:
 
     @pytest.fixture
     def store(self, tmp_path):
-        """Return the v0.2.0 Delta store, extracted under ``tmp_path``."""
+        """Return the v0.2.0 Delta database, extracted under ``tmp_path``."""
         # The store is shipped as a tarball: its directory names contain ":".
         target = tmp_path / "v020_store"
         with tarfile.open(V020_STORE) as archive:

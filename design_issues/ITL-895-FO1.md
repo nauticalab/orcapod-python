@@ -12,7 +12,7 @@ unchanged. pyarrow's integer converter calls `__int__` on a non-`int`, so `1.5`,
 `numpy.float64(1.5)`, `Decimal` and `Fraction` were truncated. Numbers were read as epoch ticks
 for date and timestamp fields, `bytes` and `str` were decoded and encoded into each other, and
 `None` became a NULL in a not-null field. The `Data` kept the raw dict, so `as_dict()` gave
-`1.5` while `as_table()`, the store and the hash gave `1`. Downstream pods read `as_dict()`, so
+`1.5` while `as_table()`, the database and the hash gave `1`. Downstream pods read `as_dict()`, so
 the same graph gave different results standalone, on the sync orchestrator and on the async
 orchestrator. Present in every release up to v0.2.0. Root-cause evidence:
 `superpowers/specs/itl-895-float-to-int/FINDINGS.md`.

@@ -89,7 +89,7 @@ class ArrowDatabaseProtocol(Protocol):
         For backends with shared pending state (InMemoryArrowDatabase,
         ConnectorArrowDatabase), calling flush() on any view drains
         the entire shared pending queue — not just the caller's prefix.
-        This is intentional: all views share the same underlying store.
+        This is intentional: all views share the same underlying database.
 
         Args:
             *path_components: Zero or more path components to append.
@@ -136,7 +136,7 @@ class ArrowDatabaseProtocol(Protocol):
         - ``DeltaTableDatabase`` on ``s3://`` or ``s3a://``: the same walk through
           ``s3fs``, one list request per directory. On ``gs://``, ``az://`` and
           ``abfs://`` only when the matching ``fsspec`` package is installed and
-          can reach the store with its default credentials. A cloud store that
+          can reach the database with its default credentials. A cloud database that
           cannot be listed raises ``TableListingNotSupportedError``.
         - ``ConnectorArrowDatabase`` (SQLite, PostgreSQL, SpiralDB): the tables
           whose name in the backend starts with the name ``prefix`` maps to. A
@@ -156,9 +156,9 @@ class ArrowDatabaseProtocol(Protocol):
             The table paths, sorted. Empty when there is none.
 
         Raises:
-            TableListingNotSupportedError: If this store cannot enumerate its
+            TableListingNotSupportedError: If this database cannot enumerate its
                 tables.
-            StoreReadError: If the store can list its tables but the listing
+            OrcapodDatabaseReadError: If the database can list its tables but the listing
                 failed.
         """
         ...

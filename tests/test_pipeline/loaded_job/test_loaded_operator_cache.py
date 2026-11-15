@@ -26,7 +26,7 @@ from orcapod import PipelineJob, function_pod
 from orcapod.core.operators import Join
 from orcapod.core.streams import ViewStatus
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
-from orcapod.errors import StoreContentWarning
+from orcapod.errors import OrcapodDatabaseContentWarning
 from orcapod.pipeline import Pipeline, SyncPipelineOrchestrator
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
@@ -77,7 +77,7 @@ def _sources(nullability: str) -> dict[str, StreamProtocol]:
 
 
 def _store(kind: str, tmp_path: pathlib.Path) -> ArrowDatabaseProtocol:
-    """An empty store of the given kind."""
+    """An empty database of the given kind."""
     if kind == "delta":
         return DeltaTableDatabase(base_path=tmp_path / "store")
     return InMemoryArrowDatabase()
@@ -287,7 +287,7 @@ def test_without_the_run_content_hash_an_absent_table_raises_too(
     node = _load_replaying(saved, InMemoryArrowDatabase()).nodes["joined"]
     with pytest.raises(RuntimeError, match=UNKNOWN_KEY) as excinfo:
         _ = node.as_source().as_table()
-    assert "is absent from the attached store" in str(excinfo.value)
+    assert "is absent from the attached database" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("store_kind", STORES)
@@ -307,7 +307,7 @@ def test_without_the_run_content_hash_head_never_raises_and_the_stored_view_says
 
 
 # ---------------------------------------------------------------------------
-# The store is the source of truth: a known key with no rows is an empty result
+# The database is the source of truth: a known key with no rows is an empty result
 # ---------------------------------------------------------------------------
 
 
@@ -354,11 +354,11 @@ def _assert_reads_as_live_with_no_rows(
 def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
     tmp_path: pathlib.Path,
 ) -> None:
-    """With its key known, a store without the run's rows answers: no rows."""
+    """With its key known, a database without the run's rows answers: no rows."""
     saved_store = InMemoryArrowDatabase()
     job = _run(saved_store, "non_null")
     saved = _save(job, tmp_path)
-    # Another store whose table at the same path holds another run's rows.
+    # Another database whose table at the same path holds another run's rows.
     other_store = InMemoryArrowDatabase()
     other = PipelineJob(name=JOB_NAME, database=other_store)
     with other:
@@ -386,7 +386,7 @@ def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
     _ = other.run()
     node = _load_replaying(saved, other_store).nodes["joined"]
     # The job file records the run's 2 rows: an advisory warning, not an error.
-    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
+    with pytest.warns(OrcapodDatabaseContentWarning, match="records 2 rows .* holds 0"):
         _assert_reads_as_live_with_no_rows(node, _live_replaying(other_store, job))
 
 
@@ -394,12 +394,12 @@ def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
 def test_an_absent_cache_table_gives_an_empty_result(
     nullability: str, tmp_path: pathlib.Path
 ) -> None:
-    """With its key known, a store without the table answers: no rows, typed."""
+    """With its key known, a database without the table answers: no rows, typed."""
     job = _run(InMemoryArrowDatabase(), nullability)
     empty_store = InMemoryArrowDatabase()
     node = _load_replaying(_save(job, tmp_path), empty_store).nodes["joined"]
     # The job file records the run's 2 rows: an advisory warning, not an error.
-    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
+    with pytest.warns(OrcapodDatabaseContentWarning, match="records 2 rows .* holds 0"):
         _assert_reads_as_live_with_no_rows(
             node, _live_replaying(empty_store, job), same_types=False
         )
@@ -565,7 +565,7 @@ def _add_values(value: int, score: int) -> int:
 def _store_the_fixture_join(store: ArrowDatabaseProtocol) -> Any:
     """Run the fixture's job with today's code, its join stored; the run's join node.
 
-    The fixture was saved before running, with in-memory sources, so no store holds
+    The fixture was saved before running, with in-memory sources, so no database holds
     its rows: this run stores them at the path the file's join node names.
     """
     from orcapod.core.data_function import PythonDataFunction
@@ -683,7 +683,7 @@ def test_saving_again_drops_only_the_records_its_file_lacked(
 
 
 # ---------------------------------------------------------------------------
-# run.expected_rows: an optional, advisory count; the store stays the truth
+# run.expected_rows: an optional, advisory count; the database stays the truth
 # ---------------------------------------------------------------------------
 
 READ_NODES = ["inc", "joined"]
@@ -718,14 +718,16 @@ def test_the_job_file_records_the_rows_each_node_has_in_the_store(
 def test_fewer_rows_than_expected_warn_once_and_read_what_the_store_holds(
     store_kind: str, label: str, tmp_path: pathlib.Path
 ) -> None:
-    """Another store with none of the run's rows: no rows, one warning per node."""
+    """Another database with none of the run's rows: no rows, one warning per node."""
     saved = _save(_run(InMemoryArrowDatabase(), "non_null"), tmp_path)
     loaded = _loaded(saved, _store(store_kind, tmp_path))
-    with pytest.warns(StoreContentWarning) as record:
+    with pytest.warns(OrcapodDatabaseContentWarning) as record:
         table = _read_all(loaded, label)
         _ = _read_all(loaded, label)
     assert table.num_rows == 0
-    messages = [str(w.message) for w in record if w.category is StoreContentWarning]
+    messages = [
+        str(w.message) for w in record if w.category is OrcapodDatabaseContentWarning
+    ]
     assert len(messages) == 1
     assert f"Node {label!r}: the job file records 2 rows for its run" in messages[0]
     assert "holds 0 under the run's key" in messages[0]
@@ -736,7 +738,7 @@ def test_fewer_rows_than_expected_warn_once_and_read_what_the_store_holds(
 def test_more_rows_than_expected_warn_and_read_them_all(
     store_kind: str, label: str, tmp_path: pathlib.Path
 ) -> None:
-    """The store holds more than the file records: all of them, one warning."""
+    """The database holds more than the file records: all of them, one warning."""
     store = _store(store_kind, tmp_path)
     job = _run(store, "non_null")
 
@@ -745,7 +747,9 @@ def test_more_rows_than_expected_warn_and_read_them_all(
         data["run"]["expected_rows"][label] = 1
 
     loaded = _loaded(_save(job, tmp_path, expect_one), store)
-    with pytest.warns(StoreContentWarning, match="records 1 row for its run.*holds 2"):
+    with pytest.warns(
+        OrcapodDatabaseContentWarning, match="records 1 row for its run.*holds 2"
+    ):
         table = _read_all(loaded, label)
     assert _sorted(table).equals(_sorted(job.nodes[label].as_table()))
 
@@ -754,12 +758,12 @@ def test_more_rows_than_expected_warn_and_read_them_all(
 def test_matching_counts_and_zero_expected_zero_found_do_not_warn(
     store_kind: str, tmp_path: pathlib.Path
 ) -> None:
-    """No warning when the store holds what the file records, zero included."""
+    """No warning when the database holds what the file records, zero included."""
     store = _store(store_kind, tmp_path)
     job = _run(store, "non_null")
     empty = _run_empty_join(_store("memory", tmp_path))
     with warnings.catch_warnings():
-        warnings.simplefilter("error", StoreContentWarning)
+        warnings.simplefilter("error", OrcapodDatabaseContentWarning)
         loaded = _loaded(_save(job, tmp_path), store)
         for label in READ_NODES:
             assert _read_all(loaded, label).num_rows == 2
@@ -788,7 +792,7 @@ def test_deleting_the_section_by_hand_loads_identically_without_a_check(
         _save(job, tmp_path / "bare2", delete_section), InMemoryArrowDatabase()
     )
     with warnings.catch_warnings():
-        warnings.simplefilter("error", StoreContentWarning)
+        warnings.simplefilter("error", OrcapodDatabaseContentWarning)
         for label in READ_NODES:
             assert _sorted(_read_all(without, label)).equals(
                 _sorted(_read_all(with_section, label))
@@ -831,10 +835,10 @@ def test_get_all_records_of_a_loaded_operator_runs_the_advisory_check(
     """``get_all_records()`` warns once, like the other reads, and returns no rows."""
     saved = _save(_run(InMemoryArrowDatabase(), "non_null"), tmp_path)
     node = _loaded(saved, InMemoryArrowDatabase()).nodes["joined"]
-    with pytest.warns(StoreContentWarning) as record:
+    with pytest.warns(OrcapodDatabaseContentWarning) as record:
         assert node.get_all_records() is None
         assert node.get_all_records() is None
-    assert len([w for w in record if w.category is StoreContentWarning]) == 1
+    assert len([w for w in record if w.category is OrcapodDatabaseContentWarning]) == 1
 
 
 def test_a_source_node_without_its_own_record_takes_its_output_schemas(

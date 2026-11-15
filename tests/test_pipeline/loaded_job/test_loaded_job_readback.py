@@ -28,7 +28,7 @@ import pytest
 from orcapod import PipelineJob, function_pod
 from orcapod.core.operators import Join
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
-from orcapod.errors import StoreContentWarning
+from orcapod.errors import OrcapodDatabaseContentWarning
 from orcapod.pipeline.serialization import LoadStatus
 from orcapod.sources import DictSource
 from orcapod.types import NodeConfig
@@ -70,7 +70,7 @@ def _rewrite_job_file(
 
 
 def _loaded_and_filled(saved: pathlib.Path) -> PipelineJob:
-    """Load the saved job, bind its in-memory sources and fill it from the store.
+    """Load the saved job, bind its in-memory sources and fill it from the database.
 
     A loaded node is empty until a load-only run fills it (ITL-1095). The sources bound
     are those of ``save_job_script.py``; the CSV and Delta sources are rebuilt.
@@ -114,10 +114,10 @@ def _save_small_job(
     record: Callable[[], None],
     configure: Callable[[PipelineJob], None] | None = None,
 ) -> str:
-    """Record, run and save a job on a Delta store in *tmp_path*; return its path.
+    """Record, run and save a job on a Delta database in *tmp_path*; return its path.
 
     Args:
-        tmp_path: Directory for the store and the saved file.
+        tmp_path: Directory for the database and the saved file.
         record: Called inside the job's ``with`` block to record the pipeline.
         configure: Called after recording and before the run, to configure nodes.
     """
@@ -195,7 +195,7 @@ def test_datetime_output_with_nothing_stored_returns_typed_zero_rows(
 
     path = _save_small_job(tmp_path, record)
     data = json.loads(pathlib.Path(path).read_text())
-    # Without the advisory count, an empty store is read without any check.
+    # Without the advisory count, an empty database is read without any check.
     data["run"].pop("expected_rows", None)
     _ = pathlib.Path(path).write_text(json.dumps(data))
     table = (
@@ -311,7 +311,7 @@ def test_loaded_function_node_get_all_records_returns_stored_rows(
 
 
 def test_loaded_function_node_with_store_is_read_only(saved: pathlib.Path) -> None:
-    """With a store attached, a loaded node is READ_ONLY."""
+    """With a database attached, a loaded node is READ_ONLY."""
     assert _load(saved).nodes["dbl"].load_status == LoadStatus.READ_ONLY
 
 
@@ -407,11 +407,11 @@ def test_other_context_records_do_not_satisfy_saved_expectation(
     other.flush()
 
     node = PipelineJob.load(path, database=other).nodes["dbl"]
-    # The store is the source of truth (ITL-1043): it holds none of the run's
+    # The database is the source of truth (ITL-1043): it holds none of the run's
     # records, so none is read; the job file's count makes it a warning.
-    # A loaded node is empty until it runs (ITL-1095): its stored view reads the store.
+    # A loaded node is empty until it runs (ITL-1095): its stored view reads the database.
     reader = node if read_method == "get_all_records" else node.as_source()
-    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
+    with pytest.warns(OrcapodDatabaseContentWarning, match="records 2 rows .* holds 0"):
         result = getattr(reader, read_method)()
         rows = list(result) if read_method == "iter_data" else result
     assert rows is None or len(rows) == 0
@@ -445,7 +445,7 @@ def test_recomputed_entry_is_read_once_with_its_latest_result(
 def test_live_node_hot_load_reads_the_latest_recomputed_result(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A live node hot-loading from its store also keeps the greatest index."""
+    """A live node hot-loading from its database also keeps the greatest index."""
     # Behaviour change (ITL-904): the hot-load used to keep whichever record of an
     # entry the join returned last; it now keeps the latest recomputation.
     store = DeltaTableDatabase(str(tmp_path / "store"))
@@ -473,7 +473,7 @@ def test_live_node_hot_load_reads_the_latest_recomputed_result(
 def test_loaded_node_with_ephemeral_results_does_not_crash(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Results kept in an ephemeral store are gone after the run: a load-only run of the
+    """Results kept in an ephemeral database are gone after the run: a load-only run of the
     loaded job counts them as not stored and shows no rows; it does not crash."""
 
     @function_pod(output_keys="dbl")
@@ -486,10 +486,10 @@ def test_loaded_node_with_ephemeral_results_does_not_crash(
         _ = double.pod(_dict_source(), label="dbl")
 
     def make_ephemeral(job: PipelineJob) -> None:
-        """Keep the node's results in an in-memory ephemeral store."""
+        """Keep the node's results in an in-memory ephemeral database."""
         node = job.nodes["dbl"]
         node.node_config = NodeConfig(is_result_ephemeral=True)
-        node.set_ephemeral_store(InMemoryArrowDatabase())
+        node.set_ephemeral_database(InMemoryArrowDatabase())
 
     path = _save_small_job(tmp_path, record, configure=make_ephemeral)
     loaded = PipelineJob.load(path)
@@ -503,7 +503,7 @@ def test_loaded_node_with_ephemeral_results_does_not_crash(
 def test_newer_unavailable_result_does_not_expose_old_persistent_result(
     tmp_path: pathlib.Path,
 ) -> None:
-    """A later ephemeral recomputation wins even after its ephemeral store is gone."""
+    """A later ephemeral recomputation wins even after its ephemeral database is gone."""
     from orcapod.system_constants import constants
 
     path = _save_small_job(tmp_path, _record_double)
@@ -522,7 +522,7 @@ def test_newer_unavailable_result_does_not_expose_old_persistent_result(
         records = records.set_column(index, field, pa.array(values, type=field.type))
     store.add_records(table_path, records, record_id_column="__rid", flush=True)
 
-    # The newest result of each entry is gone with its ephemeral store: a load-only run
+    # The newest result of each entry is gone with its ephemeral database: a load-only run
     # counts the entry as not stored and never shows the older persistent result.
     loaded = PipelineJob.load(path)
     loaded.bind(sources={"dsrc": _dict_source()})
@@ -532,7 +532,7 @@ def test_newer_unavailable_result_does_not_expose_old_persistent_result(
 
 
 # ---------------------------------------------------------------------------
-# Function nodes: the store
+# Function nodes: the database
 # ---------------------------------------------------------------------------
 
 
@@ -541,15 +541,15 @@ def test_loaded_function_node_warns_once_on_a_store_without_its_runs_records(
 ) -> None:
     """A store lacking the run's records is read as it is, with one warning.
 
-    The store is the source of truth (ITL-1043): every read returns what it holds.
-    The job file's advisory count makes the difference a ``StoreContentWarning``,
+    The database is the source of truth (ITL-1043): every read returns what it holds.
+    The job file's advisory count makes the difference a ``OrcapodDatabaseContentWarning``,
     issued once per node.
     """
     node = _load(saved, database=InMemoryArrowDatabase()).nodes["dbl"]
-    # A loaded node is empty until it runs (ITL-1095): the store is read through its
+    # A loaded node is empty until it runs (ITL-1095): the database is read through its
     # stored view, which warns once.
     stored = node.as_source()
-    with pytest.warns(StoreContentWarning) as record:
+    with pytest.warns(OrcapodDatabaseContentWarning) as record:
         table = stored.as_table()
         rows = list(stored.iter_data())
         records = node.get_all_records()
@@ -559,25 +559,29 @@ def test_loaded_function_node_warns_once_on_a_store_without_its_runs_records(
     assert rows == []
     assert records is None
     assert head.table.num_rows == 0
-    messages = [str(w.message) for w in record if w.category is StoreContentWarning]
+    messages = [
+        str(w.message) for w in record if w.category is OrcapodDatabaseContentWarning
+    ]
     assert len(messages) == 1
     assert messages[0].startswith(
         "FunctionJobNode 'dbl': the job file records 2 rows for its run, but the "
-        "in_memory store (table 'loaded_demo/double/"
+        "in_memory database (table 'loaded_demo/double/"
     )
     assert messages[0].endswith(
-        "holds 0 under the run's key. The read returns what the store holds; the "
-        "store may not be the one the run wrote, or it may have changed since."
+        "holds 0 under the run's key. The read returns what the database holds; the "
+        "database may not be the one the run wrote, or it may have changed since."
     )
 
 
 def test_store_content_warning_names_a_delta_stores_location(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """The warning names a Delta store's location."""
+    """The warning names a Delta database's location."""
     other = tmp_path / "other_store"
     node = _load(saved, database=DeltaTableDatabase(str(other))).nodes["dbl"]
-    with pytest.warns(StoreContentWarning, match="the store at '") as record:
+    with pytest.warns(
+        OrcapodDatabaseContentWarning, match="the database at '"
+    ) as record:
         _ = node.as_source().as_table()
     assert str(other) in str(record[0].message)
 
@@ -613,14 +617,14 @@ def test_store_with_only_another_runs_records_reads_none_with_a_warning(
     # the per-record count, not the missing-table case.
     assert node._pipeline_database is not None
     assert node._pipeline_database.table_exists(node._versioned_pipeline_path)
-    with pytest.warns(StoreContentWarning, match="records 2 rows .* holds 0"):
+    with pytest.warns(OrcapodDatabaseContentWarning, match="records 2 rows .* holds 0"):
         assert node.as_source().as_table().num_rows == 0
 
 
 def test_saved_file_records_the_rows_each_node_had_in_the_store(
     saved: pathlib.Path,
 ) -> None:
-    """``save()`` records, per job node, the rows its run left in the store."""
+    """``save()`` records, per job node, the rows its run left in the database."""
     run = json.loads((saved / "job.json").read_text())["run"]
     # The join is not cached (cache mode OFF): its run stored nothing.
     assert run["expected_rows"] == {
@@ -636,14 +640,14 @@ def test_saved_file_records_the_rows_each_node_had_in_the_store(
 def test_saving_a_loaded_job_keeps_the_expected_rows(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """Re-saving a job loaded with another store keeps the saved counts."""
+    """Re-saving a job loaded with another database keeps the saved counts."""
     resaved = tmp_path / "resaved.json"
     _load(saved, database=InMemoryArrowDatabase()).save(str(resaved))
     original = json.loads((saved / "job.json").read_text())["run"]["expected_rows"]
     run = json.loads(resaved.read_text())["run"]
     assert run["expected_rows"] == original
     node = PipelineJob.load(str(resaved), database=InMemoryArrowDatabase()).nodes["dbl"]
-    with pytest.warns(StoreContentWarning, match="records 2 rows"):
+    with pytest.warns(OrcapodDatabaseContentWarning, match="records 2 rows"):
         assert node.as_source().as_table().num_rows == 0
 
 
@@ -660,7 +664,7 @@ def test_loaded_function_node_with_nothing_stored_returns_zero_rows(
     node = PipelineJob.load(path, database=InMemoryArrowDatabase()).nodes["dbl"]
     with warnings.catch_warnings():
         # Zero expected and zero found: nothing to warn about.
-        warnings.simplefilter("error", StoreContentWarning)
+        warnings.simplefilter("error", OrcapodDatabaseContentWarning)
         table = node.as_table()
     assert table.num_rows == 0
     assert table.column_names == ["id", "dbl"]
@@ -678,7 +682,7 @@ def test_file_without_the_expected_rows_section_reads_without_a_check(
 
     path = _rewrite_job_file(saved, tmp_path, drop_section)
     with warnings.catch_warnings():
-        warnings.simplefilter("error", StoreContentWarning)
+        warnings.simplefilter("error", OrcapodDatabaseContentWarning)
         job = PipelineJob.load(path, database=InMemoryArrowDatabase())
         assert job.nodes["dbl"].as_source().as_table().num_rows == 0
         stored = PipelineJob.load(path).nodes["dbl"].as_source()
@@ -697,7 +701,7 @@ def test_a_file_with_the_old_stored_records_flag_loads_without_a_check(
 
     path = _rewrite_job_file(saved, tmp_path, old_flag)
     with warnings.catch_warnings():
-        warnings.simplefilter("error", StoreContentWarning)
+        warnings.simplefilter("error", OrcapodDatabaseContentWarning)
         node = PipelineJob.load(path, database=InMemoryArrowDatabase()).nodes["dbl"]
         assert node.as_table().num_rows == 0
 
@@ -705,7 +709,7 @@ def test_a_file_with_the_old_stored_records_flag_loads_without_a_check(
 def test_loaded_function_node_without_store_says_how_to_attach_one(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """Without a store, every read method says how to attach one."""
+    """Without a database, every read method says how to attach one."""
 
     def drop_store(data: dict[str, Any]) -> None:
         """Remove the saved store configuration."""
@@ -799,7 +803,7 @@ def test_loaded_operator_rejects_direct_execution(
 def test_loaded_job_without_a_store_cannot_run(
     saved: pathlib.Path, tmp_path: pathlib.Path
 ) -> None:
-    """A loaded job without a store gets the read-only error, not 'requires a database'."""
+    """A loaded job without a database gets the read-only error, not 'requires a database'."""
 
     def drop_store(data: dict[str, Any]) -> None:
         """Remove the saved store configuration."""
@@ -817,7 +821,7 @@ def test_loaded_function_node_cannot_execute(saved: pathlib.Path) -> None:
         _ = job.nodes["dbl"].execute(job.nodes["dsrc"])
     assert str(excinfo.value) == (
         "FunctionJobNode 'dbl' was loaded by PipelineJob.load and has no function "
-        "pod, so it cannot compute; fill it from the store with run(load_only=True), "
+        "pod, so it cannot compute; fill it from the database with run(load_only=True), "
         "or read its stored results with as_source()."
     )
 
@@ -878,7 +882,7 @@ def test_in_memory_sources_are_logged_at_info_with_the_remedy(
     assert (
         "Source 'dsrc' (dict) keeps its data in memory and is not saved with the job; "
         "the loaded job has no data for it. Stored function-node results are still "
-        "readable from the store. To read source node 'dsrc' itself, bind a source: "
+        "readable from the database. To read source node 'dsrc' itself, bind a source: "
         "job.bind(sources={'dsrc': <source>})."
     ) in messages
     assert any(m.startswith("Source 'asrc' (arrow_table) keeps") for m in messages)
@@ -908,7 +912,7 @@ def test_unreconstructable_file_source_is_a_warning_with_the_reason(
     )
     assert "gone.csv" in warnings[0]
     assert warnings[0].endswith(
-        "Stored function-node results are still readable from the store. To read "
+        "Stored function-node results are still readable from the database. To read "
         "source node 'csrc' itself, bind a source: job.bind(sources={'csrc': <source>})."
     )
     # The stored results downstream of the missing source are still readable.
@@ -921,7 +925,7 @@ def test_unreconstructable_store_is_a_warning_with_the_remedy(
     """A store that fails to rebuild is a WARNING with the remedy."""
 
     def break_store(data: dict[str, Any]) -> None:
-        """Replace the store configuration with an unknown type."""
+        """Replace the database configuration with an unknown type."""
         data["bindings"]["database"] = {"type": "no_such_store_type"}
 
     caplog.set_level(logging.INFO, logger="orcapod.pipeline.job")
@@ -959,7 +963,7 @@ def test_in_memory_source_node_is_readable_after_bind(saved: pathlib.Path) -> No
 def test_loaded_replay_operator_reads_an_absent_cache_table_as_no_rows(
     tmp_path: pathlib.Path, method: str
 ) -> None:
-    """The store is the source of truth: no table under the node's key is no rows.
+    """The database is the source of truth: no table under the node's key is no rows.
 
     The job file records the operator's run content hash (ITL-1043), so the loaded node
     knows its key and reads as a running node does. A file without that hash raises
@@ -994,7 +998,7 @@ def test_loaded_function_run_rejects_computation(saved: pathlib.Path) -> None:
 def test_latest_readable_result_wins_across_both_stores(
     ephemeral_modes: tuple[bool, ...],
 ) -> None:
-    """Readback picks the newest recomputation regardless of its result store."""
+    """Readback picks the newest recomputation regardless of its result database."""
     import time
     from orcapod.core.nodes.function_node import FunctionJobNode
     from orcapod.protocols.core_protocols import FunctionPodProtocol
@@ -1012,7 +1016,7 @@ def test_latest_readable_result_wins_across_both_stores(
         pipeline_database=InMemoryArrowDatabase(),
         result_database=InMemoryArrowDatabase(),
     )
-    node.set_ephemeral_store(InMemoryArrowDatabase())
+    node.set_ephemeral_database(InMemoryArrowDatabase())
     tag, data = next(source.iter_data())
     expected = None
     for ephemeral in ephemeral_modes:
@@ -1022,7 +1026,7 @@ def test_latest_readable_result_wins_across_both_stores(
         expected = result["value"]
     node.clear_cache()
     # A cleared node is empty until it runs (ITL-1095); the readback of the entry, the
-    # lookup a run makes, picks the newest recomputation from whichever store holds it.
+    # lookup a run makes, picks the newest recomputation from whichever database holds it.
     assert node.as_table().num_rows == 0
     loaded = node.get_cached_results([node.compute_base_entry_id(tag, data)])
     assert [result["value"] for _, result in loaded.values()] == [expected]

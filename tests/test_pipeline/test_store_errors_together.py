@@ -1,10 +1,10 @@
 """Store read and write failures in one run (ITL-884 with ITL-878).
 
-``StoreReadError`` and ``StoreWriteError`` share the ``StoreError`` base and one
+``OrcapodDatabaseReadError`` and ``OrcapodDatabaseWriteError`` share the ``OrcapodDatabaseError`` base and one
 error path: whichever fails first in node order fails the run, the same on the
 sync and the async orchestrator, and the error names its node. A read failure
 met while writing is reported as the read failure; any other failed write is a
-``StoreWriteError``.
+``OrcapodDatabaseWriteError``.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import DeltaTableDatabase
 from orcapod.errors import (
     InputValidationError,
-    StoreError,
-    StoreReadError,
-    StoreWriteError,
+    OrcapodDatabaseError,
+    OrcapodDatabaseReadError,
+    OrcapodDatabaseWriteError,
 )
 from orcapod.pipeline import PipelineJob
 from orcapod.pipeline.async_orchestrator import (
     AsyncPipelineOrchestrator,
-    _single_store_error,  # pyright: ignore[reportPrivateUsage]
+    _single_database_error,  # pyright: ignore[reportPrivateUsage]
     _start_node,  # pyright: ignore[reportPrivateUsage]
 )
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
@@ -83,7 +83,7 @@ def _reset_damage() -> Iterator[None]:
     _DAMAGE_ON_NEXT_CALL.clear()
 
 
-def build_job(store_path: Path, keys: str, *, reader_first: bool) -> PipelineJob:
+def build_job(database_path: Path, keys: str, *, reader_first: bool) -> PipelineJob:
     """Two sibling nodes over one source: ``rd`` (doubles) and ``wr`` (triples).
 
     ``reader_first`` decides which node is added first, and so comes first in
@@ -95,7 +95,7 @@ def build_job(store_path: Path, keys: str, *, reader_first: bool) -> PipelineJob
         infer_nullable=True,
     )
     job = PipelineJob(
-        name="together", database=DeltaTableDatabase(base_path=store_path)
+        name="together", database=DeltaTableDatabase(base_path=database_path)
     )
     with job:
         if reader_first:
@@ -107,11 +107,11 @@ def build_job(store_path: Path, keys: str, *, reader_first: bool) -> PipelineJob
     return job
 
 
-def result_table(store_path: Path, function_name: str) -> Path:
+def result_table(database_path: Path, function_name: str) -> Path:
     """The directory of ``function_name``'s result table."""
     dirs = {
         p.parent
-        for p in (store_path / "together" / "_result" / function_name).rglob(
+        for p in (database_path / "together" / "_result" / function_name).rglob(
             "*.parquet"
         )
     }
@@ -145,7 +145,7 @@ def run_with_both_failures(
     make_orchestrator: Callable[[], Any],
     *,
     reader_first: bool,
-) -> StoreError:
+) -> OrcapodDatabaseError:
     """Run a job in which ``rd``'s read and ``wr``'s write fail on the new row d.
 
     The first run stores rows a, b and c for both nodes. In the second run row d
@@ -153,18 +153,18 @@ def run_with_both_failures(
     result fails to read the table, and ``wr``'s write of d's result fails.
 
     Returns:
-        The store error the second run raised.
+        The database error the second run raised.
     """
-    store_path = tmp_path / "store"
-    build_job(store_path, "abc", reader_first=reader_first).run(
+    database_path = tmp_path / "store"
+    build_job(database_path, "abc", reader_first=reader_first).run(
         orchestrator=make_orchestrator()
     )
 
-    _DAMAGE_ON_NEXT_CALL.append(result_table(store_path, "double"))
+    _DAMAGE_ON_NEXT_CALL.append(result_table(database_path, "double"))
     with pytest.MonkeyPatch.context() as monkeypatch:
         failed = fail_result_writes_of(monkeypatch, "triple")
-        job = build_job(store_path, "abcd", reader_first=reader_first)
-        with pytest.raises(StoreError) as info:
+        job = build_job(database_path, "abcd", reader_first=reader_first)
+        with pytest.raises(OrcapodDatabaseError) as info:
             job.run(orchestrator=make_orchestrator())
     if info.value.node_label == "wr":
         assert failed, "wr's error should come from its failed write"
@@ -182,7 +182,9 @@ def test_sync_and_async_raise_the_same_error(
     }
 
     expected_type, expected_node = (
-        (StoreReadError, "rd") if reader_first else (StoreWriteError, "wr")
+        (OrcapodDatabaseReadError, "rd")
+        if reader_first
+        else (OrcapodDatabaseWriteError, "wr")
     )
     # rd's read failure surfaces when rd commits its batch, which names no row
     # (ITL-919); wr's failed write of row d names that row.
@@ -212,20 +214,20 @@ def test_async_choice_does_not_depend_on_completion_order(
         notes = list(getattr(err, "__notes__", []))
         if reader_first:
             assert any(
-                n.startswith("Another store write failed in the same run")
+                n.startswith("Another database write failed in the same run")
                 for n in notes
             ), attempt
             continue
         # rd's read failure surfaces only when its batch is committed (ITL-919). wr's
         # failed write stops the run first, so rd never commits inside the run: the
         # job's flush after the failure meets rd's unreadable table and notes it.
-        assert not any("Another store read failed" in n for n in notes), attempt
+        assert not any("Another database read failed" in n for n in notes), attempt
         flush_notes = [
             n
             for n in notes
             if n.startswith(
                 "Flushing pending writes after this failure also failed "
-                + "(StoreReadError: Could not read the stored table at "
+                + "(OrcapodDatabaseReadError: Could not read the stored table at "
             )
         ]
         assert flush_notes, (attempt, notes)
@@ -237,7 +239,7 @@ def test_async_choice_does_not_depend_on_completion_order(
 
 
 def test_selection_is_independent_of_group_order() -> None:
-    """``_single_store_error`` ranks by node order, whatever order the group has."""
+    """``_single_database_error`` ranks by node order, whatever order the group has."""
     # Calls the private helper directly: the test is about its ordering rule,
     # which an end-to-end run cannot force into both group orders.
 
@@ -247,26 +249,26 @@ def test_selection_is_independent_of_group_order() -> None:
 
     topo_order = [Node("first"), Node("second")]
     for build in (lambda r, w: [r, w], lambda r, w: [w, r]):
-        read = StoreReadError("table", ("t",))
+        read = OrcapodDatabaseReadError("table", ("t",))
         read.add_context(node_label="second")
-        write = StoreWriteError(("t",), node_label="first")
-        chosen = _single_store_error(
+        write = OrcapodDatabaseWriteError(("t",), node_label="first")
+        chosen = _single_database_error(
             ExceptionGroup("run", build(read, write)), topo_order
         )
         assert chosen is write
 
 
 def test_read_failure_while_writing_is_a_store_read_error(tmp_path: Path) -> None:
-    """A write that cannot read its stored table raises ``StoreReadError``."""
-    store_path = tmp_path / "store"
-    build_job(store_path, "abc", reader_first=True).run(
+    """A write that cannot read its stored table raises ``OrcapodDatabaseReadError``."""
+    database_path = tmp_path / "store"
+    build_job(database_path, "abc", reader_first=True).run(
         orchestrator=ORCHESTRATORS["sync"]()
     )
-    table = result_table(store_path, "double")
+    table = result_table(database_path, "double")
     _DAMAGE_ON_NEXT_CALL.append(table)
 
-    with pytest.raises(StoreReadError) as info:
-        build_job(store_path, "abcd", reader_first=True).run(
+    with pytest.raises(OrcapodDatabaseReadError) as info:
+        build_job(database_path, "abcd", reader_first=True).run(
             orchestrator=ORCHESTRATORS["sync"]()
         )
 
@@ -280,13 +282,13 @@ def test_read_failure_while_writing_is_a_store_read_error(tmp_path: Path) -> Non
 
 
 def test_refused_append_is_a_store_write_error(tmp_path: Path) -> None:
-    """A refused append (a changed column type) fails the run as a ``StoreWriteError``."""
-    store_path = tmp_path / "store"
-    build_job(store_path, "abc", reader_first=True).run(
+    """A refused append (a changed column type) fails the run as a ``OrcapodDatabaseWriteError``."""
+    database_path = tmp_path / "store"
+    build_job(database_path, "abc", reader_first=True).run(
         orchestrator=ORCHESTRATORS["sync"]()
     )
     # Store the result column as int32, so the new row's int64 result differs.
-    table = result_table(store_path, "double")
+    table = result_table(database_path, "double")
     stored = deltalake.DeltaTable(str(table)).to_pyarrow_table()
     index = stored.schema.get_field_index("y")
     narrowed = stored.set_column(index, "y", stored.column("y").cast(pa.int32()))
@@ -294,8 +296,8 @@ def test_refused_append_is_a_store_write_error(tmp_path: Path) -> None:
         str(table), narrowed, mode="overwrite", schema_mode="overwrite"
     )
 
-    with pytest.raises(StoreWriteError) as info:
-        build_job(store_path, "abcd", reader_first=True).run(
+    with pytest.raises(OrcapodDatabaseWriteError) as info:
+        build_job(database_path, "abcd", reader_first=True).run(
             orchestrator=ORCHESTRATORS["sync"]()
         )
 
@@ -312,8 +314,8 @@ def test_pipeline_record_read_failure_names_node_and_row(
     """A read failure while recording a row's pipeline entry names the node and row."""
     # The async node records pipeline entries outside the pod's per-row handler,
     # so this checks that the error still gets its node and row.
-    store_path = tmp_path / "store"
-    build_job(store_path, "abc", reader_first=True).run(
+    database_path = tmp_path / "store"
+    build_job(database_path, "abc", reader_first=True).run(
         orchestrator=ORCHESTRATORS[orchestrator]()
     )
     original = DeltaTableDatabase.add_record
@@ -322,14 +324,14 @@ def test_pipeline_record_read_failure_names_node_and_row(
         # Stand in for a pipeline table that cannot be read while row d's entry
         # is recorded (the skip_duplicates check reads the stored record ids).
         if "_result" not in self.base_path and record.column("k")[0].as_py() == "d":
-            raise StoreReadError("pipeline-table", tuple(record_path)) from OSError(
-                "data file missing"
-            )
+            raise OrcapodDatabaseReadError(
+                "pipeline-table", tuple(record_path)
+            ) from OSError("data file missing")
         return original(self, record_path, record_id, record, **kwargs)
 
     monkeypatch.setattr(DeltaTableDatabase, "add_record", add_record)
-    with pytest.raises(StoreReadError) as info:
-        build_job(store_path, "abcd", reader_first=True).run(
+    with pytest.raises(OrcapodDatabaseReadError) as info:
+        build_job(database_path, "abcd", reader_first=True).run(
             orchestrator=ORCHESTRATORS[orchestrator]()
         )
 
@@ -340,14 +342,14 @@ def test_pipeline_record_read_failure_names_node_and_row(
 
 
 def test_store_error_inside_a_node_group_gets_the_node_label() -> None:
-    """A store error a node raises inside its own exception group is labelled."""
-    # Calls the private helper directly: no public pipeline raises a store error
+    """A database error a node raises inside its own exception group is labelled."""
+    # Calls the private helper directly: no public pipeline raises a database error
     # from a node's inner task group without an annotation on the way.
 
     class Node:
         label = "inner"
 
-    read = StoreReadError("table", ("t",))
+    read = OrcapodDatabaseReadError("table", ("t",))
 
     async def node_work() -> None:
         raise ExceptionGroup("node", [read])

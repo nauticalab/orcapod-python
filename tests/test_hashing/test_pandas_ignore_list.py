@@ -275,7 +275,7 @@ class TestDataContext:
         stored = loose.type_converter.python_dicts_to_arrow_table(
             [{"x": _frame()}], python_schema={"x": pd.DataFrame}
         )
-        # As a store hands it back: the storage column with the identifier on the field.
+        # As a database hands it back: the storage column with the identifier on the field.
         field = stored.schema.field("x")
         assert isinstance(field.type, pa.ExtensionType)
         chunk = stored.column("x").chunk(0)

@@ -19,7 +19,7 @@ has two kinds of class, and you choose the kind where you define the class.
 | Reading stored values without the class | works: the class is rebuilt from stored metadata | `ImportError` |
 | What a pod is promised | the fields | the class itself, with its methods and validators |
 
-**Use `@op.dataclass`** for data you pass between pods, keep in a store and work on in
+**Use `@op.dataclass`** for data you pass between pods, keep in a database and work on in
 notebooks: records, measurements, parameters. It is the kind to use while a class is
 still being edited.
 

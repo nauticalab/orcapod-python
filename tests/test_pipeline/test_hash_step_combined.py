@@ -243,7 +243,7 @@ class TestSideEffectNodeChecksEveryRun:
         assert sorted(delivered) == [1, 2]
         delivered.clear()
         job.nodes["notify"].clear_cache()  # a current node is not run again (ITL-1095)
-        _ = job.run()  # nothing new in the store: runs, and delivers nothing again
+        _ = job.run()  # nothing new in the database: runs, and delivers nothing again
         assert delivered == []
 
         old_path = _add_table_written_before_v03(store, "pdb_v2", "pdb_v1")
@@ -255,7 +255,7 @@ class TestSideEffectNodeChecksEveryRun:
         assert delivered == []
 
     def test_the_error_does_not_offer_a_fresh_store_as_a_safe_retry(self):
-        """The error message warns that a fresh store repeats every side effect."""
+        """The error message warns that a fresh database repeats every side effect."""
         error = SideEffectLogDataContextError(
             (("j", "side_effects", "notify", "schema:abc", "tdb_v1"),),
             "std:v0.1:default",
@@ -263,9 +263,9 @@ class TestSideEffectNodeChecksEveryRun:
             node_label="notify",
         )
         message = str(error)
-        assert "Use a fresh store" not in message
+        assert "Use a fresh database" not in message
         assert (
-            "A fresh store holds no completions, so on it the node performs every "
+            "A fresh database holds no completions, so on it the node performs every "
             "side effect again" in message
         )
 

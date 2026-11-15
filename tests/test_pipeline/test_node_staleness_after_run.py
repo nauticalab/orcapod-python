@@ -3,7 +3,7 @@
 A job node stamps its modified time when its run completes, after it has read all its inputs
 and before it tells its downstream nodes it is done. So after ``job.run()``, sync or async,
 every node is at least as new as its upstreams: ``head()`` shows the rows ``as_table()`` and
-``iter_data()`` return, and none of them reads the store again.
+``iter_data()`` return, and none of them reads the database again.
 
 The job: source ``A`` (tags ``id``, ``g``; data ``w``, ``x``; rows not in tag order) feeds the
 function pod ``scaled``, which takes only ``x``, so calling it adds an automatic
@@ -47,7 +47,7 @@ ORCHESTRATORS = {
     "async": AsyncPipelineOrchestrator,
 }
 
-# The read methods of the store protocol: a read after a run is counted through them.
+# The read methods of the database protocol: a read after a run is counted through them.
 STORE_READS = (
     "get_all_records",
     "get_records_with_column_value",
@@ -138,14 +138,14 @@ def _table(columns: dict[str, list[int]]) -> pa.Table:
 
 
 def _store(kind: str, tmp_path: Path) -> ArrowDatabaseProtocol:
-    """A fresh store of the given kind."""
+    """A fresh database of the given kind."""
     if kind == "in_memory":
         return InMemoryArrowDatabase()
     return DeltaTableDatabase(base_path=tmp_path / "store")
 
 
 def _job(store: ArrowDatabaseProtocol) -> PipelineJob:
-    """The job of the module docstring, ``joined`` cached in the store (LOG)."""
+    """The job of the module docstring, ``joined`` cached in the database (LOG)."""
     a = ArrowTableSource(
         _table(
             {
@@ -307,7 +307,7 @@ def test_a_function_node_is_stamped_before_its_output_closes(with_store: bool) -
     """A reader that sees the node's output close sees the node already stamped.
 
     A downstream node stamps itself after it has seen that close, so it is then newer than
-    the function node. Without a store the pod closes the writer it is given; the node must
+    the function node. Without a database the pod closes the writer it is given; the node must
     still stamp first.
     """
     source = ArrowTableSource(

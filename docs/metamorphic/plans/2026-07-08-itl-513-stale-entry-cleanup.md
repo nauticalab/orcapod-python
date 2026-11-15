@@ -94,7 +94,7 @@ Append the following method to the `TestEphemeralWritePath` class (after the exi
         stream = _make_stream([{"id": 0, "x": 10}])
         pipeline_db = InMemoryArrowDatabase()
 
-        # Session 1: compute with ephemeral store 1 → pipeline DB gets index-0 record
+        # Session 1: compute with ephemeral database 1 → pipeline DB gets index-0 record
         pf = PythonDataFunction(counting_double, output_keys="result")
         cfg = NodeConfig(is_result_ephemeral=True)
         pod = FunctionPod(pf, node_config=cfg)
@@ -107,7 +107,7 @@ Append the following method to the `TestEphemeralWritePath` class (after the exi
         node1.execute(stream)
         assert call_count["n"] == 1
 
-        # Session 2: fresh ephemeral store → cross-session miss → recompute → index-1 record written
+        # Session 2: fresh ephemeral database → cross-session miss → recompute → index-1 record written
         pf2 = PythonDataFunction(counting_double, output_keys="result")
         pod2 = FunctionPod(pf2, node_config=cfg)
         ephemeral2 = InMemoryArrowDatabase()

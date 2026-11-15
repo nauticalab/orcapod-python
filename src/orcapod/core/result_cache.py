@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from orcapod.errors import StoreReadError, StoreWriteError
+from orcapod.errors import OrcapodDatabaseReadError, OrcapodDatabaseWriteError
 from orcapod.contexts.stored import (
     StaleTables,
     keep_rows_of_data_context,
@@ -56,7 +56,7 @@ class ResultCache:
     Args:
         result_database: The database to store/retrieve cached results.
         record_path: The record path tuple for scoping records in the database.
-        auto_flush: If True, flush the database after each store operation.
+        auto_flush: If True, flush the database after each database operation.
     """
 
     # Meta column indicating whether the result was freshly computed
@@ -75,7 +75,7 @@ class ResultCache:
         Args:
             result_database: The store holding the result table.
             record_path: Path of the result table without its layout component.
-            auto_flush: Whether to flush the store after each stored result.
+            auto_flush: Whether to flush the database after each stored result.
             delivers_side_effects: Whether computing a result is an external action
                 (a function pod that takes the invocation context). Such a cache
                 fails, instead of computing again, when it finds results stored
@@ -340,21 +340,21 @@ class ResultCache:
                 data_table,
                 skip_duplicates=skip_duplicates,
             )
-        except StoreReadError:
+        except OrcapodDatabaseReadError:
             # The stored table could not be read: report the read failure itself.
             raise
         except Exception as exc:
-            raise StoreWriteError(self._versioned_record_path) from exc
+            raise OrcapodDatabaseWriteError(self._versioned_record_path) from exc
         if self._auto_flush:
             try:
                 self._result_database.flush()
-            except StoreReadError:
+            except OrcapodDatabaseReadError:
                 # The stored table could not be read: report the read failure itself.
                 raise
             except Exception as exc:
-                # Views of one store share their pending writes, so the batch that
+                # Views of one database share their pending writes, so the batch that
                 # failed may be an earlier row's or another table's.
-                raise StoreWriteError(
+                raise OrcapodDatabaseWriteError(
                     self._result_database.base_path, flush=True
                 ) from exc
 

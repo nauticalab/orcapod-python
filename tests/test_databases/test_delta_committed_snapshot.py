@@ -3,7 +3,7 @@
 A ``DeltaTableDatabase`` family answers lookups from the rows of the table version it
 loaded, read once and extended after its own commits. These tests pin the boundary:
 
-- A cold handle (nothing loaded) on an unreadable table raises ``StoreReadError`` for
+- A cold handle (nothing loaded) on an unreadable table raises ``OrcapodDatabaseReadError`` for
   every read, including lookups of ids or values that are not stored.
 - A warm family keeps answering from the version it loaded, as before (it reloads a
   table only at its own commit). At its own commit it notices another writer's commit,
@@ -26,7 +26,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import StoreReadError
+from orcapod.errors import OrcapodDatabaseReadError
 
 PATH = ("table",)
 
@@ -82,7 +82,7 @@ def test_cold_handle_on_an_unreadable_table_raises(
     )
     cold = DeltaTableDatabase(tmp_path)
     monkeypatch.setattr(deltalake.DeltaTable, "to_pyarrow_dataset", _storage_down)
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         _ = READS[method](cold)
     assert isinstance(info.value.__cause__, OSError)
 
@@ -105,7 +105,7 @@ def test_warm_family_reloads_at_its_own_commit_after_another_writer(
     db.add_records(PATH, _rows(["c"], [3]), flush=True)
     with monkeypatch.context() as patch:
         patch.setattr(deltalake.DeltaTable, "to_pyarrow_dataset", _storage_down)
-        with pytest.raises(StoreReadError):
+        with pytest.raises(OrcapodDatabaseReadError):
             _ = READS[method](db)
     assert _values(db.get_records_with_column_value(PATH, {"g": b"g"})) == [1, 2, 3]
     assert _values(db.get_records_by_ids(PATH, [b"a", b"b", b"c"])) == [1, 2, 3]
@@ -131,7 +131,7 @@ def test_a_failed_snapshot_load_is_retried(
         return dataset
 
     monkeypatch.setattr(deltalake.DeltaTable, "to_pyarrow_dataset", fail_first_scan)
-    with pytest.raises(StoreReadError):
+    with pytest.raises(OrcapodDatabaseReadError):
         _ = db.get_records_with_column_value(PATH, {"g": b"g"})
     assert _values(db.get_records_with_column_value(PATH, {"g": b"g"})) == [1, 2]
     assert _values(db.get_record_by_id(PATH, b"b")) == [2]

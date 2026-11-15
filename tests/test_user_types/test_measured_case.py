@@ -1,9 +1,9 @@
-"""Two structural classes of one type behave the same in memory and from a store (ITL-972).
+"""Two structural classes of one type behave the same in memory and from a database (ITL-972).
 
 The case measured on November 12, 2026: two classes of one identity, the second with a
 method the first lacks. Pod A returns the first; pod B is annotated with the second.
 Orcapod checks that the two classes have the same structural identity and passes the
-value as it is, without converting it: in memory B receives pod A's object, from a store
+value as it is, without converting it: in memory B receives pod A's object, from a database
 the class bound to the type. A structural class promises its fields, not its methods, so
 on both paths B can read the fields and the value equals the instance B would build.
 """
@@ -63,7 +63,7 @@ EXPECTED = ["1,2,True", "2,3,True"]
 
 
 def _job(tmp_path: Path) -> PipelineJob:
-    """Return the two-pod job over a Delta store in ``tmp_path``, already run."""
+    """Return the two-pod job over a Delta database in ``tmp_path``, already run."""
     job = PipelineJob(name="measured", database=DeltaTableDatabase(tmp_path / "db"))
     with job:
         _ = look.pod(make.pod(_source(), label="make"), label="look")

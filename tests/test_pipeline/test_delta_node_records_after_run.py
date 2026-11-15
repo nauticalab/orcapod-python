@@ -1,4 +1,4 @@
-"""A function node on a Delta store returns every row right after its first run (ITL-864).
+"""A function node on a Delta database returns every row right after its first run (ITL-864).
 
 ``PipelineJob.run`` flushes through handles other than the node's own, so a node
 handle that cached the table during the run used to keep reading an old snapshot

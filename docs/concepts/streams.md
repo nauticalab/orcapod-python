@@ -273,7 +273,7 @@ A stream or node records that its results are current when it has read its input
 So after `job.run()` on either orchestrator, sync or async, every node shows the rows of that
 run: `head()`, `as_table()` and `iter_data()` serve them from memory, without reading the
 store. Before its run in this process a job node holds nothing and shows no rows, whatever
-its store holds; `node.as_source()` reads the store. Likewise, once a chain of streams such as `g.pod(f.pod(source))` has been read to the
+its database holds; `node.as_source()` reads the database. Likewise, once a chain of streams such as `g.pod(f.pod(source))` has been read to the
 end, reading it again computes nothing. A change upstream (`clear_cache()`) makes every stream
 after it out of date, and its next read computes it again.
 Two reads of one stream open at the same time, or a read that picks up one left partway, share

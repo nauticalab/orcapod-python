@@ -436,7 +436,7 @@ class TestFunctionJobNodeAsyncExecuteEphemeral:
             pod, src, pipeline_database=pipeline_db, result_database=result_db
         )
         node.node_config = NodeConfig(is_result_ephemeral=True)
-        node.set_ephemeral_store(ephemeral_db)
+        node.set_ephemeral_database(ephemeral_db)
 
         results = await _run_node(node)
         assert len(results) == 2
@@ -450,7 +450,7 @@ class TestFunctionJobNodeAsyncExecuteEphemeral:
 
     @pytest.mark.asyncio
     async def test_ephemeral_missing_store_raises_runtime_error(self):
-        """Raises RuntimeError when is_result_ephemeral=True but no store set."""
+        """Raises RuntimeError when is_result_ephemeral=True but no database set."""
         from orcapod.types import NodeConfig
 
         def double(value: int) -> int:
@@ -464,7 +464,7 @@ class TestFunctionJobNodeAsyncExecuteEphemeral:
             pod, src, pipeline_database=pipeline_db, result_database=result_db
         )
         node.node_config = NodeConfig(is_result_ephemeral=True)
-        # Deliberately do NOT call set_ephemeral_store()
+        # Deliberately do NOT call set_ephemeral_database()
 
         with pytest.raises(RuntimeError, match="ephemeral"):
             await _run_node(node)

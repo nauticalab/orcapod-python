@@ -1135,7 +1135,7 @@ class CachedDataFunction(DataFunctionWrapper):
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """Return the path to the cached records in the result store (versioned)."""
+        """Return the path to the cached records in the result database (versioned)."""
         return self._cache.record_path
 
     def call(
@@ -1266,7 +1266,7 @@ class CachedDataFunction(DataFunctionWrapper):
     def get_all_cached_outputs(
         self, include_system_columns: bool = False
     ) -> "pa.Table | None":
-        """Return all cached records from the result store for this function.
+        """Return all cached records from the result database for this function.
 
         Args:
             include_system_columns: If True, include system columns

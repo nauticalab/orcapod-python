@@ -1,6 +1,6 @@
-"""Helpers that keep a ``StoreError`` intact on its way out of a run.
+"""Helpers that keep a ``OrcapodDatabaseError`` intact on its way out of a run.
 
-A failed store read or write always fails the run (ITL-878, ITL-884), and so does a
+A failed database read or write always fails the run (ITL-878, ITL-884), and so does a
 stored row that cannot be decoded as its class (``TypeIdentityError``, ITL-881). User
 callbacks that run while the error propagates (a post-run hook, an observer callback)
 may fail too; their failure is logged and noted on the error, never raised in its place.
@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-from orcapod.errors import StoreError, TypeIdentityError
+from orcapod.errors import OrcapodDatabaseError, TypeIdentityError
 
 if TYPE_CHECKING:
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
@@ -22,75 +22,79 @@ logger = logging.getLogger(__name__)
 
 
 def note_callback_failure(
-    store_error: StoreError | TypeIdentityError, during: str, failure: Exception
+    database_error: OrcapodDatabaseError | TypeIdentityError,
+    during: str,
+    failure: Exception,
 ) -> None:
-    """Log a callback failure and record it on the propagating store error.
+    """Log a callback failure and record it on the propagating database error.
 
     Args:
-        store_error: The store error (or identity error) on its way out of the run.
+        database_error: The database error (or identity error) on its way out of the run.
         during: What was running, for the log and the note, such as
             ``"Observer on_data_crash"``.
         failure: The exception the callback raised.
     """
     logger.warning(
-        "%s raised while a store failure was propagating, which is raised "
+        "%s raised while a database failure was propagating, which is raised "
         + "instead: %s",
         during,
         failure,
         exc_info=failure,
     )
-    store_error.add_note(
+    database_error.add_note(
         f"{during} also raised while this error propagated: "
         + f"{type(failure).__name__}: {failure}"
     )
 
 
-def store_error_of(error: BaseException) -> StoreError | TypeIdentityError | None:
-    """Return the store error a failure carries: itself, or the first inside its group.
+def database_error_of(
+    error: BaseException,
+) -> OrcapodDatabaseError | TypeIdentityError | None:
+    """Return the database error a failure carries: itself, or the first inside its group.
 
     Args:
         error: A run's failure, possibly an exception group from a task group.
 
     Returns:
-        The ``StoreError`` or ``TypeIdentityError`` that is ``error`` or is the first
+        The ``OrcapodDatabaseError`` or ``TypeIdentityError`` that is ``error`` or is the first
         one found inside it, or ``None`` when it carries none.
     """
-    if isinstance(error, (StoreError, TypeIdentityError)):
+    if isinstance(error, (OrcapodDatabaseError, TypeIdentityError)):
         return error
     if isinstance(error, BaseExceptionGroup):
         for inner in error.exceptions:
-            found = store_error_of(inner)
+            found = database_error_of(inner)
             if found is not None:
                 return found
     return None
 
 
 @contextmanager
-def keep_store_error(
-    store_error: StoreError | TypeIdentityError | None, during: str
+def keep_database_error(
+    database_error: OrcapodDatabaseError | TypeIdentityError | None, during: str
 ) -> Iterator[None]:
-    """Run a callback so that it cannot replace a propagating store error.
+    """Run a callback so that it cannot replace a propagating database error.
 
-    With ``store_error`` set, an ``Exception`` the block raises is logged and noted on
-    ``store_error`` (see ``note_callback_failure``) and not re-raised, so the caller's
-    ``raise`` propagates the store error. With ``store_error=None`` the block runs
+    With ``database_error`` set, an ``Exception`` the block raises is logged and noted on
+    ``database_error`` (see ``note_callback_failure``) and not re-raised, so the caller's
+    ``raise`` propagates the database error. With ``database_error=None`` the block runs
     unchanged and its exceptions propagate.
 
     Args:
-        store_error: The store error (or identity error) on its way out, or ``None``
+        database_error: The database error (or identity error) on its way out, or ``None``
             when none is.
         during: What the block runs, for the log and the note.
 
     Yields:
         Nothing; the block runs inside the context.
     """
-    if store_error is None:
+    if database_error is None:
         yield
         return
     try:
         yield
     except Exception as failure:
-        note_callback_failure(store_error, during, failure)
+        note_callback_failure(database_error, during, failure)
 
 
 def commit_best_effort(run_error: BaseException, commit: Callable[[], None]) -> None:

@@ -12,7 +12,7 @@ Orcapod v0.3 writes the data context key ``std:v1:default`` into the column
 - Side-effect logs are the exception: an old-layout log, or logged deliveries of another
   data context, raise before anything is delivered.
 
-Stores "written by v0.2" and rows "of another data context" are produced here from a store
+Stores "written by v0.2" and rows "of another data context" are produced here from a database
 this version wrote, through the public database interface: the same rows are stored at the
 old-layout paths without the column, or under another data context key with other keys.
 """
@@ -43,7 +43,7 @@ from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
 from orcapod.errors import (
     InputValidationError,
     SideEffectLogDataContextError,
-    StoreError,
+    OrcapodDatabaseError,
 )
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 from orcapod.side_effects import SideEffectPod, sink_pod
@@ -122,7 +122,7 @@ def _cached_source(store: Store) -> CachedSource:
     )
 
 
-# Root directory of each Delta store handed out by the ``new_store`` fixture.
+# Root directory of each Delta database handed out by the ``new_store`` fixture.
 _delta_roots: dict[int, pathlib.Path] = {}
 
 
@@ -138,7 +138,7 @@ def reopened(store: Store) -> Store:
 
 
 def delta_at(root: pathlib.Path) -> DeltaTableDatabase:
-    """A Delta store rooted at ``root`` that ``reopened`` can reopen."""
+    """A Delta database rooted at ``root`` that ``reopened`` can reopen."""
     store = DeltaTableDatabase(root)
     _delta_roots[id(store)] = root
     return store
@@ -169,7 +169,7 @@ def new_store(
     made: list[Store] = []
 
     def make() -> Store:
-        """Create an empty store of the parametrized backend and remember it."""
+        """Create an empty database of the parametrized backend and remember it."""
         if request.param == "in_memory":
             store: Store = InMemoryArrowDatabase()
         else:
@@ -182,7 +182,7 @@ def new_store(
 
 @pytest.fixture
 def store(new_store: Callable[[], Store]) -> Store:
-    """One fresh, empty store."""
+    """One fresh, empty database."""
     return new_store()
 
 
@@ -535,7 +535,7 @@ class TestJobSavedByV02:
     def test_after_a_run_of_this_version_it_shows_the_new_rows(
         self, new_store: Callable[[], Store], tmp_path: pathlib.Path
     ):
-        """Once this version has run on the store, the loaded job reads its rows."""
+        """Once this version has run on the database, the loaded job reads its rows."""
         written = new_store()
         completed = build_job(written, with_operator=True)
         _ = completed.run()
@@ -600,7 +600,7 @@ class TestOldLayout:
     def test_delta_files_written_by_v02_are_byte_identical(
         self, tmp_path: pathlib.Path
     ):
-        """A run on a Delta store adds files and changes none of the old ones."""
+        """A run on a Delta database adds files and changes none of the old ones."""
         written = DeltaTableDatabase(tmp_path / "written")
         _ = build_job(written, with_operator=True).run()
         root = tmp_path / "store"
@@ -716,7 +716,7 @@ class TestOldLayout:
     def test_nothing_is_reported_for_a_store_of_this_version(
         self, store: Store, caplog: pytest.LogCaptureFixture
     ):
-        """A rerun on a store of this version logs no data context warning."""
+        """A rerun on a database of this version logs no data context warning."""
         run_everything(store)
         with caplog.at_level(logging.WARNING, logger="orcapod"):
             run_everything(store)
@@ -752,7 +752,7 @@ class TestRowsOfAnotherDataContext:
                 assert row in after[path], path
 
     def test_alone_they_give_no_rows(self, new_store: Callable[[], Store]):
-        """In ``REPLAY`` mode a store of only foreign rows yields no rows and no call."""
+        """In ``REPLAY`` mode a database of only foreign rows yields no rows and no call."""
         store = other_context_store(new_store)
         job = build_job(store, with_operator=True, cache_mode=CacheMode.REPLAY)
         node = job.nodes["dbl"]
@@ -767,7 +767,7 @@ class TestRowsOfAnotherDataContext:
     ):
         """Every read method of a function node returns only the rows of ``CURRENT``.
 
-        A node shows rows only after a run (ITL-1095); the run reads them from the store.
+        A node shows rows only after a run (ITL-1095); the run reads them from the database.
         """
         store = both_contexts_store(new_store)
         job = build_job(store)
@@ -868,7 +868,7 @@ class TestRowsOfAnotherDataContext:
     ):
         """The pipeline and operator tables each get one warning counting skipped rows."""
         store = both_contexts_store(new_store)
-        caplog.clear()  # the store was prepared by a run that reported too
+        caplog.clear()  # the database was prepared by a run that reported too
         with caplog.at_level(logging.WARNING, logger="orcapod"):
             job = build_job(store, with_operator=True, cache_mode=CacheMode.REPLAY)
             _ = job.run(orchestrator=orchestrator)
@@ -934,7 +934,7 @@ class TestSideEffects:
         assert delivered == []
         assert snapshot(store) == before
         error = info.value
-        assert isinstance(error, StoreError)
+        assert isinstance(error, OrcapodDatabaseError)
         assert error.found_context == PRE_V1
         assert error.current_context == CURRENT
         assert error.node_label == "sink"
@@ -964,7 +964,7 @@ class TestSideEffects:
         assert info.value.record_path[-1] == "tdb_v2"
 
     def test_delta_log_files_are_untouched(self, tmp_path: pathlib.Path):
-        """The refused run leaves every file of the Delta store byte for byte."""
+        """The refused run leaves every file of the Delta database byte for byte."""
         _ = _sink_job(DeltaTableDatabase(tmp_path / "written")).run()
         delivered.clear()
         root = tmp_path / "store"
@@ -994,7 +994,7 @@ class TestSideEffects:
     def test_completions_logged_by_this_version_are_not_delivered_again(
         self, store: Store, orchestrator: Orchestrator
     ):
-        """A second sink run on the same store delivers nothing."""
+        """A second sink run on the same database delivers nothing."""
         _ = _sink_job(store).run(orchestrator=orchestrator)
         delivered.clear()
         _ = _sink_job(store).run(orchestrator=orchestrator)
@@ -1103,7 +1103,7 @@ class TestSideEffectFunctionNodes:
     def test_store_of_this_version_is_reused_without_delivering(
         self, store: Store, orchestrator: Orchestrator
     ):
-        """A second run of the ``notify`` job on the same store delivers nothing."""
+        """A second run of the ``notify`` job on the same database delivers nothing."""
         _ = _notify_job(store).run(orchestrator=orchestrator)
         delivered.clear()
         _ = _notify_job(store).run(orchestrator=orchestrator)
@@ -1112,7 +1112,7 @@ class TestSideEffectFunctionNodes:
     def test_a_newly_attached_store_is_checked_again(
         self, new_store: Callable[[], Store]
     ):
-        """Attaching another store resets what the node knows about stale tables."""
+        """Attaching another database resets what the node knows about stale tables."""
         # Only the old pipeline table: the result cache, which is rebuilt on attach,
         # has nothing to refuse, so the node's own check must run again.
         written = reopened(_notify_store(new_store, copy_as_v02))
@@ -1135,7 +1135,7 @@ class TestSideEffectFunctionNodes:
             pipeline_database=fresh.at(JOB_NAME),
             result_database=fresh.at(JOB_NAME, "_result"),
         )
-        assert node.get_all_records() is None  # the fresh store has been checked
+        assert node.get_all_records() is None  # the fresh database has been checked
 
         node.attach_databases(
             pipeline_database=old.at(JOB_NAME),
@@ -1150,7 +1150,7 @@ class TestSideEffectFunctionNodes:
     def test_a_late_attached_ephemeral_store_is_checked_again(
         self, new_store: Callable[[], Store], read_first: bool
     ):
-        """An ephemeral store attached after the node checked its stores is checked too
+        """An ephemeral database attached after the node checked its stores is checked too
         (ITL-975): completions of ``OTHER`` in it raise and nothing is delivered.
         """
         relabelled = reopened(_notify_store(new_store, copy_as_other_context))
@@ -1159,7 +1159,7 @@ class TestSideEffectFunctionNodes:
             if path[-1] == "rdb_v2":
                 rows = relabelled.get_all_records(path, record_id_column=RID)
                 assert rows is not None
-                # An ephemeral store holds the result table at the path relative to
+                # An ephemeral database holds the result table at the path relative to
                 # the job's result database.
                 assert path[:2] == (JOB_NAME, "_result")
                 ephemeral.add_records(path[2:], rows, record_id_column=RID)
@@ -1170,7 +1170,7 @@ class TestSideEffectFunctionNodes:
             # The node checks its (clean) stores when it first reads them.
             assert job.nodes["notify"].get_all_records() is None
 
-        job.set_ephemeral_store(ephemeral)
+        job.set_ephemeral_database(ephemeral)
         job.apply_node_config(NodeConfig(is_result_ephemeral=True))
         with pytest.raises(SideEffectLogDataContextError) as info:
             _ = job.run()

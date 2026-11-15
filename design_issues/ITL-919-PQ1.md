@@ -6,7 +6,7 @@
 **Issue:** ITL-919
 
 A function node in a `PipelineJob` does, per row: `ResultCache.lookup` (lookup by input data
-hash in the result table), `ResultCache.store` with a flush of the whole store (both
+hash in the result table), `ResultCache.store` with a flush of the whole database (both
 tables), and `add_pipeline_record` (lookup by base entry id for the recomputation index,
 then `add_record(skip_duplicates=True)`). Sync and async orchestrators share that path;
 operator nodes write with one `add_records` and are not affected. Measured on `c8efc092`,
@@ -39,7 +39,7 @@ pod: 0.09 ms).
   async rerun of an ephemeral-result node skipped its rows (ITL-923, fixed). Remaining
   (ITL-923 item 3): a pending row written with `skip_duplicates=False` whose id is already
   stored is still dropped by the commit (Delta keeps the stored row; the in-memory store
-  overwrites it). Memory: a store object keeps the committed rows of each table it looks rows
+  overwrites it). Memory: a database object keeps the committed rows of each table it looks rows
   up in for as long as it lives, all of them at once (main read one whole table per lookup
   and released it), so memory is cumulative over the tables: measured for an `int -> int`
   pod, about 820 bytes per stored row for the result table and 746 for the pipeline-record

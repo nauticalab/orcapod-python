@@ -28,8 +28,8 @@ from orcapod.core.streams.view import (
     StreamView,
 )
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
-from orcapod.errors import StoreError, TypeIdentityError
-from orcapod.utils.store_errors import keep_store_error, note_callback_failure
+from orcapod.errors import OrcapodDatabaseError, TypeIdentityError
+from orcapod.utils.database_errors import keep_database_error, note_callback_failure
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
     FunctionPodProtocol,
@@ -358,18 +358,20 @@ class _FunctionPodBase(TraceableBase):
     def _fire_post_run_hooks(self, payload: PostRunPayload) -> None:
         """Fire all registered hooks with payload in registration order.
 
-        When the invocation failed with a ``StoreError`` or a ``TypeIdentityError``
+        When the invocation failed with a ``OrcapodDatabaseError`` or a ``TypeIdentityError``
         (both fail the run under every error policy), a fail-loud hook that
-        raises does not replace it: its failure is logged and noted on the store
+        raises does not replace it: its failure is logged and noted on the database
         error, the remaining hooks are skipped as for any fail-loud failure, and the
-        caller re-raises the store error.
+        caller re-raises the database error.
 
         Args:
             payload: The post-run payload to pass to each hook.
         """
         error = payload.stats.error
-        store_error = (
-            error if isinstance(error, (StoreError, TypeIdentityError)) else None
+        database_error = (
+            error
+            if isinstance(error, (OrcapodDatabaseError, TypeIdentityError))
+            else None
         )
         for hook in self._post_run_hooks:
             fn = hook.fn if isinstance(hook, HookConfig) else hook
@@ -378,8 +380,10 @@ class _FunctionPodBase(TraceableBase):
                 fn(payload)
             except Exception as exc:
                 if on_error == "raise":
-                    if store_error is not None:
-                        note_callback_failure(store_error, f"Post-run hook {fn!r}", exc)
+                    if database_error is not None:
+                        note_callback_failure(
+                            database_error, f"Post-run hook {fn!r}", exc
+                        )
                         return
                     raise
                 logger.warning(
@@ -619,7 +623,7 @@ class _FunctionPodBase(TraceableBase):
         Raises:
             Exception: Under ``"fail_fast"``, the exception of the first row whose
                 function raised, inside the ``ExceptionGroup`` of the pod's task group.
-            StoreError: A failed store read or write, whatever ``error_policy`` is.
+            OrcapodDatabaseError: A failed database read or write, whatever ``error_policy`` is.
         """
         from orcapod.pipeline.observer import NoOpObserver
 
@@ -642,17 +646,17 @@ class _FunctionPodBase(TraceableBase):
                     out_tag, result_data = await self._async_invoke_with_hooks(
                         tag, data, logger=pkt_logger, run_id=run_id
                     )
-                except StoreError as exc:
-                    # A failed store read or write fails the run; only rows whose
+                except OrcapodDatabaseError as exc:
+                    # A failed database read or write fails the run; only rows whose
                     # function raised are skipped.
                     exc.add_context(tag=tag.as_dict())
-                    with keep_store_error(exc, "Observer on_data_crash"):
+                    with keep_database_error(exc, "Observer on_data_crash"):
                         obs.on_data_crash(pod_label, tag, data, exc)
                     raise
                 except TypeIdentityError as exc:
                     # A stored row that cannot be decoded as its class is never
                     # skipped as a row failure (ITL-881).
-                    with keep_store_error(exc, "Observer on_data_crash"):
+                    with keep_database_error(exc, "Observer on_data_crash"):
                         obs.on_data_crash(pod_label, tag, data, exc)
                     raise
                 except Exception as exc:
@@ -1505,7 +1509,7 @@ class FunctionPodStream(StreamBase):
         After a complete computation (``as_table``, or iteration to the end) the rows are
         the first of the result. After an iteration that stopped part way they are the
         rows computed so far (``PARTIAL``). Before any computation, or once an input
-        changed, there are none. A ``CachedFunctionPod``'s result store is not looked
+        changed, there are none. A ``CachedFunctionPod``'s result database is not looked
         up: that needs the input rows' hashes, i.e. reading the input. With
         ``sort_by_tags`` (or ``all_info``) the rows held are sorted by tag and the first
         ``n`` of those returned: after a complete computation that is

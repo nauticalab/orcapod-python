@@ -17,7 +17,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import StoreReadError
+from orcapod.errors import OrcapodDatabaseReadError
 
 PATH = ("table",)
 SCOPE = "scope"
@@ -228,7 +228,7 @@ def test_failed_id_refresh_is_retried_by_the_next_read(
     db.add_records(PATH, _rows(["a", "b"], [1, 20]))
 
     # The failed refresh is a failed stored read (ITL-884): never "no stored ids".
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         _ = db.get_all_records(PATH)
     assert isinstance(info.value.__cause__, OSError)
 
@@ -237,7 +237,7 @@ def test_failed_id_refresh_is_retried_by_the_next_read(
 
 @pytest.mark.usefixtures("fail_id_refresh_once")
 def test_get_records_by_ids_raises_on_failed_id_refresh(tmp_path: Path) -> None:
-    """A failed stored-ID refresh raises ``StoreReadError``, never "no records" (ITL-884)."""
+    """A failed stored-ID refresh raises ``OrcapodDatabaseReadError``, never "no records" (ITL-884)."""
     # Another root stores ``a`` and ``b``: this handle has to read the stored ids (ITL-919).
     DeltaTableDatabase(tmp_path).at(SCOPE).add_records(
         PATH, _rows(["a", "b"], [1, 2], [0, 1]), flush=True
@@ -245,7 +245,7 @@ def test_get_records_by_ids_raises_on_failed_id_refresh(tmp_path: Path) -> None:
     db = DeltaTableDatabase(tmp_path).at(SCOPE)
     db.add_records(PATH, _rows(["c"], [3], [1]))
 
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         _ = db.get_records_by_ids(PATH, [b"a", b"c"])
     assert isinstance(info.value.__cause__, OSError)
     assert _values(db.get_records_by_ids(PATH, [b"a", b"c"])) == [1, 3]
@@ -259,7 +259,7 @@ def test_unreadable_table_with_sibling_pending_rows_raises_and_drops_nothing(
     """A read never answers from pending rows alone when the stored table is unreadable.
 
     ``b`` is stored and ``a`` is pending through a sibling handle. While the stored
-    table cannot be read, every read method raises ``StoreReadError`` (ITL-884)
+    table cannot be read, every read method raises ``OrcapodDatabaseReadError`` (ITL-884)
     rather than returning only the pending rows (ITL-864); once it is readable again
     the same read returns both rows, so nothing was dropped from the pending batch.
     """
@@ -287,7 +287,7 @@ def test_unreadable_table_with_sibling_pending_rows_raises_and_drops_nothing(
             # (ITL-919). Every read that needs storage still raises.
             assert _values(READS[method](reader, PATH)) == EXPECTED[method]
         else:
-            with pytest.raises(StoreReadError) as info:
+            with pytest.raises(OrcapodDatabaseReadError) as info:
                 _ = READS[method](reader, PATH)
             assert isinstance(info.value.__cause__, OSError)
 

@@ -41,7 +41,7 @@ N_ROWS = 250
 # The async orchestrator computes rows on a thread pool ahead of the stage that records
 # them and commits every commit_every_rows rows, so without a wait row x could be
 # computed before the batches before it are committed (ITL-1001). Row x and every row
-# after it wait until the store has finished the run's first flush and one flush per
+# after it wait until the database has finished the run's first flush and one flush per
 # batch before x, so the crash falls in the batch that holds x, after the earlier
 # batches are committed and before the result of any row from x on is stored. On the
 # sync path the rows come in order and the wait returns at once.
@@ -67,7 +67,7 @@ JOB_SCRIPT = textwrap.dedent(
     from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
     from orcapod.sources import DictSource
 
-    store_path, calls_path, every, orchestrator, crash, late = sys.argv[1:7]
+    database_path, calls_path, every, orchestrator, crash, late = sys.argv[1:7]
     crash_kind, _, crash_arg = crash.partition(":")
     earlier_batches_committed = threading.Event()
     if crash_kind == "fn":
@@ -111,7 +111,7 @@ JOB_SCRIPT = textwrap.dedent(
             return getattr(self._inner, name)
 
 
-    store = CrashOnFlush(DeltaTableDatabase(store_path), {"n": 0})
+    store = CrashOnFlush(DeltaTableDatabase(database_path), {"n": 0})
     job = PipelineJob(name="crash", database=store)
     with job:
         source = DictSource(

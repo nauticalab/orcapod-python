@@ -19,7 +19,7 @@ import pytest
 from orcapod import PipelineJob, function_pod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.errors import StoreWriteError
+from orcapod.errors import OrcapodDatabaseWriteError
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 from orcapod.core.streams import ViewStatus
 from orcapod.sources import DictSource
@@ -59,13 +59,13 @@ def fails_on_20(x: int) -> int:
 
 @function_pod(output_keys="y")
 def store_fails_on_20(x: int) -> int:
-    """Return ``x + 1``; for ``x == 20`` raise the error a failed store write raises.
+    """Return ``x + 1``; for ``x == 20`` raise the error a failed database write raises.
 
-    A ``StoreError`` fails the run whatever the error policy, on both orchestrators, as a
+    A ``OrcapodDatabaseError`` fails the run whatever the error policy, on both orchestrators, as a
     failed write of the node's results does.
     """
     if x == 20:
-        raise StoreWriteError(("simulated", "results"))
+        raise OrcapodDatabaseWriteError(("simulated", "results"))
     return x + 1
 
 
@@ -179,7 +179,7 @@ def _snapshot(job: PipelineJob) -> dict[str, Any]:
 
 
 class TestFreshJobPerRun:
-    """A new job over the same store for every run, as the issue's reproduction."""
+    """A new job over the same database for every run, as the issue's reproduction."""
 
     @pytest.mark.parametrize("kind", ORCHESTRATORS)
     def test_each_run_returns_its_inputs_rows(self, kind: str) -> None:
@@ -311,7 +311,7 @@ class TestRaisedRun:
         # Store the results of rows 3..5 first, then run rows 0..3, which fails at x=20.
         _single(fn.pod, ROWS[3:], db).run(orchestrator=_orchestrator(kind))
         job = _single(fn.pod, ROWS[:4], db)
-        with pytest.raises((ValueError, StoreWriteError)):
+        with pytest.raises((ValueError, OrcapodDatabaseWriteError)):
             job.run(orchestrator=_orchestrator(kind, policy))
         node = job.nodes["node"]
         assert _values(node, lambda r: (r["k"], r["y"])) == []
@@ -437,7 +437,7 @@ class TestRefusedOrFailedRunAfterAGoodRun:
     """A run that raises after a good run drops that run's rows too (ITL-1093).
 
     The node then reads as a node with no run in this process: every row stored under
-    its content hash, read from the store, whatever raised. An input refused for its data
+    its content hash, read from the database, whatever raised. An input refused for its data
     context is tested in ``test_stored_data_context.py``, which registers a second one.
     """
 
@@ -470,7 +470,7 @@ class TestRefusedOrFailedRunAfterAGoodRun:
         node.clear_cache()
         with pytest.raises(RuntimeError, match="^observer failed$"):
             job.run(orchestrator=_orchestrator(kind), observer=FailsAtNodeEnd())
-        # The node holds no run (it reads empty, ITL-1095); the store keeps every row.
+        # The node holds no run (it reads empty, ITL-1095); the database keeps every row.
         assert _values(node, lambda r: r["k"]) == []
         stored = node.as_source().as_table().to_pylist()
         assert sorted(r["k"] for r in stored) == [0, 1, 2, 3, 4, 5]
@@ -534,7 +534,7 @@ class TestAsyncOutputCloseFails:
         with pytest.raises(OSError, match="cannot be closed"):
             asyncio.run(run())
         assert len(output.sent) == 2
-        # No run is held: the node reads empty (ITL-1095); the store keeps the rows.
+        # No run is held: the node reads empty (ITL-1095); the database keeps the rows.
         assert node.head(10).status is ViewStatus.NOT_COMPUTED
         assert _values(node, lambda r: (r["k"], r["y"])) == []
         stored = node.as_source().as_table().to_pylist()

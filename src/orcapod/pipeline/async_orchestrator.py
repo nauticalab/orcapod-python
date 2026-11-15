@@ -19,9 +19,13 @@ from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from orcapod.channels import BroadcastChannel, Channel
-from orcapod.errors import StoreError, StoreWriteError, TypeIdentityError
+from orcapod.errors import (
+    OrcapodDatabaseError,
+    OrcapodDatabaseWriteError,
+    TypeIdentityError,
+)
 from orcapod.pipeline.result import OrchestratorResult
-from orcapod.utils.store_errors import keep_store_error
+from orcapod.utils.database_errors import keep_database_error
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
@@ -92,7 +96,7 @@ class AsyncPipelineOrchestrator:
         cancels the run, waits for the functions still running to return, and is
         re-raised. A second interrupt during that wait returns at once, with a
         ``RuntimeWarning`` naming the nodes whose functions have not returned; when they
-        do, nothing more is written to the store.
+        do, nothing more is written to the database.
 
         Args:
             graph: A ``GraphProtocol`` DAG with GraphNode objects as vertices.
@@ -208,7 +212,7 @@ class AsyncPipelineOrchestrator:
         effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
         topo_order: list[Any] = []
-        store_error: StoreError | TypeIdentityError | None = None
+        database_error: OrcapodDatabaseError | TypeIdentityError | None = None
         # id of each exception a node raised -> that node's label.
         failed_nodes: dict[int, str] = {}
         try:
@@ -354,26 +358,26 @@ class AsyncPipelineOrchestrator:
                 node_outputs=collectors if materialize_results else {}
             )
         except ExceptionGroup as group:
-            # A failed store read or write stops the run. Raise it on its own, as the
+            # A failed database read or write stops the run. Raise it on its own, as the
             # sync orchestrator does, rather than inside the TaskGroup's exception
             # group.
-            store_error = _single_store_error(group, topo_order)
-            if store_error is not None:
-                raise store_error
+            database_error = _single_database_error(group, topo_order)
+            if database_error is not None:
+                raise database_error
             # A stored row that cannot be decoded as its class stops the run too,
             # raised on its own as the sync orchestrator raises it (ITL-881).
             identity_errors = [
                 exc for exc in _leaves(group) if isinstance(exc, TypeIdentityError)
             ]
             if identity_errors:
-                store_error = identity_errors[0]
-                raise store_error
+                database_error = identity_errors[0]
+                raise database_error
             # Any other failure is raised on its own too, as the sync orchestrator
             # raises it: a row's error under fail_fast, a side effect's delivery error.
             raise _single_failure(group, topo_order, failed_nodes)
         finally:
-            # A failing on_run_end must not replace a failed store read or write.
-            with keep_store_error(store_error, "Observer on_run_end"):
+            # A failing on_run_end must not replace a failed database read or write.
+            with keep_database_error(database_error, "Observer on_run_end"):
                 effective_observer.on_run_end(run_id)
 
 
@@ -520,7 +524,7 @@ def _warn_function_still_running(
         which = f"a function in {_nodes(labels)}" if labels else "a function"
         message = (
             f"The run was cancelled, but {which} has not returned yet. Nothing more "
-            "will be written to the store when it does. To stop it, restart the kernel "
+            "will be written to the database when it does. To stop it, restart the kernel "
             "(or end the process)."
         )
     # Shown every time, whatever filters hide repeated warnings.
@@ -622,7 +626,7 @@ class _RowsInFlight:
         output_data: Any,
         cached: bool,
     ) -> None:
-        """A row's function returned (or its result came from the store)."""
+        """A row's function returned (or its result came from the database)."""
         self._change(node_label, -1)
 
     def on_data_crash(
@@ -664,7 +668,7 @@ def _start_node(
 ) -> None:
     """Start a node's coroutine in ``tg``, recording which node each failure came from.
 
-    A store error raised on its own or inside an exception group (a node that runs
+    A database error raised on its own or inside an exception group (a node that runs
     its own task group) gets the node's label when it has none. Every exception the
     node raises, each one inside a group included, is recorded in ``failed_nodes``
     under the node's label, so ``_single_failure`` can order the run's failures as
@@ -680,17 +684,17 @@ def _start_node(
     async def run() -> None:
         try:
             await work
-        except StoreError as exc:
+        except OrcapodDatabaseError as exc:
             # Name the node the failure belongs to, if the raising site did not,
-            # so _single_store_error can order it like the sync orchestrator.
+            # so _single_database_error can order it like the sync orchestrator.
             exc.add_context(node_label=node.label)
             failed_nodes[id(exc)] = node.label
             raise
         except BaseExceptionGroup as group:
-            # A node that runs its own task group raises its store errors inside
+            # A node that runs its own task group raises its database errors inside
             # a group; name the node on each and re-raise the group unchanged.
-            for store_error in StoreError.in_group(group):
-                store_error.add_context(node_label=node.label)
+            for database_error in OrcapodDatabaseError.in_group(group):
+                database_error.add_context(node_label=node.label)
             for leaf in _leaves(group):
                 failed_nodes[id(leaf)] = node.label
             raise
@@ -704,7 +708,7 @@ def _start_node(
 def _single_failure(
     group: BaseExceptionGroup, topo_order: list[Any], failed_nodes: dict[int, str]
 ) -> BaseException:
-    """Pick the one exception an async run raises when no store error is among its failures.
+    """Pick the one exception an async run raises when no database error is among its failures.
 
     The caller gets one exception, as from the sync orchestrator, never the task
     group's exception group: the one whose node comes first in topological order (the
@@ -735,18 +739,18 @@ def _single_failure(
     return chosen
 
 
-def _single_store_error(
+def _single_database_error(
     group: ExceptionGroup, topo_order: list[Any]
-) -> StoreError | None:
-    """Pick the one ``StoreError`` an async run raises from its exception group.
+) -> OrcapodDatabaseError | None:
+    """Pick the one ``OrcapodDatabaseError`` an async run raises from its exception group.
 
     Concurrent node tasks can fail together, so the ``TaskGroup``'s group may hold
-    several store errors, read and write ones alike, and other exceptions. The
-    caller gets a single ``StoreError``, as from the sync orchestrator: the one
+    several database errors, read and write ones alike, and other exceptions. The
+    caller gets a single ``OrcapodDatabaseError``, as from the sync orchestrator: the one
     whose node comes first in topological order (the one the sync orchestrator
     would meet first, when both failures happen), with ties and node-less errors
     broken by their order in the group. Every other exception stays attached for
-    diagnosis: each is noted on the chosen error, other store errors are also
+    diagnosis: each is noted on the chosen error, other database errors are also
     logged at WARNING, and the whole group is the chosen error's ``__context__``.
     Its ``__cause__`` stays the backend error.
 
@@ -755,25 +759,25 @@ def _single_store_error(
         topo_order: The run's nodes in topological order.
 
     Returns:
-        The store error to raise, or ``None`` when the group holds none.
+        The database error to raise, or ``None`` when the group holds none.
     """
-    store_errors = StoreError.in_group(group)
-    if not store_errors:
+    database_errors = OrcapodDatabaseError.in_group(group)
+    if not database_errors:
         return None
     rank = {getattr(node, "label", None): i for i, node in enumerate(topo_order)}
-    chosen = min(store_errors, key=lambda err: rank.get(err.node_label, len(rank)))
+    chosen = min(database_errors, key=lambda err: rank.get(err.node_label, len(rank)))
     for other in _leaves(group):
         if other is chosen:
             continue
-        if isinstance(other, StoreError):
-            kind = "write" if isinstance(other, StoreWriteError) else "read"
+        if isinstance(other, OrcapodDatabaseError):
+            kind = "write" if isinstance(other, OrcapodDatabaseWriteError) else "read"
             logger.warning(
-                "Another store %s failed in the same run: %s",
+                "Another database %s failed in the same run: %s",
                 kind,
                 other,
                 exc_info=other,
             )
-            chosen.add_note(f"Another store {kind} failed in the same run: {other}")
+            chosen.add_note(f"Another database {kind} failed in the same run: {other}")
         else:
             chosen.add_note(
                 f"Another node failed in the same run: {type(other).__name__}: {other}"

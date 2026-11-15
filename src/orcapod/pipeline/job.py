@@ -22,9 +22,9 @@ from orcapod.contexts.stored import (
     unclaimed_tables_written_before_v03,
 )
 from orcapod.errors import (
-    StoreError,
-    StoreReadError,
-    StoreWriteError,
+    OrcapodDatabaseError,
+    OrcapodDatabaseReadError,
+    OrcapodDatabaseWriteError,
     TableListingNotSupportedError,
 )
 from orcapod.pipeline.base import AbstractPipelineBase
@@ -44,7 +44,7 @@ from orcapod.pipeline.run_summary import (
 from orcapod.protocols import core_protocols as cp
 from orcapod.databases.utils import as_table_committing
 from orcapod.types import CacheMode, NodeConfig
-from orcapod.utils.store_errors import flush_best_effort
+from orcapod.utils.database_errors import flush_best_effort
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PENDING_BEFORE_RUN_NOTE = (
-    "These writes were left pending in the store before this run started (written "
+    "These writes were left pending in the database before this run started (written "
     "without a flush, or by a run that failed). The run stopped before computing "
     "anything."
 )
@@ -73,8 +73,8 @@ class _PreparedRun:
         exec_dag: The nodes to run (unbound sources and their dependents left out).
         run_id: The run's identifier.
         pipeline_uri: ``<job name>@<snapshot hash>``, passed to the observer.
-        pipeline_db: The job's view of the store.
-        result_db: The job's function-result view of the store.
+        pipeline_db: The job's view of the database.
+        result_db: The job's function-result view of the database.
         plan: What the run runs and holds (``plan_run``, ITL-1095).
         unchecked_sources: The sources the start-of-run check could not check
             (``check_sources``, ITL-1102).
@@ -165,7 +165,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
         self._has_run: bool = False
         # True only while the last run started has finished and committed its writes:
-        # what the store then holds for each node is what that run left (ITL-1043).
+        # what the database then holds for each node is what that run left (ITL-1043).
         self._last_run_finished: bool = False
         self._run_id: str | None = None
         # The summary of the last run this object completed (ITL-997).
@@ -234,7 +234,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # Invalidate the lazy compiled_pipeline cache.
         self._compiled_pipeline = None
 
-        # Wire databases if a store is already set.
+        # Wire databases if a database is already set.
         if self._database is not None:
             self._distribute_databases()
 
@@ -247,7 +247,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         """The summary of the last run this job completed, or ``None`` before one.
 
         The same object ``run`` and ``run_async`` returned: per function node, the rows
-        computed, read from the store and failed, and each node's first error. Use
+        computed, read from the database and failed, and each node's first error. Use
         ``job.last_run.print_traceback("<node label>")`` to see a failed row's full
         traceback. A run that raised leaves it unchanged. A loaded job has none.
         """
@@ -479,7 +479,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     def _distribute_databases(self) -> None:
         """Wire live DB references to all FunctionJobNode and OperatorJobNode objects.
 
-        Called by ``compile()`` when a store is already set, and by ``bind()``
+        Called by ``compile()`` when a database is already set, and by ``bind()``
         when *database* is changed.
 
         Raises:
@@ -514,7 +514,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     ) -> None:
         """Report, once per run, the pre-v0.3 tables no node of this job reports itself.
 
-        A function or side-effect node looks under its own name in the store and
+        A function or side-effect node looks under its own name in the database and
         reports, or refuses, the tables an earlier version of Orcapod wrote there.
         Operator caches and cached sources have no name in their path that survives
         a change of hashes, and a node that left the job has no node to report it.
@@ -543,7 +543,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             unclaimed = unclaimed_tables_written_before_v03(pipeline_db, claimed)
         except TableListingNotSupportedError as exc:
             logger.info(
-                "The store cannot list its tables (%s), so tables written by an "
+                "The database cannot list its tables (%s), so tables written by an "
                 "earlier version of Orcapod are reported only where a node finds "
                 "them at its own path.",
                 exc,
@@ -814,10 +814,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         return result
 
     def is_complete(self) -> bool:
-        """Return ``True`` when all source nodes are bound and a store is set.
+        """Return ``True`` when all source nodes are bound and a database is set.
 
         Returns:
-            ``True`` if all SourceNode slots are bound and a store is set.
+            ``True`` if all SourceNode slots are bound and a database is set.
         """
         return self._database is not None and not self.unbound_sources
 
@@ -924,17 +924,17 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 ``None`` when no matching records exist; records from an earlier
                 LOG run remain readable after switching to OFF.
             commit_every_rows: How many rows a function node processes between
-                commits of its results and pipeline records to the store
+                commits of its results and pipeline records to the database
                 (default 100). Each node also commits when it finishes, before a
                 failed run raises, and the job commits at its end. On a durable
-                store (``DeltaTableDatabase``) a hard crash (power loss, killed
+                database (``DeltaTableDatabase``) a hard crash (power loss, killed
                 process) loses at most the rows of the running node since its
                 last commit; re-running the job recomputes only those. A larger
                 value commits less often (faster, fewer files); ``1`` commits
                 after every row. A node run on its own, outside ``run()``,
-                commits after every row. It must be smaller than the store's
-                ``batch_size`` when the store has one (``DeltaTableDatabase``,
-                default 1000): the store commits every pending table by itself
+                commits after every row. It must be smaller than the database's
+                ``batch_size`` when the database has one (``DeltaTableDatabase``,
+                default 1000): the database commits every pending table by itself
                 once one table's pending rows reach that size, which would
                 break the node's results-before-records commit order.
             load_only: Fill the nodes from what is already stored and compute
@@ -944,7 +944,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 the inputs without one, which the summary counts (``not_stored``);
                 a function node forwards only the rows it loaded. No user function
                 is called, no side effect is delivered (a side-effect node passes its
-                rows on) and nothing is written to the store, a ``LOG`` operator's
+                rows on) and nothing is written to the database, a ``LOG`` operator's
                 cache included. Afterwards each node shows the rows it loaded.
 
         Rows whose function raised (with the default ``error_policy="continue"``) are
@@ -954,24 +954,24 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         Returns:
             The run's ``RunSummary``: per function node, the rows computed, read from
-            the store and failed, with each node's first error. Shown at the end of a
+            the database and failed, with each node's first error. Shown at the end of a
             notebook cell; also kept as ``job.last_run``. Results are read from
             ``job.nodes``.
 
         Raises:
             ValueError: If no database is set, or ``commit_every_rows`` is not a
-                positive integer smaller than the store's ``batch_size``.
+                positive integer smaller than the database's ``batch_size``.
             RuntimeError: If no pipeline has been compiled, or the job was built
                 by ``PipelineJob.load`` (a loaded job is read-only).
-            StoreWriteError: If a node's results or records could not be written
-                to the store, whatever the orchestrator's ``error_policy``. The run
+            OrcapodDatabaseWriteError: If a node's results or records could not be written
+                to the database, whatever the orchestrator's ``error_policy``. The run
                 stops at the first failed write. Writes that succeeded before it
                 are flushed first, so rows stored before the failure are kept, and
                 re-running the job does not recompute stored function results.
                 A failed commit of a node's batch names the node but no row
                 (``flush=True``): the batch's writes stay pending and are retried
                 once by the flush that follows the failure.
-            StoreReadError: If a stored table exists but could not be read,
+            OrcapodDatabaseReadError: If a stored table exists but could not be read,
                 whatever the orchestrator's ``error_policy``, also when the read
                 was needed to write a node's results. Its rows are not recomputed
                 and the table is not overwritten.
@@ -1037,8 +1037,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 run a ``SyncPipelineOrchestrator`` with ``job.run``.
             ValueError: As for ``run``.
             RuntimeError: As for ``run``.
-            StoreWriteError: As for ``run``.
-            StoreReadError: As for ``run``.
+            OrcapodDatabaseWriteError: As for ``run``.
+            OrcapodDatabaseReadError: As for ``run``.
         """
         from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 
@@ -1085,12 +1085,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             load_only: As for ``run``: a loaded job can run only this way.
 
         Returns:
-            The execution DAG, run id, pipeline URI and the store views of the run.
+            The execution DAG, run id, pipeline URI and the database views of the run.
 
         Raises:
             ValueError: As for ``run``.
             RuntimeError: As for ``run``.
-            StoreError: If writes still pending from before the run cannot be committed.
+            OrcapodDatabaseError: If writes still pending from before the run cannot be committed.
         """
         import hashlib
         import uuid
@@ -1111,17 +1111,17 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             )
         # A loaded job never computes: function pods are not saved with it, and even
         # an operator-only loaded job, whose operators are rebuilt, stays read-only.
-        # A load-only run fills it from the store (ITL-1095).
+        # A load-only run fills it from the database (ITL-1095).
         if self._loaded and not load_only:
             raise RuntimeError(
                 "PipelineJob.run() cannot execute a loaded job: its function pods are "
                 "not saved with it, so it cannot compute. Fill its nodes from the "
-                "store with run(load_only=True) (bind in-memory sources first), or "
+                "database with run(load_only=True) (bind in-memory sources first), or "
                 "read a node's stored results with node.as_source(). To run a new "
                 "computation, create a fresh PipelineJob from the original pipeline "
                 "definition."
             )
-        # Until this run finishes, what the store holds for a node is not certain.
+        # Until this run finishes, what the database holds for a node is not certain.
         self._last_run_finished = False
 
         table_committing = as_table_committing(self._database)
@@ -1131,10 +1131,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         ):
             raise ValueError(
                 f"commit_every_rows={commit_every_rows} must be smaller than the "
-                f"store's batch_size={table_committing.batch_size}: the store commits a "
+                f"database's batch_size={table_committing.batch_size}: the database commits a "
                 "table by itself once it holds batch_size pending rows, which could "
                 "commit pipeline records before their results. Use a smaller "
-                "commit_every_rows, or create the store with a larger batch_size."
+                "commit_every_rows, or create the database with a larger batch_size."
             )
         if self._database is None:
             raise ValueError(
@@ -1152,7 +1152,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         from orcapod.pipeline.serialization import LoadStatus
 
         # A loaded function node has no function pod, whatever its load status
-        # (READ_ONLY once a store is attached, so it can read its stored results).
+        # (READ_ONLY once a database is attached, so it can read its stored results).
         unavailable_labels = [
             node.label
             for node in self._persistent_node_map.values()
@@ -1263,24 +1263,26 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         plan = plan_run(exec_dag, load_only=load_only)
         # Pre-v0.3 tables are reported for a run that runs a node or leaves one out
         # (ITL-954): an excluded node reports nothing itself, so the job's total counts
-        # its tables. Only a run that runs nothing and leaves nothing out lists no store.
+        # its tables. Only a run that runs nothing and leaves nothing out lists no database.
         if plan.to_run or excluded_hashes:
             self._report_unclaimed_tables_written_before_v03(excluded_hashes)
-        # A store that commits a table by itself at batch_size: commit what it already
+        # A database that commits a table by itself at batch_size: commit what it already
         # holds pending (writes made without a flush, or a failed run's batches) before
         # this run writes. Those rows would otherwise count towards a table's
         # batch_size, which could then be reached mid-run and commit this run's pipeline
         # records ahead of their results (ITL-919).
-        # A load-only run writes nothing, and a run that runs no node touches no store,
+        # A load-only run writes nothing, and a run that runs no node touches no database,
         # so neither commits anything, not even pending writes of earlier operations.
         if table_committing is not None and not load_only and plan.to_run:
             try:
                 pipeline_db.flush()
-            except StoreError as exc:
+            except OrcapodDatabaseError as exc:
                 exc.add_note(_PENDING_BEFORE_RUN_NOTE)
                 raise
             except Exception as exc:
-                flush_error = StoreWriteError(pipeline_db.base_path, flush=True)
+                flush_error = OrcapodDatabaseWriteError(
+                    pipeline_db.base_path, flush=True
+                )
                 flush_error.add_note(_PENDING_BEFORE_RUN_NOTE)
                 raise flush_error from exc
 
@@ -1358,12 +1360,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             The run's summary, also kept as ``last_run``.
 
         Raises:
-            StoreReadError: As for ``run``.
-            StoreWriteError: As for ``run``.
+            OrcapodDatabaseReadError: As for ``run``.
+            OrcapodDatabaseWriteError: As for ``run``.
         """
         pipeline_db = prepared.pipeline_db
         result_db = prepared.result_db
-        # Flush databases. Every view of the store shares one set of pending
+        # Flush databases. Every view of the database shares one set of pending
         # batches, so a failed batch can leave the ones after it unwritten.
         pending_note = (
             "Writes that were still pending when the flush failed, such as a "
@@ -1373,17 +1375,17 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         try:
             if not load_only and plan.to_run:
                 # A load-only run writes nothing and commits nothing, and a run that
-                # ran no node touches no store (ITL-1095).
+                # ran no node touches no database (ITL-1095).
                 pipeline_db.flush()
                 result_db.flush()
-        except StoreReadError as exc:
+        except OrcapodDatabaseReadError as exc:
             # A stored table could not be read: report the read failure itself.
             exc.add_note(pending_note)
             # A run whose commit failed did not complete: no node holds its rows.
             clear_run_rows(plan.to_run)
             raise
         except Exception as exc:
-            flush_error = StoreWriteError(pipeline_db.base_path, flush=True)
+            flush_error = OrcapodDatabaseWriteError(pipeline_db.base_path, flush=True)
             flush_error.add_note(pending_note)
             clear_run_rows(plan.to_run)
             raise flush_error from exc
@@ -1488,10 +1490,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # stubs whose content_hash() matches the _node_content_hash column in the
         # DB — required for _filter_by_content_hash() in get_all_records().
         node_job_content_hashes: dict[str, str] = {}
-        # Advisory only (ITL-1043): how many rows the store holds under each node's
+        # Advisory only (ITL-1043): how many rows the database holds under each node's
         # run key, written only when certain (the last run finished and committed, or
-        # a loaded node's own record). A loaded node compares it with its store and
-        # warns on a difference; the store stays the source of truth.
+        # a loaded node's own record). A loaded node compares it with its database and
+        # warns on a difference; the database stays the source of truth.
         expected_rows: dict[str, int] = {}
         for node in (self._persistent_node_map or {}).values():
             if isinstance(node, (FunctionJobNode, OperatorJobNode)):
@@ -1631,7 +1633,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 logger.info(
                     "Source %r (%s) keeps its data in memory and is not saved with the "
                     "job; the loaded job has no data for it. Stored function-node "
-                    "results are still readable from the store. To read source node "
+                    "results are still readable from the database. To read source node "
                     "%r itself, bind a source: job.bind(sources={%r: <source>}).",
                     spec_name,
                     source_type,
@@ -1641,7 +1643,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             except Exception as exc:
                 logger.warning(
                     "Could not reconstruct source %r (%s) from its saved config: %s. "
-                    "Stored function-node results are still readable from the store. "
+                    "Stored function-node results are still readable from the database. "
                     "To read source node %r itself, bind a source: "
                     "job.bind(sources={%r: <source>}).",
                     spec_name,
@@ -1724,8 +1726,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             "node_job_content_hashes", {}
         )
         # The optional, advisory section (ITL-1043): a node with an entry warns when
-        # its store holds another number of rows. Without it nothing is checked. The
-        # ITL-904 flag (node_has_stored_records) of older files is not used: the store
+        # its database holds another number of rows. Without it nothing is checked. The
+        # ITL-904 flag (node_has_stored_records) of older files is not used: the database
         # is the source of truth.
         expected_rows: dict[str, int] = run_block.get("expected_rows", {})
 

@@ -532,7 +532,7 @@ def test_an_aggregate_downstream_stores_nothing_after_fail_fast(
 
     The failing node closes its output before the run cancels the others; the aggregate
     must not take that close for the end of its input. Under ``continue`` the same job
-    stores its one aggregate, so the store is read where the aggregate would be.
+    stores its one aggregate, so the database is read where the aggregate would be.
     """
     xs = xs_failing_at(FAILING_POSITIONS[position])
     assert (

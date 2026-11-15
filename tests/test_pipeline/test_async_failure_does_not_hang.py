@@ -20,7 +20,7 @@ import pytest
 from orcapod import PipelineJob, function_pod
 from orcapod.core.operators import Join
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
-from orcapod.errors import InputValidationError, StoreWriteError
+from orcapod.errors import InputValidationError, OrcapodDatabaseWriteError
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.sources import ArrowTableSource, DictSource
 
@@ -97,7 +97,7 @@ def test_function_node_store_failure_raises(tmp_path: Path, store: str) -> None:
         )
         double.pod(source, label="dbl")
     error = run_in_thread(job)
-    assert isinstance(error, StoreWriteError), repr(error)
+    assert isinstance(error, OrcapodDatabaseWriteError), repr(error)
     assert error.node_label == "dbl"
 
 

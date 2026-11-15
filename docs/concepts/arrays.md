@@ -33,11 +33,11 @@ for tag, data in scale.pod(source).iter_data():
     hashed the file. v0.3 stores them under `orcapod.numpy.ndarray`, hashes the value as
     described below, and does not migrate older stores. Every node that handles arrays, and
     every node downstream of an array column, gets new tables in v0.3. Because v0.3 also
-    changed every hash of Arrow data, v0.3 reuses no result of a store written by v0.2: it
+    changed every hash of Arrow data, v0.3 reuses no result of a database written by v0.2: it
     ignores the v0.2 rows and computes every input again (see
     [A store written by an older version](function-pods.md#a-store-written-by-an-older-version)).
     Nodes that perform side effects are the exception: a side-effect pod, or a function pod
-    that takes the invocation context, does not run again on such a store but raises
+    that takes the invocation context, does not run again on such a database but raises
     `SideEffectLogDataContextError` before it delivers anything.
     The v0.2 tables and rows stay on disk unchanged, readable with v0.2. A migration is
     planned after v0.3 (ITL-889).
@@ -96,7 +96,7 @@ Part of the hash by default; each has a name and can be put on the type's
 | `byte_order` | Little- or big-endian, for each scalar field. A native array hashes as the byte order it actually has, never as "native": the same array bytes hash the same on every machine, and an array created natively on a big-endian machine is a big-endian array. |
 | `struct_layout` | The field offsets and the item size of a structured dtype, at every nesting depth. An aligned (padded) dtype and the packed dtype with the same fields differ. |
 
-Never part of the hash, because `.npy` does not keep it. A value read back from a store must
+Never part of the hash, because `.npy` does not keep it. A value read back from a database must
 hash like the value that was written, or every cached run would compute again:
 
 - **Strides other than C or Fortran order.** A step slice (`a[:, ::2]`), a reversed view or
@@ -109,7 +109,7 @@ hash like the value that was written, or every cached run would compute again:
   flag produced are kept and count, as `struct_layout`).
 - **Padding bytes between structured fields.** NumPy does not define their content (an
   `np.empty` array holds whatever the memory held). They are not part of the value: they are
-  written to the store as zero, so residual memory never reaches a store that may be shared,
+  written to the database as zero, so residual memory never reaches a database that may be shared,
   and they read back as zero. Every field reads back as written.
 
 ```python
@@ -361,7 +361,7 @@ tensors hash the same only when all of these are equal.
 | Device, autograd history, `.grad`, position inside a larger buffer | never | |
 
 A property that storage does not keep is never in the hash: otherwise a value read back from
-a store would hash differently from the value that was written, and every cached result would
+a database would hash differently from the value that was written, and every cached result would
 be computed again. For the same reason the optional properties are those of the *stored*
 tensor: a step slice hashes like its contiguous clone.
 
@@ -428,7 +428,7 @@ print(caught[0].message)
 # Function 'fit' output 'weights' returned a torch tensor with autograd history (a grad_fn); Orcapod stored a CPU tensor without autograd history, and the returned tensor is unchanged. Return value.detach().cpu() to avoid this warning.
 ```
 
-**What comes back.** A tensor read from a store or a source is a CPU leaf tensor with the
+**What comes back.** A tensor read from a database or a source is a CPU leaf tensor with the
 stored dtype, shape, elements, strides, `requires_grad`, lazy bits and class (a `bfloat16`
 tensor reads back as `bfloat16`, an `nn.Parameter` as an `nn.Parameter`). Within a single
 in-memory run, though, the next pod receives the very object the previous pod returned, on its

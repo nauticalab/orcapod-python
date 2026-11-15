@@ -8,7 +8,7 @@
 Re-verified against the EDI sample project (`edi-sample-v1-855632`, read-only) and a
 disk-backed pyspiral fake (`tests/test_databases/fake_pyspiral.py`). The workshop path works:
 a `SpiralDBTableSource` with a composite key, a `Join` of two Spiral sources, a function pod,
-a Delta store, a re-run with no function calls, save and load, and the same hashes in a fresh
+a Delta database, a re-run with no function calls, save and load, and the same hashes in a fresh
 process. Findings, with repro scripts, are in `superpowers/specs/itl-926-live/FINDINGS.md`.
 
 **Fixed:**

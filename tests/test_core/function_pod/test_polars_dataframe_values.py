@@ -381,7 +381,7 @@ class TestPipelineStores:
     def test_frames_stored_and_read_back(
         self, store_name: str, orchestrator_name: str, tmp_path: Path
     ) -> None:
-        """Frames written by a job read back exactly, in each store and orchestrator."""
+        """Frames written by a job read back exactly, in each database and orchestrator."""
         job = PipelineJob(name="frames", database=_STORES[store_name](tmp_path))
         with job:
             frames = make_frame.pod(_int_source(), label="make")
@@ -449,8 +449,8 @@ class TestPipelineStores:
 
     def test_saved_job_loaded_back_reads_the_frames(self, tmp_path: Path) -> None:
         """A saved job, loaded in place of the original, reads its stored frames exactly."""
-        store_path = tmp_path / "delta"
-        job = PipelineJob(name="frames", database=DeltaTableDatabase(store_path))
+        database_path = tmp_path / "delta"
+        job = PipelineJob(name="frames", database=DeltaTableDatabase(database_path))
         with job:
             frames = make_frame.pod(_int_source(), label="make")
             frame_height.pod(frames, label="height")
@@ -458,7 +458,9 @@ class TestPipelineStores:
         saved = tmp_path / "job.json"
         job.save(str(saved))
 
-        loaded = PipelineJob.load(str(saved), database=DeltaTableDatabase(store_path))
+        loaded = PipelineJob.load(
+            str(saved), database=DeltaTableDatabase(database_path)
+        )
         node = loaded.nodes["make"]
         _, data_schema = node.output_schema()
         assert data_schema["df"] is pl.DataFrame
@@ -503,7 +505,7 @@ class TestPipelineStores:
         _assert_exact(got["b"], _frame(3))
 
 
-# Runs one pipeline over a Delta store and prints how many times each pod body ran, plus
+# Runs one pipeline over a Delta database and prints how many times each pod body ran, plus
 # the frames read back. The pod bodies append to a marker file so a cache hit (body not
 # run) is observable from the parent process.
 _CROSS_PROCESS_SCRIPT = textwrap.dedent(
@@ -515,7 +517,7 @@ _CROSS_PROCESS_SCRIPT = textwrap.dedent(
     from orcapod.databases import DeltaTableDatabase
     from orcapod.sources import DictSource
 
-    store_path, marker = Path(sys.argv[1]), Path(sys.argv[2])
+    database_path, marker = Path(sys.argv[1]), Path(sys.argv[2])
 
     @function_pod(output_keys="df")
     def make_frame(n: int) -> pl.DataFrame:
@@ -533,7 +535,7 @@ _CROSS_PROCESS_SCRIPT = textwrap.dedent(
         return df.height
 
     source = DictSource([{"k": "a", "n": 1}, {"k": "b", "n": 3}], tag_columns=["k"])
-    job = PipelineJob(name="frames", database=DeltaTableDatabase(store_path))
+    job = PipelineJob(name="frames", database=DeltaTableDatabase(database_path))
     with job:
         frames = make_frame.pod(source, label="make")
         frame_height.pod(frames, label="height")
@@ -548,10 +550,10 @@ _CROSS_PROCESS_SCRIPT = textwrap.dedent(
 )
 
 
-def _run_pipeline_process(store_path: Path, marker: Path) -> dict[str, Any]:
+def _run_pipeline_process(database_path: Path, marker: Path) -> dict[str, Any]:
     """Run the pipeline script in a new process and return its printed JSON."""
     result = subprocess.run(
-        [sys.executable, "-c", _CROSS_PROCESS_SCRIPT, str(store_path), str(marker)],
+        [sys.executable, "-c", _CROSS_PROCESS_SCRIPT, str(database_path), str(marker)],
         capture_output=True,
         text=True,
         check=False,
@@ -561,14 +563,14 @@ def _run_pipeline_process(store_path: Path, marker: Path) -> dict[str, Any]:
 
 
 def test_cached_rerun_in_new_process_hits_the_cache(tmp_path: Path) -> None:
-    """A second process over the same Delta store recomputes nothing and reads equal frames."""
-    store_path, marker = tmp_path / "store", tmp_path / "calls.txt"
+    """A second process over the same Delta database recomputes nothing and reads equal frames."""
+    database_path, marker = tmp_path / "store", tmp_path / "calls.txt"
 
-    first = _run_pipeline_process(store_path, marker)
+    first = _run_pipeline_process(database_path, marker)
     calls_after_first = marker.read_text().splitlines()
     assert sorted(calls_after_first) == ["height", "height", "make", "make"]
 
-    second = _run_pipeline_process(store_path, marker)
+    second = _run_pipeline_process(database_path, marker)
     assert marker.read_text().splitlines() == calls_after_first  # nothing re-ran
     assert second == first
     assert second["heights"] == {"a": 1, "b": 3}

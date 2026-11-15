@@ -103,7 +103,7 @@ def _other() -> ArrowTableSource:
 def _pod(
     function: object, output: str, executor: str, cached: bool
 ) -> FunctionPod | CachedFunctionPod:
-    """The pod of ``function``; when ``cached``, storing its results in a fresh store."""
+    """The pod of ``function``; when ``cached``, storing its results in a fresh database."""
     pod = function_pod(
         output_keys=output,
         executor=_ConcurrentExecutor() if executor == "concurrent" else None,

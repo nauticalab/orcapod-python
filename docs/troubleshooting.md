@@ -2,7 +2,7 @@
 
 ## A script finishes its work but the process never exits
 
-**Symptom.** A Python script that used a Delta store prints all of its output and then hangs,
+**Symptom.** A Python script that used a Delta database prints all of its output and then hangs,
 and has to be killed. On Linux with Python 3.11 or 3.12 the process may instead end with
 `terminate called without an active exception` and exit code 134 (SIGABRT). Notebooks are not
 affected in the same way, because the kernel keeps running.
@@ -25,7 +25,7 @@ Reading a Delta table yourself with `deltalake.DeltaTable(...).to_pyarrow_table(
 
 - Upgrade pyarrow once a release includes the fix
   ([apache/arrow#54467](https://github.com/apache/arrow/pull/54467)).
-- In a script that reads a cloud Delta store, end it by flushing your outputs and calling
+- In a script that reads a cloud Delta database, end it by flushing your outputs and calling
   `os._exit(0)`. That skips interpreter shutdown, where the hang happens. It also skips
   `atexit` handlers and other cleanup, so close files and flush stores first.
 - When reading local Delta tables directly with deltalake, pass a native filesystem. Resolve

@@ -165,7 +165,7 @@ class TestGroupByMemoization:
         _CALLS["path"].clear()
         _run(store_b, session_source_factory(), GroupBy(by=["subject", "date"]), "m")
         assert len(_CALLS["path"]) == 2, (
-            "a fresh store has no cached records, so both groups must recompute"
+            "a fresh database has no cached records, so both groups must recompute"
         )
 
     def test_changed_member_invalidates_only_its_group(
@@ -271,7 +271,7 @@ class TestStoreWrittenByV020:
     In v0.2.0 a pod could only follow ``GroupBy`` by selecting the real data
     columns (or by taking the moved tags as parameters).  Neither later change
     moves a pipeline hash or the pod's input data, and the dropped tags make
-    the stored shape after the select equal to today's, so a store written by
+    the stored shape after the select equal to today's, so a database written by
     the old shape serves the new one without recomputing.
     """
 

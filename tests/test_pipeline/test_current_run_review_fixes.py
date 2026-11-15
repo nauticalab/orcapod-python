@@ -1,6 +1,6 @@
 """Review fixes for the current-run rule and load-only runs (ITL-1095, PR #380 review).
 
-Each test names the guarantee it protects: a run that raised (in its observer, its store,
+Each test names the guarantee it protects: a run that raised (in its observer, its database,
 its commit or its output) leaves no node holding its rows; a load-only run writes nothing,
 not even pending writes of others; an operator filled by a load-only run says so; the
 freshness check stays linear on a DAG of shared ancestors.
@@ -23,7 +23,7 @@ from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.operators import Join, MapData, SelectDataColumns
 from orcapod.core.streams import ArrowTableStream, ViewStatus
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
-from orcapod.errors import StoreWriteError
+from orcapod.errors import OrcapodDatabaseWriteError
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 from orcapod.pipeline.observer import NoOpObserver
 from orcapod.side_effects import SideEffectPod, SideEffectPodConfig, side_effect_pod
@@ -166,7 +166,7 @@ def test_a_failed_commit_of_a_node_run_alone_leaves_it_empty() -> None:
 
     with (
         mock.patch.object(InMemoryArrowDatabase, "flush", fail),
-        pytest.raises(StoreWriteError),
+        pytest.raises(OrcapodDatabaseWriteError),
     ):
         node.run()
     assert node.as_table().num_rows == 0
@@ -199,7 +199,7 @@ def test_a_failed_cascade_clears_every_node_it_ran() -> None:
 
     with (
         mock.patch.object(InMemoryArrowDatabase, "flush", fail),
-        pytest.raises(StoreWriteError),
+        pytest.raises(OrcapodDatabaseWriteError),
     ):
         job.nodes["down"].run()
     for label in ("up", "down"):
@@ -220,7 +220,7 @@ def test_a_failed_operator_store_leaves_the_operator_empty(orchestrator: str) ->
         mock.patch.object(
             InMemoryArrowDatabase, "add_records", side_effect=OSError("disk full")
         ),
-        pytest.raises((StoreWriteError, ExceptionGroup)),
+        pytest.raises((OrcapodDatabaseWriteError, ExceptionGroup)),
     ):
         job.run(orchestrator=ORCHESTRATORS[orchestrator]())
     assert job.nodes["sel"].as_table().num_rows == 0

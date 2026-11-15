@@ -48,14 +48,14 @@ from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.core.nodes.staleness import RunHoldingNode
 from orcapod.errors import (
     PipelineJobRequiredError,
-    StoreReadError,
-    StoreWriteError,
+    OrcapodDatabaseReadError,
+    OrcapodDatabaseWriteError,
 )
 from orcapod.contexts.stored import (
     keep_rows_of_data_context,
     require_same_data_context,
     account_for_stale_tables,
-    describe_store_table,
+    describe_database_table,
     find_stale_tables,
     report_rows_of_other_data_contexts,
     report_unexpected_row_count,
@@ -445,14 +445,14 @@ class OperatorNodeBase(StreamBase):
         )
 
     @abstractmethod
-    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
+    def set_ephemeral_database(self, database: "ArrowDatabaseProtocol | None") -> None:
+        """Assign or remove the ephemeral result database for this node.
 
         No-op for operator nodes — full ephemeral support for operators
         is deferred to ITL-509.
 
         Args:
-            store: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
+            database: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
                 to detach. Ignored by operator nodes in v1.
         """
 
@@ -645,7 +645,7 @@ class OperatorNode(OperatorNodeBase):
 
         return node
 
-    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+    def set_ephemeral_database(self, database: "ArrowDatabaseProtocol | None") -> None:
         """No-op — blueprint operator nodes carry no database references."""
 
     def as_node(self) -> OperatorNode:
@@ -718,7 +718,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
     # Set once a table found at the older layout has been accounted for.
     _stale_tables_checked: bool = False
     # The job file's expected row count for a loaded node, and whether it was checked
-    # against the attached store (ITL-1043). Advisory: a mismatch only warns.
+    # against the attached database (ITL-1043). Advisory: a mismatch only warns.
     _expected_row_count: int | None = None
     _row_count_checked: bool = False
 
@@ -808,7 +808,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             tracker_manager=self.tracker_manager,
         )
 
-    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
+    def set_ephemeral_database(self, database: "ArrowDatabaseProtocol | None") -> None:
         """No-op — full ephemeral support for operators is deferred to ITL-509."""
 
     # ------------------------------------------------------------------
@@ -843,7 +843,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             pipeline_database: Database for pipeline records.
             cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
         """
-        # Another store has its own tables of other generations to account for.
+        # Another database has its own tables of other generations to account for.
         self._stale_tables_checked = False
         self._skipped_rows_reported = False
         self._row_count_checked = False
@@ -888,10 +888,10 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
                 to database instances.
             job_content_hash: The content hash of the node in the saved job's run,
                 which its stored rows carry; ``None`` when the file does not record it.
-            expected_row_count: How many rows the store held under the run's key when
+            expected_row_count: How many rows the database held under the run's key when
                 the job was saved, from the job file's optional ``run.expected_rows``;
-                ``None`` when not recorded. Advisory: a read returns what the store
-                holds and only warns (``StoreContentWarning``) when it differs.
+                ``None`` when not recorded. Advisory: a read returns what the database
+                holds and only warns (``OrcapodDatabaseContentWarning``) when it differs.
 
         Returns:
             A new ``OperatorJobNode`` instance.
@@ -1029,7 +1029,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         """Return the count ``PipelineJob.save`` records for this node, if certain.
 
         A loaded node keeps the count its file recorded, or none. A node of a job whose
-        last run finished (its writes committed) records the rows the store holds under
+        last run finished (its writes committed) records the rows the database holds under
         its run's content hash; otherwise nothing is certain.
 
         Args:
@@ -1043,12 +1043,12 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         return 0 if records is None else records.num_rows
 
     def _check_expected_rows(self, found: int) -> None:
-        """Warn, once per store, if a loaded node finds another number of rows than recorded.
+        """Warn, once per database, if a loaded node finds another number of rows than recorded.
 
-        The store is the source of truth: the read returns what it holds (ITL-1043).
+        The database is the source of truth: the read returns what it holds (ITL-1043).
 
         Args:
-            found: The rows the store holds under the node's run key.
+            found: The rows the database holds under the node's run key.
         """
         if self._expected_row_count is None or self._row_count_checked:
             return
@@ -1056,7 +1056,9 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         if found != self._expected_row_count and self._pipeline_database is not None:
             report_unexpected_row_count(
                 f"OperatorJobNode {self.label!r}",
-                describe_store_table(self._pipeline_database, self._stored_table_path),
+                describe_database_table(
+                    self._pipeline_database, self._stored_table_path
+                ),
                 self._expected_row_count,
                 found,
             )
@@ -1080,7 +1082,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         """Describe why this loaded node cannot execute an operator."""
         return RuntimeError(
             f"OperatorJobNode {self.label!r} was loaded by PipelineJob.load and "
-            "cannot compute; fill it from the store with run(load_only=True), read "
+            "cannot compute; fill it from the database with run(load_only=True), read "
             "its stored results with as_source(), or create a fresh PipelineJob to "
             "run the pipeline again."
         )
@@ -1196,11 +1198,11 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
                 record_id_column=self.HASH_COLUMN_NAME,
                 skip_duplicates=True,
             )
-        except StoreReadError:
+        except OrcapodDatabaseReadError:
             # The stored table could not be read: report the read failure itself.
             raise
         except Exception as exc:
-            raise StoreWriteError(
+            raise OrcapodDatabaseWriteError(
                 self._stored_table_path, node_label=self.label
             ) from exc
 
@@ -1344,7 +1346,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
 
         A loaded node names its run by the content hash its job file records. A file
         saved before Orcapod recorded it leaves the node only the hash the loaded job
-        computes; when the store holds no rows under that hash, an empty answer would
+        computes; when the database holds no rows under that hash, an empty answer would
         make stored results look dropped, so this raises instead (ITL-1043).
 
         Returns:
@@ -1353,7 +1355,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
 
         Raises:
             RuntimeError: If a loaded node's job file does not record its run's
-                content hash and the store holds no rows under the hash the loaded
+                content hash and the database holds no rows under the hash the loaded
                 job computes.
         """
         stored = self._read_current_context_records()
@@ -1364,7 +1366,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             and (records is None or records.num_rows == 0)
         ):
             found = (
-                "is absent from the attached store"
+                "is absent from the attached database"
                 if stored is None
                 else f"holds {stored.num_rows} stored rows, none of them under the "
                 f"content hash the loaded job computes ({self.content_hash().to_string()})"
@@ -1400,13 +1402,13 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             - Returns ``None`` if ``_cache_mode != CacheMode.REPLAY``
               (LOG/OFF modes may have stale historical records in the DB).
 
-        The store is the source of truth: a loaded node whose job file records its
+        The database is the source of truth: a loaded node whose job file records its
         run's content hash reads exactly as a node that runs does, so an absent table or
         a table with no rows under that hash is an empty result.
 
         Raises:
             RuntimeError: If a loaded REPLAY node's job file does not record its run's
-                content hash and the store holds no rows under the hash the loaded job
+                content hash and the database holds no rows under the hash the loaded job
                 computes: the node cannot name its run's rows, so an empty result would
                 make stored results look dropped.
         """
@@ -1521,7 +1523,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             ctx_obs.on_node_end(node_label, node_hash)
             return output
         except BaseException:
-            # A run that raised (its store write or an observer included) defines no rows.
+            # A run that raised (its database write or an observer included) defines no rows.
             self.clear_cache()
             raise
 
@@ -1694,7 +1696,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             # that reused the kept result computed nothing and is not stamped.
             self._update_modified_time()
         # The view names its rows as head() names them afterwards: computed by a live
-        # computation, plain rows when replayed from the store or kept by execute().
+        # computation, plain rows when replayed from the database or kept by execute().
         kept = self._cached_output_stream
         origin = "computed" if kept is None else head_of(kept.head(1), self).origin
         view = self._view_of_rows(table, origin)
@@ -1720,7 +1722,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         A node holds a run's output from the end of ``run()``, ``execute()`` or
         ``async_execute()`` until it is cleared or becomes stale (an input or the
         operator changed since). Before a run in this process it holds none, whatever
-        its cache mode and store hold (ITL-1095).
+        its cache mode and database hold (ITL-1095).
         """
         if self._cached_output_stream is None or self.is_stale:
             return None
@@ -1729,7 +1731,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         """Return an iterator over the (tag, data) rows of the node's current run.
 
-        Read-only: never computes and never reads the store. Yields the rows of the
+        Read-only: never computes and never reads the database. Yields the rows of the
         latest ``run()``, ``execute()`` or ``async_execute()``; nothing before a run in
         this process, after ``clear_cache()`` or once the node is stale, in every cache
         mode (ITL-1095). ``as_source()`` reads what the node stored (``LOG``).
@@ -1747,7 +1749,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
     ) -> "pa.Table":
         """Return the output of the node's current run as a PyArrow table.
 
-        Read-only: never computes and never reads the store. Returns the rows of the
+        Read-only: never computes and never reads the database. Returns the rows of the
         latest ``run()``, ``execute()`` or ``async_execute()``; before a run in this
         process, after ``clear_cache()`` or once the node is stale, a zero-row table
         with the node's columns, in every cache mode (ITL-1095).
@@ -1796,7 +1798,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         After a run (or ``execute``) the rows are the node's output in memory. Before a
         run in this process the node shows no rows and says so, pointing to ``run()``
         and to ``as_source()``, in every cache mode; once stale it says its inputs
-        changed (ITL-1095). The store is never read. See ``StreamBase.head``.
+        changed (ITL-1095). The database is never read. See ``StreamBase.head``.
         """
         check_head_size(n)
         config = ColumnConfig.handle_config(columns, all_info=all_info)

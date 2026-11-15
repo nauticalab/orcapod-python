@@ -24,7 +24,7 @@ ARRAYS = {
 
 
 def build_job(store_root: Path) -> Any:
-    """Build the fixture's pipeline on a Delta store at ``store_root``."""
+    """Build the fixture's pipeline on a Delta database at ``store_root``."""
     from orcapod import PipelineJob, function_pod
     from orcapod.databases import DeltaTableDatabase
     from orcapod.operators import DropDataColumns

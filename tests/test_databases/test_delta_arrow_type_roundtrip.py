@@ -1,4 +1,4 @@
-"""The Delta store gives back the Arrow types it was given (ITL-928, part B).
+"""The Delta database gives back the Arrow types it was given (ITL-928, part B).
 
 Delta Lake has no unsigned integer, nanosecond, second or millisecond timestamp, or
 zoned (other than UTC) timestamp type, and the Delta writer converts such columns. A
@@ -67,7 +67,7 @@ COLUMNS: dict[str, pa.Array[Any]] = {
 
 
 def _written_and_read(tmp_path: pathlib.Path, column: pa.Array[Any]) -> pa.Table:
-    """Write one three-row column to a Delta store and read it back from a new store object."""
+    """Write one three-row column to a Delta database and read it back from a new store object."""
     DeltaTableDatabase(tmp_path).add_records(
         ("t",),
         pa.table({"id": pa.array([b"a", b"b", b"c"], pa.large_binary()), "c": column}),
@@ -182,7 +182,7 @@ TAGS = {
 
 
 def _chained_job(root: pathlib.Path, table: pa.Table) -> PipelineJob:
-    """A job on a Delta store at ``root``: source -> ``double`` -> ``increment``."""
+    """A job on a Delta database at ``root``: source -> ``double`` -> ``increment``."""
     with PipelineJob(name="j", database=DeltaTableDatabase(root)) as job:
         src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
         increment.pod(double.pod(src, label="double"), label="increment")
@@ -195,7 +195,7 @@ def test_a_rerun_on_the_same_store_writes_no_pipeline_rows(
     name: str, mode: str, tmp_path: pathlib.Path
 ) -> None:
     """The ITL-990 case: source -> pod -> pod, run twice; a fresh job's run shows 3 rows
-    and the store holds 3 records per node (a node shows rows only after a run,
+    and the database holds 3 records per node (a node shows rows only after a run,
     ITL-1095)."""
     from orcapod.pipeline import AsyncPipelineOrchestrator
 
@@ -220,7 +220,7 @@ def test_a_rerun_on_the_same_store_writes_no_pipeline_rows(
 
 @pytest.mark.parametrize("name", list(TAGS))
 def test_a_fresh_job_reads_the_tag_type(name: str, tmp_path: pathlib.Path) -> None:
-    """A new job on the same store, run, reads the tag type through every read of a
+    """A new job on the same database, run, reads the tag type through every read of a
     node (a node shows rows only after a run, ITL-1095)."""
     table = _source_table(TAGS[name])
     _chained_job(tmp_path, table).run()
@@ -258,7 +258,7 @@ def test_a_loaded_job_reads_the_tag_type(name: str, tmp_path: pathlib.Path) -> N
     """A job saved after its run and loaded in a new process reads the tag type.
 
     The load runs in a child process, so nothing of the run (pods, sources, store
-    objects) can stand in for what the saved job and the store hold.
+    objects) can stand in for what the saved job and the database hold.
     """
     job = _chained_job(tmp_path / "store", _source_table(TAGS[name]))
     job.run()
@@ -319,7 +319,7 @@ def test_a_cached_source_reads_the_tag_type(name: str, tmp_path: pathlib.Path) -
     table = _source_table(TAGS[name])
 
     def cached() -> CachedSource:
-        """A ``CachedSource`` of the table, cached in a new Delta store object."""
+        """A ``CachedSource`` of the table, cached in a new Delta database object."""
         return CachedSource(
             ArrowTableSource(table, tag_columns=["k"], source_id="src"),
             cache_database=DeltaTableDatabase(tmp_path),
@@ -376,7 +376,7 @@ def test_nanoseconds_cannot_be_appended_to_a_table_written_before_the_fix(
     """A build before ITL-928 stored ``timestamp[ns]`` as ``timestamp[us]``.
 
     The integer form this build writes differs from that stored type, so the append
-    is refused (nothing is written) and the store must be rebuilt.
+    is refused (nothing is written) and the database must be rebuilt.
     """
     from deltalake import write_deltalake
 
@@ -432,7 +432,7 @@ def test_unsigned_rows_append_to_a_signed_column_without_a_recorded_type(
 ) -> None:
     """A column with no recorded type may hold an unsigned column a build before
     ITL-928 wrote (Delta's ``int32`` for ``uint32``): appending to it is not refused,
-    as before. Such a store must be rebuilt (developer, November 12, 2026)."""
+    as before. Such a database must be rebuilt (developer, November 12, 2026)."""
     store = DeltaTableDatabase(tmp_path)
     store.add_records(
         ("t",),

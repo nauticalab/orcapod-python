@@ -134,7 +134,7 @@ def _run(
 @pytest.mark.parametrize("store_name", list(_STORES))
 @pytest.mark.parametrize("orchestrator_name", list(_ORCHESTRATORS))
 class TestPandasColumnOrder:
-    """Column order of a frame in a pipeline, on every store and orchestrator."""
+    """Column order of a frame in a pipeline, on every database and orchestrator."""
 
     def test_frames_stored_with_their_order(
         self, store_name: str, orchestrator_name: str, tmp_path: Path
@@ -166,7 +166,7 @@ class TestPandasColumnOrder:
     def test_warm_cache_does_not_serve_another_order(
         self, store_name: str, orchestrator_name: str, tmp_path: Path
     ) -> None:
-        """One order per run on one store, so the second run meets a warm cache."""
+        """One order per run on one database, so the second run meets a warm cache."""
         store = _STORES[store_name](tmp_path)
         got: dict[str, str] = {}
         for key, reverse in (("fwd", False), ("rev", True)):
@@ -240,9 +240,9 @@ class TestPandasColumnOrder:
     ) -> None:
         """A frame that storage reads back in another form is still a cache hit.
 
-        The store holds the frame in the form storage restores (``object`` ints as
+        The database holds the frame in the form storage restores (``object`` ints as
         ``int64``, ``string[pyarrow]`` as ``string[python]``, ``attrs`` as JSON). A second
-        run on the same store must not compute the consumer again. The hash-level
+        run on the same database must not compute the consumer again. The hash-level
         guarantee, ``hash(read(write(v))) == hash(v)``, is tested in
         ``tests/test_hashing/test_pandas_value_identity.py``.
         """

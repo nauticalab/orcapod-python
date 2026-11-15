@@ -5,7 +5,7 @@ where it would fill the pipeline only based on what can be loaded ... and does n
 computation of any missing entries." A load-only run reads the sources, runs operators on
 the rows that reach them, and fills each function node with the results already stored for
 this run's inputs. No user function is called, no side effect is delivered, nothing is
-written to the store. Inputs without a stored result are skipped and counted.
+written to the database. Inputs without a stored result are skipped and counted.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def _build(
 
 
 def _snapshot(db: InMemoryArrowDatabase) -> dict[tuple[str, ...], int]:
-    """Every table of the store with its row count."""
+    """Every table of the database with its row count."""
     db.flush()
     counts: dict[tuple[str, ...], int] = {}
     for path in db.list_table_paths():
@@ -131,7 +131,7 @@ def test_a_load_only_run_over_a_full_store_equals_a_run_and_computes_nothing(
 def test_inputs_without_a_stored_result_are_skipped_and_counted(
     orchestrator: str,
 ) -> None:
-    """The store holds a 3-row run; the source now has 6 rows."""
+    """The database holds a 3-row run; the source now has 6 rows."""
     db = InMemoryArrowDatabase()
     _run(_build(ROWS[:3], db), orchestrator)
     CALLS.clear()

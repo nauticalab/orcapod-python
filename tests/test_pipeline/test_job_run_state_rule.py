@@ -4,7 +4,7 @@ Developer, November 14, 2026 ("let's align now"): ``job.run()`` and ``run_async(
 the same rule as ``node.run()``. A node that holds a current completed run (not stale; for
 a full run, not filled by a load-only run) is not run again: its rows feed the nodes after
 it. Never-run, stale and (for a full run) load-only-filled nodes run. So a second
-``job.run()`` of an unchanged job computes nothing, reads and writes nothing in the store
+``job.run()`` of an unchanged job computes nothing, reads and writes nothing in the database
 and delivers no side effect.
 """
 
@@ -18,7 +18,7 @@ import pytest
 
 from orcapod import PipelineJob, function_pod
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.errors import StoreWriteError
+from orcapod.errors import OrcapodDatabaseWriteError
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 from orcapod.side_effects import SideEffectPod, tap_pod
 from orcapod.sources import DictSource
@@ -100,12 +100,12 @@ def test_a_second_run_of_an_unchanged_job_does_nothing(orchestrator: str) -> Non
         mock.patch.object(
             InMemoryArrowDatabase,
             "get_all_records",
-            side_effect=AssertionError("store read"),
+            side_effect=AssertionError("database read"),
         ),
         mock.patch.object(
             InMemoryArrowDatabase,
             "add_records",
-            side_effect=AssertionError("store write"),
+            side_effect=AssertionError("database write"),
         ),
         mock.patch.object(
             DictSource, "iter_data", side_effect=AssertionError("source read")
@@ -214,7 +214,7 @@ def test_a_failed_commit_clears_only_the_nodes_that_ran(orchestrator: str) -> No
 
     with (
         mock.patch.object(InMemoryArrowDatabase, "flush", fail),
-        pytest.raises(StoreWriteError),
+        pytest.raises(OrcapodDatabaseWriteError),
     ):
         _run(job, orchestrator)
     assert job.nodes["summed"].as_table().num_rows == 0

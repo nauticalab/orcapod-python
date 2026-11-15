@@ -3,7 +3,7 @@
 The array format changed in v0.3 without a migration (ITL-888), and so did every Arrow-derived
 hash (starfix hash format 2, label ``arrow_v1``, ITL-910). v0.3 stores every table at a new
 layout (``pdb_v2``, ``rdb_v2``), with the data context of each row in ``__data_context``
-(ITL-944). The tables a v0.2 store holds are at the old layout: v0.3 does not refuse the
+(ITL-944). The tables a v0.2 database holds are at the old layout: v0.3 does not refuse the
 store and does not read those tables as results. It computes every input again into its own
 tables and leaves what v0.2 wrote byte-for-byte in place for a later migration (ITL-913,
 ITL-914).

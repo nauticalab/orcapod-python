@@ -14,8 +14,8 @@ Inputs carry one or two system-tag pairs (a source, or a join of two sources).
 
 An operator node also has one populated order on every path (ITL-1133): the row order of a job
 run (user tags, system tags, data, source info). A node run on its own (``node.run()`` over
-streams outside a job, without a store, in ``LOG`` and read back in ``REPLAY``) keeps and
-stores that order, so a store written by a job run and by a node run on its own holds one
+streams outside a job, without a database, in ``LOG`` and read back in ``REPLAY``) keeps and
+stores that order, so a database written by a job run and by a node run on its own holds one
 order and accepts both.
 """
 

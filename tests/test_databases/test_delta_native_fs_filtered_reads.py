@@ -1,12 +1,12 @@
-"""Filtered Delta reads on the native reader keep the store's read contract (ITL-892).
+"""Filtered Delta reads on the native reader keep the database's read contract (ITL-892).
 
 Orcapod scans local Delta tables through a native pyarrow filesystem (ITL-892). These tests
 pin how that reader combines with the read contract of ITL-884 and ITL-864, for every read
 method, including the filtered ones:
 
-- A stored table that cannot be read raises ``StoreReadError``, never "no rows".
+- A stored table that cannot be read raises ``OrcapodDatabaseReadError``, never "no rows".
 - A bad filter (an unknown column, a value that does not compare with the column) is the
-  caller's error: it is raised as itself, not as ``StoreReadError``, and the same error is
+  caller's error: it is raised as itself, not as ``OrcapodDatabaseReadError``, and the same error is
   raised before and after a flush.
 - A filtered read returns the stored rows plus the pending rows a flush would insert,
   exactly the rows the unfiltered read returns, filtered in memory.
@@ -23,7 +23,7 @@ import pyarrow.compute as pc
 import pytest
 
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import StoreError, StoreReadError
+from orcapod.errors import OrcapodDatabaseError, OrcapodDatabaseReadError
 
 PATH = ("table",)
 ID = DeltaTableDatabase.RECORD_ID_COLUMN
@@ -117,7 +117,7 @@ def test_filtered_read_equals_the_unfiltered_read_filtered_in_memory(
 
 
 def _damage(store: Path, how: str) -> None:
-    """Make every data file of the store's tables unreadable.
+    """Make every data file of the database's tables unreadable.
 
     Args:
         store: Root directory of the ``DeltaTableDatabase``.
@@ -138,7 +138,7 @@ def _damage(store: Path, how: str) -> None:
 def test_filtered_read_of_an_unreadable_table_raises_store_read_error(
     tmp_path: Path, method: str, pending: bool, how: str
 ) -> None:
-    """Every read of a table whose data files cannot be read raises ``StoreReadError``."""
+    """Every read of a table whose data files cannot be read raises ``OrcapodDatabaseReadError``."""
     writer = DeltaTableDatabase(tmp_path)
     writer.add_records(PATH, _rows(["a", "c"], [1, 3], [1, 0]), flush=True)
     _damage(tmp_path, how)
@@ -151,7 +151,7 @@ def test_filtered_read_of_an_unreadable_table_raises_store_read_error(
     else:
         read = FILTERED[method][0]
 
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         _ = read(db)
     assert info.value.__cause__ is not None
 
@@ -166,7 +166,7 @@ BAD_FILTERS = {
 def test_bad_filter_raises_its_own_error_before_and_after_flush(
     tmp_path: Path, bad: str
 ) -> None:
-    """A bad filter is the caller's error: never ``StoreReadError``, the same at every stage."""
+    """A bad filter is the caller's error: never ``OrcapodDatabaseReadError``, the same at every stage."""
     db = _stored_and_pending(tmp_path)
     column_values = BAD_FILTERS[bad]
 
@@ -178,6 +178,6 @@ def test_bad_filter_raises_its_own_error_before_and_after_flush(
         db.flush()
 
     for when, error in errors.items():
-        assert not isinstance(error, StoreError), f"{when}: {error!r}"
+        assert not isinstance(error, OrcapodDatabaseError), f"{when}: {error!r}"
         assert isinstance(error, pa.ArrowException), f"{when}: {error!r}"
     assert type(errors["before flush"]) is type(errors["after flush"])

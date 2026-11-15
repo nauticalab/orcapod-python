@@ -1,4 +1,4 @@
-"""A process that read a local Delta store must exit cleanly (ITL-892).
+"""A process that read a local Delta database must exit cleanly (ITL-892).
 
 deltalake's default pyarrow reader goes through a filesystem implemented in Python. Arrow
 finishes tearing down a scan on a thread-pool worker after the scan returns. If that worker
@@ -99,7 +99,7 @@ def _run_once(script: str, store: Path) -> str | None:
 def test_process_exits_after_reading_a_local_delta_store(
     tmp_path: Path, script: str
 ) -> None:
-    """Every one of ``RUNS`` fresh interpreters reads a local Delta store and exits cleanly.
+    """Every one of ``RUNS`` fresh interpreters reads a local Delta database and exits cleanly.
 
     Each run must finish within ``DEADLINE_S`` with exit code 0. A run that misses the
     deadline or aborts is the ITL-892 exit hang.
@@ -111,6 +111,6 @@ def test_process_exits_after_reading_a_local_delta_store(
         ]
     assert not failures, (
         f"{len(failures)} of {RUNS} processes did not exit cleanly after reading a "
-        f"local Delta store (ITL-892: Arrow thread-pool teardown at interpreter exit). "
+        f"local Delta database (ITL-892: Arrow thread-pool teardown at interpreter exit). "
         f"First failures: {failures[:3]}"
     )

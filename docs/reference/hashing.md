@@ -646,7 +646,7 @@ result. Within one dict or set the two compare equal, so they cannot both be pre
 
 **Arrow tables are hashed exactly as stored.** `StarfixArrowHasher` never sorts list
 contents. A `list<struct<key, value>>` column that arrives already in Arrow form (an
-`ArrowTableSource`, a Delta table, rows read back from a store) is read by Python as a
+`ArrowTableSource`, a Delta table, rows read back from a database) is read by Python as a
 `dict`, but at the Arrow level it is an ordered list and its stored order is part of its
 hash. A `list[T]` value is never sorted: its order is part of its identity. (Tables written
 by `0.2.0`, which stored dicts in insertion order, are not read by v0.3 at all.)
@@ -1339,7 +1339,7 @@ result tables. Either raises `SideEffectLogDataContextError`, naming the tables,
 doing anything when it finds a table at an older layout anywhere under its name, or
 completions of another data context in its current tables. Because every older table under
 the name counts, an unrelated pod of the same name in the same job raises the error too;
-the error names every table so that you can tell. When the store cannot list its tables,
+the error names every table so that you can tell. When the database cannot list its tables,
 the node logs one warning saying that it could not look for older completions, and
 proceeds.
 
@@ -1467,7 +1467,7 @@ column back, so the value is refused (see "What is refused" below).
 
 **The hash is strict.** Everything about a value that can be changed is part of its
 identity (developer, November 11 and 12, 2026), with one exception: **a property storage
-does not restore never counts**, so that a value read back from a store hashes exactly like
+does not restore never counts**, so that a value read back from a database hashes exactly like
 the value that was written. `PANDAS_IDENTITY_PROPERTIES` in
 `orcapod/hashing/pandas_value_hash.py` is the one list in code of every property below.
 

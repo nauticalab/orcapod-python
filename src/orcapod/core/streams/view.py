@@ -51,7 +51,7 @@ class ViewStatus(str, Enum):
             the rows are the stored results of its inputs; inputs without one were
             skipped, so the rows may be fewer than a full run gives (ITL-1095).
         NOT_COMPUTED: Nothing is computed, or what was computed is out of date.
-        NOTHING_STORED: A stored view (``node.as_source()``) whose store holds no rows
+        NOTHING_STORED: A stored view (``node.as_source()``) whose database holds no rows
             for its node yet.
         UNAVAILABLE: No rows can exist here: a pipeline blueprint, an input slot with no
             source bound, or a source that is not available.
@@ -191,7 +191,7 @@ class StreamView:
         total_is_estimate: ``True`` when ``total_rows`` is a recorded estimate.
         origin: What the rows are: ``"held"`` (in memory), ``"read"`` (a bounded read
             of a table), ``"computed"`` (cached from an earlier computation),
-            ``"stored"`` (a job node's store) or ``"delivered"`` (the rows a side-effect
+            ``"stored"`` (a job node's database) or ``"delivered"`` (the rows a side-effect
             stream passed on while delivering).
         note: For a view without rows, the explanation shown instead of the default;
             for a view with rows, a remark shown after the row count.

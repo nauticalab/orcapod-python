@@ -18,13 +18,13 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from orcapod.errors import StoreError, StoreWriteError
+from orcapod.errors import OrcapodDatabaseError, OrcapodDatabaseWriteError
 from orcapod.pipeline.run_summary import (
     RunCountingObserver,
     RunSummary,
     run_node_summaries,
 )
-from orcapod.utils.store_errors import flush_best_effort
+from orcapod.utils.database_errors import flush_best_effort
 
 if TYPE_CHECKING:
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
@@ -126,8 +126,8 @@ def refuse_unloadable_inputs(node: Any) -> None:
         )
 
 
-def _stores(nodes: list[Any]) -> list[ArrowDatabaseProtocol]:
-    """The distinct stores the given nodes write to: pipeline and result databases."""
+def _databases(nodes: list[Any]) -> list[ArrowDatabaseProtocol]:
+    """The distinct databases the given nodes write to: pipeline and result databases."""
     found: list[ArrowDatabaseProtocol] = []
     for node in nodes:
         pipeline_database = getattr(node, "_pipeline_database", None)
@@ -354,25 +354,25 @@ def plan_run(graph: Any, *, load_only: bool, outside: Sequence[Any] = ()) -> Run
     return RunPlan(dag, held_rows, to_run, held_counts)
 
 
-def commit_run(stores: Sequence[ArrowDatabaseProtocol], ran: Sequence[Any]) -> None:
+def commit_run(databases: Sequence[ArrowDatabaseProtocol], ran: Sequence[Any]) -> None:
     """Commit a run's writes at its end; a failed commit clears the nodes that ran.
 
     A run whose commit failed did not complete, so no node it ran holds its rows
     (ITL-1095); nodes it held keep the rows of their earlier run.
 
     Raises:
-        StoreError: The commit's own store error.
-        StoreWriteError: If committing failed for another reason.
+        OrcapodDatabaseError: The commit's own database error.
+        OrcapodDatabaseWriteError: If committing failed for another reason.
     """
-    for store in stores:
+    for database in databases:
         try:
-            store.flush()
-        except StoreError:
+            database.flush()
+        except OrcapodDatabaseError:
             clear_run_rows(ran)
             raise
         except Exception as exc:
             clear_run_rows(ran)
-            raise StoreWriteError(store.base_path, flush=True) from exc
+            raise OrcapodDatabaseWriteError(database.base_path, flush=True) from exc
         except BaseException:
             # An interruption during the commit leaves its outcome unknown too.
             clear_run_rows(ran)
@@ -388,7 +388,7 @@ def run_with_dependencies(
     one ``job.run()`` makes over the job: a dependency that holds a current run is not
     run and its rows feed the nodes after it, a stream outside the job is read, every
     other node runs once, in dependency order, on the ``SyncPipelineOrchestrator``
-    (error policy ``"continue"``). The run ends with a commit of every store it wrote
+    (error policy ``"continue"``). The run ends with a commit of every database it wrote
     to, also, best-effort, when it fails; a load-only run commits nothing (it writes
     nothing, and pending writes of others stay pending). A run that raises leaves no
     node it ran holding rows.
@@ -403,7 +403,7 @@ def run_with_dependencies(
         The run's summary, one entry per function node of the graph.
 
     Raises:
-        StoreWriteError: If committing the run's writes failed.
+        OrcapodDatabaseWriteError: If committing the run's writes failed.
         ValueError: For a load-only run, if a node it would run reads an input that
             computes or delivers when read (``refuse_unloadable_inputs``); nothing has run then.
     """
@@ -432,7 +432,7 @@ def run_with_dependencies(
 
     visit(target)
     plan = plan_run(graph, load_only=load_only, outside=outside)
-    stores = _stores(plan.to_run)
+    databases = _databases(plan.to_run)
     counter = RunCountingObserver()
     try:
         _ = SyncPipelineOrchestrator().run(
@@ -442,13 +442,13 @@ def run_with_dependencies(
         if isinstance(run_error, Exception) and not load_only:
             # Commit the writes that succeeded before the failure, as job.run() does;
             # a load-only run writes nothing, so it commits nothing (ITL-1095).
-            flush_best_effort(run_error, *stores)
+            flush_best_effort(run_error, *databases)
         # A run that raised leaves no node it ran holding rows: whether their writes
         # were committed is unknown.
         clear_run_rows(plan.to_run)
         raise
     if not load_only:
-        commit_run(stores, plan.to_run)
+        commit_run(databases, plan.to_run)
     return RunSummary(
         _job_name(target),
         run_node_summaries(graph, counter, held=plan.held_counts),

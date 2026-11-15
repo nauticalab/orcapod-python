@@ -21,7 +21,7 @@ their extension identity instead of as their storage type.
 Stored rows: under the default `table_scope`, table paths do not move (developer, November
 11, 2026: only a change of a table's schema goes into its path; a value-only change stays in
 the same table), so a v0.3 node writes into the same tables as a v0.2 store. The first decision
-that day was to refuse such a store (`StoreHashLabelError`); the developer reversed it in the
+that day was to refuse such a database (`StoreHashLabelError`); the developer reversed it in the
 ITL-938 design session: v0.3 does not refuse a v0.2 store. It ignores rows hashed under
 `arrow_v0.1`, computes every input again under `arrow_v0.2`, and leaves the old rows in place,
 unchanged and distinguishable, for a later migration (ITL-913, ITL-914).
@@ -50,7 +50,7 @@ later discussion of what side-effect logs hold.
 
 Known limits, follow-ups:
 - The warning is logged once per reader object (node, result cache, cached source) and
-  table, not once per process: stored paths are relative to the store, so a process-wide
+  table, not once per process: stored paths are relative to the database, so a process-wide
   record of reported tables would silence a second store with the same layout.
 - A global hash-version identifier stored with every row is being designed (not decided); it
   would also give operator-node and cached-source rows a label.
@@ -61,7 +61,7 @@ Known limits, follow-ups:
 - The node content hash does not separate the generations: a source with an explicit
   `source_id` gives the same node content hash under both labels.
 - A `DeltaTableDatabase` object keeps the table version it read first, so a job object that
-  read a table before a run does not see the rows the run added until the store is reopened
+  read a table before a run does not see the rows the run added until the database is reopened
   (not specific to hash labels; seen when re-reading a node of the same job after an
   incremental run).
 - Tables placed under a content hash (`table_scope="content_hash"`, `CachedSource` without an

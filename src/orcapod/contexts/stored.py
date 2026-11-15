@@ -23,7 +23,7 @@ the current layouts (``CURRENT_LAYOUTS``) was written before v0.3 (ITL-954).
 
 Example:
     To list the data contexts a stored table holds, call
-    ``stored_data_contexts(store, record_path)`` (from ``orcapod.contexts``); it
+    ``stored_data_contexts(database, record_path)`` (from ``orcapod.contexts``); it
     returns, for example, ``{"std:v1:default": 3}``.
 """
 
@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, Protocol, cast
 from orcapod.errors import (
     InputValidationError,
     SideEffectLogDataContextError,
-    StoreContentWarning,
+    OrcapodDatabaseContentWarning,
     TableListingNotSupportedError,
 )
 from orcapod.system_constants import (
@@ -77,7 +77,7 @@ CURRENT_LAYOUTS: frozenset[str] = frozenset(
 
 # Last path components that mark a table as written before v0.3 wherever it is found:
 # the older layout names, and the beginnings of the hash components that ended a path
-# when a table had no layout component (also as a connector store spells them).
+# when a table had no layout component (also as a connector database spells them).
 _OLD_LAYOUTS: frozenset[str] = frozenset(
     OLD_PIPELINE_DB_SCHEMA_VERSIONS
     + OLD_RESULT_DB_SCHEMA_VERSIONS
@@ -174,7 +174,7 @@ def report_rows_of_other_data_contexts(
     """Warn that a read left out stored rows written under another data context.
 
     Args:
-        record_path: Path of the stored table from the root of the store.
+        record_path: Path of the stored table from the root of the database.
         skipped: Number of rows of the table left out of the read.
     """
     logger.warning(
@@ -187,62 +187,62 @@ def report_rows_of_other_data_contexts(
     )
 
 
-class _DescribedStore(Protocol):
-    """The part of ``ArrowDatabaseProtocol`` that names a store (no import cycle)."""
+class _DescribedDatabase(Protocol):
+    """The part of ``ArrowDatabaseProtocol`` that names a database (no import cycle)."""
 
     @property
     def base_path(self) -> tuple[str, ...]:
-        """Path of this store's view from the root of the underlying store."""
+        """Path of this database's view from the root of the underlying database."""
         ...
 
     def to_config(self) -> dict[str, Any]:
-        """Return the store's configuration, with its location when it has one."""
+        """Return the database's configuration, with its location when it has one."""
         ...
 
 
-def describe_store_table(
-    database: _DescribedStore, record_path: tuple[str, ...]
+def describe_database_table(
+    database: _DescribedDatabase, record_path: tuple[str, ...]
 ) -> str:
-    """Name a stored table for a message: the store's location and the table's path.
+    """Name a stored table for a message: the database's location and the table's path.
 
     Args:
-        database: The store, or a view of it.
+        database: The database, or a view of it.
         record_path: Path of the table relative to ``database``.
 
     Returns:
-        For example ``"store at '/data/store' (table 'job/node/...')"``.
+        For example ``"database at '/data/store' (table 'job/node/...')"``.
     """
     store_config = database.to_config()
     location = store_config.get("root_uri")
-    store = (
-        f"store at {location!r}"
+    description = (
+        f"database at {location!r}"
         if location
-        else f"{store_config.get('type', 'attached')} store"
+        else f"{store_config.get('type', 'attached')} database"
     )
     table = "/".join(database.base_path + record_path)
-    return f"{store} (table {table!r})"
+    return f"{description} (table {table!r})"
 
 
 def report_unexpected_row_count(
     node: str, location: str, expected: int, found: int
 ) -> None:
-    """Warn that a loaded node's store holds another number of rows than its run's.
+    """Warn that a loaded node's database holds another number of rows than its run's.
 
-    The store is the source of truth: the read returns what it holds. The warning says
+    The database is the source of truth: the read returns what it holds. The warning says
     that it differs from what the job file recorded (ITL-1043).
 
     Args:
         node: The node, as messages name it (``"FunctionJobNode 'dbl'"``).
-        location: The store and table, from ``describe_store_table``.
+        location: The database and table, from ``describe_database_table``.
         expected: The rows the job file records for the node's run.
-        found: The rows the store holds under the node's run key.
+        found: The rows the database holds under the node's run key.
     """
     warnings.warn(
-        StoreContentWarning(
+        OrcapodDatabaseContentWarning(
             f"{node}: the job file records {expected} "
             f"{'row' if expected == 1 else 'rows'} for its run, but the {location} "
-            f"holds {found} under the run's key. The read returns what the store "
-            "holds; the store may not be the one the run wrote, or it may have "
+            f"holds {found} under the run's key. The read returns what the database "
+            "holds; the database may not be the one the run wrote, or it may have "
             "changed since."
         ),
         stacklevel=3,
@@ -253,7 +253,7 @@ def report_old_layout_rows(record_path: tuple[str, ...], rows: int) -> None:
     """Warn that a table written at an older table layout was found and is not used.
 
     Args:
-        record_path: Path of the old-layout table from the root of the store.
+        record_path: Path of the old-layout table from the root of the database.
         rows: Number of rows the table holds.
     """
     logger.warning(
@@ -273,8 +273,8 @@ def report_tables_under_name(
     """Warn that tables written before v0.3 were found under a function's name.
 
     Args:
-        name_path: Path, from the root of the store, up to the function's name.
-        record_paths: Paths of the tables found, from the root of the store.
+        name_path: Path, from the root of the database, up to the function's name.
+        record_paths: Paths of the tables found, from the root of the database.
     """
     logger.warning(
         "Found %d %s written by an earlier version of Orcapod under %r (older table "
@@ -290,19 +290,19 @@ def report_tables_under_name(
 
 
 def report_unclaimed_tables(
-    store_path: tuple[str, ...], record_paths: Collection[tuple[str, ...]]
+    database_path: tuple[str, ...], record_paths: Collection[tuple[str, ...]]
 ) -> None:
     """Warn, once for a job, about the pre-v0.3 tables none of its nodes reports.
 
     Args:
-        store_path: Path of the job's tables from the root of the store.
-        record_paths: Paths of the tables found, from the root of the store.
+        database_path: Path of the job's tables from the root of the database.
+        record_paths: Paths of the tables found, from the root of the database.
     """
     logger.warning(
-        "Store %r holds %d more %s written by an earlier version of Orcapod "
+        "Database %r holds %d more %s written by an earlier version of Orcapod "
         "(operator caches, cached sources, or nodes not in this job): %s. They are "
         "not used and are left unchanged; they can be migrated later.",
-        "/".join(store_path),
+        "/".join(database_path),
         len(record_paths),
         "table" if len(record_paths) == 1 else "tables",
         _spelled_out(record_paths),
@@ -315,14 +315,14 @@ def report_unlisted_side_effect_tables(
     """Warn that a side-effecting node could not look for completions logged before v0.3.
 
     Args:
-        name_paths: Paths, from the root of the store, up to the node's function or
+        name_paths: Paths, from the root of the database, up to the node's function or
             pod name: where the tables would have been looked for.
-        reason: Why the store could not list its tables.
+        reason: Why the database could not list its tables.
     """
     logger.warning(
-        "The store cannot list its tables (%s), so the node that performs side "
+        "The database cannot list its tables (%s), so the node that performs side "
         "effects could not check for completions logged before Orcapod v0.3 under "
-        "%s. If the store holds such tables, every side effect is delivered again.",
+        "%s. If the database holds such tables, every side effect is delivered again.",
         reason,
         " and ".join(repr("/".join(path)) for path in name_paths),
     )
@@ -341,7 +341,7 @@ class _RecordStore(Protocol):
 
     @property
     def base_path(self) -> tuple[str, ...]:
-        """Path of this store's view from the root of the underlying store."""
+        """Path of this database's view from the root of the underlying database."""
         ...
 
     def table_exists(self, record_path: tuple[str, ...]) -> bool:
@@ -351,7 +351,7 @@ class _RecordStore(Protocol):
             record_path: Path of the table, relative to ``base_path``.
 
         Returns:
-            True if the store holds a table at that path.
+            True if the database holds a table at that path.
         """
         ...
 
@@ -375,14 +375,14 @@ class StaleTable(NamedTuple):
     """Stored rows a node will not use: an old-layout table, or rows of another data context.
 
     Attributes:
-        record_path: Path of the table from the root of the store.
+        record_path: Path of the table from the root of the database.
         data_context: Key of the data context that wrote the rows.
         rows: Number of such rows in the table; ``None`` for a table found by
-            listing the store, which is not read.
+            listing the database, which is not read.
         old_layout: True for a table at an older layout, False for rows of another
             data context in a table at the current layout.
-        found_under: For a table found by listing the store, the path (from the
-            root of the store) under which the tables were listed; ``None`` for a
+        found_under: For a table found by listing the database, the path (from the
+            root of the database) under which the tables were listed; ``None`` for a
             table found at a computed path.
     """
 
@@ -397,9 +397,9 @@ class UnlistedTables(NamedTuple):
     """A place where tables written before v0.3 could not be looked for.
 
     Attributes:
-        name_path: Path, from the root of the store, under which the tables would
+        name_path: Path, from the root of the database, under which the tables would
             have been listed.
-        reason: Why the store could not list its tables.
+        reason: Why the database could not list its tables.
     """
 
     name_path: tuple[str, ...]
@@ -412,7 +412,7 @@ class StaleTables:
 
     Attributes:
         tables: The tables found, each once.
-        unlisted: The places that could not be searched because the store cannot
+        unlisted: The places that could not be searched because the database cannot
             list its tables.
     """
 
@@ -445,7 +445,7 @@ def tables_written_before_v03(
     every table under it belongs to a node of that name.
 
     Args:
-        database: The store to list.
+        database: The database to list.
         name_path: Leading path components, relative to the database's ``base_path``.
 
     Returns:
@@ -453,7 +453,7 @@ def tables_written_before_v03(
         ``name_path`` whose last component is not a current layout, sorted.
 
     Raises:
-        TableListingNotSupportedError: If the store cannot list its tables.
+        TableListingNotSupportedError: If the database cannot list its tables.
     """
     return [
         path
@@ -465,20 +465,20 @@ def tables_written_before_v03(
 def marked_tables_written_before_v03(database: object) -> list[tuple[str, ...]]:
     """List the tables of a whole database view that carry a mark of an older version.
 
-    Unlike under the name of one function, a store holds other tables beside node
+    Unlike under the name of one function, a database holds other tables beside node
     tables (observer logs, tables of the user), so here a table counts only when its
     last path component is an older layout (``pdb_v1``, ``rdb_v1``, ``tdb_v1``) or
     the hash component that ended a path before tables had a layout component
     (``schema:...``, ``instance:...``, ``node:...``).
 
     Args:
-        database: The store to list, positioned at the tables of one job.
+        database: The database to list, positioned at the tables of one job.
 
     Returns:
         The paths of those tables, relative to the database's ``base_path``, sorted.
 
     Raises:
-        TableListingNotSupportedError: If the store cannot list its tables.
+        TableListingNotSupportedError: If the database cannot list its tables.
     """
     return [
         path
@@ -497,7 +497,7 @@ def unclaimed_tables_written_before_v03(
     that survives a change of hashes, and tables of nodes the job no longer has.
 
     Args:
-        database: The store, positioned at the tables of one job.
+        database: The database, positioned at the tables of one job.
         claimed: The name paths, relative to ``database``, that nodes of the job
             account for themselves.
 
@@ -506,7 +506,7 @@ def unclaimed_tables_written_before_v03(
         ``marked_tables_written_before_v03`` finds outside every claimed name path.
 
     Raises:
-        TableListingNotSupportedError: If the store cannot list its tables.
+        TableListingNotSupportedError: If the database cannot list its tables.
     """
     return [
         path
@@ -518,10 +518,10 @@ def unclaimed_tables_written_before_v03(
 def _list_table_paths(
     database: object, prefix: tuple[str, ...]
 ) -> list[tuple[str, ...]]:
-    """Call ``list_table_paths`` of a store that may not have the method.
+    """Call ``list_table_paths`` of a database that may not have the method.
 
     Raises:
-        TableListingNotSupportedError: If the store has no such method or cannot
+        TableListingNotSupportedError: If the database has no such method or cannot
             list its tables.
     """
     list_table_paths = getattr(database, "list_table_paths", None)
@@ -544,12 +544,12 @@ def find_stale_tables(
 
     - at ``old_paths``, where an earlier version stored the table if no hash in the
       path changed since (the rows are counted, which reads the table);
-    - under ``name_path``, by listing the store, for tables of an earlier version
+    - under ``name_path``, by listing the database, for tables of an earlier version
       wherever their hashes put them (ITL-954; not read, so not counted);
     - in the current table, for rows of another data context.
 
     Args:
-        database: The store the paths belong to.
+        database: The database the paths belong to.
         old_paths: Paths at which an earlier version of Orcapod stored this table.
         current: The table's current path and the current data context key, to also
             look for rows of another data context in the current table (this reads
@@ -560,7 +560,7 @@ def find_stale_tables(
     Returns:
         The old-layout tables found (those at ``old_paths`` first), then one entry
         per other data context found in the current table (in key order); and
-        ``name_path`` under ``unlisted`` if the store could not list its tables.
+        ``name_path`` under ``unlisted`` if the database could not list its tables.
     """
     found = StaleTables()
     for path in old_paths:
@@ -617,7 +617,7 @@ def account_for_stale_tables(
       context. It fails before doing anything. Every old-layout table under the
       node's name counts, so a table of another function or pod with the same name
       in the job, or of another node of the same function, fails it too: the error
-      names the tables. Where the store cannot list its tables, the node warns and
+      names the tables. Where the database cannot list its tables, the node warns and
       proceeds (developer, November 11, 2026).
 
     Args:
@@ -665,7 +665,7 @@ def stored_data_contexts(
     before Orcapod v0.3; all its rows are counted under ``std:v0.1:default``.
 
     Args:
-        database: The store, positioned so that ``record_path`` names the table.
+        database: The database, positioned so that ``record_path`` names the table.
         record_path: Path of the stored table, including its layout component.
 
     Returns:

@@ -363,14 +363,14 @@ class SourceCheckFailedWarning(UserWarning):
     """
 
 
-class StoreContentWarning(UserWarning):
-    """A loaded node's store holds another number of rows than the saved run recorded.
+class OrcapodDatabaseContentWarning(UserWarning):
+    """A loaded node's database holds another number of rows than the saved run recorded.
 
     A job file may record, in its optional ``run.expected_rows`` section, how many rows
-    the store held under each node's run key when the job was saved. Reading a loaded
-    node always returns what the attached store holds, which is the source of truth;
+    the database held under each node's run key when the job was saved. Reading a loaded
+    node always returns what the attached database holds, which is the source of truth;
     when that differs from the recorded number, this warning is issued once per node.
-    The store may not be the one the run wrote, or it may have changed since. A file
+    The database may not be the one the run wrote, or it may have changed since. A file
     without the section, or without a node's entry, is not checked.
     """
 
@@ -488,22 +488,22 @@ class EphemeralResultMissingError(Exception):
 
 
 class TableListingNotSupportedError(NotImplementedError):
-    """Raised by ``list_table_paths`` when a store cannot enumerate its tables.
+    """Raised by ``list_table_paths`` when a database cannot enumerate its tables.
 
-    Some stores can read and write a table at a known path but have no way to list
-    the tables they hold (for example a Delta store on cloud storage for which no
+    Some databases can read and write a table at a known path but have no way to list
+    the tables they hold (for example a Delta database on cloud storage for which no
     file system package is installed). Orcapod then cannot look for tables written
     by an earlier version; it says so in a warning and carries on.
     """
 
 
-class StoreError(RuntimeError):
-    """Base of the errors raised when the store could not be read or written.
+class OrcapodDatabaseError(RuntimeError):
+    """Base of the errors raised when the database could not be read or written.
 
-    A store error always fails the run, whatever the orchestrator's
+    A database error always fails the run, whatever the orchestrator's
     ``error_policy``: ``error_policy="continue"`` skips rows whose *function*
     raised, never rows whose stored data could not be read or written. Catch
-    ``StoreError`` to handle both ``StoreReadError`` and ``StoreWriteError``.
+    ``OrcapodDatabaseError`` to handle both ``OrcapodDatabaseReadError`` and ``OrcapodDatabaseWriteError``.
 
     The backend's own exception is chained as ``__cause__``.
 
@@ -568,13 +568,13 @@ class StoreError(RuntimeError):
             self.tag = dict(tag)
 
 
-class StoreWriteError(StoreError):
-    """Raised when a node's results or records could not be written to the store.
+class OrcapodDatabaseWriteError(OrcapodDatabaseError):
+    """Raised when a node's results or records could not be written to the database.
 
     The run stops at the first failed write. Rows stored before the failure are
     kept, and re-running the job does not recompute stored function results.
     A write that fails because the stored table cannot be read raises
-    ``StoreReadError`` instead.
+    ``OrcapodDatabaseReadError`` instead.
 
     Attributes:
         record_path: Path of the table the write was for, relative to the
@@ -585,7 +585,7 @@ class StoreWriteError(StoreError):
         tag: Tag values of the row being stored, or ``None`` when the write
             covered many rows (an operator's output), no row, or was a flush.
         flush: ``True`` when committing pending writes failed. Every view of a
-            store shares one set of pending writes, so the write that failed may
+            database shares one set of pending writes, so the write that failed may
             belong to an earlier row or another table than the one being stored.
     """
 
@@ -643,17 +643,18 @@ class StoreWriteError(StoreError):
         if self.flush:
             node = f" for node {self.node_label!r}" if self.node_label else ""
             return (
-                f"Could not commit pending writes to the store{node} "
-                f"(store {'/'.join(self.record_path)!r}){reason}. The failing write "
-                "may belong to an earlier row or another table of this store. " + retry
+                f"Could not commit pending writes to the database{node} "
+                f"(database {'/'.join(self.record_path)!r}){reason}. The failing write "
+                "may belong to an earlier row or another table of this database. "
+                + retry
             )
         return (
-            f"Could not write to the store for {where}{row} "
+            f"Could not write to the database for {where}{row} "
             f"(table {'/'.join(self.record_path)!r}){reason}. " + retry
         )
 
 
-class StoreReadError(StoreError):
+class OrcapodDatabaseReadError(OrcapodDatabaseError):
     """Raised when a stored table exists but could not be read.
 
     A table that does not exist reads as empty. A table that exists but cannot be
@@ -696,7 +697,7 @@ class StoreReadError(StoreError):
         )
 
 
-class SideEffectLogDataContextError(StoreError):
+class SideEffectLogDataContextError(OrcapodDatabaseError):
     """Raised when a side-effecting node finds completions logged under another data context.
 
     A node whose run is an external action finds what it already did by keys hashed
@@ -717,14 +718,14 @@ class SideEffectLogDataContextError(StoreError):
     with the same name in the same job, or of another node of the same function,
     therefore raises this error too; ``record_paths`` names every table found.
 
-    A fresh store is not a safe way around this error: it holds no completions, so on
-    it the node performs every side effect again. Run the node on a fresh store only
+    A fresh database is not a safe way around this error: it holds no completions, so on
+    it the node performs every side effect again. Run the node on a fresh database only
     when a repeated delivery is acceptable; otherwise keep using the Orcapod version
     that wrote the tables. Migrating stored rows to the current data context is
     planned.
 
     Attributes:
-        record_paths: Paths, from the root of the store, of the tables holding such
+        record_paths: Paths, from the root of the database, of the tables holding such
             completions.
         record_path: The first of ``record_paths``.
         found_context: Data context key of the completions that do not match.
@@ -768,7 +769,7 @@ class SideEffectLogDataContextError(StoreError):
             "current inputs, so running the node would perform every side effect "
             "again; nothing was delivered or written. Keep using the Orcapod "
             "version that wrote these tables; they are left in place and can be "
-            "migrated to the current data context later. A fresh store holds no "
+            "migrated to the current data context later. A fresh database holds no "
             "completions, so on it the node performs every side effect again: use "
             "one only when a repeated delivery is acceptable."
         )

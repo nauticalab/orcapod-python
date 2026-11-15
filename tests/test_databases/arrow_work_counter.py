@@ -1,6 +1,6 @@
 """A database wrapper that counts the Arrow memory its calls allocate (ITL-919).
 
-The scaling tests use the bytes a store's calls allocate from the Arrow memory pool as a
+The scaling tests use the bytes a database's calls allocate from the Arrow memory pool as a
 deterministic measure of the work those calls do: a call that filters, copies or
 concatenates the rows already stored allocates in proportion to them, while a call that
 touches only the rows it reads or writes does not. Unlike wall-clock time, the count does

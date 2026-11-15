@@ -30,7 +30,7 @@ On top of the v0.3 hash step, hashes move only for values not already
 in canonical order (two golden entries, `pipeline:index_pick.index` row data hashes); see
 the `0.3.0` changelog. This storage order is a separate layer from the semantic hasher's
 ordering of its hash input (ITL-942), which sorts by canonical JSON text and stores nothing. Regressions: `tests/test_hashing/test_dict_order_hash.py` (including a
-Delta store written by `0.2.0`, which v0.3 does not read) and `tests/test_hashing/test_set_order_hash.py`. Open: a
+Delta database written by `0.2.0`, which v0.3 does not read) and `tests/test_hashing/test_set_order_hash.py`. Open: a
 key/value list that arrives already in Arrow form keeps its stored order and hash, by the
 same ruling; dicts inside dataclass or pydantic objects keep their own order in memory
 (their stored and hashed form is canonical). A fresh user-class instance iterates its

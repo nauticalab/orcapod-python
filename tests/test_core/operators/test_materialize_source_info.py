@@ -645,7 +645,7 @@ PRE_FIX_RECORD_IDS = frozenset(
 
 
 class TestStoreWrittenBeforeFix:
-    """What a user sees when a store written by pre-fix ``main`` is re-run.
+    """What a user sees when a database written by pre-fix ``main`` is re-run.
 
     Operator-node tables written by ``main`` from c398e7d4 (ITL-539) up to the fix
     hold row 0's source-info tokens on every row. The fixed code gives the corrected

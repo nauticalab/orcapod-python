@@ -6,7 +6,7 @@ writer converts the first kinds (unsigned to the signed type of the same width, 
 fails for a value above the signed maximum; every timestamp to microseconds, dropping
 nanosecond digits; a zone to UTC) and cannot store the others at all.
 
-A Delta store must give back the type it was given: a tag read back with another type
+A Delta database must give back the type it was given: a tag read back with another type
 changes every record id computed from it. So before a write, a column whose type Delta
 would not keep is recorded in its top-level field metadata (``ARROW_TYPE_KEY``: the
 column's whole Arrow type, IPC-serialized; Delta keeps top-level field metadata but not
@@ -23,7 +23,7 @@ type (large-normalized). A column whose type has an extension (logical) type any
 left as it is: its type is restored from its extension metadata.
 
 A table written before this existed has no recorded type and reads back with Delta's
-types; such a store must be rebuilt.
+types; such a database must be rebuilt.
 """
 
 from __future__ import annotations

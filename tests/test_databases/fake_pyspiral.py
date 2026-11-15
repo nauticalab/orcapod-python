@@ -40,7 +40,7 @@ connector's docstrings, pyspiral's own documentation) or is an assumption to con
   top-level column declared non-null is refused on write (Arrow validates the outgoing batch
   on the client). A null in a struct field declared non-null is accepted and stored as the
   type's zero value (a null written to an ``int32`` field read back as ``0``). Switch it off
-  only to model a store that keeps nullability.
+  only to model a database that keeps nullability.
 * ``reject_struct_nulls`` (documented by pyspiral ``Table.write``): a null struct value is
   refused unless written with ``push_down_nulls=True``, which turns it into a struct of null
   fields (observed live, ITL-936; top-level struct columns only in the fake).
@@ -235,7 +235,7 @@ class _Store:
     """Directory-backed table store shared by every fake object."""
 
     def __init__(self, root: Path) -> None:
-        """Open the store under ``root`` and load its storage behaviour."""
+        """Open the database under ``root`` and load its storage behaviour."""
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         bfile = self.root / _BEHAVIOUR_FILE
@@ -733,7 +733,7 @@ class FakeSpiral:
     def __init__(
         self, *, config: Any = None, overrides: dict[str, str] | None = None
     ) -> None:
-        """Open the store under ``FAKE_SPIRAL_ROOT`` and record ``overrides``."""
+        """Open the database under ``FAKE_SPIRAL_ROOT`` and record ``overrides``."""
         root = os.environ.get(_ROOT_ENV)
         if not root:
             raise RuntimeError(f"{_ROOT_ENV} is not set; call fake_pyspiral.install()")

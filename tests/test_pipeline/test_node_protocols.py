@@ -86,7 +86,7 @@ class TestFunctionNodeProtocol:
             async def async_execute(self, input_channel, output, *, observer=None):
                 pass
 
-            def set_ephemeral_store(self, store):
+            def set_ephemeral_database(self, database):
                 pass
 
         assert isinstance(GoodFunction(), FunctionNodeProtocol)
@@ -128,7 +128,7 @@ class TestOperatorNodeProtocol:
             async def async_execute(self, inputs, output, *, observer=None):
                 pass
 
-            def set_ephemeral_store(self, store):
+            def set_ephemeral_database(self, database):
                 pass
 
         assert isinstance(GoodOperator(), OperatorNodeProtocol)

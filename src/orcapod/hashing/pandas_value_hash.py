@@ -15,7 +15,7 @@ also changes the identifier of the pandas logical types (``logical_types/pandas_
 The hash is strict (developer's decisions, November 11 and 12, 2026): everything about a
 value that can be changed is part of its identity, ``attrs`` and ``-0.0`` versus ``0.0``
 included. The one exception is a property the stored form does not restore, which never
-counts, so that a value read back from a store hashes like the value that was written:
+counts, so that a value read back from a database hashes like the value that was written:
 ``flags``, the kind of a ``RangeIndex``, an index's ``freq``, unused MultiIndex levels, the
 storage of a string dtype, and the ``object`` dtype of a column that reads back as another
 dtype. ``PANDAS_IDENTITY_PROPERTIES`` lists every property and whether it is identity; it

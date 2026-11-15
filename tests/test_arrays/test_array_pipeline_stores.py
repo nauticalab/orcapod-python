@@ -112,7 +112,7 @@ def split(x: np.ndarray) -> list[np.ndarray]:  # pyright: ignore[reportMissingTy
     ],
 )
 def test_pod_output_list_of_arrays(tmp_path: Path, store: str, runner: str) -> None:
-    """A pod output ``list[np.ndarray]`` is stored and read back on every store and runner."""
+    """A pod output ``list[np.ndarray]`` is stored and read back on every database and runner."""
     source = DictSource(
         data=[{"k": k, "x": ARRAYS[k]} for k in NUMERIC],
         tag_columns=["k"],
@@ -142,7 +142,7 @@ def first_elements(x: list[np.ndarray]) -> list[float]:  # pyright: ignore[repor
 def test_batch_and_group_by_over_an_array_column(
     tmp_path: Path, operator: str, store: str, runner: str
 ) -> None:
-    """``Batch`` and ``GroupBy`` over an array column feed a pod on every store and runner."""
+    """``Batch`` and ``GroupBy`` over an array column feed a pod on every database and runner."""
     source = DictSource(
         data=[
             {"g": "a" if i < 2 else "b", "k": f"r{i}", "x": np.arange(3.0) + i}

@@ -1,10 +1,10 @@
 """Regression tests for ITL-884: a Delta table that cannot be read is never "no rows".
 
 Covers:
-- A table that exists but cannot be read raises ``StoreReadError`` on every read
+- A table that exists but cannot be read raises ``OrcapodDatabaseReadError`` on every read
   path, naming the table; a table that does not exist still reads as ``None``.
 - A table whose log cannot be loaded is never overwritten by a flush.
-- ``flush`` raises ``StoreReadError`` and the append refusal's
+- ``flush`` raises ``OrcapodDatabaseReadError`` and the append refusal's
   ``InputValidationError`` themselves, not wrapped in ``RuntimeError``, and
   notes every other batch that failed in the same flush.
 - An append whose column types differ from the stored table is refused before
@@ -12,7 +12,7 @@ Covers:
   (same types in another layout, new or missing columns, unchanged extension
   storage) still succeed.
 - A readable table whose stored user-class shape differs from the registered class
-  raises ``TypeIdentityError``, not ``StoreReadError`` (ITL-881).
+  raises ``TypeIdentityError``, not ``OrcapodDatabaseReadError`` (ITL-881).
 """
 
 from __future__ import annotations
@@ -30,7 +30,11 @@ import pytest
 from deltalake.exceptions import DeltaProtocolError
 
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import InputValidationError, StoreReadError, TypeIdentityError
+from orcapod.errors import (
+    InputValidationError,
+    OrcapodDatabaseReadError,
+    TypeIdentityError,
+)
 from orcapod.sources import DictSource
 
 PATH = ("results", "t")
@@ -81,7 +85,7 @@ def ext_array(values: list[Any], storage: pa.DataType) -> pa.ExtensionArray[Any]
 
 @pytest.fixture
 def base(tmp_path: Path) -> Path:
-    """Return the store root, inside the test's temporary directory."""
+    """Return the database root, inside the test's temporary directory."""
     return tmp_path / "store"
 
 
@@ -123,7 +127,7 @@ def unsupported_reader_feature(base: Path) -> None:
     log.write_text("\n".join(json.dumps(a) for a in actions))
 
 
-def assert_names_table(exc: StoreReadError, base: Path) -> None:
+def assert_names_table(exc: OrcapodDatabaseReadError, base: Path) -> None:
     """Assert that ``exc`` names the table at ``PATH`` and chains its cause."""
     assert Path(exc.table) == table_dir(base)
     assert exc.table in str(exc)
@@ -149,15 +153,15 @@ class TestUnreadableTable:
 
     @pytest.mark.parametrize("read", READS.values(), ids=list(READS))
     def test_read_raises_store_read_error(self, base, unreadable, read):
-        """Each read of the unreadable table raises ``StoreReadError`` naming it."""
-        with pytest.raises(StoreReadError) as info:
+        """Each read of the unreadable table raises ``OrcapodDatabaseReadError`` naming it."""
+        with pytest.raises(OrcapodDatabaseReadError) as info:
             read(unreadable)
         assert_names_table(info.value, base)
 
     def test_skip_duplicates_append_raises_store_read_error(self, base, unreadable):
         """The existing-ids read for ``skip_duplicates`` raises, never assumes none."""
         # skip_duplicates reads the stored record ids before buffering the rows.
-        with pytest.raises(StoreReadError) as info:
+        with pytest.raises(OrcapodDatabaseReadError) as info:
             unreadable.add_records(
                 PATH,
                 rows([b"c"], pa.array([3], pa.int64())),
@@ -172,7 +176,7 @@ class TestUnreadableTable:
 
 
 def test_bad_filter_is_not_reported_as_unreadable_table(stored):
-    """A bad filter column is the caller's error, not a ``StoreReadError``."""
+    """A bad filter column is the caller's error, not a ``OrcapodDatabaseReadError``."""
     # The table reads fine; the filter names a column it does not have.
     with pytest.raises(pa.ArrowInvalid):
         stored.get_records_with_column_value(PATH, {"no_such_column": 1})
@@ -203,9 +207,9 @@ class TestUnloadableTableIsNeverOverwritten:
         before = snapshot(table_dir(base))
         db = DeltaTableDatabase(base_path=base)
 
-        with pytest.raises(StoreReadError):
+        with pytest.raises(OrcapodDatabaseReadError):
             db.get_all_records(PATH)
-        with pytest.raises(StoreReadError) as info:
+        with pytest.raises(OrcapodDatabaseReadError) as info:
             db.add_records(
                 PATH,
                 rows([b"c"], pa.array([3], pa.int64())),
@@ -235,7 +239,7 @@ class TestUnloadableTableIsNeverOverwritten:
         before = snapshot(target)
         db = DeltaTableDatabase(base_path=base)
         monkeypatch.setattr(deltalake, "DeltaTable", failing_load)
-        with pytest.raises(StoreReadError) as info:
+        with pytest.raises(OrcapodDatabaseReadError) as info:
             db.add_records(
                 PATH,
                 rows([b"c"], pa.array([3], pa.int64())),
@@ -252,12 +256,12 @@ class TestUnloadableTableIsNeverOverwritten:
 
 
 class TestFlushRaisesStoreErrorsThemselves:
-    """``flush`` raises store errors as themselves, with the other failures noted."""
+    """``flush`` raises database errors as themselves, with the other failures noted."""
 
     def test_store_read_error_is_raised_with_a_note_per_other_failed_batch(
         self, base, stored
     ):
-        """The ``StoreReadError`` is raised and the refused batch is noted on it."""
+        """The ``OrcapodDatabaseReadError`` is raised and the refused batch is noted on it."""
         other = ("results", "u")
         stored.add_records(
             other,
@@ -274,10 +278,10 @@ class TestFlushRaisesStoreErrorsThemselves:
             PATH, rows([b"c"], pa.array([3], pa.int64())), record_id_column="rid"
         )
 
-        with pytest.raises(StoreReadError) as info:
+        with pytest.raises(OrcapodDatabaseReadError) as info:
             db.flush()
 
-        # The StoreReadError wins over the earlier refusal, because it is the one
+        # The OrcapodDatabaseReadError wins over the earlier refusal, because it is the one
         # that fails a run whatever the error policy; the refusal is noted on it.
         assert_names_table(info.value, base)
         notes = getattr(info.value, "__notes__", [])
@@ -285,7 +289,7 @@ class TestFlushRaisesStoreErrorsThemselves:
         assert "results/u" in notes[0]
         assert "InputValidationError" in notes[0]
         # Both failed batches stay queued, so the next flush fails the same way.
-        with pytest.raises(StoreReadError):
+        with pytest.raises(OrcapodDatabaseReadError):
             db.flush()
 
     def test_other_flush_failures_still_raise_runtime_error(self, base, monkeypatch):
@@ -554,9 +558,9 @@ READS_WITHOUT_VALUE_FILTER = {
 def test_class_mismatch_is_type_identity_error_not_store_read_error(other_shape, read):
     """A stored shape that differs from the registered class raises ``TypeIdentityError``.
 
-    ``StoreReadError`` means the table cannot be read. Here the table is intact and the
+    ``OrcapodDatabaseReadError`` means the table cannot be read. Here the table is intact and the
     class differs, so the identity error is raised as is, never wrapped.
     """
     with pytest.raises(TypeIdentityError) as info:
         read(other_shape)
-    assert not isinstance(info.value, StoreReadError)
+    assert not isinstance(info.value, OrcapodDatabaseReadError)

@@ -24,7 +24,7 @@ from orcapod import function_pod
 from orcapod.core.sources import DictSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
-from orcapod.errors import StoreWriteError
+from orcapod.errors import OrcapodDatabaseWriteError
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -305,7 +305,7 @@ def test_a_run_that_raises_leaves_no_rows_to_read(orchestrator: Orchestrator) ->
 
 @pytest.mark.parametrize("track_completion", [True, False])
 def test_a_read_before_any_run_delivers_nothing(track_completion: bool) -> None:
-    """A fresh job over a store with deliveries recorded returns no rows and delivers nothing."""
+    """A fresh job over a database with deliveries recorded returns no rows and delivers nothing."""
     database = InMemoryArrowDatabase()
     first, first_sent = _job(track_completion=track_completion, database=database)
     _ = first.run()
@@ -353,7 +353,7 @@ def test_node_run_commits_the_invocation_log(tmp_path: Path) -> None:
     job, sent = _job(database=DeltaTableDatabase(tmp_path / "store"))
     _ = job.nodes["delivered"].run()
     assert len(sent) == ROWS
-    # A new database object reads only what was committed to the store.
+    # A new database object reads only what was committed to the database.
     again, again_sent = _job(database=DeltaTableDatabase(tmp_path / "store"))
     _ = again.run()
     assert again_sent == []
@@ -411,8 +411,8 @@ class _FailingFlushDatabase(InMemoryArrowDatabase):
 
     @override
     def flush(self) -> None:
-        """Fail, as a store that cannot be written does."""
-        raise OSError("the store cannot be written")
+        """Fail, as a database that cannot be written does."""
+        raise OSError("the database cannot be written")
 
 
 def test_node_run_whose_log_commit_fails_leaves_no_rows() -> None:
@@ -422,7 +422,7 @@ def test_node_run_whose_log_commit_fails_leaves_no_rows() -> None:
     # The job hands its nodes scoped views of its database; attach the failing one
     # to the node itself.
     node.attach_databases(pipeline_database=_FailingFlushDatabase())
-    with pytest.raises(StoreWriteError):
+    with pytest.raises(OrcapodDatabaseWriteError):
         _ = node.run()
     assert len(sent) == ROWS
     assert list(node.iter_data()) == []

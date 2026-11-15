@@ -34,9 +34,9 @@ from orcapod.core.streams.view import (
 )
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.errors import (
-    StoreError,
-    StoreReadError,
-    StoreWriteError,
+    OrcapodDatabaseError,
+    OrcapodDatabaseReadError,
+    OrcapodDatabaseWriteError,
 )
 from orcapod.contexts.stored import (
     StaleTables,
@@ -56,7 +56,7 @@ from orcapod.system_constants import (
 )
 from orcapod.types import ColumnConfig
 from orcapod.utils import arrow_utils
-from orcapod.utils.store_errors import flush_best_effort
+from orcapod.utils.database_errors import flush_best_effort
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -419,7 +419,7 @@ def _execute_side_effect_row(
     ):
         try:
             prior = pipeline_database.get_record_by_id(table_path, record_id)
-        except StoreError as exc:
+        except OrcapodDatabaseError as exc:
             # A failed lookup fails the run like a failed write: name pod and row.
             exc.add_context(node_label=pod_name, tag=tag.as_dict())
             raise
@@ -455,8 +455,8 @@ def _execute_side_effect_row(
                 data_context_key=data_context_key,
             )
         return (tag, data)
-    except StoreError as exc:
-        # A failed store read or write fails the run, even under on_error="log".
+    except OrcapodDatabaseError as exc:
+        # A failed database read or write fails the run, even under on_error="log".
         exc.add_context(node_label=pod_name, tag=tag.as_dict())
         raise
     except Exception as exc:
@@ -514,11 +514,11 @@ def _write_invocation_row(
             with_data_context(record, data_context_key),
             skip_duplicates=True,
         )
-    except StoreReadError:
+    except OrcapodDatabaseReadError:
         # The stored table could not be read: report the read failure itself.
         raise
     except Exception as exc:
-        raise StoreWriteError(table_path) from exc
+        raise OrcapodDatabaseWriteError(table_path) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1070,10 +1070,10 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
         older table layout (written by Orcapod up to v0.2), and rows of another data
         context in the current log. An older log is looked for at this node's own
         path and, because the hash in the path can differ between versions, anywhere
-        under the pod's name in the store (ITL-954). Checked at the start of every
+        under the pod's name in the database (ITL-954). Checked at the start of every
         run, so a log that appears between two runs of one node object is found too.
         The current log is read and counted by data context the first time only;
-        the later runs list the store, which reads no table.
+        the later runs list the database, which reads no table.
 
         Raises:
             SideEffectLogDataContextError: If such deliveries are found; nothing has
@@ -1093,7 +1093,7 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
             name_path=self.node_uri,
         )
         if found.unlisted:
-            # The check runs before every run; that the store cannot list its tables
+            # The check runs before every run; that the database cannot list its tables
             # is reported once per node object and attached database.
             if self._unlisted_store_reported:
                 found = StaleTables(tables=found.tables)
@@ -1102,7 +1102,7 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
             account_for_stale_tables(
                 found, delivers_side_effects=True, current_context=current
             )
-        except StoreError as exc:
+        except OrcapodDatabaseError as exc:
             exc.add_context(node_label=self.label)
             raise
         self._current_log_checked = True
@@ -1327,7 +1327,7 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
 
         Raises:
             SideEffectLogDataContextError: As for ``execute``.
-            StoreWriteError: If committing the invocation log fails.
+            OrcapodDatabaseWriteError: If committing the invocation log fails.
         """
         import sys
 
@@ -1353,14 +1353,14 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
             # Committed as at the end of a job run (PipelineJob._finish_run).
             try:
                 database.flush()
-            except StoreReadError:
+            except OrcapodDatabaseReadError:
                 # A stored table could not be read: report the read failure itself.
                 # The run raised, so it leaves the node no rows.
                 self.clear_cache()
                 raise
             except Exception as exc:
                 self.clear_cache()
-                raise StoreWriteError(database.base_path, flush=True) from exc
+                raise OrcapodDatabaseWriteError(database.base_path, flush=True) from exc
             except BaseException:
                 # An interruption leaves the commit's outcome unknown: the node holds no
                 # run, so the next run runs and commits again (ITL-1121).

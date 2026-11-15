@@ -127,7 +127,9 @@ def test_nothing_new_a_second_run_computes_nothing(orchestrator: str) -> None:
     assert sorted(CALLS) == [0, 10, 20]
     CALLS.clear()
     with mock.patch.object(
-        InMemoryArrowDatabase, "add_records", side_effect=AssertionError("store write")
+        InMemoryArrowDatabase,
+        "add_records",
+        side_effect=AssertionError("database write"),
     ):
         summary = _run(job, orchestrator)
     assert CALLS == []

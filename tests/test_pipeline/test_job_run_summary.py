@@ -158,7 +158,7 @@ def test_clean_run_is_quiet(store: Any, orchestrator: Any) -> None:
 
 
 def test_rerun_counts_rows_from_the_store(store: Any, orchestrator: Any) -> None:
-    """Running again counts the stored rows as from the store and computes only the new row."""
+    """Running again counts the stored rows as from the database and computes only the new row."""
     run(make_job(store, double, "doubled"), orchestrator)
     summary = run(make_job(store, double, "doubled", n_rows=5), orchestrator)
 

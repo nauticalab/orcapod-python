@@ -272,7 +272,7 @@ def _half_on_even(x: int) -> int:
 
 
 def _store(kind: str, tmp_path: Path) -> Any:
-    """A Delta store under ``tmp_path`` for ``"delta"``, else an in-memory store."""
+    """A Delta database under ``tmp_path`` for ``"delta"``, else an in-memory store."""
     return (
         DeltaTableDatabase(tmp_path / "db")
         if kind == "delta"
@@ -530,7 +530,7 @@ class TestDownstreamSeesStoredValue:
 
 
 class TestRejectionInPipelineJob:
-    """Every decided rejection is a row failure on both orchestrators and both stores."""
+    """Every decided rejection is a row failure on both orchestrators and both databases."""
 
     @pytest.mark.parametrize("orchestrator_cls", ORCHESTRATORS)
     @pytest.mark.parametrize("store_kind", STORES)

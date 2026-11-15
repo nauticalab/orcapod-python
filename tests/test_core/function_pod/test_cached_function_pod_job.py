@@ -164,7 +164,7 @@ def test_row_is_computed_once_and_stored_in_both_caches(
     assert pod_rows is not None and pod_rows.num_rows == 2
     assert sorted(counter.calls) == [2, 5]
 
-    # A second run over the same store computes nothing.
+    # A second run over the same database computes nothing.
     run_job(cached_pod, store, orchestrator)
     assert sorted(counter.calls) == [2, 5]
 
@@ -227,7 +227,7 @@ def test_saved_job_equals_the_uncached_pods_and_loads(
 
     plain_saved = saved(plain, tmp_path / "plain.json")
     cached_saved = saved(job, tmp_path / "cached.json")
-    # Fields that differ between any two saves: the run id and the store's location.
+    # Fields that differ between any two saves: the run id and the database's location.
     for doc in (plain_saved, cached_saved):
         doc["run"].pop("run_id")
         doc["bindings"].pop("database")

@@ -474,7 +474,7 @@ def test_a_load_only_operator_run_without_a_database_is_loaded_only() -> None:
 
 
 def test_an_interrupted_log_commit_leaves_the_side_effect_node_without_a_run() -> None:
-    """A standalone side-effect node with a store: a KeyboardInterrupt while its run commits
+    """A standalone side-effect node with a database: a KeyboardInterrupt while its run commits
     the invocation log clears the node, so the next run runs (and commits) again."""
     from unittest import mock
 
@@ -519,7 +519,7 @@ def _computing_stream(kind: str) -> Any:
     """A stream outside a job that computes ``_recorded_copy`` when read.
 
     ``pod``: the function pod's stream; ``cached``: a cached function pod's stream over
-    an empty store; ``wrapped``: an operator's stream outside a job over the pod's
+    an empty database; ``wrapped``: an operator's stream outside a job over the pod's
     stream. (A ``FunctionNode`` outside a job is a blueprint: reading it raises.)
     """
     from orcapod.core.cached_function_pod import CachedFunctionPod

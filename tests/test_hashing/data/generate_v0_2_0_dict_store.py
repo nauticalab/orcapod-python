@@ -1,11 +1,11 @@
-"""Build a Delta result store with the released v0.2.0 code (ITL-905 test fixture).
+"""Build a Delta result database with the released v0.2.0 code (ITL-905 test fixture).
 
 Run from a checkout of the v0.2.0 tag, then pack the store:
 
     uv run python generate_v0_2_0_dict_store.py <store_dir>
     tar -czf v0_2_0_dict_store.tar.gz -C <store_dir> .
 
-The process can hang at interpreter exit inside deltalake after printing; the store is
+The process can hang at interpreter exit inside deltalake after printing; the database is
 complete once the record counts are printed.
 
 Two pods write to the store:

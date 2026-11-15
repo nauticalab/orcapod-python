@@ -62,7 +62,7 @@ def delta_to_pyarrow_dataset(
 
     A local table is therefore read through a native pyarrow filesystem rooted at the
     table, which returns the same schema and values without Python file objects. Any other
-    URI, a cloud store or a ``filesystem`` passed by the caller, keeps deltalake's reader.
+    URI, a cloud database or a ``filesystem`` passed by the caller, keeps deltalake's reader.
 
     ``table_uri`` is percent-encoded: deltalake 1.0.2 and 1.2.1 return a bare path such as
     ``/data/a%20b/``, and 1.6.6 returns ``file:///data/a%20b/``. pyarrow's own URI parser

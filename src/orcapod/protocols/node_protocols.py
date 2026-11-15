@@ -102,10 +102,10 @@ class FunctionNodeProtocol(Protocol):
         load_only: bool = False,
     ) -> None: ...
 
-    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
+    def set_ephemeral_database(self, database: "ArrowDatabaseProtocol | None") -> None:
+        """Assign or remove the ephemeral result database for this node.
 
-        Pass an ``ArrowDatabaseProtocol`` to attach the store.
+        Pass an ``ArrowDatabaseProtocol`` to attach the database.
         Pass ``None`` to detach it — the node falls back to persistent-only
         behaviour for subsequent writes. No-op for node types that do not
         support ephemeral result storage (e.g. blueprint ``FunctionNode``).
@@ -140,8 +140,8 @@ class OperatorNodeProtocol(Protocol):
         load_only: bool = False,
     ) -> None: ...
 
-    def set_ephemeral_store(self, store: "ArrowDatabaseProtocol | None") -> None:
-        """Assign or remove the ephemeral result store for this node.
+    def set_ephemeral_database(self, database: "ArrowDatabaseProtocol | None") -> None:
+        """Assign or remove the ephemeral result database for this node.
 
         No-op for operator nodes in v1 — full ephemeral support for operators
         is deferred to ITL-509.

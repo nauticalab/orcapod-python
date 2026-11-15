@@ -2,7 +2,7 @@
 
 A node is associated with its storage (developer, November 12, 2026): its preview is the
 first rows of what it holds after a run, or of its stored table, and showing it never
-computes. These tests run jobs on both orchestrators and both stores, and load saved jobs.
+computes. These tests run jobs on both orchestrators and both databases, and load saved jobs.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ def _source(rows: int = 25) -> ArrowTableSource:
 
 
 def _store(kind: str, tmp_path: Path) -> ArrowDatabaseProtocol:
-    """A fresh store of the given kind (``in_memory`` or ``delta``)."""
+    """A fresh database of the given kind (``in_memory`` or ``delta``)."""
     if kind == "in_memory":
         return InMemoryArrowDatabase()
     return DeltaTableDatabase(base_path=tmp_path / "store")
@@ -131,9 +131,9 @@ def test_nodes_after_a_run_show_their_first_rows(
     assert len(CALLS) == 25
     for label in ("triple", "sel"):
         node = job.nodes[label]
-        # Right after a run the rows are in memory: the store is not read at all.
+        # Right after a run the rows are in memory: the database is not read at all.
         with mock.patch.object(
-            type(store), "get_all_records", side_effect=AssertionError("store read")
+            type(store), "get_all_records", side_effect=AssertionError("database read")
         ):
             head = node.head()
         assert head.status is ViewStatus.ROWS, label
@@ -148,7 +148,7 @@ def test_a_new_job_over_a_filled_store_shows_rows_once_its_run_reads_the_store(
     store_kind: str, tmp_path: Path
 ) -> None:
     """A new job over a filled store shows no rows until it runs (ITL-1095); its run
-    reads every result from the store and computes nothing."""
+    reads every result from the database and computes nothing."""
     store = _store(store_kind, tmp_path)
     _ = _job(store).run()
     CALLS.clear()
@@ -292,7 +292,7 @@ def test_head_keeps_the_tag_arrow_type_of_the_input(
     """A node's head keeps an ``int8`` tag ``int8`` and is the prefix of ``as_table``.
 
     ``head`` and ``as_table`` share one table build (ITL-928 typing), in memory after a
-    run and in a new job whose run reads its rows from the store.
+    run and in a new job whose run reads its rows from the database.
     """
     table = pa.table(
         {"id": pa.array(range(12), pa.int8()), "x": pa.array(range(12), pa.int64())},
@@ -317,7 +317,7 @@ def test_head_keeps_the_tag_arrow_type_of_the_input(
     store = _store(store_kind, tmp_path)
     job = build(store)
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator]())
-    # The new job shows rows once its run has read them from the store (ITL-1095).
+    # The new job shows rows once its run has read them from the database (ITL-1095).
     fresh = build(store)
     _ = fresh.run(orchestrator=ORCHESTRATORS[orchestrator]())
     for node in (job.nodes["triple"], fresh.nodes["triple"]):

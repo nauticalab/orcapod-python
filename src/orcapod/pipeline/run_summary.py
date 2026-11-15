@@ -2,7 +2,7 @@
 
 With the default ``error_policy="continue"``, a row whose function raises is skipped and
 the run goes on. ``RunSummary`` tells the user, per function node, how many rows were
-computed, how many were read from the store, and how many failed with which first error.
+computed, how many were read from the database, and how many failed with which first error.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class NodeRunSummary:
     Attributes:
         label: The node's label, its key in ``job.nodes``.
         computed: Rows whose function ran and returned.
-        reused: Rows whose result was read from the store instead.
+        reused: Rows whose result was read from the database instead.
         failed: Rows whose function raised; the run skipped them.
         first_error: The exception of the first failed row, with its traceback, or
             ``None`` when no row failed.
@@ -412,7 +412,7 @@ class RunCountingObserver:
         output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
-        """Count the row as reused (from the pipeline or result store) or computed."""
+        """Count the row as reused (from the pipeline or result database) or computed."""
         from_store = cached or (
             output_data is not None
             and output_data.get_meta_value(ResultCache.RESULT_COMPUTED_FLAG, True)

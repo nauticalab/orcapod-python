@@ -4,7 +4,7 @@ Before ITL-884 a Delta result table that existed but could not be read was
 returned as "no rows": the job warned that the data "may have been deleted
 externally", swallowed the per-row read errors under ``error_policy="continue"``,
 finished without raising, and the node showed no records. Both orchestrators
-must now raise ``StoreReadError`` instead, and a table that does not exist must
+must now raise ``OrcapodDatabaseReadError`` instead, and a table that does not exist must
 still be computed.
 """
 
@@ -21,7 +21,7 @@ import pytest
 from orcapod import function_pod
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import StoreReadError
+from orcapod.errors import OrcapodDatabaseReadError
 from orcapod.pipeline import PipelineJob
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.observer import NoOpObserver
@@ -70,22 +70,24 @@ def make_orchestrator(request) -> Callable[[], object]:
     return ORCHESTRATORS[request.param]
 
 
-def build_job(store_path: Path, keys: str = "abc") -> PipelineJob:
+def build_job(database_path: Path, keys: str = "abc") -> PipelineJob:
     """Build a job that doubles ``x`` for one row per key in ``keys``."""
     source = ArrowTableSource(
         pa.table({"k": list(keys), "x": list(range(1, len(keys) + 1))}),
         tag_columns=["k"],
         infer_nullable=True,
     )
-    job = PipelineJob(name="itl884", database=DeltaTableDatabase(base_path=store_path))
+    job = PipelineJob(
+        name="itl884", database=DeltaTableDatabase(base_path=database_path)
+    )
     with job:
         _ = double.pod(source, label="dbl")
     return job
 
 
-def table_dirs(store_path: Path) -> tuple[Path, Path]:
+def table_dirs(database_path: Path) -> tuple[Path, Path]:
     """The (result table, pipeline table) directories the job wrote."""
-    dirs = {p.parent for p in store_path.rglob("*.parquet")}
+    dirs = {p.parent for p in database_path.rglob("*.parquet")}
     result = [d for d in dirs if "_result" in d.parts]
     pipeline = [d for d in dirs if "_result" not in d.parts]
     assert len(result) == 1 and len(pipeline) == 1, sorted(dirs)
@@ -118,11 +120,11 @@ def require_unknown_reader_feature(table: Path) -> None:
 @pytest.fixture
 def stored(tmp_path: Path, make_orchestrator) -> Path:
     """A store in which the job has computed and stored all three rows."""
-    store_path = tmp_path / "store"
-    build_job(store_path).run(orchestrator=make_orchestrator())
+    database_path = tmp_path / "store"
+    build_job(database_path).run(orchestrator=make_orchestrator())
     assert len(_CALLS) == 3
     _CALLS.clear()
-    return store_path
+    return database_path
 
 
 def test_unreadable_result_table_fails_the_run(stored, make_orchestrator):
@@ -131,7 +133,7 @@ def test_unreadable_result_table_fails_the_run(stored, make_orchestrator):
     delete_data_files(result_table)
 
     job = build_job(stored)
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run(orchestrator=make_orchestrator())
 
     assert Path(info.value.table) == result_table
@@ -150,7 +152,7 @@ def test_unreadable_result_table_fails_the_run_under_continue(
     shutil.rmtree(pipeline_table)
 
     job = build_job(stored)
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run(orchestrator=make_orchestrator())
 
     assert Path(info.value.table) == result_table
@@ -162,14 +164,14 @@ def test_store_read_failure_in_a_row_flush_fails_the_run(stored, make_orchestrat
     # Rows d and e are new. The result table breaks while d is computed, after
     # d's cache lookup succeeded, so the failure surfaces in the flush that stores
     # d's result, inside the error_policy="continue" per-row handler. Before the
-    # fix the flush wrapped the StoreReadError in a RuntimeError, the handler
+    # fix the flush wrapped the OrcapodDatabaseReadError in a RuntimeError, the handler
     # skipped d as a failed row, computed e, and the run ended with RuntimeError.
     result_table, _ = table_dirs(stored)
     _DAMAGE_ON_NEXT_CALL.append(result_table)
 
     orchestrator = make_orchestrator()
     job = build_job(stored, keys="abcde")
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run(orchestrator=orchestrator)
 
     assert Path(info.value.table) == result_table
@@ -187,7 +189,7 @@ def test_store_read_failure_with_per_row_commits_stops_at_the_row(
 
     orchestrator = make_orchestrator()
     job = build_job(stored, keys="abcde")
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run(orchestrator=orchestrator, commit_every_rows=1)
 
     assert Path(info.value.table) == result_table
@@ -210,7 +212,7 @@ def test_absent_tables_are_computed(stored, make_orchestrator):
     build_job(stored).run(orchestrator=make_orchestrator())
     assert sorted(_CALLS) == [1, 2, 3]
 
-    # The recomputed rows were stored: a fresh job over the same store computes
+    # The recomputed rows were stored: a fresh job over the same database computes
     # nothing. (Reading the node right after its own run can miss rows, ITL-864.)
     _CALLS.clear()
     build_job(stored).run(orchestrator=make_orchestrator())
@@ -233,11 +235,11 @@ class _FailsToStartNode(NoOpObserver):
 
 
 def test_unrelated_concurrent_failure_does_not_hide_store_read_error(tmp_path):
-    """An unrelated concurrent failure does not hide the ``StoreReadError``."""
-    # Node "dbl" raises StoreReadError while loading its stored results and node
+    """An unrelated concurrent failure does not hide the ``OrcapodDatabaseReadError``."""
+    # Node "dbl" raises OrcapodDatabaseReadError while loading its stored results and node
     # "tri" fails in the observer's on_node_start. Both fail before their first
     # await, so both land in the async TaskGroup's exception group. Before the fix,
-    # re-raising inside "except* StoreReadError" left the unmatched ValueError in
+    # re-raising inside "except* OrcapodDatabaseReadError" left the unmatched ValueError in
     # the group and the caller got an ExceptionGroup, whatever the Python version.
     stored = tmp_path / "store"
     _ = build_job(stored).run()
@@ -254,13 +256,13 @@ def test_unrelated_concurrent_failure_does_not_hide_store_read_error(tmp_path):
         _ = double.pod(source, label="dbl")
         _ = triple.pod(source, label="tri")
 
-    with pytest.raises(StoreReadError) as info:
+    with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run(
             orchestrator=AsyncPipelineOrchestrator(),
             observer=_FailsToStartNode("tri"),
         )
 
-    assert type(info.value) is StoreReadError
+    assert type(info.value) is OrcapodDatabaseReadError
     assert Path(info.value.table) == result_table
     assert info.value.__cause__ is not None
     notes = getattr(info.value, "__notes__", [])

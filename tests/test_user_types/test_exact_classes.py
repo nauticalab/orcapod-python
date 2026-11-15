@@ -149,7 +149,7 @@ def test_class_defined_again_can_be_used_on_its_own(kind: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The case measured on November 12, 2026: the same answer in memory and from a store
+# The case measured on November 12, 2026: the same answer in memory and from a database
 # ---------------------------------------------------------------------------
 
 

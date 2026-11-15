@@ -1,11 +1,11 @@
-## `src/orcapod/pipeline/job.py`, orchestrators, node write paths — store write failures
+## `src/orcapod/pipeline/job.py`, orchestrators, node write paths — database write failures
 
-### SW1 — A failed store write did not fail `PipelineJob.run()`
+### SW1 — A failed database write did not fail `PipelineJob.run()`
 **Status:** resolved
 **Severity:** critical
 **Issue:** ITL-878
 
-A node's write to the store ran inside the per-row handler meant for function failures:
+A node's write to the database ran inside the per-row handler meant for function failures:
 `FunctionNode.execute` (sync) and `_FunctionPodBase.async_execute.process_one` (async) wrap
 compute *and* the result-table and pipeline-table writes in one `except Exception`. With the
 default `error_policy="continue"` a failed write was skipped like a crashed function: the sync
@@ -15,30 +15,30 @@ the node read back fewer rows (none when every write failed, e.g. a logical-type
 final flush, so the upstream function node's pending pipeline rows were never committed while
 its result rows were; async callers got an `ExceptionGroup`.
 
-**Fix:** Contract, for now (developer, November 10, 2026): a failed store write always fails
+**Fix:** Contract, for now (developer, November 10, 2026): a failed database write always fails
 the run, whatever `error_policy` is. Every node write site (`ResultCache.store`,
 `FunctionNode.add_pipeline_record`, `OperatorNode._store_output_stream`, the side-effect
-invocation log) raises `orcapod.errors.StoreWriteError`, chained from the backend error and
+invocation log) raises `orcapod.errors.OrcapodDatabaseWriteError`, chained from the backend error and
 naming the node, the row's tag and the table. The per-row handlers re-raise it, so the run
 stops at the first failed write; `error_policy` still decides only about rows whose function
 raised. `AsyncPipelineOrchestrator` unwraps it from the `TaskGroup` exception group, so both
 orchestrators raise the same error. `PipelineJob.run()` flushes the writes that succeeded
 before re-raising (a flush failure there is logged, not raised over the original), and wraps a
 failure of its final flush. Nothing stored is rewritten; no hash, path or schema change. An
-opt-in mode that tolerates store failures is a possible later option. A fail-loud post-run
-hook or an observer callback that raises while the store error propagates is logged and noted
-on it (`orcapod.utils.store_errors`), not raised in its place, so a node function that runs
-another cached pod cannot turn that pod's store failure into a skipped row. When concurrent
-node tasks fail together, the async orchestrator raises the store error of the node first in
-topological order, notes the other failures on it and logs other store errors at WARNING.
+opt-in mode that tolerates database failures is a possible later option. A fail-loud post-run
+hook or an observer callback that raises while the database error propagates is logged and noted
+on it (`orcapod.utils.database_errors`), not raised in its place, so a node function that runs
+another cached pod cannot turn that pod's database failure into a skipped row. When concurrent
+node tasks fail together, the async orchestrator raises the database error of the node first in
+topological order, notes the other failures on it and logs other database errors at WARNING.
 A failed flush (the result cache's per-row auto-flush or the job's final flush) raises
-`StoreWriteError(flush=True)` naming the store and no row: views of one store share their
+`OrcapodDatabaseWriteError(flush=True)` naming the database and no row: views of one database share their
 pending writes, so the failing batch may be an earlier row's or another table's.
-The rule (developer, November 11, 2026): store failures fail the run; a function output that
+The rule (developer, November 11, 2026): database failures fail the run; a function output that
 cannot be stored (a naive `datetime`, a value not matching the declared type, rejected while
 `ResultCache.store` prepares the record, before any write) is a row failure governed by
-`error_policy` exactly like a function that raised, not a `StoreWriteError`: the value is
-specific to that row, the store is healthy, and every re-run would fail at the same row. The
+`error_policy` exactly like a function that raised, not a `OrcapodDatabaseWriteError`: the value is
+specific to that row, the database is healthy, and every re-run would fail at the same row. The
 async orchestrator ignored `fail_fast` for such rows (ITL-879), unchanged here and fixed since
 by ITL-879 (`ITL-879-EP1`).
 Regressions: `tests/test_pipeline/test_store_write_failure.py`. Related, not fixed here: the async

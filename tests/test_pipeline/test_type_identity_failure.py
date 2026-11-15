@@ -1,7 +1,7 @@
 """A stored row that cannot be decoded as its class fails the run (ITL-881).
 
 ``TypeIdentityError`` means a stored table is intact but holds another shape than the
-registered class. It is not a ``StoreReadError``, yet it must be as fatal: under
+registered class. It is not a ``OrcapodDatabaseReadError``, yet it must be as fatal: under
 ``error_policy="continue"`` a row whose stored result cannot be decoded must never be
 skipped as an ordinary row failure, or stored results would silently look dropped. Both
 orchestrators must raise it.
@@ -22,7 +22,7 @@ import pytest
 from orcapod import function_pod
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import DeltaTableDatabase
-from orcapod.errors import StoreError, TypeIdentityError
+from orcapod.errors import OrcapodDatabaseError, TypeIdentityError
 from orcapod.pipeline import PipelineJob
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.observer import NoOpObserver
@@ -68,22 +68,24 @@ def make_orchestrator(request: pytest.FixtureRequest) -> Callable[[], Orchestrat
     return ORCHESTRATORS[request.param]
 
 
-def build_job(store_path: Path) -> PipelineJob:
+def build_job(database_path: Path) -> PipelineJob:
     """Build a job that stores one ``Pair`` per row of a three-row source."""
     source = ArrowTableSource(
         pa.table({"k": ["a", "b", "c"], "x": [1, 2, 3]}),
         tag_columns=["k"],
         infer_nullable=True,
     )
-    job = PipelineJob(name="itl881", database=DeltaTableDatabase(base_path=store_path))
+    job = PipelineJob(
+        name="itl881", database=DeltaTableDatabase(base_path=database_path)
+    )
     with job:
         _ = pair.pod(source, label="pair")
     return job
 
 
-def table_dirs(store_path: Path) -> tuple[Path, Path]:
+def table_dirs(database_path: Path) -> tuple[Path, Path]:
     """The (result table, pipeline table) directories the job wrote."""
-    dirs = {p.parent for p in store_path.rglob("*.parquet")}
+    dirs = {p.parent for p in database_path.rglob("*.parquet")}
     result = [d for d in dirs if "_result" in d.parts]
     pipeline = [d for d in dirs if "_result" not in d.parts]
     assert len(result) == 1 and len(pipeline) == 1, sorted(dirs)
@@ -124,11 +126,11 @@ def store_another_shape(result_table: Path) -> None:
 @pytest.fixture
 def stored(tmp_path: Path, make_orchestrator: Callable[[], Orchestrator]) -> Path:
     """A store in which the job has computed and stored all three rows."""
-    store_path = tmp_path / "store"
-    build_job(store_path).run(orchestrator=make_orchestrator())
+    database_path = tmp_path / "store"
+    build_job(database_path).run(orchestrator=make_orchestrator())
     assert len(_CALLS) == 3
     _CALLS.clear()
-    return store_path
+    return database_path
 
 
 def test_other_stored_shape_fails_the_run(
@@ -141,7 +143,7 @@ def test_other_stored_shape_fails_the_run(
     with pytest.raises(TypeIdentityError) as info:
         build_job(stored).run(orchestrator=make_orchestrator())
 
-    assert not isinstance(info.value, StoreError)
+    assert not isinstance(info.value, OrcapodDatabaseError)
     assert _CALLS == []
 
 
@@ -158,7 +160,7 @@ def test_other_stored_shape_fails_the_run_in_the_per_row_lookup(
     with pytest.raises(TypeIdentityError) as info:
         build_job(stored).run(orchestrator=make_orchestrator())
 
-    assert not isinstance(info.value, StoreError)
+    assert not isinstance(info.value, OrcapodDatabaseError)
     assert _CALLS == []
 
 

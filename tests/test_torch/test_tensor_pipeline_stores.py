@@ -137,7 +137,7 @@ def _node(job: PipelineJob, label: str, column: str, key: str = "k") -> dict[str
     [(store, runner) for store in sorted(STORES) for runner in sorted(RUNNERS)],
 )
 def test_pipeline_keeps_tensors_exact(tmp_path: Path, store: str, runner: str) -> None:
-    """Every node of the job keeps tensors exact on each store and runner."""
+    """Every node of the job keeps tensors exact on each database and runner."""
     job = _build(STORES[store](tmp_path))
     RUNNERS[runner](job)
 

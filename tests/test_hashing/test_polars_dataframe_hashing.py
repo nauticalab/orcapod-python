@@ -114,7 +114,7 @@ class TestEqualFramesHashEqual:
     def test_value_read_back_from_a_database_hashes_the_same(
         self, tmp_path: Path
     ) -> None:
-        """A frame read back from a Delta store hashes like the original."""
+        """A frame read back from a Delta database hashes like the original."""
         expected = pl.DataFrame(
             {
                 "e": pl.Series(["a", None], dtype=pl.Enum(["b", "a"])),

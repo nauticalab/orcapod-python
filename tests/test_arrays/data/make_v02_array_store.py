@@ -1,6 +1,6 @@
 """Regenerate ``v02_array_store.tar.gz`` with Orcapod v0.2 (ITL-888).
 
-The store is kept as an archive because Delta table paths contain ``:``, which
+The database is kept as an archive because Delta table paths contain ``:``, which
 some file systems refuse.
 
 Run from the repository root with a v0.2 source tree first on the path:

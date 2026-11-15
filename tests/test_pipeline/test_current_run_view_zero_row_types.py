@@ -154,7 +154,7 @@ class TestOneSchemaInEveryState:
         _assert_empty_with(job, expected)
 
     def test_after_a_load_only_run(self, orchestrator: str) -> None:
-        """A load-only run over a store filled by a run shows that run's schema."""
+        """A load-only run over a database filled by a run shows that run's schema."""
         expected = _run_schemas(orchestrator)
         db = InMemoryArrowDatabase()
         _ = _job(db).run(orchestrator=ORCHESTRATORS[orchestrator]())
@@ -164,7 +164,7 @@ class TestOneSchemaInEveryState:
         _assert_reads_with(job, expected, rows=True)
 
     def test_after_a_load_only_run_with_nothing_stored(self, orchestrator: str) -> None:
-        """A load-only run over an empty store fills every node with zero rows.
+        """A load-only run over an empty database fills every node with zero rows.
 
         Each has its populated table's schema, column order included (ITL-1131).
         """
@@ -185,7 +185,7 @@ class TestOneSchemaInEveryState:
 
 
 def _load_only_over_an_empty_store(orchestrator: str) -> PipelineJob:
-    """A job after a load-only run over an empty store: every node holds zero rows."""
+    """A job after a load-only run over an empty database: every node holds zero rows."""
     job = _job()
     FAIL["on"] = True  # a load-only run never calls the function
     _ = job.run(orchestrator=ORCHESTRATORS[orchestrator](), load_only=True)
