@@ -241,7 +241,10 @@ def async_rows(op: StaticOutputOperatorPod, *sources: StreamProtocol) -> list[Ro
 
 
 def _row_key(tag: TagProtocol) -> str:
-    return repr(sorted(tag.as_dict().items()))
+    # The tag's Arrow values, not ``as_dict()``: a null nested in a container tag
+    # (``[[1], None]``) cannot be read back to Python yet and raises (ITL-1144).
+    [row] = tag.as_table().to_pylist()
+    return repr(sorted(row.items()))
 
 
 def _row_schema(tag: TagProtocol, data: DataProtocol) -> pa.Schema:

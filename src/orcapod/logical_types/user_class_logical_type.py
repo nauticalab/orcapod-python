@@ -26,6 +26,11 @@ from orcapod.errors import RecursiveTypeError, TypeIdentityError
 import orcapod.logical_types.user_class_identity as uci
 from orcapod.logical_types.base_logical_type import BaseLogicalType
 from orcapod.logical_types.structural_class import class_for_record
+from orcapod.semantic_types.nested_none import (
+    NestedNoneNotRestorableError,
+    require_restorable_none,
+    with_context,
+)
 from orcapod.logical_types.registry import (
     make_arrow_extension_type,
     make_polars_extension_type,
@@ -307,6 +312,8 @@ class UserClassLogicalTypeFactory:
         Raises:
             ValueError: If the type hints cannot be resolved.
             RecursiveTypeError: If the class refers back to itself, naming the path.
+            NestedNoneNotRestorableError: If a field admits a None a read cannot
+                restore (ITL-1144), naming the field.
         """
         hints = uci.type_hints(python_type)
         arrow_fields = []
@@ -315,6 +322,19 @@ class UserClassLogicalTypeFactory:
             annotation = hints.get(field_name, Any)
             try:
                 arrow_type = converter.register_python_class(annotation)
+                # A field is a nested position: its None must be readable (ITL-1144).
+                require_restorable_none(
+                    annotation,
+                    arrow_type,
+                    lambda name: isinstance(
+                        converter.get_logical_type_by_arrow_extension_name(name),
+                        UserClassLogicalType,
+                    ),
+                )
+            except NestedNoneNotRestorableError as exc:
+                raise with_context(
+                    f"{python_type.__qualname__}.{field_name}", exc
+                ) from exc
             except TypeError as exc:
                 if isinstance(exc, RecursiveTypeError):
                     raise RecursiveTypeError(

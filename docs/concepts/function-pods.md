@@ -1123,6 +1123,60 @@ for tag, data in count_rows.pod(readings).iter_data():
 # s2 3
 ```
 
+### A `None` inside a container
+
+A `None` inside a list, a set, a dict value or a class field is accepted where its type is
+a scalar (`int`, `float`, `str`, `bool`, `bytes`, `datetime`, ...) or a class of your own
+(a dataclass, an `orcapod.dataclass` or a pydantic model): `list[int | None]`,
+`dict[str, float | None]`, `list[MyData | None]` and a field `x: int | None` store and read
+back exactly.
+
+Where the type inside is a container (`list`, `set`, `dict`) or one of the logical types
+above (`Path`, `UUID`, `numpy.ndarray`, ...), a stored `None` is not yet read back
+faithfully: it would read as an empty container or fail. Such a declaration is refused when
+the type is declared: `list[set[int] | None]`, `list[Path | None]`, `dict[str, list[int] |
+None]` or a dataclass field `x: UUID | None`, as a function's parameter or return value, a
+source's schema or a class field. The error names the column (or the class field) and the
+type. Declare the inner type without `| None`, or hold the value in a dataclass and make
+that optional (`list[MyData | None]`). A `None` at the top level of a column
+(`list[Path] | None`, `UUID | None`) is accepted as before. Lifting this restriction is
+ITL-1144.
+
+```python
+try:
+    DictSource(
+        data=[{"sample": "s1", "labels": [{1, 2}, None]}],
+        tag_columns=["sample"],
+        data_schema={"sample": str, "labels": list[set[int] | None]},
+    )
+except ValueError as error:
+    print(str(error).split(": ")[0])
+# Column 'labels' (list[set[int] | None])
+
+labels = DictSource(
+    data=[{"sample": "s1", "counts": [3, None, 1]}],
+    tag_columns=["sample"],
+    data_schema={"sample": str, "counts": list[int | None]},
+)
+for tag, data in labels.iter_data():
+    print(data["counts"])
+# [3, None, 1]
+```
+
+A column that already holds such a `None` (an Arrow table given to `ArrowTableSource`, or
+`GroupBy` or `Batch` over a column of a nullable list, set, `Path` or `UUID`) raises a
+`ValueError` naming the column when its values are read as Python values, instead of
+returning a wrong value. Before `GroupBy` or `Batch`, `DropNulls` on that column removes
+the rows whose value is `None`, so no `None` reaches the lists they build. `DropNulls` reads
+only whether a column's own value is null, so it cannot remove a `None` already nested inside
+a list: remove it from an Arrow table before giving the table to `ArrowTableSource`. Keeping
+the value in a dataclass (`list[MyData | None]`) works on both paths.
+
+A `None` given where the declared type does not allow one (`[None, [1]]` for
+`list[list[int]]`) is refused when a source is built from it, naming the column: it used to
+be stored as an empty list. A function returning one is refused as described in
+[Return values must match the declared type](#return-values-must-match-the-declared-type).
+
 ## Multiple input streams
 
 If you pass multiple streams to a function pod, they are automatically joined (using
