@@ -296,6 +296,22 @@ A logical type's identifier is its Arrow extension name plus its Arrow extension
   identifier is the container kind plus the element's identifier; the type hash treats them
   like any generic alias (origin and arguments). A change to how they are stored or hashed is
   a data context (global hash version) change, not a logical type change.
+- `set[T]` of a primitive is a native container too (developer, November 14, 2026, ITL-611):
+  `ListLogicalType` over an `ArrowElement`, extension name `set[<large Arrow type text>]`
+  (`set[int64]`), metadata `{"category": "set", "element_kind": "arrow"}` (developer,
+  November 15, 2026: the name holds the element as it is and is the registry key; the
+  metadata never repeats it), elements in the canonical set order (`sort_set_elements`). A
+  reader takes the element from the storage (`large_list<int64>`) and refuses
+  (`LogicalTypeIdentifierError`) a storage that is not a list of the element the name names.
+  It reads as `set[<Python type of the element Arrow type>]` (`set[int8]` and `set[int64]`
+  both as `set[int]`, as for lists), so it is
+  registered by identifier only, never bound to a Python type (`binds_python_type`), and
+  `set[T]` maps to Arrow through `T`. `list[T]` of a primitive stays a plain
+  `large_list`: never wrap it. Inside a dict value or tuple field a set of a primitive keeps
+  its plain storage (Arrow has no extension type in a struct field). A container's elements
+  are value-hashed only when its innermost element is a logical type. A saved schema rebuilds
+  an unregistered native container from its identifier (`serialization.parse_arrow_type_string`).
+  `frozenset[T]` is refused (ITL-1140).
 - On read, stored metadata must be one of the type's `readable_extension_metadata()`;
   otherwise raise `LogicalTypeIdentifierError`. Never wrap a stored column by name alone and
   never fall back to the storage type. List an older value in `also_reads` only when the

@@ -102,9 +102,13 @@ class LogicalTypeIdentifierError(ValueError):
             column: The name of the column the identifier was stored with.
 
         Returns:
-            A new ``LogicalTypeIdentifierError`` with ``column`` set.
+            A new ``LogicalTypeIdentifierError`` with ``column`` set and this
+            error's notes.
         """
-        return LogicalTypeIdentifierError(self.stored, self.readable, column)
+        error = LogicalTypeIdentifierError(self.stored, self.readable, column)
+        for note in getattr(self, "__notes__", ()):
+            error.add_note(note)
+        return error
 
 
 def version_metadata(version: int) -> bytes:

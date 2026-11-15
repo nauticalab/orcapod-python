@@ -298,6 +298,42 @@
     "_tag_source_id::a7cdef49c8d02a3910137a97c6deac6bc87493cadc102bfce49cb195725fae7a",
     "_tag_record_id::a7cdef49c8d02a3910137a97c6deac6bc87493cadc102bfce49cb195725fae7a"
   ],
+  "set_bytes.content_hash": "semantic_v1:ee042c0dfb3d2bcaba484e0d01a9129ce07cb79a8984fd0465b202ef949a6500",
+  "set_bytes.pipeline_hash": "semantic_v1:e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951",
+  "set_bytes.row[{\"k\":\"r1\"}]._tag_record_id::e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951": "518dfec57f2c51998591fe459d19d3df",
+  "set_bytes.row[{\"k\":\"r1\"}]._tag_source_id::e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951": "golden_set_bytes",
+  "set_bytes.row[{\"k\":\"r1\"}].data_hash": "arrow_v1:00000209b1234d474584dcaba0bf1697326d8a7d17af08e0663849d8e9edd61159dc7c",
+  "set_bytes.row[{\"k\":\"r2\"}]._tag_record_id::e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951": "7a4a4d5d3c5c54c5a27390332d0ea93c",
+  "set_bytes.row[{\"k\":\"r2\"}]._tag_source_id::e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951": "golden_set_bytes",
+  "set_bytes.row[{\"k\":\"r2\"}].data_hash": "arrow_v1:000002b82f8de0c4d706e1adfab09b0a0721217f99c45992a902dab3dcd87595e89b4e",
+  "set_bytes.system_tag_columns": [
+    "_tag_source_id::e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951",
+    "_tag_record_id::e61a21b4303d9aaaad4bc7acbbcbc232919fae2c9c84f8c61dd166f75607d951"
+  ],
+  "set_int.content_hash": "semantic_v1:f7e30f37e72860f035c440f04cf6b646fa22321bc07e15b5c8efeb49f6df2795",
+  "set_int.pipeline_hash": "semantic_v1:07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a",
+  "set_int.row[{\"k\":\"r1\"}]._tag_record_id::07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a": "12fcd3ffe39f510b9d47f7ea2c0fcfa2",
+  "set_int.row[{\"k\":\"r1\"}]._tag_source_id::07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a": "golden_set_int",
+  "set_int.row[{\"k\":\"r1\"}].data_hash": "arrow_v1:000002c66e08689c6546e8e2e4c75480f12aeb8fa8f03117cb4bbca20239054da1226d",
+  "set_int.row[{\"k\":\"r2\"}]._tag_record_id::07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a": "9f913c859c6a56478883a077d10413de",
+  "set_int.row[{\"k\":\"r2\"}]._tag_source_id::07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a": "golden_set_int",
+  "set_int.row[{\"k\":\"r2\"}].data_hash": "arrow_v1:00000250eadd1390c914bb77edc5286000569c65c11d01eeb038f5ca657646cb405265",
+  "set_int.system_tag_columns": [
+    "_tag_source_id::07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a",
+    "_tag_record_id::07fc17e5d283de983dbfb456c28dee31905f70b9714038c5f6977ea4f816467a"
+  ],
+  "set_str.content_hash": "semantic_v1:e98a3b5bbc53d63e4625873e18000e9a0483ecc607e2bce8b169c5f8d4f4f726",
+  "set_str.pipeline_hash": "semantic_v1:a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93",
+  "set_str.row[{\"k\":\"r1\"}]._tag_record_id::a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93": "1db3719420995abab9ef75a223c5baea",
+  "set_str.row[{\"k\":\"r1\"}]._tag_source_id::a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93": "golden_set_str",
+  "set_str.row[{\"k\":\"r1\"}].data_hash": "arrow_v1:000002d3577efbb77c8cd29859c39d1ec4540028c928669c3c17817682a657580a915c",
+  "set_str.row[{\"k\":\"r2\"}]._tag_record_id::a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93": "107803948e885973a6746072bde16429",
+  "set_str.row[{\"k\":\"r2\"}]._tag_source_id::a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93": "golden_set_str",
+  "set_str.row[{\"k\":\"r2\"}].data_hash": "arrow_v1:000002ca9566cd0df49261b343372e28e82696239c316519fb1b93883f06ba78696b65",
+  "set_str.system_tag_columns": [
+    "_tag_source_id::a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93",
+    "_tag_record_id::a8da17a17f8cea1f96f383d788cb81caf5424d810c9b5faa28b190502cfe7b93"
+  ],
   "set_uuid.content_hash": "semantic_v1:d355e7723650062a578bd830a61a66ae19f7acf01d4b7b8cd36581ad662df144",
   "set_uuid.pipeline_hash": "semantic_v1:5b561315f1796dce0f0cd9a4a98df81a781ca0c0a2c71cefd349418aeaebce07",
   "set_uuid.row[{\"k\":\"r1\"}]._tag_record_id::5b561315f1796dce0f0cd9a4a98df81a781ca0c0a2c71cefd349418aeaebce07": "2d3990a5b84f5cf0a5c846c448a25267",

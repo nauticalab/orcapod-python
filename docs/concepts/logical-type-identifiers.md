@@ -114,7 +114,8 @@ containers*. They are logical types only because Arrow cannot hold an extension 
 a list; conceptually they are an ordinary list or set of `T`. By design:
 
 - **A native container has no version of its own.** Its metadata is JSON with `category`
-  (`list` or `set`) and the element's extension name and metadata, and nothing else. Its
+  (`list` or `set`) and the element's extension name and metadata (for a set of a primitive,
+  the element's Arrow type; see below), and nothing else. Its
   identifier is the container kind plus the element's identifier, so it changes exactly when
   the element's identifier changes. Because the element's metadata is written into that
   JSON as text, a logical type used inside `list[T]` or `set[T]` must have extension
@@ -126,6 +127,46 @@ a list; conceptually they are an ordinary list or set of `T`. By design:
 - **A change to how native containers are stored or hashed is a change of Orcapod's core
   hashing**, recorded by the data context (the global hash version), never a change of a
   logical type.
+
+**A set of a primitive is a native container too** (ITL-611). `set[T]` where `T` has no
+logical type (`set[int]`, `set[str]`, `set[bytes]`, `set[datetime]`) is stored under the
+wrapper `set[<element Arrow type>]`, so a set reads back as a set everywhere: from the
+node, in a downstream pod, from `as_source()` and from a job loaded in another process.
+The element's identifier is its Arrow type in the large variants, as text, inside the
+extension name, which is the key the type is registered under. The metadata does not repeat
+it: `"element_kind": "arrow"` (never `element_ext_name`, which names a logical type) says
+that the element is a plain Arrow type, which a reader takes from the storage
+(`large_list<large_string>`). A stored column whose storage is not a list of the element its
+name names is refused with `LogicalTypeIdentifierError`.
+
+```python
+from orcapod.sources import DictSource
+
+source = DictSource(
+    data=[{"k": "r", "labels": {"b", "a"}}],
+    tag_columns=["k"],
+    data_schema={"k": str, "labels": set[str]},
+)
+labels_type = source.as_table().schema.field("labels").type
+print(labels_type.extension_name)
+# set[large_string]
+print(labels_type.__arrow_ext_serialize__().decode())
+# {"category": "set", "element_kind": "arrow"}
+print(labels_type.storage_type)
+# large_list<item: large_string>
+```
+
+- `list[T]` of a primitive is not a native container: it stays a plain `large_list`, because
+  a list is a list in Arrow too.
+- `set[T | None]` has the identifier of `set[T]`, as `set[Path | None]` has that of
+  `set[Path]`: the element's nullability is not part of a native container's identifier.
+- The elements are stored in the canonical set order (see the hashing reference, section 1e),
+  so equal sets store, and hash, identically. A set row never hashes like the list row with
+  the same elements, because the container's identifier is part of the row hash.
+- **Known limit:** inside a dict value or a tuple field (`dict[str, set[int]]`,
+  `dict[str, list[set[int]]]`), a set of a primitive keeps its plain `large_list` storage, because Arrow cannot hold an extension
+  type inside a struct field; read back without the declared type, such a value is a list.
+- `frozenset[T]` is not supported: declare `set[T]`. Support is to be evaluated in ITL-1140.
 
 A container type you implement yourself is not a native container. It is an ordinary logical
 type with its own identifier, which you declare and change like that of any other type.

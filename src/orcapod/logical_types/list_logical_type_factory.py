@@ -1,5 +1,6 @@
-"""ListLogicalType: wraps list[T]/set[T] (where T is an Arrow extension type) as a
-top-level Arrow extension type with storage ``large_list(<T storage>)``.
+"""ListLogicalType: wraps list[T]/set[T] as a top-level Arrow extension type with
+storage ``large_list(<T storage>)``, where ``T`` is a logical type (``list`` and ``set``)
+or, for ``set`` only, a plain Arrow type (ITL-611).
 
 This solves the ET1 constraint (Arrow cannot embed extension types inside list value
 positions): by promoting the extension metadata to the outermost field level, the
@@ -11,6 +12,20 @@ Design decisions:
 - Storage type: ``pa.large_list(element_storage)`` — NO extension type inside list value
 - Metadata JSON: ``{"category": "list"|"set", "element_ext_name": "...", "element_ext_metadata": null_or_string}``
 - ``python_type`` returns the full generic alias ``list[uuid.UUID]`` (not bare ``list``)
+
+A set of a primitive (developer, November 14, 2026, ITL-611). ``set[T]`` where ``T`` has
+no logical type (``set[int]``, ``set[str]``, ``set[bytes]``) is the same native set
+container: without it a set is stored as a plain ``large_list`` and is read back, and
+hashed, as the list with the same elements. Its element is an ``ArrowElement``, whose
+identifier is its Arrow type normalized to the large variants, as text
+(``str(normalize_to_large_types(t))``): the extension name is ``set[int64]``, which
+holds the element as it is and is the registry key of the exact type, and the metadata
+is ``{"category": "set", "element_kind": "arrow"}`` (developer, November 15, 2026). The
+metadata does not repeat the element type: a reader takes it from the storage,
+``large_list<int64>``, and refuses a storage whose element is not the one the name
+names. ``element_kind`` (never ``element_ext_name``) marks a plain Arrow element, so it
+can never be mistaken for a logical type's name. ``list[T]`` of a primitive is not a
+native container: it stays a plain ``large_list``, because a list is a list in Arrow too.
 
 Native containers (developer, November 11, 2026, ITL-935). ``list[T]`` and ``set[T]``
 of a logical type ``T`` are the *native containers*, and the only ones. They are
@@ -36,6 +51,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from orcapod.logical_types.base_logical_type import BaseLogicalType
@@ -60,26 +76,60 @@ logger = logging.getLogger(__name__)
 
 LIST_CATEGORY = "list"
 SET_CATEGORY = "set"
+ELEMENT_KIND_KEY = "element_kind"
+"""Metadata key saying what a set's element is; only ``ARROW_ELEMENT_KIND`` (ITL-611)."""
+ARROW_ELEMENT_KIND = "arrow"
+"""The ``element_kind`` of a set of a plain Arrow element: the storage's element type."""
+
+
+@dataclass(frozen=True)
+class ArrowElement:
+    """The element of a native set that is not a logical type: a plain Arrow type.
+
+    Attributes:
+        python_type: The element's Python type (``int`` for ``set[int]``).
+        arrow_type: The element's Arrow type; ``ListLogicalType`` normalizes it to
+            its large variants.
+    """
+
+    python_type: Any
+    arrow_type: "pa.DataType"
 
 
 class ListLogicalType(BaseLogicalType):
-    """Logical type for ``list[T]`` or ``set[T]`` where T maps to an Arrow extension type.
+    """Logical type for the native containers ``list[T]`` and ``set[T]``.
 
     Wraps a homogeneous list or set of elements whose Python type corresponds to
     a registered Arrow extension type (e.g. ``list[uuid.UUID]`` where ``uuid.UUID``
-    maps to ``orcapod.uuid``). The resulting Arrow extension type has:
+    maps to ``orcapod.uuid``), or a set of a plain Arrow element type
+    (``set[int]``, an ``ArrowElement``). The resulting Arrow extension type has:
 
-    - Extension name: ``list[<element_ext_name>]`` or ``set[<element_ext_name>]``
+    - Extension name: ``list[<element_ext_name>]`` or ``set[<element_ext_name>]``;
+      for a plain element ``set[<element Arrow type>]``
     - Storage type: ``pa.large_list(<element_storage_type>)`` — ET1 safe (no nested extension)
-    - Metadata: JSON with ``category``, ``element_ext_name``, and ``element_ext_metadata``
+    - Metadata: JSON with ``category``, ``element_ext_name``, and ``element_ext_metadata``;
+      for a plain element ``category`` and ``element_kind`` (``"arrow"``)
 
     Args:
-        element_logical_type: The logical type of individual list elements (e.g. ``LogicalUUID()``
-            for ``uuid.UUID`` elements). The element Python type and Arrow extension type are
-            derived from this logical type.
+        element_logical_type: The element: the logical type of individual elements
+            (e.g. ``LogicalUUID()`` for ``uuid.UUID`` elements), from which the element
+            Python type and Arrow extension type are derived, or an ``ArrowElement``
+            for a set of a plain Arrow type.
         is_set: If ``True``, uses ``set[T]`` semantics (``storage_to_python`` returns a
             ``set``; ``python_to_storage`` sorts storage values for determinism). Defaults to
             ``False`` (``list[T]`` semantics).
+
+    Attributes:
+        binds_python_type: Whether the registry binds ``python_type`` to this logical
+            type. ``False`` for a set of a plain Arrow element: ``set[int]`` is the
+            Python type of ``set[int64]`` and of ``set[int8]`` alike, so such a set is
+            found by its identifier only, and ``set[T]`` maps to Arrow through ``T``'s
+            own Arrow type, as ``list[T]`` does (ITL-611). A container takes its
+            element's value, so ``list[set[int]]`` is found by its identifier only too.
+
+    Raises:
+        ValueError: If the element is an ``ArrowElement`` and ``is_set`` is ``False``: a
+            list of a plain Arrow type is a plain ``large_list``, not a logical type.
 
     Example:
         >>> from orcapod.logical_types.builtin_logical_types import LogicalUUID
@@ -90,17 +140,36 @@ class ListLogicalType(BaseLogicalType):
         list[uuid.UUID]
     """
 
+    binds_python_type: bool = True
+
     def __init__(
         self,
-        element_logical_type: "LogicalTypeProtocol",
+        element_logical_type: "LogicalTypeProtocol | ArrowElement",
         *,
         is_set: bool = False,
     ) -> None:
-        self._element_logical_type = element_logical_type
-        self._element_python_type = element_logical_type.python_type
         self._is_set = is_set
         self._arrow_ext: pa.ExtensionType | None = None
         self._polars_ext: pl.BaseExtension | None = None
+
+        if isinstance(element_logical_type, ArrowElement):
+            if not is_set:
+                raise ValueError(
+                    f"A list of the plain Arrow type {element_logical_type.arrow_type} "
+                    "is a plain large_list, not a list logical type; only a set of a "
+                    "plain Arrow type is a native container."
+                )
+            self._init_arrow_element(element_logical_type)
+            return
+
+        self._element_logical_type: LogicalTypeProtocol | None = element_logical_type
+        self._element_python_type = element_logical_type.python_type
+        # A container of an element found by its identifier only (a set of a plain
+        # element) is found by its identifier only too: ``list[set[int8]]`` and
+        # ``list[set[int64]]`` both read as ``list[set[int]]`` (ITL-611).
+        self.binds_python_type = getattr(
+            element_logical_type, "binds_python_type", True
+        )
 
         # Derive Arrow extension details from the element logical type.
         element_ext_type = element_logical_type.get_arrow_extension_type()
@@ -150,6 +219,35 @@ class ListLogicalType(BaseLogicalType):
         # Compose the extension name from the category and element extension name.
         self._logical_type_name = f"{category}[{element_ext_name}]"
 
+    def _init_arrow_element(self, element: ArrowElement) -> None:
+        """Set up a set of a plain Arrow element type (ITL-611).
+
+        The element's identifier is its Arrow type normalized to the large variants,
+        as text, and enters the extension name only; the metadata says just that the
+        element is a plain Arrow type, which a reader takes from the storage. No
+        ``"version"`` key, as for every native container.
+
+        Args:
+            element: The element's Python and Arrow types.
+        """
+        from orcapod.utils.arrow_utils import normalize_to_large_types
+
+        element_arrow_type = normalize_to_large_types(
+            element.arrow_type, keep_null=True
+        )
+        element_text = str(element_arrow_type)
+        # Many element Arrow types read as one Python type (int8 and int64 as int),
+        # so a set of a plain element is found by its identifier only (ITL-611).
+        self.binds_python_type = False
+        self._element_logical_type = None
+        self._element_python_type = element.python_type
+        self._metadata_bytes = json.dumps(
+            {"category": SET_CATEGORY, ELEMENT_KIND_KEY: ARROW_ELEMENT_KIND}
+        ).encode("utf-8")
+        self._also_reads = (self._metadata_bytes,)
+        self._storage_type = pa.large_list(element_arrow_type)
+        self._logical_type_name = f"{SET_CATEGORY}[{element_text}]"
+
     @property
     def logical_type_name(self) -> str:
         """Unique orcapod identifier for this logical type.
@@ -160,11 +258,12 @@ class ListLogicalType(BaseLogicalType):
         return self._logical_type_name
 
     @property
-    def element_logical_type(self) -> LogicalTypeProtocol:
+    def element_logical_type(self) -> LogicalTypeProtocol | None:
         """The logical type of the list's elements.
 
         Returns:
-            The element logical type this list type was built from.
+            The element logical type this list type was built from, or ``None`` for a
+            set of a plain Arrow element type.
         """
         return self._element_logical_type
 
@@ -247,9 +346,10 @@ class ListLogicalType(BaseLogicalType):
         the element Python type. If ``value`` is ``None``, returns an empty list.
 
         For ``set[T]`` (``is_set=True``), the resulting list is sorted to guarantee
-        deterministic storage order regardless of Python set iteration order. Sorting
-        is attempted naturally; if elements are not comparable (``TypeError``), falls
-        back to ``repr``-based ordering.
+        deterministic storage order regardless of Python set iteration order. For a
+        logical element sorting is attempted naturally; if elements are not comparable
+        (``TypeError``), falls back to ``repr``-based ordering. A plain Arrow element is
+        put in the canonical order of ``canonical_order.sort_set_elements``.
 
         Args:
             value: A Python list (or set) of elements of type ``element_python_type``,
@@ -259,6 +359,10 @@ class ListLogicalType(BaseLogicalType):
         Returns:
             A plain Python list of storage values suitable for Arrow large_list storage.
             For set semantics the list is sorted.
+
+        Raises:
+            CanonicalOrderError: For a set of a plain Arrow type holding a NaN, elements
+                that cannot be ordered, or two elements with one storage value.
         """
         if value is None:
             return []
@@ -270,6 +374,13 @@ class ListLogicalType(BaseLogicalType):
                 for item in value
             ]
         if self._is_set:
+            if self._element_logical_type is None:
+                # A set of a plain Arrow type keeps the canonical order a plain set
+                # had before it was a native container (ITL-905), so the stored
+                # elements are unchanged (ITL-611).
+                from orcapod.semantic_types.canonical_order import sort_set_elements
+
+                return sort_set_elements(elements)
             try:
                 elements = sorted(elements)
             except TypeError:
@@ -341,8 +452,9 @@ class ListLogicalTypeFactory:
         ``ListLogicalType``.
 
         Args:
-            python_type: A ``list[T]`` or ``set[T]`` generic alias where ``T``
-                maps to a registered ``LogicalType``.
+            python_type: A ``list[T]`` generic alias where ``T`` maps to a registered
+                ``LogicalType``, or a ``set[T]`` of any element type the converter
+                supports.
             converter: The active converter for recursive element-type resolution.
 
         Returns:
@@ -350,7 +462,8 @@ class ListLogicalTypeFactory:
 
         Raises:
             ValueError: If ``python_type`` is not ``list[T]`` or ``set[T]``, if
-                it lacks a type argument, or if ``T`` has no registered ``LogicalType``.
+                it lacks a type argument, or if ``T`` of a ``list[T]`` has no
+                registered ``LogicalType``.
         """
         import typing
 
@@ -373,6 +486,18 @@ class ListLogicalTypeFactory:
 
         # Directly look up (and register if needed) the LogicalType for the element.
         element_lt = converter.get_logical_type_for_python_type(element_annotation)
+        if element_lt is None and is_set:
+            # A set of a plain Arrow type is a native container too (ITL-611). Its
+            # element Python type is that of the element Arrow type, as on the read
+            # path, never the annotation (``Literal[1, 2]`` reads as ``int``).
+            element_arrow_type = converter.register_python_class(element_annotation)
+            return ListLogicalType(
+                ArrowElement(
+                    converter.arrow_type_to_python_type(element_arrow_type),
+                    element_arrow_type,
+                ),
+                is_set=True,
+            )
         if element_lt is None:
             raise ValueError(
                 f"ListLogicalTypeFactory.create_for_python_type: element type "
@@ -396,20 +521,34 @@ class ListLogicalTypeFactory:
         ensuring the element logical type is registered before constructing the outer
         ``ListLogicalType``. Handles arbitrary nesting depth via recursion.
 
+        A set of a plain Arrow element (``"element_kind": "arrow"``) is rebuilt from
+        the storage's element type; the rebuilt extension name must be the stored one
+        (ITL-611).
+
         Args:
             arrow_extension_name: Extension name (e.g. ``"list[orcapod.uuid]"``).
             storage_type: Outer storage type (``large_list(<element storage>)``).
-            metadata: Parsed metadata dict; must contain ``"category"`` and
-                ``"element_ext_name"``; ``"element_ext_metadata"`` may be ``None``.
+            metadata: Parsed metadata dict; must contain ``"category"`` and either
+                ``"element_ext_name"`` (``"element_ext_metadata"`` may be ``None``) or,
+                for a set, ``"element_kind"``.
             converter: Active converter for recursive element registration.
 
         Returns:
             A ``ListLogicalType`` ready for registration.
 
         Raises:
+            LogicalTypeIdentifierError: If the metadata names a plain Arrow element
+                and the storage is not a list of the element the extension name
+                names, ``"element_kind"`` is not ``"arrow"``, or a set's metadata
+                names no element at all.
             ValueError: If ``storage_type`` is not a list type, or required metadata
                 keys are missing.
         """
+        if ELEMENT_KIND_KEY in metadata:
+            return self._reconstruct_arrow_element_set(
+                arrow_extension_name, storage_type, metadata, converter
+            )
+
         if not (pa.types.is_large_list(storage_type) or pa.types.is_list(storage_type)):
             raise ValueError(
                 f"ListLogicalTypeFactory.reconstruct_from_arrow: expected a list storage "
@@ -417,6 +556,12 @@ class ListLogicalTypeFactory:
             )
 
         element_ext_name = metadata.get("element_ext_name")
+        if not element_ext_name and metadata.get("category") == SET_CATEGORY:
+            # A set's metadata that names no element is not a form this version
+            # reads (a set of a primitive writes ``element_kind``).
+            return self._reconstruct_arrow_element_set(
+                arrow_extension_name, storage_type, metadata, converter
+            )
         if not element_ext_name:
             raise ValueError(
                 f"ListLogicalTypeFactory.reconstruct_from_arrow: missing 'element_ext_name' "
@@ -453,3 +598,70 @@ class ListLogicalTypeFactory:
             is_set,
         )
         return ListLogicalType(element_logical_type, is_set=is_set)
+
+    def _reconstruct_arrow_element_set(
+        self,
+        arrow_extension_name: str,
+        storage_type: "pa.DataType",
+        metadata: dict[str, Any],
+        converter: "TypeConverterProtocol",
+    ) -> ListLogicalType:
+        """Rebuild a set of a plain Arrow element type from stored metadata (ITL-611).
+
+        The element is the storage's element type: the metadata does not repeat it.
+        The set built over it must have the stored extension name, so a storage whose
+        element is not the one the name names is refused.
+
+        Args:
+            arrow_extension_name: Extension name (e.g. ``"set[int64]"``).
+            storage_type: The stored storage type (``large_list<int64>``).
+            metadata: Parsed metadata dict.
+            converter: Active converter, for the element's Python type.
+
+        Returns:
+            The ``ListLogicalType`` of the set.
+
+        Raises:
+            LogicalTypeIdentifierError: If the metadata is not a set's with
+                ``"element_kind": "arrow"``, the storage is not a list, or the set
+                built over the storage's element is not named ``arrow_extension_name``.
+        """
+        from orcapod.logical_types.identifier import (
+            LogicalTypeIdentifier,
+            LogicalTypeIdentifierError,
+        )
+        from orcapod.utils.arrow_utils import normalize_to_large_types
+
+        def refused(reason: str) -> LogicalTypeIdentifierError:
+            error = LogicalTypeIdentifierError(
+                LogicalTypeIdentifier(
+                    arrow_extension_name, json.dumps(metadata).encode("utf-8")
+                ),
+                (),
+            )
+            error.add_note(reason)
+            return error
+
+        if (
+            metadata.get("category") != SET_CATEGORY
+            or metadata.get(ELEMENT_KIND_KEY) != ARROW_ELEMENT_KIND
+        ):
+            raise refused(
+                f'Only a set has a plain element, with "{ELEMENT_KIND_KEY}": '
+                f'"{ARROW_ELEMENT_KIND}".'
+            )
+        if not (pa.types.is_large_list(storage_type) or pa.types.is_list(storage_type)):
+            raise refused(f"Its storage {storage_type} is not a list.")
+        element_arrow_type = normalize_to_large_types(
+            storage_type.value_type, keep_null=True
+        )
+        element_python_type = converter.arrow_type_to_python_type(element_arrow_type)
+        logical_type = ListLogicalType(
+            ArrowElement(element_python_type, element_arrow_type), is_set=True
+        )
+        if logical_type.logical_type_name != arrow_extension_name:
+            raise refused(
+                f"Its storage {storage_type} holds the elements of "
+                f"{logical_type.logical_type_name!r}."
+            )
+        return logical_type

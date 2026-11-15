@@ -512,6 +512,10 @@ def _semantic_types() -> dict[str, Any]:
         "dataclass_subclass": GoldenChild,
         "dataclass_with_structural": GoldenHolder,
         "list_dataclass": list[GoldenPoint],
+        # Added by ITL-611: a set of a primitive is the native set container.
+        "set_int": set[int],
+        "set_str": set[str],
+        "set_bytes": set[bytes],
     }
 
 
@@ -987,6 +991,10 @@ def _datagram_rows() -> dict[str, list[dict[str, Any]]]:
             {"k": "r1", "c": GoldenHolder(GoldenInner(1), "a")},
             {"k": "r2", "c": GoldenHolder(GoldenInner(2), "b")},
         ],
+        # Added by ITL-611: a set of a primitive is the native set container.
+        "set_int": [{"k": "r1", "c": {10, 2, 1}}, {"k": "r2", "c": {-1}}],
+        "set_str": [{"k": "r1", "c": {"b", "a", "10"}}, {"k": "r2", "c": {"x"}}],
+        "set_bytes": [{"k": "r1", "c": {b"y", b"\x00"}}, {"k": "r2", "c": {b"x"}}],
     }
 
 

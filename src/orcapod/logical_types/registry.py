@@ -331,7 +331,9 @@ class LogicalTypeRegistry:
         Raises:
             ValueError: If any of the three keys (``logical_type_name``,
                 Arrow extension name, ``python_type``) is already bound to a
-                *different* ``LogicalTypeProtocol`` in this registry, or if the
+                *different* ``LogicalTypeProtocol`` in this registry (the
+                ``python_type`` only for a logical type that binds it, see
+                ``binds_python_type`` on ``ListLogicalType``), or if the
                 Arrow extension name contains ``;`` (the separator between name
                 and metadata in the identifier text that is hashed).
         """
@@ -344,10 +346,16 @@ class LogicalTypeRegistry:
             )
         py_type = logical_type.python_type
         logical_name = logical_type.logical_type_name
+        # A logical type whose Python type is shared by other logical types (a set
+        # of a plain Arrow element: ``set[int]`` reads as ``set[int64]`` and as
+        # ``set[int8]``) is found by its identifier only, never by its Python type.
+        binds_python_type = getattr(logical_type, "binds_python_type", True)
 
         existing_by_logical = self._by_logical_name.get(logical_name)
         existing_by_arrow = self._by_arrow_name.get(arrow_ext_name)
-        existing_by_python = self._by_python_type.get(py_type)
+        existing_by_python = (
+            self._by_python_type.get(py_type) if binds_python_type else None
+        )
 
         if (
             existing_by_python is None
@@ -379,11 +387,11 @@ class LogicalTypeRegistry:
                     f"'{existing.logical_type_name}'."
                 )
 
-        # Idempotent check: all three keys already bound to this same instance.
+        # Idempotent check: every key already bound to this same instance.
         if (
             existing_by_logical is logical_type
             and existing_by_arrow is logical_type
-            and existing_by_python is logical_type
+            and (existing_by_python is logical_type or not binds_python_type)
         ):
             return
 
@@ -410,7 +418,8 @@ class LogicalTypeRegistry:
         # Store three-way binding.
         self._by_logical_name[logical_name] = logical_type
         self._by_arrow_name[arrow_ext_name] = logical_type
-        self._by_python_type[py_type] = logical_type
+        if binds_python_type:
+            self._by_python_type[py_type] = logical_type
 
     def _rebind(
         self, previous: LogicalTypeProtocol, logical_type: LogicalTypeProtocol

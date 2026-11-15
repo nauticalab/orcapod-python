@@ -7,7 +7,7 @@ import json as _json
 import logging
 from collections.abc import Collection
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.types import Schema
 from orcapod.logical_types.identifier import (
@@ -964,6 +964,11 @@ def parse_arrow_type_string(type_str: str, type_converter: Any | None = None) ->
             type_converter = resolve_context(None).type_converter
         logical_type = type_converter.get_logical_type_by_arrow_extension_name(name)
         if logical_type is None:
+            # A native container (list[T], set[T]) is fully described by its
+            # identifier: rebuild it, as a read of stored data does (ITL-611).
+            _register_native_container(name, metadata, type_converter)
+            logical_type = type_converter.get_logical_type_by_arrow_extension_name(name)
+        if logical_type is None:
             raise ValueError(f"Unregistered extension type: {name!r}")
         require_readable(logical_type, metadata)
         return logical_type.get_arrow_extension_type()
@@ -1013,6 +1018,91 @@ def parse_arrow_type_string(type_str: str, type_converter: Any | None = None) ->
         return pa.map_(key_type, value_type, False)
 
     raise ValueError(f"Unknown nested Arrow type: {type_str!r}")
+
+
+def _native_container_storage(
+    name: str, metadata: bytes, type_converter: Any
+) -> Any | None:
+    """Return the storage type a native container's identifier describes.
+
+    A native container's element is a plain Arrow type (a set of a primitive,
+    ``"element_kind": "arrow"``: the element type is the text inside the extension
+    name, ``set[<element>]``) or a logical type its metadata names
+    (``element_ext_name`` and ``element_ext_metadata``). The storage is a
+    ``large_list`` of the element's storage. A logical element must be registered
+    in this process, or be a native container itself.
+
+    Args:
+        name: The container's extension name.
+        metadata: The container's extension metadata.
+        type_converter: The converter that resolves a logical element.
+
+    Returns:
+        The storage type, or ``None`` if ``metadata`` is not a native container's or
+        names a logical element that is not registered.
+    """
+    import pyarrow as pa
+
+    from orcapod.logical_types.list_logical_type_factory import (
+        ARROW_ELEMENT_KIND,
+        ELEMENT_KIND_KEY,
+        LIST_CATEGORY,
+        SET_CATEGORY,
+    )
+
+    try:
+        description: object = _json.loads(metadata.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(description, dict):
+        return None
+    fields = cast("dict[str, object]", description)
+    if fields.get("category") not in (LIST_CATEGORY, SET_CATEGORY):
+        return None
+    if fields.get(ELEMENT_KIND_KEY) == ARROW_ELEMENT_KIND:
+        prefix = f"{SET_CATEGORY}["
+        if not (name.startswith(prefix) and name.endswith("]")):
+            return None
+        element_text = name[len(prefix) : -1]
+        return pa.large_list(parse_arrow_type_string(element_text, type_converter))
+    element_name = fields.get("element_ext_name")
+    if not isinstance(element_name, str):
+        return None
+    element_metadata_text = fields.get("element_ext_metadata")
+    element_metadata = (
+        element_metadata_text.encode("utf-8")
+        if isinstance(element_metadata_text, str)
+        else b""
+    )
+    element = type_converter.get_logical_type_by_arrow_extension_name(element_name)
+    if element is not None:
+        return pa.large_list(element.get_arrow_extension_type().storage_type)
+    element_storage = _native_container_storage(
+        element_name, element_metadata, type_converter
+    )
+    if element_storage is None:
+        return None
+    return pa.large_list(element_storage)
+
+
+def _register_native_container(name: str, metadata: bytes, type_converter: Any) -> None:
+    """Register the native container a saved identifier names, if it is one.
+
+    Saved schemas hold an extension type as its identifier only. A native container
+    (``list[T]`` or ``set[T]``) is fully described by it, so it is rebuilt through
+    the registered factory, as reading stored data rebuilds it; any other logical
+    type must already be registered in this process.
+
+    Args:
+        name: The extension name.
+        metadata: The extension metadata.
+        type_converter: The converter to register the container with.
+    """
+    storage = _native_container_storage(name, metadata, type_converter)
+    if storage is not None:
+        type_converter.register_logical_type_from_arrow_metadata(
+            name, metadata, storage
+        )
 
 
 def _parse_arrow_field(text: str, type_converter: Any | None) -> Any:

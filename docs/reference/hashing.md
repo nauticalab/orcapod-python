@@ -582,7 +582,9 @@ counts column order. A Polars frame and the equal pandas frame never share a has
 
 A `dict` and a `set` have no order, so equal values must hash equally whatever order they
 were built in. Arrow stores both as lists: `dict[K, V]` as `large_list<struct<key, value>>`
-and a plain `set[T]` as `large_list<T>`. Orcapod puts them in canonical order at the point
+and a `set[T]` of a primitive as the native set container `set[<element Arrow type>]` over
+`large_list<T>` (ITL-611; see [Logical Type Identifiers](../concepts/logical-type-identifiers.md)).
+Orcapod puts them in canonical order at the point
 where a Python value becomes Arrow, so the stored list, and therefore the row hash, does not
 depend on insertion order (dicts) or on `PYTHONHASHSEED` (sets of `str` or `bytes`).
 
@@ -660,6 +662,17 @@ is defined in terms of the other: changing the hasher's order would move semanti
 of affected inputs, and changing storage order would move row hashes and what a pod reads back.
 `set[T]` of a logical type (`set[Path]`, `set[UUID]`) is ordered by `ListLogicalType`, not
 by this rule.
+
+**The set's identity is part of the row hash** (ITL-611). A set of a primitive is stored
+under its native container type, and the Arrow hasher hashes an extension column's
+identifier (extension name and metadata) with its stored values. So `{1, 2, 3}` as
+`set[int]` and `[1, 2, 3]` as `list[int]` are two different rows, although both store the
+list `[1, 2, 3]`. The elements of a set of a primitive are hashed as stored, never replaced
+by their value hashes: only a container whose innermost element is a logical type is (a
+`set[bytes]` hashes like its stored `large_list<large_binary>` plus the identifier, although
+the semantic hasher has a handler for `bytes`). Before ITL-611 a set of a primitive was a
+plain `large_list` and hashed exactly like the list row; such rows were written only by
+development builds of v0.3.
 
 ---
 
