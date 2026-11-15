@@ -33,10 +33,16 @@ DOC_PAGES = sorted(
         REPO_ROOT / "README.md",
         REPO_ROOT / "docs" / "index.md",
         REPO_ROOT / "docs" / "getting-started.md",
+        REPO_ROOT / "docs" / "troubleshooting.md",
         *(REPO_ROOT / "docs" / "concepts").glob("*.md"),
         *(REPO_ROOT / "docs" / "reference").glob("*.md"),
+        *(REPO_ROOT / "docs" / "tutorial").glob("*.md"),
     ]
 )
+
+# The tutorial pages start with ``from workshop_data import make_dataset``; the
+# generator lives next to them so that the built site serves it for download.
+TUTORIAL_DIR = REPO_ROOT / "docs" / "tutorial"
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +256,21 @@ def test_doc_pages_are_discovered():
         "docs/getting-started.md",
         "docs/concepts/function-pods.md",
         "docs/concepts/operators.md",
+        "docs/concepts/pipeline-job.md",
+        "docs/concepts/file-types.md",
+        "docs/troubleshooting.md",
+        "docs/tutorial/index.md",
+        "docs/tutorial/00-setup.md",
+        "docs/tutorial/01-first-stream.md",
+        "docs/tutorial/02-function-pods.md",
+        "docs/tutorial/03-operators.md",
+        "docs/tutorial/04-many-rows-into-one.md",
+        "docs/tutorial/05-pipeline-job.md",
+        "docs/tutorial/06-reruns-and-caching.md",
+        "docs/tutorial/07-files.md",
+        "docs/tutorial/08-inspecting-and-tracing.md",
+        "docs/tutorial/09-when-things-go-wrong.md",
+        "docs/tutorial/10-where-next.md",
     ):
         assert expected in DOC_PAGES
 
@@ -265,7 +286,9 @@ def test_doc_page_samples_run(page: str, tmp_path: Path):
     ``~/.orcapod``.
     """
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "src")])
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(REPO_ROOT), str(REPO_ROOT / "src"), str(TUTORIAL_DIR)]
+    )
     env["HOME"] = str(tmp_path)
     env["USERPROFILE"] = str(tmp_path)
     env.pop("ORCAPOD_HASH_CACHE_DB", None)

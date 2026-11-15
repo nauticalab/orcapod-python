@@ -5,6 +5,9 @@ unchanged file — across pipeline runs or between `op.File` and `op.Directory`
 accesses — skips the disk read entirely. This page explains how the cache
 works, how to turn it on, and when it helps.
 
+If you have not used `op.File` and `op.Directory` yet, read
+[File and Path Types](file-types.md) first.
+
 ## FileHasher, HashCacher, and CachedFileHasher
 
 `FileHasher` is the base hasher. When you call `hash_file(path)` on it, it
@@ -42,8 +45,8 @@ from orcapod.contexts import enable_file_hash_caching
 enable_file_hash_caching()
 ```
 
-`enable_file_hash_caching` lives in `orcapod.contexts`; it is not re-exported from the
-top-level `orcapod` namespace.
+`enable_file_hash_caching` lives in `orcapod.contexts` and is also exported from the
+top-level `orcapod` namespace, as `orcapod.enable_file_hash_caching`.
 
 You can also supply an explicit path for the SQLite database, as a `pathlib.Path`. Parent
 directories are created if they do not exist:
@@ -266,7 +269,6 @@ Requires `psycopg` (install with `pip install 'orcapod[postgresql]'`) and a reac
 Postgres server:
 
 <!-- docs-test: skip -->
-
 ```python
 from orcapod.contexts import enable_file_hash_caching
 
@@ -279,7 +281,6 @@ You can also construct `PostgresHashCacher` directly and pass it to
 `CachedFileHasher` for advanced configurations:
 
 <!-- docs-test: skip -->
-
 ```python
 from orcapod.hashing import CachedFileHasher, FileHasher, PostgresHashCacher
 

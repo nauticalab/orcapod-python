@@ -85,8 +85,9 @@ to refer to names (e.g. ``PollingSource``, ``iter_data``, ``CursorInvalidatedErr
 ## Documentation samples
 
 Every fenced `python` block in `README.md`, `docs/index.md`, `docs/getting-started.md`,
-`docs/concepts/` and `docs/reference/` is executed by `tests/test_docs/test_doc_samples.py`,
-and `tests/test_docs/test_mkdocs_build.py` runs `mkdocs build --strict`. When writing docs:
+`docs/troubleshooting.md`, `docs/concepts/`, `docs/reference/` and `docs/tutorial/` is executed
+by `tests/test_docs/test_doc_samples.py`, and `tests/test_docs/test_mkdocs_build.py` runs
+`mkdocs build --strict`. When writing docs:
 
 - Blocks on one page share a namespace and run top to bottom.
 - Every line a block prints must appear as a `# ...` comment in that block; `...` inside the
@@ -94,6 +95,13 @@ and `tests/test_docs/test_mkdocs_build.py` runs `mkdocs build --strict`. When wr
 - Put `<!-- docs-test: skip -->` on the line above a fence only when the sample needs
   infrastructure the test run lacks (e.g. a Postgres server) — never to hide a wrong sample.
 - If a sample fails because the library changed, fix the page to match the code.
+- Tutorial pages (`docs/tutorial/`) all use one synthetic dataset, written by
+  `docs/tutorial/workshop_data.py` (standard library only, deterministic; tested by
+  `tests/test_docs/test_workshop_data.py`). Each page starts with
+  `from workshop_data import make_dataset`; the harness puts `docs/tutorial` on `PYTHONPATH`.
+  Do not add a second dataset or a dependency to the generator.
+- Output that the library does not guarantee to be ordered must not be shown as if it were:
+  print `sorted(job.nodes)`, and sort rows read back from a database before showing them.
 
 ## Linear issue tracking
 

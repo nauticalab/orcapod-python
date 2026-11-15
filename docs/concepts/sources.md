@@ -344,7 +344,10 @@ source, or a node of a job. It has two uses.
 [`PipelineJob`](function-pods.md#pipelinejob-database-backed-cached-execution) that has run
 and presents them as a new source. You get one by calling `as_source()` on the node, for
 example `job.nodes["bmi"].as_source()`. This is useful for chaining pipeline stages: run a
-job, then use one of its outputs as the input of a new pipeline.
+job, then use one of its outputs as the input of a new pipeline. The `as_source()` of a node
+downstream of a join cannot yet be bound as a source of a new `PipelineJob`: its rows carry
+the system tags of every joined source, and binding refuses it with `SourceSpecMismatchError`
+(support is planned, ITL-1127).
 
 **Using a tag value as an input to a computation.** Tags identify a row and data is what a
 function computes on, so a function pod never receives a tag. Sometimes one value is needed

@@ -33,15 +33,30 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Tutorial:
+    - Overview: tutorial/index.md
+    - 0. Setup: tutorial/00-setup.md
+    - 1. Your first stream: tutorial/01-first-stream.md
+    - 2. Computing with function pods: tutorial/02-function-pods.md
+    - 3. Reshaping with operators: tutorial/03-operators.md
+    - 4. Many rows into one: tutorial/04-many-rows-into-one.md
+    - 5. Keeping results: tutorial/05-pipeline-job.md
+    - 6. Re-runs and caching: tutorial/06-reruns-and-caching.md
+    - 7. Working with files: tutorial/07-files.md
+    - 8. Inspecting and tracing: tutorial/08-inspecting-and-tracing.md
+    - 9. When things go wrong: tutorial/09-when-things-go-wrong.md
+    - 10. Where next: tutorial/10-where-next.md
   - Concepts:
     - Sources: concepts/sources.md
     - Streams: concepts/streams.md
     - Operators: concepts/operators.md
     - Function Pods: concepts/function-pods.md
+    - Pipelines and Jobs: concepts/pipeline-job.md
     - Your Own Data Types: concepts/your-own-data-types.md
     - Arrays and Tensors: concepts/arrays.md
     - Logical Type Identifiers: concepts/logical-type-identifiers.md
     - Identity & Hashing: concepts/identity.md
+    - File and Path Types: concepts/file-types.md
     - File Hash Caching: concepts/file-hash-caching.md
   - API Reference:
     - Overview: api/index.md

@@ -209,10 +209,10 @@ print(result.as_table().to_pandas())
 
 ## Keeping results
 
-Everything above runs in memory: results are recomputed each time and nothing is stored. To
+Everything above runs in memory: nothing is stored, so each new run computes everything again. To
 save results in a database and have later runs compute only what is new, record the same
-steps inside a `PipelineJob`. See
-[`PipelineJob` -- database-backed, cached execution](concepts/function-pods.md#pipelinejob-database-backed-cached-execution).
+steps inside a `PipelineJob`. See [Pipelines and Jobs](concepts/pipeline-job.md), or work
+through the [Tutorial](tutorial/index.md), which builds up to it step by step.
 
 ## Next steps
 
@@ -227,3 +227,5 @@ Now that you have the basics, explore these topics:
   that work on tags and stream structure without inspecting data content.
 - [Identity & Hashing](concepts/identity.md) -- how Orcapod tracks content identity and
   pipeline structure for reproducibility.
+- [Tutorial](tutorial/index.md) -- a self-paced course with exercises, on one small dataset.
+- [Troubleshooting](troubleshooting.md) -- common errors, their causes and fixes.
