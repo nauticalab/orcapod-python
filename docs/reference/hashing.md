@@ -720,10 +720,34 @@ topology suffix, encoding the full join lineage into each column name.
 | Field | Value |
 |---|---|
 | **Inputs** | `source_id` string + provenance token: `"{col}={value}"` when `record_id_column` is specified, otherwise `"row_{index}"` |
-| **Algorithm** | `uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, f"{source_id}::{provenance_token}")` where `_SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(NAMESPACE_URL, "orcapod::record_id")` is a fixed constant |
+| **Algorithm** | `uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, f"{source_id}::{provenance_token}")` where `_SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(NAMESPACE_URL, "https://orcapod.org/namespaces/source-record-id")` is a fixed constant (`core/sources/stream_builder.py`) |
 | **Output format** | `bytes` (16 bytes, UUID v5 bit pattern), stored in a `large_binary` Arrow column; the column keeps that type through tags, operators and stored tables (ITL-942: before v0.3 a source gave it `fixed_size_binary[16]`, so the operator cache key of one row differed between a direct run and the async orchestrator) |
 | **Uniqueness guarantee** | Deterministic per `(source_id, row_identity)`; stable across identical re-runs of the same source |
 | **Known exclusions** | When `record_id_column` is not specified, the row index is used as the provenance token; `record_id` changes if rows are **reordered** within the source table |
+
+The recipe recomputes a record id from the source id and the token alone. The value below is
+the one pinned for this row in the golden hash file (`pipeline.json`):
+
+```python
+import uuid
+
+record_id_namespace = uuid.uuid5(
+    uuid.NAMESPACE_URL, "https://orcapod.org/namespaces/source-record-id"
+)
+subjects = DictSource(
+    data=[{"subject": "s1", "age": 3, "weight": 20.5}],
+    tag_columns=["subject"],
+    source_id="subjects",
+)
+first_row = subjects.as_table(columns={"system_tags": True}).to_pylist()[0]
+stored_record_id = next(
+    value for name, value in first_row.items() if name.startswith("_tag_record_id")
+)
+print(stored_record_id == uuid.uuid5(record_id_namespace, "subjects::row_0").bytes)
+# True
+print(stored_record_id.hex())
+# e8e02084627f5e1aad83839e421538e8
+```
 
 ---
 
