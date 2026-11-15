@@ -7,8 +7,10 @@ Both share SourceNodeBase which provides schema-based identity.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
+import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping
@@ -35,7 +37,7 @@ from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.logical_types.user_class_identity import equivalent_hints
 from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.arrow_utils import system_tag_column_names
 from orcapod.utils.lazy_module import LazyModule
@@ -56,6 +58,44 @@ logger = logging.getLogger(__name__)
 def _type_text(data_type: Any) -> str:
     """Return *data_type* as it is written in an annotation (``int``, ``int | None``)."""
     return data_type.__name__ if isinstance(data_type, type) else str(data_type)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PendingType:
+    """A column of a loaded slot whose saved type could not be restored at load (ITL-1138).
+
+    Attributes:
+        role: ``"tag"`` or ``"data"``.
+        text: The saved type text, as the job file holds it.
+        nullable: Whether the file records the column as nullable (``T | None``).
+    """
+
+    role: str
+    text: str
+    nullable: bool
+
+
+def _saved_type_description(text: str) -> str:
+    """Name the type a saved type text stands for, for a message.
+
+    A user class is named by its identity record (``user class 'mod.A' (dataclass)``),
+    any other extension type by its extension name; other text is quoted as it is.
+
+    Args:
+        text: A saved type text, e.g. ``extension<mod.A@<sha>;<hex of metadata>>``.
+    """
+    start = text.find("extension<")
+    if start < 0:
+        return f"type {text!r}"
+    name, _, rest = text[start + len("extension<") :].partition(";")
+    try:
+        metadata = json.loads(bytes.fromhex(rest.split(">", 1)[0]))
+    except ValueError:  # not hex, or not JSON (UnicodeDecodeError is a ValueError)
+        metadata = None
+    identity = metadata.get("identity") if isinstance(metadata, dict) else None
+    if isinstance(identity, dict) and isinstance(identity.get("name"), str):
+        return f"user class {identity['name']!r} ({identity.get('kind', 'class')})"
+    return f"extension type {name!r}"
 
 
 def _is_narrower(declared: Any, given: Any) -> bool:
@@ -241,6 +281,149 @@ class SourceNodeBase(TraceableBase, ABC):
         self._name = name
         self._tag_schema = tag_schema
         self._data_schema = data_schema
+        # A slot rebuilt from a saved job keeps the saved hashes, and the columns whose
+        # saved type could not be restored at load (ITL-1138); see ``_keep_saved``.
+        self._saved_pipeline_hash: ContentHash | None = None
+        self._saved_content_hash: ContentHash | None = None
+        self._pending_types: dict[str, _PendingType] = {}
+
+    # ------------------------------------------------------------------
+    # Rebuilt from a saved job
+    # ------------------------------------------------------------------
+
+    def _keep_saved(
+        self,
+        *,
+        pipeline_hash: str | None,
+        content_hash: str | None,
+        saved_types: Mapping[str, Mapping[str, str]],
+        nullable: Mapping[str, Collection[str]] | None,
+    ) -> None:
+        """Keep what a saved job recorded for this slot (ITL-1138).
+
+        The slot returns the saved pipeline hash, and the saved content hash while no
+        source is bound, as loaded function and operator nodes return theirs, so its
+        stored address does not depend on what the loading process had registered. A
+        column whose saved type the load could not restore to a Python type (a user
+        class nothing in this process has registered yet) holds its saved text; it is
+        kept as pending and restored when a source is bound (``_fit``).
+
+        Args:
+            pipeline_hash: The saved pipeline hash text, or ``None`` if not saved.
+            content_hash: The saved content hash text, or ``None`` if not saved.
+            saved_types: The saved type texts, ``{"tag": {...}, "data": {...}}``.
+            nullable: The saved nullable column names per role, or ``None`` when the
+                file does not record them.
+        """
+        if pipeline_hash is not None:
+            self._saved_pipeline_hash = ContentHash.from_string(pipeline_hash)
+        if content_hash is not None:
+            self._saved_content_hash = ContentHash.from_string(content_hash)
+        for role, schema in (("tag", self._tag_schema), ("data", self._data_schema)):
+            for name, value in schema.items():
+                text = saved_types.get(role, {}).get(name)
+                if isinstance(value, str) and text is not None:
+                    self._pending_types[name] = _PendingType(
+                        role=role,
+                        text=text,
+                        nullable=nullable is not None and name in nullable[role],
+                    )
+
+    def _take_saved_state_of(self, other: "SourceNodeBase") -> None:
+        """Keep the saved state of *other*, a slot of the same schema.
+
+        The pending types and the saved pipeline hash, which does not depend on the
+        slot's name, are always kept. The saved content hash covers the name too, so
+        it is kept only when this slot has *other*'s name.
+        """
+        self._saved_pipeline_hash = other._saved_pipeline_hash
+        if self._name == other._name:
+            self._saved_content_hash = other._saved_content_hash
+        self._pending_types = dict(other._pending_types)
+
+    def _pending_nullable_columns(self) -> dict[str, list[str]]:
+        """The pending columns the saved job records as nullable, by role.
+
+        A column whose type is still the saved text has no Python type to read its
+        nullability from, so a job saved again records the saved nullability (ITL-1138).
+        """
+        names: dict[str, list[str]] = {"tag": [], "data": []}
+        for name, pending in self._pending_types.items():
+            if pending.nullable:
+                names[pending.role].append(name)
+        return names
+
+    def _restore_pending_types(self) -> dict[str, str]:
+        """Restore the pending columns whose type this process can now restore.
+
+        A source being bound has registered the class it holds, so a column saved with
+        that class restores now. The slot's schemas then hold the class, as they would
+        had the class been registered before the load.
+
+        Returns:
+            For each column still not restorable, the description of its saved type.
+        """
+        if not self._pending_types:
+            return {}
+        # Local import: orcapod.pipeline imports the node modules.
+        from orcapod.pipeline.serialization import deserialize_schema
+
+        converter = self.data_context.type_converter
+        schemas = {"tag": dict(self._tag_schema), "data": dict(self._data_schema)}
+        still_pending: dict[str, _PendingType] = {}
+        for name, pending in self._pending_types.items():
+            restored = deserialize_schema(
+                {name: pending.text},
+                converter,
+                nullable=[name] if pending.nullable else [],
+            )[name]
+            if isinstance(restored, str):
+                still_pending[name] = pending
+            else:
+                schemas[pending.role][name] = restored
+        if len(still_pending) < len(self._pending_types):
+            self._tag_schema = Schema(
+                schemas["tag"], optional_fields=self._tag_schema.optional_fields
+            )
+            self._data_schema = Schema(
+                schemas["data"], optional_fields=self._data_schema.optional_fields
+            )
+            self._pending_types = still_pending
+            # The system-tag names come from the schema hash, now of the restored types.
+            with contextlib.suppress(AttributeError):  # not computed yet
+                del self._schema_hash_str
+            self._invalidate_content_hash_cache()
+            # A slot without a saved pipeline hash computed one from the type text.
+            self._invalidate_pipeline_hash_cache()
+        return {
+            name: _saved_type_description(pending.text)
+            for name, pending in still_pending.items()
+        }
+
+    def _bound_stream(self) -> "StreamProtocol | None":
+        """The concrete stream bound to this slot; a declaration has none."""
+        return None
+
+    def content_hash(self, hasher=None) -> ContentHash:
+        """Return the content hash; a slot rebuilt from a saved job returns the saved one.
+
+        The saved value stands while no source is bound (ITL-1138); a bound source gives
+        its own identity, as for any slot.
+        """
+        if self._saved_content_hash is not None and self._bound_stream() is None:
+            return self._saved_content_hash
+        return super().content_hash(hasher)
+
+    def pipeline_hash(self, hasher=None) -> ContentHash:
+        """Return the pipeline hash; a slot rebuilt from a saved job returns the saved one.
+
+        A slot's saved type of a user class this process has not registered is text
+        until a source is bound, so recomputing would give another value than the run's
+        (ITL-1138), as for loaded function and operator nodes.
+        """
+        if self._saved_pipeline_hash is not None:
+            return self._saved_pipeline_hash
+        return super().pipeline_hash(hasher)
 
     # ------------------------------------------------------------------
     # Identity
@@ -440,6 +623,15 @@ class SourceNodeBase(TraceableBase, ABC):
         source_tag, source_data = source.output_schema()
 
         issues: list[str] = []
+        unrestored = self._restore_pending_types()
+        for name, saved in unrestored.items():
+            role = self._pending_types[name].role
+            issues.append(
+                f"{role} column {name!r} was saved as {saved}, which is not registered "
+                "in this process, so the source cannot be checked against it: bind a "
+                "source of that class (building one registers it) or define a function "
+                "pod that uses it before binding"
+            )
         narrower: set[str] = set()
         for role, declared, given in (
             ("tag", self._tag_schema, source_tag),
@@ -452,6 +644,8 @@ class SourceNodeBase(TraceableBase, ABC):
             if extra:
                 issues.append(f"unexpected {role} columns: {sorted(extra)}")
             for name in declared.keys():
+                if name in unrestored:
+                    continue
                 if name not in given or equivalent_hints(given[name], declared[name]):
                     continue
                 if _is_narrower(declared[name], given[name]):
@@ -726,11 +920,18 @@ class SourceNode(SourceNodeBase):
                 slot_name = stream.source_id
             else:
                 slot_name = f"{stream.label}:{stream.content_hash().to_hex()}"
-        return cls(
+        node = cls(
             name=slot_name,
             tag_schema=tag_schema,
             data_schema=data_schema,
         )
+        if isinstance(stream, SourceNodeBase):
+            # A loaded job's slot keeps its pending types and its saved pipeline hash,
+            # which does not depend on the name (ITL-1138); its saved content hash
+            # covers the name, and the new slot has another name.
+            node._pending_types = dict(stream._pending_types)
+            node._saved_pipeline_hash = stream._saved_pipeline_hash
+        return node
 
 
 class SourceJobNode(SourceNodeBase):
@@ -848,6 +1049,10 @@ class SourceJobNode(SourceNodeBase):
         """
         self._bind(value)
         self._update_modified_time()
+
+    def _bound_stream(self) -> StreamProtocol | None:
+        """The concrete stream bound to this slot, or ``None``."""
+        return self._bound_source
 
     def _bind(self, value: StreamProtocol | None) -> None:
         """Check *value* and bind it, invalidating both hash caches.
@@ -1213,20 +1418,24 @@ class SourceJobNode(SourceNodeBase):
         match stream:
             case SourceJobNode():
                 # Case 1: copy — preserve bound_source, do NOT wrap the SJN itself.
-                return cls(
+                node = cls(
                     name=name if name is not None else stream.name,
                     tag_schema=stream.tag_schema,
                     data_schema=stream.data_schema,
                     bound_source=stream.bound_source,
                 )
+                node._take_saved_state_of(stream)
+                return node
             case SourceNode():
                 # Case 2: unbound — schema placeholder; SJN hash = SourceNode hash.
-                return cls(
+                node = cls(
                     name=name if name is not None else stream.name,
                     tag_schema=stream.tag_schema,
                     data_schema=stream.data_schema,
                     bound_source=None,
                 )
+                node._take_saved_state_of(stream)
+                return node
             case _:
                 # Case 3: concrete stream — bound SJN.
                 # Slot name priority:
@@ -1252,14 +1461,43 @@ class SourceJobNode(SourceNodeBase):
                     bound_source=stream,
                 )
 
+    @classmethod
+    def _from_loaded_slot(
+        cls, slot: SourceNode, bound_source: StreamProtocol | None
+    ) -> "SourceJobNode":
+        """Build the job node of a slot rebuilt from a saved job (``PipelineJob.load``).
+
+        The node takes the slot's saved hashes and pending types before *bound_source*
+        is checked, so a column saved with a class this process registers only now
+        (by building the source) is restored for the check (ITL-1138).
+
+        Args:
+            slot: The slot ``Pipeline.load`` rebuilt from the job file.
+            bound_source: The source rebuilt from the saved config, if any.
+
+        Raises:
+            SourceSpecMismatchError: If *bound_source* does not fit the slot.
+        """
+        node = cls(
+            name=slot.name,
+            tag_schema=slot.tag_schema,
+            data_schema=slot.data_schema,
+        )
+        node._take_saved_state_of(slot)
+        if bound_source is not None:
+            node._bind(bound_source)
+        return node
+
     def as_node(self) -> SourceNode:
         """Return the lightweight ``SourceNode`` equivalent of this job node.
 
         Returns:
             A new ``SourceNode`` with the same name and schemas.
         """
-        return SourceNode(
+        node = SourceNode(
             name=self._name,
             tag_schema=self._tag_schema,
             data_schema=self._data_schema,
         )
+        node._take_saved_state_of(self)
+        return node

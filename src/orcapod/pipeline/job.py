@@ -1708,11 +1708,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 continue
 
             if isinstance(bp_node, _SourceNode):
-                sjn = SourceJobNode(
-                    name=bp_node.name,
-                    tag_schema=bp_node.tag_schema,
-                    data_schema=bp_node.data_schema,
-                    bound_source=sources.get(bp_node.name),
+                # Keeps the loaded slot's saved hashes and pending types (ITL-1138).
+                sjn = SourceJobNode._from_loaded_slot(  # pyright: ignore[reportPrivateUsage]  # the loader is the one caller
+                    bp_node, bound_source=sources.get(bp_node.name)
                 )
                 job._persistent_node_map[node_hash] = sjn
                 if bp_node.name in sources:
