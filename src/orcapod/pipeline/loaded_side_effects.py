@@ -343,7 +343,8 @@ class LoadedSideEffectJobNode(SideEffectJobNode):
         run_job_node(
             self,
             load_only=True,
-            run_alone=lambda: self._run_alone(load_only=True),
+            # As the live node: a run alone has no use for the unchecked source ids.
+            run_alone=lambda _unchecked: self._run_alone(load_only=True),
             caller=sys._getframe(1),  # pyright: ignore[reportPrivateUsage]  # the caller's line is where a failure warning is shown
         )
         return self._with_run_status(self._view_of_rows(self.as_table(), "held"))

@@ -403,3 +403,23 @@ def test_a_loaded_blueprint_side_effect_node_cannot_become_an_invocation(
     loaded = Pipeline.load(blueprint)
     with pytest.raises(RuntimeError, match="SideEffectNode.*no live side-effect pod"):
         _ = loaded.to_invocations()
+
+
+def test_a_loaded_side_effect_node_over_a_non_job_stream_runs_load_only(
+    saved: tuple[PipelineJob, list[int], pathlib.Path],
+) -> None:
+    """A load-only run reaches ``run_alone`` when no job node feeds the node.
+
+    ``PipelineJob.load`` always puts a job node upstream, so the node is built directly
+    over a source's stream (#381 x #384: ``run_alone`` takes the unchecked source ids).
+    """
+    from orcapod.pipeline.loaded_side_effects import LoadedSideEffectJobNode
+
+    _, sent, path = saved
+    delivered_before = list(sent)
+    descriptor = _descriptors(path)["delivered"]
+    node = LoadedSideEffectJobNode(descriptor, _source())  # pyright: ignore[reportArgumentType]  # a source is a stream
+    view = node.run(load_only=True)
+    assert view.status is ViewStatus.LOADED_ONLY
+    assert view.as_table().num_rows == ROWS
+    assert sent == delivered_before
