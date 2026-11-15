@@ -488,16 +488,19 @@ def test_a_run_with_every_node_held_says_so() -> None:
 
 
 # ---------------------------------------------------------------------------
-# A loaded job missing a node (ITL-1094) fails load-only with a clear error
+# A loaded job missing a node fails load-only with a clear error
 # ---------------------------------------------------------------------------
+
+DELIVERED: list[int] = []
 
 
 def _deliver_x(x: int, ctx: Any) -> None:
-    """A side effect over the source's own column."""
+    """A side effect over the source's own column: record ``x``."""
+    DELIVERED.append(x)
 
 
-def test_a_loaded_job_without_its_side_effect_node_names_it(tmp_path: Path) -> None:
-    """A loaded job missing a side-effect node fails load-only naming ITL-1094."""
+def test_a_loaded_job_without_a_node_names_the_node_below_it(tmp_path: Path) -> None:
+    """A node of a kind ``PipelineJob.load`` does not restore leaves its input lost."""
     tap = side_effect_pod(_deliver_x)
     assert isinstance(tap, SideEffectPod)
     db = InMemoryArrowDatabase()
@@ -507,9 +510,15 @@ def test_a_loaded_job_without_its_side_effect_node_names_it(tmp_path: Path) -> N
         inc.pod(tapped, label="down")
     job.run()
     job.save(tmp_path / "job.json")
+    saved = json.loads((tmp_path / "job.json").read_text())
+    for descriptor in saved["pipeline"]["nodes"].values():
+        if descriptor["label"] == "delivered":
+            descriptor["node_type"] = "a_kind_this_version_does_not_know"
+    (tmp_path / "job.json").write_text(json.dumps(saved))
     loaded = PipelineJob.load(tmp_path / "job.json", database=db)
+    assert "delivered" not in loaded.nodes
     loaded.bind(sources={"s": _source()})
-    with pytest.raises(RuntimeError, match=r"'down'.*ITL-1094"):
+    with pytest.raises(RuntimeError, match=r"'down'.*lost 1 of its input nodes"):
         loaded.run(load_only=True)
 
 
@@ -611,38 +620,33 @@ def test_an_interrupted_run_clears_the_nodes_it_ran() -> None:
     assert job.nodes["rowwise"].is_stale
 
 
-def test_a_loaded_operator_that_lost_an_input_names_it(tmp_path: Path) -> None:
-    """A loaded operator whose saved input was not restored names ITL-1094."""
+def test_a_load_only_run_reaches_an_operator_below_a_loaded_side_effect_node(
+    tmp_path: Path,
+) -> None:
+    """The restored side-effect node passes its rows on to the join; nothing delivered."""
     tap = side_effect_pod(_deliver_x)
     assert isinstance(tap, SideEffectPod)
     db = InMemoryArrowDatabase()
+
+    def other() -> DictSource:
+        return DictSource(
+            [{"g": r["g"], "k": r["k"], "w": r["x"]} for r in ROWS],
+            tag_columns=["g", "k"],
+            source_id="w",
+        )
+
     job = PipelineJob(name="m2", database=db)
     with job:
         tapped: Any = tap.process(_source(), label="delivered")
-        Join()(
-            tapped,
-            DictSource(
-                [{"g": r["g"], "k": r["k"], "w": r["x"]} for r in ROWS],
-                tag_columns=["g", "k"],
-                source_id="w",
-            ),
-            label="joined",
-        )
+        Join()(tapped, other(), label="joined")
     job.run()
     job.save(tmp_path / "job.json")
+    DELIVERED.clear()
     loaded = PipelineJob.load(tmp_path / "job.json", database=db)
-    loaded.bind(
-        sources={
-            "s": _source(),
-            "w": DictSource(
-                [{"g": r["g"], "k": r["k"], "w": r["x"]} for r in ROWS],
-                tag_columns=["g", "k"],
-                source_id="w",
-            ),
-        }
-    )
-    with pytest.raises(RuntimeError, match=r"'joined'.*ITL-1094"):
-        loaded.run(load_only=True)
+    loaded.bind(sources={"s": _source(), "w": other()})
+    loaded.run(load_only=True)
+    assert loaded.nodes["joined"].as_table().num_rows == len(ROWS)
+    assert DELIVERED == []
 
 
 def test_an_async_cache_only_node_holds_the_rows_it_sent() -> None:
@@ -744,8 +748,9 @@ def test_a_direct_async_run_drains_the_inputs_of_a_held_node(
 def test_a_loaded_job_runs_its_bound_branch_beside_a_broken_unbound_one(
     tmp_path: Path,
 ) -> None:
-    """The ITL-1094 check covers only the nodes the run includes: a branch below an
-    unbound source and a dropped node is left out, the bound branch loads."""
+    """The lost-input check covers only the nodes the run includes: a branch below an
+    unbound source and a node the load did not restore is left out, the bound branch
+    loads."""
     tap = side_effect_pod(_deliver_x)
     assert isinstance(tap, SideEffectPod)
     db = InMemoryArrowDatabase()
@@ -766,7 +771,13 @@ def test_a_loaded_job_runs_its_bound_branch_beside_a_broken_unbound_one(
         )
     job.run()
     job.save(tmp_path / "job.json")
+    saved = json.loads((tmp_path / "job.json").read_text())
+    for descriptor in saved["pipeline"]["nodes"].values():
+        if descriptor["label"] == "delivered":
+            descriptor["node_type"] = "a_kind_this_version_does_not_know"
+    (tmp_path / "job.json").write_text(json.dumps(saved))
     loaded = PipelineJob.load(tmp_path / "job.json", database=db)
+    assert "delivered" not in loaded.nodes
     loaded.bind(
         sources={
             "other": DictSource(

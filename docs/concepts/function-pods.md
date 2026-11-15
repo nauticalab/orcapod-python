@@ -937,6 +937,16 @@ from that store, and no rows under that key is an empty result, not an error.
   exactly as the same node built from your code would; when the store holds no rows under
   the node's key (no table, or none of its rows), the answer is an empty result, as for that
   node. A loaded operator node itself is empty, like every node that has not run.
+- A side-effect node is restored read-only, in its place in the graph, with its label,
+  pipeline hash (which names its invocation log), output schema and the content hash the saved
+  job's node had (a file saved before that hash was recorded gives the blueprint's), so the
+  nodes below it keep their own identity. The file holds neither the
+  side-effect function nor the pod's configuration (`on_error`, `track_completion`,
+  `drop_on_failure`, `max_concurrency`), so a loaded side-effect node never delivers and never
+  writes its invocation log. A load-only run passes its input rows on to the nodes below it
+  and the node holds them (status `loaded_only`), as any side-effect job node does in a
+  load-only run; before that its reads return no rows. A run that is not load-only
+  (`loaded.run()`, `node.run()`) raises before anything runs.
 - A loaded node has the pipeline hash, content hash, table path and output schema its run
   had (a source node whose data was not saved gets its run's content hash once its source is
   bound). The file records which columns may be null (`T | None`), because the Arrow type text

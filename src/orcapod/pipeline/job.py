@@ -7,7 +7,7 @@ import logging
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import orcapod
 from orcapod.core.nodes import JobNode
@@ -15,7 +15,7 @@ from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.streams.base import StreamBase
-from orcapod.side_effects import SideEffectJobNode
+from orcapod.side_effects import SideEffectJobNode, SideEffectNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.contexts.stored import (
     report_unclaimed_tables,
@@ -609,6 +609,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         from orcapod.core.nodes.function_node import FunctionNode
         from orcapod.core.nodes.operator_node import OperatorNode
         from orcapod.pipeline.graph import Pipeline
+        from orcapod.pipeline.loaded_side_effects import (
+            LoadedSideEffectJobNode,
+            LoadedSideEffectNode,
+        )
         from orcapod.side_effects import SideEffectNode
 
         if not self._compiled:
@@ -657,6 +661,15 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     label=job_node._label,
                     table_scope=job_node._table_scope,
                     tracker_manager=job_node.tracker_manager,
+                )
+
+            elif isinstance(job_node, LoadedSideEffectJobNode):
+                # No pod to wrap: the blueprint node is restored from the saved
+                # entry, with the saved blueprint identity (ITL-1094).
+                upstream_bp_hash = job_id_to_bp_hash[id(job_node._input_stream)]
+                node_map[node_hash] = LoadedSideEffectNode(
+                    job_node._descriptor,
+                    cast("cp.StreamProtocol", node_map[upstream_bp_hash]),
                 )
 
             elif isinstance(job_node, SideEffectJobNode):
@@ -1142,8 +1155,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         excluded_hashes: set[str] = set()
         for node_hash in hash_dag.topological_sort():
             if node_hash not in self._persistent_node_map:
-                # A node a loaded job did not restore (ITL-1094): below an unbound
-                # source it is left out too, so the nodes below it are as well.
+                # A node a loaded job did not restore (a kind PipelineJob.load does
+                # not know): below an unbound source it is left out too, so the nodes
+                # below it are as well.
                 if any(p in excluded_hashes for p in hash_dag.predecessors(node_hash)):
                     excluded_hashes.add(node_hash)
                 continue
@@ -1153,9 +1167,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             elif any(p in excluded_hashes for p in hash_dag.predecessors(node_hash)):
                 excluded_hashes.add(node_hash)
 
-        # A loaded job whose graph lost a node (PipelineJob.load does not restore
-        # side-effect nodes yet, ITL-1094) cannot feed the nodes below it: every saved
-        # input of a node must be a restored node.
+        # A loaded job whose graph lost a node (the file records a node of a kind
+        # PipelineJob.load does not restore) cannot feed the nodes below it: every
+        # saved input of a node must be a restored node.
         if self._loaded:
             for node_hash, node in self._persistent_node_map.items():
                 if node_hash in excluded_hashes:
@@ -1172,10 +1186,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 if missing:
                     raise RuntimeError(
                         f"Node {node.label!r} of the loaded job has lost "
-                        f"{len(missing)} of its input nodes: PipelineJob.load does not "
-                        "restore side-effect nodes yet (ITL-1094), so the nodes below "
-                        "one cannot run, not even load-only. Read their stored results "
-                        "with node.as_source()."
+                        f"{len(missing)} of its input nodes: the saved file records a "
+                        "node of a kind PipelineJob.load does not restore, so the nodes "
+                        "below it cannot run, not even load-only. Read their stored "
+                        "results with node.as_source()."
                     )
 
         # --- Build execution OrcaDAG from existing node objects (no cloning) ---
@@ -1427,8 +1441,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         else:
             status = "complete"
 
-        # Collect the live (data-inclusive) content hashes of function and operator
-        # job nodes.
+        # Collect the live (data-inclusive) content hashes of function, operator and
+        # side-effect job nodes.
         # The pipeline blueprint stores schema-only blueprint hashes; but the DB
         # records are written with the live hash (which includes the upstream data
         # content).  Saving these ensures that PipelineJob.load() can reconstruct
@@ -1454,6 +1468,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 run_content_hash = node._run_content_hash()
                 if run_content_hash is not None:
                     node_job_content_hashes[node.label] = run_content_hash.to_string()
+            elif isinstance(node, SideEffectJobNode):
+                # Its descriptor holds the blueprint's hash; a loaded side-effect node
+                # takes the job's from here, as a function node does (ITL-1094).
+                node_job_content_hashes[node.label] = node.content_hash().to_string()
 
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
@@ -1644,6 +1662,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         from orcapod.core.nodes.function_node import FunctionNode as _FunctionNode
         from orcapod.core.nodes.operator_node import OperatorNode as _OperatorNode
         from orcapod.core.nodes.source_node import SourceNode as _SourceNode
+        from orcapod.pipeline.loaded_side_effects import LoadedSideEffectJobNode
 
         job._sources = dict(sources)
 
@@ -1715,6 +1734,18 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     expected_row_count=expected_rows.get(bp_node.label),
                 )
                 job._persistent_node_map[node_hash] = ojn
+
+            elif isinstance(bp_node, SideEffectNode):
+                # Read-only: it never delivers (ITL-1094). Its upstream is the restored
+                # job node, so the nodes below it keep their position in the graph.
+                preds = list(job._hash_graph.predecessors(node_hash))
+                # JobNode predates side-effect nodes; compile() stores them in this map
+                # too, through the untyped side_effect_node_class.
+                job._persistent_node_map[node_hash] = LoadedSideEffectJobNode(  # pyright: ignore[reportArgumentType]
+                    getattr(bp_node, "_descriptor", None) or {},
+                    input_stream=job._persistent_node_map[preds[0]],
+                    job_content_hash=node_job_content_hashes.get(bp_node.label),
+                )
 
         # Update _nodes to point to job nodes (FunctionJobNode/OperatorJobNode stubs)
         # rather than blueprint nodes, so that job.nodes["label"].get_all_records()

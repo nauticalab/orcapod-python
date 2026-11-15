@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     )
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
+    from orcapod.contexts import DataContext
     from orcapod.types import ContentHash, Schema
 else:
     pa = LazyModule("pyarrow")
@@ -860,7 +861,8 @@ class SideEffectNode(StreamBase):
     # ------------------------------------------------------------------
 
     @property
-    def producer(self) -> SideEffectPod:  # type: ignore[override]
+    def producer(self) -> SideEffectPod | None:  # type: ignore[override]
+        """The node's pod; ``None`` for a node loaded from a saved file (ITL-1094)."""
         return self._pod
 
     @property
@@ -958,8 +960,12 @@ class SideEffectNode(StreamBase):
             tag_keys=lambda: self.keys()[0],
             zero_rows=self._typed_zero_row_table,
             declared_schema=lambda: self.output_schema(all_info=True),
-            type_converter=self._pod.data_context.type_converter,
+            type_converter=self._rows_data_context().type_converter,
         )
+
+    def _rows_data_context(self) -> DataContext:
+        """The data context the node's rows are typed and hashed with: its pod's."""
+        return self._pod.data_context
 
     def _zero_row_table(self, config: ColumnConfig) -> pa.Table | None:
         """``as_table(columns=config)`` with no rows; nothing is delivered (ITL-912)."""
@@ -972,7 +978,7 @@ class SideEffectNode(StreamBase):
             tag_keys=lambda: self.keys()[0],
             zero_rows=lambda: typed,
             declared_schema=lambda: self.output_schema(all_info=True),
-            type_converter=self._pod.data_context.type_converter,
+            type_converter=self._rows_data_context().type_converter,
         )
 
     def _typed_zero_row_table(self) -> pa.Table | None:

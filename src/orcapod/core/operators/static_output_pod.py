@@ -560,6 +560,20 @@ class StaticOutputOperatorPod(TraceableBase):
             pa.field(constants.CONTEXT_KEY, pa.large_string(), nullable=False),
             pa.array([context.context_key] * table.num_rows, pa.large_string()),
         )
+        if upstream.producer is None:
+            # A node with no pod (a loaded function node, a restored side-effect
+            # node, ITL-1094) cannot give the stream a producer to hash, so the
+            # stream reports the node's pipeline hash, as the async path does;
+            # otherwise it would fall back to a root's schema-only hash and an
+            # operator would name its system tags after that. A source's pipeline
+            # hash is that schema-only hash already.
+            return _RowsOfStream(
+                table,
+                tag_columns=tag_keys,
+                pipeline_hash=upstream.pipeline_hash(),
+                upstreams=upstream.upstreams,
+                data_context=context,
+            )
         # No ``source_info`` argument: the table's own ``_source_*`` columns
         # pass through, one value per row.
         return ArrowTableStream(
@@ -648,14 +662,22 @@ class StaticOutputOperatorPod(TraceableBase):
 
 
 class _RowsOfStream(ArrowTableStream):
-    """Rows collected from a channel, standing in for the stream they came from.
+    """Rows standing in for the stream they came from, with its pipeline hash.
 
-    The barrier-mode ``async_execute`` rebuilds each input from its rows. A
-    rebuilt ``ArrowTableStream`` has no producer, so its own pipeline hash is
-    the schema-only hash of a root; this stream reports the pipeline hash of
-    the stream the rows came from instead, as the operator node passes it
-    (``input_pipeline_hashes``). Its content hash is that of its table, as for
-    any ``ArrowTableStream`` without a producer.
+    The barrier-mode ``async_execute`` rebuilds each input from its rows, and the
+    sync path rebuilds the rows of an upstream with no producer
+    (``_as_upstream_stream``). A rebuilt ``ArrowTableStream`` has no producer, so
+    its own pipeline hash is the schema-only hash of a root; this stream reports
+    the pipeline hash of the stream the rows came from instead (the operator
+    node's ``input_pipeline_hashes``, or the upstream's own). Its content hash is
+    that of its table, as for any ``ArrowTableStream`` without a producer.
+
+    Args:
+        table: The rows.
+        tag_columns: The user tag columns.
+        pipeline_hash: The pipeline hash of the stream the rows came from.
+        upstreams: The upstreams of the stream the rows came from, if any.
+        data_context: The rows' data context; ``None`` for the default.
     """
 
     def __init__(
@@ -664,8 +686,15 @@ class _RowsOfStream(ArrowTableStream):
         *,
         tag_columns: Collection[str],
         pipeline_hash: ContentHash,
+        upstreams: tuple[StreamProtocol, ...] = (),
+        data_context: DataContext | None = None,
     ) -> None:
-        super().__init__(table, tag_columns=tag_columns)
+        super().__init__(
+            table,
+            tag_columns=tag_columns,
+            upstreams=upstreams,
+            data_context=data_context,
+        )
         self._input_pipeline_hash: ContentHash = pipeline_hash
 
     def pipeline_hash(

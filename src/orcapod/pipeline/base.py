@@ -503,7 +503,9 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
             a mapping of hash → source node (which acts as its own stream).
 
         Raises:
-            RuntimeError: If the pipeline has not been compiled.
+            RuntimeError: If the pipeline has not been compiled, or if a node was
+                loaded from a saved file without its function pod, operator or
+                side-effect pod.
         """
         import networkx as _nx
 
@@ -540,8 +542,17 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                     label=node._label,
                 )
             elif isinstance(node, SideEffectNode):
+                side_effect_pod = node.producer
+                if side_effect_pod is None:
+                    raise RuntimeError(
+                        f"to_invocations() cannot serialise SideEffectNode "
+                        f"{node_hash!r}: it was loaded with no live side-effect pod "
+                        "(read-only / stub mode). Use PipelineJob.load() to work with "
+                        "loaded pipelines, or build the pipeline from its code before "
+                        "calling to_invocations() / from_pipeline()."
+                    )
                 inv_by_node_hash[node_hash] = SideEffectInvocation(
-                    pod=node._pod,
+                    pod=side_effect_pod,
                     input_streams=(node.upstreams[0],),
                     label=node._label,
                 )
