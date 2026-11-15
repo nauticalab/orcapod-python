@@ -10,7 +10,10 @@ unless a live source has been bound via `bind`.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
+from typing_extensions import override
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.view import (
@@ -141,6 +144,8 @@ class SourceProxy(RootSource):
             raise ValueError(f"Cannot bind source to SourceProxy: {'; '.join(errors)}")
 
         self._delegate = source
+        # Another source's data now stands behind the proxy (ITL-1102).
+        self._update_modified_time()
 
     def unbind(self) -> SourceProtocol | None:
         """Remove and return the bound source, reverting to proxy behavior.
@@ -150,7 +155,37 @@ class SourceProxy(RootSource):
         """
         delegate = self._delegate
         self._delegate = None
+        self._update_modified_time()
         return delegate
+
+    @property
+    @override
+    def last_modified(self) -> datetime | None:
+        """When the proxy's data last changed: its binding or its bound source.
+
+        The later of the time the proxy was last bound or unbound and the bound
+        source's own ``last_modified``; a bound source that does not know its time
+        makes the proxy's unknown too (``None``). So a bound source that takes in new
+        data at a run's check moves the proxy with it (ITL-1102).
+        """
+        own = self._modified_time
+        if self._delegate is None:
+            return own
+        bound = self._delegate.last_modified
+        if bound is None or own is None:
+            return bound
+        return max(own, bound)
+
+    @override
+    def check_for_new_data(self) -> bool:
+        """Check the bound source for new data; an unbound proxy has none (ITL-1102).
+
+        Returns:
+            ``True`` if the bound source took in new data.
+        """
+        if not isinstance(self._delegate, RootSource):
+            return False
+        return self._delegate.check_for_new_data()
 
     # -------------------------------------------------------------------------
     # Identity — return stored hashes (always, regardless of delegate)

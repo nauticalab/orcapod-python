@@ -284,39 +284,46 @@ def run_job_node(
     node: Any,
     *,
     load_only: bool,
-    run_alone: Callable[[], Any],
+    run_alone: Callable[[tuple[str, ...]], Any],
     caller: Any,
 ) -> None:
     """Run a job node as its ``run()`` does (developer, November 13, 2026; ITL-1095).
 
-    Nothing runs when the node holds a current run (``holds_current_run``). Otherwise
-    a node that depends on job nodes runs with them (``run_with_dependencies``) and one
-    built over streams outside a job runs alone (``run_alone``). The run's summary, if
+    Every source feeding the node is first checked for new data (``check_sources``,
+    ITL-1102). Nothing runs when the node then holds a current run
+    (``holds_current_run``). Otherwise a node that depends on job nodes runs with them
+    (``run_with_dependencies``) and one built over streams outside a job runs alone
+    (``run_alone``). The run's summary, if
     it gives one, is kept as the node's ``last_run``, and failed rows warn at the
     caller's line, as ``job.run()`` warns.
 
     Args:
         node: The job node (a ``RunHoldingNode``).
         load_only: Whether to load stored results only.
-        run_alone: Runs the node over its input when no job node feeds it; returns its
-            ``RunSummary`` or ``None``.
+        run_alone: Runs the node over its input when no job node feeds it, given the
+            sources the check could not check; returns its ``RunSummary`` or ``None``.
         caller: The frame of the ``run()`` caller.
     """
     from orcapod.pipeline.node_run import (
+        check_sources,
         depends_on_job_nodes,
         refuse_unloadable_inputs,
         run_with_dependencies,
     )
     from orcapod.pipeline.run_summary import warn_row_failures
 
+    # Every source feeding the run first takes in any new data (ITL-1102).
+    unchecked = check_sources([node])
     if node.holds_current_run(load_only=load_only):
         return
     if depends_on_job_nodes(node):
-        summary = run_with_dependencies(node, load_only=load_only)
+        summary = run_with_dependencies(
+            node, load_only=load_only, unchecked_sources=unchecked
+        )
     else:
         if load_only:
             refuse_unloadable_inputs(node)
-        summary = run_alone()
+        summary = run_alone(unchecked)
     if summary is None:
         return
     node._last_run = summary
@@ -3597,13 +3604,21 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
         run_job_node(
             self,
             load_only=load_only,
-            run_alone=lambda: self._run_alone(load_only=load_only),
+            run_alone=lambda unchecked: self._run_alone(
+                load_only=load_only, unchecked_sources=unchecked
+            ),
             caller=sys._getframe(1),  # pyright: ignore[reportPrivateUsage]  # the caller's line is where a failure warning is shown
         )
         return self._run_view()
 
-    def _run_alone(self, *, load_only: bool) -> Any:
+    def _run_alone(
+        self, *, load_only: bool, unchecked_sources: tuple[str, ...] = ()
+    ) -> Any:
         """Run this node over its input stream, which is not a job node; commit.
+
+        Args:
+            load_only: Whether to load stored results only.
+            unchecked_sources: The sources the start-of-run check could not check.
 
         Returns:
             The run's ``RunSummary``.
@@ -3642,7 +3657,11 @@ class FunctionJobNode(RunHoldingNode, FunctionNodeBase):
         )
         base_path = getattr(self._pipeline_database, "base_path", ())
         return RunSummary(
-            "/".join(base_path), [node_summary], load_only=load_only, target=self.label
+            "/".join(base_path),
+            [node_summary],
+            load_only=load_only,
+            target=self.label,
+            unchecked_sources=unchecked_sources,
         )
 
     def _incomplete_inputs(self) -> list[str]:

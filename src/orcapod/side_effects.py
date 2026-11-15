@@ -1334,7 +1334,7 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
         run_job_node(
             self,
             load_only=load_only,
-            run_alone=lambda: self._run_alone(load_only=load_only),
+            run_alone=lambda _unchecked: self._run_alone(load_only=load_only),
             caller=sys._getframe(1),  # pyright: ignore[reportPrivateUsage]  # the caller's line is where a failure warning is shown
         )
         return self._with_run_status(self._view_of_rows(self.as_table(), "held"))

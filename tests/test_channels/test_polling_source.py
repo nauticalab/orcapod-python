@@ -485,18 +485,23 @@ class TestPollingSourceSyncMode:
         assert fake.fetch_cursors[1] is not None
         assert fake.fetch_cursors[1].value == 1
 
-    def test_last_modified_updated_from_cursor_modified_at(self):
-        """cursor.modified_at updates last_modified; None falls back to wall clock."""
+    def test_last_modified_is_the_moment_rows_are_found_not_the_cursor_time(self):
+        """cursor.modified_at is informational: last_modified is the moment the rows
+        were found (ITL-1102), so rows modified before a downstream node's last run
+        but found after it still make that node stale."""
         ts = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
         fake = FakeDynamicSource(batches=[_batch(1, 10)], cursor_modified_at=ts)
         src = PollingSource(
             fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
         )
 
+        before = datetime.now(timezone.utc)
         list(src.iter_data())
-        assert src.last_modified == ts
+        after = datetime.now(timezone.utc)
+        assert src.last_modified is not None
+        assert before <= src.last_modified <= after
 
-    def test_last_modified_falls_back_to_wall_clock_when_none(self):
+    def test_last_modified_is_wall_clock_when_cursor_time_is_none(self):
         """When cursor.modified_at is None, last_modified is updated to wall clock."""
         fake = FakeDynamicSource(batches=[_batch(1, 10)], cursor_modified_at=None)
         src = PollingSource(

@@ -12,8 +12,11 @@ Example::
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
+
+from typing_extensions import override
 
 from orcapod.core.sources.db_table_source import DBTableSource
 from orcapod.databases.postgresql_connector import PostgreSQLConnector
@@ -94,6 +97,19 @@ class PostgreSQLTableSource(DBTableSource):
                 connector.close()
             except Exception:
                 pass  # suppress close errors; don't mask original __init__ failure
+
+    @contextmanager
+    @override
+    def _open_connector(self) -> Iterator[PostgreSQLConnector]:
+        """Open a new connector for a check and close it afterwards.
+
+        The connector the source was built with was closed once the table was read.
+        """
+        connector = PostgreSQLConnector(self._dsn)
+        try:
+            yield connector
+        finally:
+            connector.close()
 
     def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""

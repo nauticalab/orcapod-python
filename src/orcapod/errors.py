@@ -351,6 +351,18 @@ class RowFailuresWarning(UserWarning):
     """
 
 
+class SourceCheckFailedWarning(UserWarning):
+    """A source could not be checked for new data at the start of a run (ITL-1102).
+
+    Every run (``job.run()``, ``run_async()``, a job node's ``run()``) first asks each
+    source feeding it whether its data changed (``check_for_new_data``). A check that
+    raises does not fail the run: this warning is issued once per source and run, naming
+    the source and the error, the source keeps the data and modified time it had, and
+    the run proceeds with that data. The run's ``RunSummary`` lists the source in
+    ``unchecked_sources``. A later failure to read the source raises as it always has.
+    """
+
+
 class StoreContentWarning(UserWarning):
     """A loaded node's store holds another number of rows than the saved run recorded.
 

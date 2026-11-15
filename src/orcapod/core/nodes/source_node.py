@@ -1010,9 +1010,12 @@ class SourceJobNode(SourceNodeBase):
     def run(self, *, load_only: bool = False) -> StreamView:
         """Read the bound source's rows and return a ``StreamView`` of all of them.
 
-        A source is read, never computed, so ``load_only`` changes nothing, except that
-        a load-only run refuses a bound stream that computes or delivers when read
-        (ITL-1121); a job node's ``run()`` takes it (ITL-1095).
+        As every job node's ``run()``, it first checks the bound source for new data
+        (``check_sources``, ITL-1102): a check that raises warns
+        (``SourceCheckFailedWarning``) and the source's held rows are read. A source is
+        read, never computed, so ``load_only`` changes nothing, except that a load-only
+        run refuses a bound stream that computes or delivers when read (ITL-1121); a job
+        node's ``run()`` takes it (ITL-1095).
 
         Args:
             load_only: Accepted for every job node; a source reads its rows either way.
@@ -1022,9 +1025,10 @@ class SourceJobNode(SourceNodeBase):
             ValueError: If ``load_only`` and the bound stream computes or delivers
                 when read (``node_run.refuse_unloadable_inputs``).
         """
-        if load_only:
-            from orcapod.pipeline.node_run import refuse_unloadable_inputs
+        from orcapod.pipeline.node_run import check_sources, refuse_unloadable_inputs
 
+        _ = check_sources([self])
+        if load_only:
             refuse_unloadable_inputs(self)
         return super().run()
 
@@ -1076,10 +1080,11 @@ class SourceJobNode(SourceNodeBase):
         The later of the time the slot was bound and the bound source's own
         ``last_modified`` (a ``CachedSource`` or ``PollingSource`` moves it when it
         reads new rows). A bound source that does not know its modification time makes
-        the slot's unknown too (``None``), so every node below it is stale. A source
-        whose rows change without its modified time moving (a table read lazily, a file
-        rewritten in place) is not seen: build a new source object and bind it, or clear
-        the dependent nodes.
+        the slot's unknown too (``None``), so every node below it is stale. Every run
+        first checks the bound source for new data (``check_for_new_data``, ITL-1102),
+        which moves its modified time when it found some. A source that cannot see its
+        data change (one built over data held in memory) is not re-read: build a new
+        source object and bind it, or clear the dependent nodes.
         """
         own = self._modified_time
         if self._bound_source is None:

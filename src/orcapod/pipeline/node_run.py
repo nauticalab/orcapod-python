@@ -164,6 +164,97 @@ def clear_run_rows(nodes: Iterable[Any]) -> None:
             node.clear_cache()  # pyright: ignore[reportAttributeAccessIssue]  # every RunHoldingNode is a job node with clear_cache
 
 
+def run_sources(streams: Iterable[Any]) -> list[Any]:
+    """The distinct sources that feed ``streams``, in the order first met.
+
+    A ``SourceJobNode`` gives its bound source; a root source is itself; any other
+    stream is followed through its ``upstreams``. A bound stream that is not a root
+    source (a pod's stream bound to a slot) is followed the same way.
+
+    Args:
+        streams: The nodes of a run, or the node whose ``run()`` it is.
+
+    Returns:
+        Every ``RootSource`` met, once each.
+    """
+    from orcapod.core.nodes.source_node import SourceJobNode
+    from orcapod.core.sources.base import RootSource
+
+    found: list[Any] = []
+    visited: list[Any] = []
+    pending = list(streams)
+    while pending:
+        stream = pending.pop(0)
+        if any(stream is seen for seen in visited):
+            continue
+        visited.append(stream)
+        if isinstance(stream, SourceJobNode):
+            if stream.bound_source is not None:
+                pending.append(stream.bound_source)
+        elif isinstance(stream, RootSource):
+            if not any(stream is source for source in found):
+                found.append(stream)
+        else:
+            pending.extend(getattr(stream, "upstreams", ()))
+    return found
+
+
+def check_sources(streams: Iterable[Any]) -> tuple[str, ...]:
+    """Ask each source feeding ``streams`` once whether its data changed (ITL-1102).
+
+    Called at the start of a run, before the state rule decides which nodes run: a
+    source that found new data has moved its modified time, so the nodes below it are
+    stale. A check that raises does not stop the run (developer, November 14, 2026:
+    "For check that fails, issues a warning"): one ``SourceCheckFailedWarning`` names
+    the source and the error, at the user's line that started the run and at every run,
+    and the run proceeds with the data the source holds (a ``PollingSource`` that a run
+    reads is polled again by that read, and a poll that fails then raises: ITL-1139).
+
+    Args:
+        streams: The nodes of the run, or the node whose ``run()`` it is.
+
+    Returns:
+        The source ids of the sources that could not be checked, in the order met.
+    """
+    import sys
+    import warnings
+
+    from orcapod.errors import SourceCheckFailedWarning
+    from orcapod.utils.warning_utils import outside_orcapod_stacklevel
+
+    unchecked: list[str] = []
+    for source in run_sources(streams):
+        try:
+            source.check_for_new_data()
+        except Exception as exc:
+            name = _source_name(source)
+            unchecked.append(name)
+            # Shown at the user's line that started the run, at every run: a fresh
+            # registry each time, as for RowFailuresWarning, so the default filter's
+            # once-per-line rule cannot hide the next run's failure.
+            caller = sys._getframe(outside_orcapod_stacklevel() - 1)  # pyright: ignore[reportPrivateUsage]  # as the warnings module does
+            warnings.warn_explicit(
+                f"Source {name!r} could not be checked for new data: "
+                f"{type(exc).__name__}: {str(exc).rstrip('.')}. The run proceeds "
+                "with the data the source already holds.",
+                SourceCheckFailedWarning,
+                caller.f_code.co_filename,
+                caller.f_lineno,
+                module=caller.f_globals.get("__name__"),
+                registry=None,
+                module_globals=caller.f_globals,
+            )
+    return tuple(unchecked)
+
+
+def _source_name(source: Any) -> str:
+    """A source's name for a report: its source id, or its label without one."""
+    try:
+        return str(source.source_id)
+    except ValueError:
+        return str(source.label)
+
+
 @dataclass(frozen=True)
 class RunPlan:
     """What a run does with each node of its graph (ITL-1095).
@@ -288,7 +379,9 @@ def commit_run(stores: Sequence[ArrowDatabaseProtocol], ran: Sequence[Any]) -> N
             raise
 
 
-def run_with_dependencies(target: Any, *, load_only: bool) -> RunSummary:
+def run_with_dependencies(
+    target: Any, *, load_only: bool, unchecked_sources: Sequence[str] = ()
+) -> RunSummary:
     """Run ``target`` and every job node it depends on that holds no current run.
 
     The dependencies are found through ``upstreams``; the plan (``plan_run``) is the
@@ -303,6 +396,8 @@ def run_with_dependencies(target: Any, *, load_only: bool) -> RunSummary:
     Args:
         target: The job node whose ``run()`` this is.
         load_only: Whether to load stored results only.
+        unchecked_sources: The sources the caller's start-of-run check could not
+            check (``check_sources``), for the summary.
 
     Returns:
         The run's summary, one entry per function node of the graph.
@@ -359,5 +454,6 @@ def run_with_dependencies(target: Any, *, load_only: bool) -> RunSummary:
         run_node_summaries(graph, counter, held=plan.held_counts),
         load_only=load_only,
         target=target.label,
+        unchecked_sources=unchecked_sources,
         ran_nothing=not plan.to_run,
     )

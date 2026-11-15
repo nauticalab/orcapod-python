@@ -76,6 +76,10 @@ class RunSummary:
             it computed nothing; ``reused`` counts the rows it loaded.
         target: For the run of one node and the nodes it depends on
             (``node.run()``), that node's label; ``None`` for a job run.
+        unchecked_sources: The source ids of the sources that could not be checked
+            for new data at the start of the run (ITL-1102): each raised in
+            ``check_for_new_data``, was reported by a ``SourceCheckFailedWarning``,
+            and fed the run with the data it already held.
         ran_nothing: Whether the run ran no node: every node held a current run
             (ITL-1095). Decided by the run's plan, which counts every kind of node, so a
             run that ran only a side-effect or operator node is not "nothing to do".
@@ -88,6 +92,7 @@ class RunSummary:
         *,
         load_only: bool = False,
         target: str | None = None,
+        unchecked_sources: Sequence[str] = (),
         ran_nothing: bool = False,
     ) -> None:
         """Build the summary.
@@ -97,12 +102,14 @@ class RunSummary:
             nodes: One entry per function node of the run, in run order.
             load_only: Whether the run loaded stored results only.
             target: The label of the node whose ``run()`` this was, if any.
+            unchecked_sources: The sources that could not be checked for new data.
             ran_nothing: Whether the run ran no node (every node held a current run).
         """
         self.job_name: str = job_name
         self.nodes: Mapping[str, NodeRunSummary] = {node.label: node for node in nodes}
         self.load_only: bool = load_only
         self.target: str | None = target
+        self.unchecked_sources: tuple[str, ...] = tuple(unchecked_sources)
         self.ran_nothing: bool = ran_nothing
 
     @property
@@ -177,9 +184,25 @@ class RunSummary:
             outcome = "all rows succeeded."
         return f"Run of {subject}: {outcome}"
 
+    def _unchecked_line(self) -> str | None:
+        """The line naming the sources that could not be checked, if any."""
+        if not self.unchecked_sources:
+            return None
+        return "sources not checked for new data (see the warning): " + ", ".join(
+            self.unchecked_sources
+        )
+
+    def _unchecked_html(self) -> str:
+        """The unchecked-sources line as an HTML paragraph, or ``""``."""
+        unchecked = self._unchecked_line()
+        return "" if unchecked is None else f"<p>{html.escape(unchecked)}</p>"
+
     def __repr__(self) -> str:
         """The summary as text: one line per node, and the first error of a failing one."""
         lines = [self._headline()]
+        unchecked = self._unchecked_line()
+        if unchecked is not None:
+            lines.append(f"  {unchecked}")
         for node in self.nodes.values():
             lines.append(
                 f"  {node.label}: {_rows(node.rows)}: {_counts(node, self.load_only)}"
@@ -225,7 +248,7 @@ class RunSummary:
                 "</tr>"
             )
         return (
-            f"<p>{html.escape(self._headline())}</p>"
+            f"<p>{html.escape(self._headline())}</p>{self._unchecked_html()}"
             f"<table><thead><tr>{header}</tr></thead>"
             f"<tbody>{''.join(body)}</tbody></table>"
         )
@@ -245,7 +268,7 @@ class RunSummary:
             for node in self.nodes.values()
         ]
         return (
-            f"<p>{html.escape(self._headline())}</p>"
+            f"<p>{html.escape(self._headline())}</p>{self._unchecked_html()}"
             f"<table><thead><tr>{header}</tr></thead>"
             f"<tbody>{''.join(body)}</tbody></table>"
         )

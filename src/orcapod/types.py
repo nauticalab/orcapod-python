@@ -715,10 +715,11 @@ class Cursor(Generic[_T]):
             timestamp, integer offset, string pagination token, or any
             other type meaningful to the implementation.
         modified_at: Optional wall-clock time when the source content at
-            this cursor position was last modified. When provided,
-            ``PollingSource`` uses this to update its ``last_modified``
-            timestamp for downstream staleness detection. When ``None``,
-            the framework falls back to its own wall clock.
+            this cursor position was last modified. Informational only: it is
+            not used for staleness. ``PollingSource`` moves its own
+            ``last_modified`` to the moment a poll finds rows it did not have
+            (ITL-1102), because content modified before a downstream node's
+            last run but found after it must still make that node stale.
     """
 
     value: _T

@@ -616,17 +616,24 @@ A node is stale, and runs, when:
 - `clear_cache()` was called on it, or on any job node above it;
 - a job node above it ran again;
 - its source was bound again (`job.bind(sources=...)`), or the bound source's own modified
-  time moved (a `CachedSource` that read new rows, a `PollingSource` that polled).
+  time moved (a `CachedSource` that read new rows, a `PollingSource` that found new rows).
 
-Staleness comes from modified times only, so a re-run does not notice new data in a source
-whose object is unchanged (a start-of-run check for new data is planned, ITL-1102). Most
-sources hold the data they read when they were built: an in-memory source (a `DictSource`
-copies the list it is given), a CSV, Delta or database table source, and a
-`SpiralDBTableSource` pinned to the table version it found. For those, build a new source
-object and bind it (`job.bind(sources=...)`): every node that reads it becomes stale and
-runs; clearing the nodes below would only read the same data again. A `PollingSource` polls
-when it is read, so `clear_cache()` on each node that reads it directly (one per branch)
-makes the next run poll it and process its new rows. To deliver a side effect again (with
+Staleness comes from modified times only, so every run first asks each source feeding it,
+once, whether its data changed (`check_for_new_data()`, ITL-1102): `job.run()`,
+`run_async()` and a job node's `run()`, a load-only run too. A source that finds new data
+takes it in and moves its modified time, and the nodes below it run; one that finds nothing
+moves nothing, and a current job stays current. What each kind of source checks is in
+[Sources](sources.md#what-a-source-does-at-a-run). A check that raises does not fail the
+run: a `SourceCheckFailedWarning` names the source and the error, the run proceeds with the
+data the source already holds, and the summary lists the source in `unchecked_sources` (a
+node's `run()` that runs nothing makes no summary and keeps its `last_run`: the warning is
+the report; a run that has to read a `PollingSource` whose check failed polls it again, and
+a failing poll raises, ITL-1139). `head()` and the preview never check.
+
+A source that cannot see its data change (an in-memory source: a `DictSource` copies the
+list it is given) is not re-read: build a new source object and bind it
+(`job.bind(sources=...)`); every node that reads it becomes stale and runs, while clearing
+the nodes below would only read the same data again. To deliver a side effect again (with
 `track_completion=False`), call `clear_cache()` on its node first.
 
 `node.last_run` holds the counts of a `node.run()`, as `job.last_run` does for `job.run()`,

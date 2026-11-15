@@ -1616,6 +1616,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
                 ``load_only`` is false.
         """
         from orcapod.pipeline.node_run import (
+            check_sources,
             depends_on_job_nodes,
             refuse_unloadable_inputs,
             run_with_dependencies,
@@ -1624,10 +1625,14 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
 
         if self._loaded and not load_only:
             raise self._cannot_compute_error()
+        # Every source feeding the run first takes in any new data (ITL-1102).
+        unchecked = check_sources([self])
         if self.holds_current_run(load_only=load_only):
             return self._run_view(computed=False)
         if depends_on_job_nodes(self):
-            summary = run_with_dependencies(self, load_only=load_only)
+            summary = run_with_dependencies(
+                self, load_only=load_only, unchecked_sources=unchecked
+            )
             self._last_run = summary
             if not summary.ok:
                 warn_row_failures(summary, sys._getframe(1))  # pyright: ignore[reportPrivateUsage]  # the caller's line is where the warning is shown

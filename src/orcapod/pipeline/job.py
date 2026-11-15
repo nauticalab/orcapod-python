@@ -29,7 +29,12 @@ from orcapod.errors import (
 )
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.pipeline.dag import OrcaDAG
-from orcapod.pipeline.node_run import RunPlan, clear_run_rows, plan_run
+from orcapod.pipeline.node_run import (
+    RunPlan,
+    check_sources,
+    clear_run_rows,
+    plan_run,
+)
 from orcapod.pipeline.run_summary import (
     RunCountingObserver,
     RunSummary,
@@ -71,6 +76,8 @@ class _PreparedRun:
         pipeline_db: The job's view of the store.
         result_db: The job's function-result view of the store.
         plan: What the run runs and holds (``plan_run``, ITL-1095).
+        unchecked_sources: The sources the start-of-run check could not check
+            (``check_sources``, ITL-1102).
     """
 
     exec_dag: OrcaDAG[Any]
@@ -79,6 +86,7 @@ class _PreparedRun:
     pipeline_db: "ArrowDatabaseProtocol"
     result_db: "ArrowDatabaseProtocol"
     plan: "RunPlan"
+    unchecked_sources: tuple[str, ...]
 
 
 def _with_counter(
@@ -985,7 +993,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 load_only=load_only,
                 held_rows=plan.held_rows,
             )
-        summary = self._finish_run(prepared, counter, plan, load_only=load_only)
+        summary = self._finish_run(
+            prepared,
+            counter,
+            plan,
+            load_only=load_only,
+            unchecked_sources=prepared.unchecked_sources,
+        )
         if not summary.ok:
             warn_row_failures(summary, sys._getframe(1))  # pyright: ignore[reportPrivateUsage]  # the caller's line is where the warning is shown
         return summary
@@ -1050,7 +1064,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 load_only=load_only,
                 held_rows=plan.held_rows,
             )
-        summary = self._finish_run(prepared, counter, plan, load_only=load_only)
+        summary = self._finish_run(
+            prepared,
+            counter,
+            plan,
+            load_only=load_only,
+            unchecked_sources=prepared.unchecked_sources,
+        )
         if not summary.ok:
             warn_row_failures(summary, sys._getframe(1))  # pyright: ignore[reportPrivateUsage]  # the caller's line is where the warning is shown
         return summary
@@ -1236,11 +1256,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         pipeline_db = self._database.at(*self._name)
         result_db = pipeline_db.at("_result")
 
-        # A store that commits a table by itself at batch_size: commit what it already
-        # holds pending (writes made without a flush, or a failed run's batches) before
-        # this run writes. Those rows would otherwise count towards a table's
-        # batch_size, which could then be reached mid-run and commit this run's pipeline
-        # records ahead of their results (ITL-919).
+        # Every source first takes in any new data, moving its modified time, before
+        # the state rule judges any node (ITL-1102).
+        unchecked = check_sources(exec_dag.nodes())
         # The state rule (ITL-1095): a node that holds a current run is not run again.
         plan = plan_run(exec_dag, load_only=load_only)
         # Pre-v0.3 tables are reported for a run that runs a node or leaves one out
@@ -1248,6 +1266,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # its tables. Only a run that runs nothing and leaves nothing out lists no store.
         if plan.to_run or excluded_hashes:
             self._report_unclaimed_tables_written_before_v03(excluded_hashes)
+        # A store that commits a table by itself at batch_size: commit what it already
+        # holds pending (writes made without a flush, or a failed run's batches) before
+        # this run writes. Those rows would otherwise count towards a table's
+        # batch_size, which could then be reached mid-run and commit this run's pipeline
+        # records ahead of their results (ITL-919).
         # A load-only run writes nothing, and a run that runs no node touches no store,
         # so neither commits anything, not even pending writes of earlier operations.
         if table_committing is not None and not load_only and plan.to_run:
@@ -1268,6 +1291,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             pipeline_db=pipeline_db,
             result_db=result_db,
             plan=plan,
+            unchecked_sources=unchecked,
         )
 
     @contextlib.contextmanager
@@ -1316,6 +1340,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         plan: RunPlan,
         *,
         load_only: bool = False,
+        unchecked_sources: tuple[str, ...] = (),
     ) -> RunSummary:
         """Commit the run's last writes, mark the job as run and keep its summary.
 
@@ -1327,6 +1352,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             counter: The observer that counted the run's rows.
             plan: The nodes the run ran and held (``plan_run``).
             load_only: Whether the run loaded stored results only.
+            unchecked_sources: The sources the start-of-run check could not check.
 
         Returns:
             The run's summary, also kept as ``last_run``.
@@ -1375,6 +1401,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             "/".join(self._name),
             run_node_summaries(prepared.exec_dag, counter, held=plan.held_counts),
             load_only=load_only,
+            unchecked_sources=unchecked_sources,
             ran_nothing=not plan.to_run,
         )
         return self._last_run

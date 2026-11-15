@@ -168,6 +168,33 @@ class RootSource(StreamBase):
         """Delegate to the underlying stream's as_table."""
         return self._stream.as_table(columns=columns, all_info=all_info)
 
+    # -------------------------------------------------------------------------
+    # The start-of-run check (ITL-1102)
+    # -------------------------------------------------------------------------
+
+    def check_for_new_data(self) -> bool:
+        """Check whether the data behind the source changed; if so, take it in.
+
+        Every run (``job.run()``, ``run_async()``, a job node's ``run()``, a load-only
+        run too) calls this once on each source feeding it, before deciding which
+        nodes to run (developer, November 14, 2026, ITL-1102). A source that finds new
+        data takes it in and moves its modified time to that moment, so every job node
+        below it is stale and runs. A source that finds nothing changes nothing, so a
+        current job stays current. ``head()`` and the notebook preview never call it.
+
+        A source built over data held in memory (``ArrowTableSource``, ``DictSource``,
+        ``ListSource``, ``DataFrameSource``) cannot change: this default returns
+        ``False``. A source that raises here does not fail the run: the run issues a
+        ``SourceCheckFailedWarning`` and proceeds with the data the source holds, so a
+        source must leave its data and modified time as they were when it raises. A
+        source whose reads refresh it (``PollingSource``: a read polls) is refreshed
+        again by a run that reads it, and a refresh that fails then raises (ITL-1139).
+
+        Returns:
+            ``True`` if the source found new data and took it in.
+        """
+        return False
+
     # A source's rows are its own, not computed: a run() view says "all N rows".
     _RUN_ORIGIN: str = "held"
 

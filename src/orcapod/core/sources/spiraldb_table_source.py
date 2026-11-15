@@ -40,6 +40,8 @@ from collections.abc import AsyncIterator, Collection, Generator, Iterator, Mapp
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from typing_extensions import override
+
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.derived_source import validate_tags_as_data
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
@@ -130,21 +132,21 @@ class _Head(NamedTuple):
 
 
 def _schema_difference(found: "pa.Schema", expected: "pa.Schema") -> str:
-    """Describe how a scanned batch's columns differ from the ones the source expects."""
+    """Describe how the table's columns as found differ from the ones the source expects."""
     if found.names != expected.names:
         return (
-            f"a scan returned columns {found.names} but the source was built with "
+            f"the table has columns {found.names} but the source was built with "
             f"{expected.names}"
         )
     for got, want in zip(found, expected, strict=True):
         if not got.equals(want, check_metadata=True):
             return (
-                f"a scan returned column {got.name!r} as {got} with metadata "
+                f"the table has column {got.name!r} as {got} with metadata "
                 f"{got.metadata} but the source was built with {want} with metadata "
                 f"{want.metadata}"
             )
     return (
-        f"a scan returned schema metadata {found.metadata} but the source was built "
+        f"the table has schema metadata {found.metadata} but the source was built "
         f"with {expected.metadata}"
     )
 
@@ -453,6 +455,53 @@ class SpiralDBTableSource(RootSource):
         """
         with self._connector() as connector:
             return connector.get_row_count_estimate(self._table_name, asof=self._asof)
+
+    @override
+    def check_for_new_data(self) -> bool:
+        """Advance the pinned version when the table has a newer one (ITL-1102).
+
+        The source holds no rows: every read scans the table at the pinned version. A
+        source built without ``asof`` pinned the version the table had then; this
+        check reads the table's current version (metadata only: no row is read, and
+        ``max_rows`` does not apply) and, when it is newer, pins it and moves the
+        modified time, so the next read returns the new rows. An ``asof`` given by the
+        user never moves. Rows keep their record ids (the hash of their key), so only
+        rows whose key or data changed are new entries downstream. A version that
+        moved without changing the rows (if SpiralDB moves it on compaction) makes the
+        nodes below run again and reuse every stored result.
+
+        Returns:
+            ``True`` if the pinned version moved.
+
+        Raises:
+            ValueError: If the table was dropped and created again (another table id)
+                or its columns changed: build the source again to read it.
+        """
+        if self._given_asof is not None:
+            return False
+        with self._connector() as connector:
+            table_id = connector.get_spiral_table_id(self._table_name)
+            if table_id != self._table_id:
+                raise ValueError(
+                    f"SpiralDB table {self._qualified!r} is now another table (id "
+                    f"{table_id!r}; the source reads {self._table_id!r}): it was "
+                    "dropped and created again. Build the source again to read it."
+                )
+            schema = arrow_utils.drop_system_columns(
+                connector.get_arrow_schema(self._table_name).empty_table()
+            ).schema
+            if not schema.equals(self._table_schema, check_metadata=True):
+                raise ValueError(
+                    f"SpiralDB table {self._qualified!r}: "
+                    f"{_schema_difference(schema, self._table_schema)}. Build the "
+                    "source again to read it as it is now."
+                )
+            version = connector.get_table_version(self._table_name) or None
+        if version is None or (self._asof is not None and version <= self._asof):
+            return False
+        self._asof = version
+        self._update_modified_time()
+        return True
 
     def _too_large(self, found: str) -> SourceTooLargeError:
         """Return the error for a read that goes over ``max_rows``."""
