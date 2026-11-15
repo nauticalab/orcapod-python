@@ -213,14 +213,14 @@ class UnboundSourceError(RuntimeError):
     """
 
 
-class SourceSpecMismatchError(ValueError):
-    """Raised when a concrete source's schema is incompatible with a SourceNode slot.
+class SourceSpecMismatchError(InputValidationError, ValueError):
+    """Raised when a concrete source's schema differs from a source slot's declared schema.
 
-    The class name ``SourceSpecMismatchError`` is preserved for compatibility
-    with any code that catches it by name.
-
-    Contains the slot name and a description of the incompatible field(s).
-    Raised at ``bind()`` time — schema mismatches are rejected before execution.
+    A source fits a slot when its tag and data columns have the slot's names, roles and
+    Python types (ITL-1112): those are what every downstream pipeline hash, and so every
+    stored path, is built from. The message names the slot and the column, and for a type
+    difference both types. Raised by ``PipelineJob.bind(sources=...)`` and by assigning a
+    source node's ``bound_source``, before anything is bound.
     """
 
 

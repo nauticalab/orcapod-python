@@ -642,8 +642,12 @@ def test_head_of_a_filter_has_the_large_types_its_run_gives() -> None:
 
 
 def test_an_input_with_a_meta_data_column_gives_a_zero_row_table() -> None:
-    """A raw stream lists a ``__`` column as data; an operator node over it still
-    reads as zero rows before a run, without that column."""
+    """A raw stream lists a ``__`` column as data; an operator over it still reads as
+    zero rows before it computes, without that column, typed as its computed rows.
+
+    A raw stream cannot be a job's input (ITL-1126: it has no system-tag pair), so
+    the operator is applied to it directly, outside a job.
+    """
     raw = ArrowTableStream(
         pa.table(
             {
@@ -654,18 +658,16 @@ def test_an_input_with_a_meta_data_column_gives_a_zero_row_table() -> None:
         ),
         tag_columns=["id"],
     )
-    job = PipelineJob(name="itl912", database=InMemoryArrowDatabase())
-    with job:
-        _ = SelectDataColumns(["x"])(raw, label="op")
-    node = _op(job)
+    stream = SelectDataColumns(["x"])(raw)
 
-    head = node.head(all_info=True).table
-    table = node.as_table(all_info=True)
+    head = stream.head(all_info=True).table
+    table = stream.as_table(all_info=True)
 
-    assert head.num_rows == table.num_rows == 0
+    assert head.num_rows == 0
+    assert table.num_rows == 2
     assert head.schema == table.schema
-    assert table.schema.field("x").type == pa.int8()
-    assert not any("__debug" in name for name in table.column_names)
+    assert head.schema.field("x").type == pa.int8()
+    assert not any("__debug" in name for name in head.column_names)
 
 
 # Both branches share the data columns, which SemiJoin ignores: not under test here.

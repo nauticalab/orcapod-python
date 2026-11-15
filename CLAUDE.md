@@ -858,6 +858,29 @@ data. The rules:
 ### Important implementation details
 
 - `ArrowTableSource.__init__` raises `ValueError` if any `tag_columns` are not in the table.
+- The pipeline determines every node's schema; a bound source never changes it (developer,
+  November 14, 2026, ITL-1112). No accepted bind changes any node's stored path or the
+  columns of any node's or stored table (names, tag or data roles, types, nullable flags,
+  system-tag column names); only values differ. Column order is not part of it: matching a
+  source to a slot, columns match by name within the tag group and within the data group,
+  and their order never decides acceptance (developer, November 14, 2026). Do not reorder
+  columns without a reason. `SourceNodeBase.validate` is the one check, used by
+  `PipelineJob.bind`, the `bound_source` setter (and `SourceJobNode.__init__`) and
+  `PipelineJob.load`: per column the declared Python type (structural classes of one identity
+  are one type, `equivalent_hints`), or `T` where the slot declares `T | None`; and exactly
+  one source-id (`str`) and one record-id (`bytes`) system-tag column, no other. Anything
+  else raises `SourceSpecMismatchError` before anything is bound. The
+  source's rows are given as the declared schema at one place, `_DeclaredForm` (nullable
+  fields over the same arrays; the system-tag column NAMES of the declared schema hash,
+  taken from the source's own pair by prefix, the VALUES the source's own; as a stable
+  convenience, not a guarantee, the declared column order, source id before record id). Limits: the check compares Python types, so a difference in Arrow width only
+  (`int32` against `int64`) is not yet refused (ITL-949). A source whose system-tag columns
+  are not exactly one source-id and one record-id column (a joined or merged stream, a raw
+  stream with none) is refused by the same check (developer, November 14, 2026, ITL-1126);
+  binding one properly is ITL-1127. That includes a pipeline's input: `Pipeline.compile`
+  binds each leaf through `SourceJobNode.from_stream`, so a pipeline built directly over a
+  raw `ArrowTableStream` is refused (developer, November 14, 2026; wrap the table as a
+  source). Never pass a bound stream's own system tags through.
 - A source id is the source's name (developer, November 11, 2026; ITL-957). A default id
   built from a hash is `<source kind>:<algorithm label>:<hex>` and is built only by
   `core/sources/source_ids.hash_source_id`: never format one by hand, and never write a label

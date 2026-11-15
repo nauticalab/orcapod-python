@@ -7,16 +7,20 @@ Both share SourceNodeBase which provides schema-based identity.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping
 from datetime import datetime
-from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
+from orcapod.core.datagrams import Data, Tag
+from orcapod.core.operators.drop_nulls import _without_none  # pyright: ignore[reportPrivateUsage]  # DropNulls' rule for removing None from a type, shared, never copied
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import schema_requires_io, typed_zero_row_table
 from orcapod.core.streams.view import (
     ViewStatus,
@@ -28,10 +32,13 @@ from orcapod.core.streams.base import (
     check_head_size,
 )
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
+from orcapod.logical_types.user_class_identity import equivalent_hints
+from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.arrow_utils import system_tag_column_names
+from orcapod.utils.lazy_module import LazyModule
 from orcapod.utils.schema_utils import compute_source_schema_hash
 
 if TYPE_CHECKING:
@@ -40,8 +47,165 @@ if TYPE_CHECKING:
     from orcapod.channels import WritableChannel
     from orcapod.protocols.core_protocols import StreamProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
+else:
+    pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
+
+
+def _type_text(data_type: Any) -> str:
+    """Return *data_type* as it is written in an annotation (``int``, ``int | None``)."""
+    return data_type.__name__ if isinstance(data_type, type) else str(data_type)
+
+
+def _is_narrower(declared: Any, given: Any) -> bool:
+    """Return whether *given* is *declared* without its ``None`` member.
+
+    ``int`` is narrower than ``int | None`` and ``int | str`` than ``int | str | None``;
+    nothing else is (developer, November 14, 2026, ITL-1112). Structural classes of one
+    identity are one type here as everywhere (``equivalent_hints``).
+
+    Args:
+        declared: The slot's declared Python type of a column.
+        given: The bound source's Python type of that column.
+    """
+    return declared != given and equivalent_hints(_without_none(declared), given)
+
+
+@dataclasses.dataclass(frozen=True)
+class _DeclaredForm:
+    """How the rows of a bound source become rows of the declared schema.
+
+    The pipeline determines every node's schema (ITL-1112). A slot declaring
+    ``x: int | None`` accepts a source of ``x: int`` and gives its rows as rows of
+    ``x: int | None``: the same arrays under nullable fields. The source's system-tag
+    columns take the slot's names (their values stay the source's own). As a stable
+    convenience, not a guarantee (column order is not part of a node's schema), the
+    columns come in the declared order: tags, data and source info as declared, the
+    system tags source id first. Nothing else
+    differs: values, types, source-info tokens and meta columns pass unchanged, so the
+    rows equal those of a source of the declared schema with the same source id.
+
+    Attributes:
+        nullable: The columns declared ``T | None`` that the source gives as ``T``.
+        renames: The source's system-tag column names, mapped to the declared ones.
+        tag_order: The declared tag columns, in declared order.
+        data_order: The declared data columns, in declared order.
+        system_tag_order: The declared system-tag columns, source id then record id.
+    """
+
+    nullable: frozenset[str]
+    renames: Mapping[str, str]
+    tag_order: tuple[str, ...]
+    data_order: tuple[str, ...]
+    system_tag_order: tuple[str, str]
+
+    def apply(self, table: pa.Table) -> pa.Table:
+        """Return *table*'s arrays under the declared fields and system-tag names.
+
+        Serves a whole stream table and a single row's tag or data table: columns that
+        are not in the table are skipped.
+
+        Args:
+            table: Rows read from the bound source.
+
+        Returns:
+            The same arrays, with the columns in ``nullable`` flagged nullable, the
+            columns in ``renames`` renamed, and the tag, system-tag, data and
+            source-info columns in declared order within the positions each group
+            holds.
+        """
+        schema = table.schema
+        for position, field in enumerate(table.schema):
+            if field.name in self.nullable:
+                field = field.with_nullable(True)
+            if field.name in self.renames:
+                field = field.with_name(self.renames[field.name])
+            schema = schema.set(position, field)  # pyright: ignore[reportUnknownMemberType]  # stubs leave Field unparametrized
+        # Same arrays under the declared fields: no cast, so no value or type changes.
+        table = pa.Table.from_arrays(table.columns, schema=schema)
+        return table.select(self._declared_positions(table.column_names))
+
+    def _declared_positions(self, names: list[str]) -> list[int]:
+        """Return the column positions of *names* with each group in declared order.
+
+        The tag columns, the system-tag pair, the data columns and the data columns'
+        source-info columns each fill the positions their group holds, in declared
+        order; every other column keeps its position.
+        """
+        position = {name: index for index, name in enumerate(names)}
+        order = list(range(len(names)))
+        source_info = tuple(f"{constants.SOURCE_PREFIX}{n}" for n in self.data_order)
+        groups = (self.tag_order, self.system_tag_order, self.data_order, source_info)
+        for group in groups:
+            present = [name for name in group if name in position]
+            for slot, name in zip(
+                sorted(position[n] for n in present), present, strict=True
+            ):
+                order[slot] = position[name]
+        return order
+
+
+def _system_tag_columns(
+    source: StreamProtocol, tag_names: Collection[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """Return *source*'s source-id, record-id and any other system-tag columns.
+
+    A root source, or a stream that keeps its system tags (a filter, a rename), has one
+    of each; a stream that joins or merges inputs has one pair per input; a stream over a
+    table without them (a raw ``ArrowTableStream``) has none. A slot accepts only the
+    first, also as a pipeline's input (ITL-1126).
+
+    Args:
+        source: The stream being bound.
+        tag_names: Its user tag columns.
+
+    Returns:
+        The source-id columns, the record-id columns, and every other system-tag
+        column, which no slot declares.
+    """
+    names = [
+        name
+        for name in source.keys(columns={"system_tags": True})[0]
+        if name not in tag_names
+    ]
+    source_id = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}"
+    record_id = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}"
+    source_ids = [name for name in names if name.startswith(source_id)]
+    record_ids = [name for name in names if name.startswith(record_id)]
+    others = [name for name in names if name not in {*source_ids, *record_ids}]
+    return source_ids, record_ids, others
+
+
+def _one_system_tag_pair_issue(
+    source_ids: list[str], record_ids: list[str], others: list[str]
+) -> str:
+    """Return why a source without exactly one system-tag pair is refused, and the remedy.
+
+    Args:
+        source_ids: The source's source-id system-tag columns.
+        record_ids: The source's record-id system-tag columns.
+        others: The source's other system-tag columns.
+    """
+    found = sorted(source_ids + record_ids + others)
+    issue = (
+        "a source must carry exactly one source-id and one record-id system-tag "
+        f"column and no other, not {found}"
+    )
+    if not found:
+        remedy = (
+            "a stream without system-tag columns (a raw ArrowTableStream) cannot be "
+            "bound or used as a pipeline's input; wrap its table as a source, e.g. "
+            "ArrowTableSource(stream.as_table(), tag_columns=[...])"
+        )
+    elif len(source_ids) > 1 or len(record_ids) > 1:
+        remedy = (
+            "a joined or merged stream cannot be bound; make the join part of the "
+            "pipeline, or store the joined stream and bind the stored source"
+        )
+    else:
+        return issue
+    return f"{issue}: {remedy} (binding such a stream is planned, ITL-1127)"
 
 
 class SourceNodeBase(TraceableBase, ABC):
@@ -184,9 +348,10 @@ class SourceNodeBase(TraceableBase, ABC):
 
         When ``columns.system_tags`` is ``True`` (or ``all_info=True``), the
         returned tag schema is extended with the two system-tag entries for this
-        node's schema (both typed as ``str``). Their names are deterministic from
-        the declared schemas and match what a concrete source with the same schema
-        would produce.
+        node's schema: the source id as ``str`` and the record id as ``bytes``, the
+        types every source's rows have (Arrow ``large_string`` and ``large_binary``).
+        Their names are deterministic from the declared schemas and match what a
+        concrete source with the same schema would produce.
 
         Other ``ColumnConfig`` flags (``meta``, ``context``, ``source``,
         ``content_hash``, ``sort_by_tags``) are no-ops at the node level —
@@ -207,7 +372,7 @@ class SourceNodeBase(TraceableBase, ABC):
                 self._schema_hash_str
             )
             tag_schema = Schema(
-                {**dict(tag_schema), source_id_col: str, record_id_col: str}
+                {**dict(tag_schema), source_id_col: str, record_id_col: bytes}
             )
         return tag_schema, self._data_schema
 
@@ -238,44 +403,90 @@ class SourceNodeBase(TraceableBase, ABC):
     # ------------------------------------------------------------------
 
     def validate(self, source: "StreamProtocol") -> None:
-        """Check that *source* is schema-compatible with this node's declared schema.
+        """Check that *source* fits this slot's declared schema.
+
+        The source's tag and data columns must have the declared names and roles, and
+        each the declared Python type, or, where the slot declares ``T | None``, ``T``
+        (ITL-1112). Those are what every downstream pipeline hash, and so every stored
+        path, is built from, so a source that fits never moves one. Column order and
+        ``optional_fields`` are not compared; neither enters the pipeline hash. The
+        source must also carry exactly one source-id and one record-id system-tag
+        column, which take the slot's names; a joined or merged stream, or one with no
+        system tags, is refused (ITL-1126).
 
         Args:
             source: A concrete stream to validate.
 
         Raises:
-            SourceSpecMismatchError: If schema columns don't match.
+            SourceSpecMismatchError: If a column is missing, unexpected, or of a type
+                the declared one does not accept, or the source's system-tag columns
+                are not exactly one source-id and one record-id column.
+        """
+        _ = self._fit(source)
+
+    def _fit(self, source: "StreamProtocol") -> tuple[Schema, Schema, frozenset[str]]:
+        """Check *source* against the declared schema, as ``validate`` describes.
+
+        Args:
+            source: A concrete stream to check.
+
+        Returns:
+            The source's tag and data schemas, and the names of the columns it gives as
+            ``T`` where the slot declares ``T | None``.
+
+        Raises:
+            SourceSpecMismatchError: If *source* does not fit.
         """
         source_tag, source_data = source.output_schema()
 
-        tag_issues: list[str] = []
-        data_issues: list[str] = []
-
-        spec_tag_cols = set(self._tag_schema.keys())
-        src_tag_cols = set(source_tag.keys())
-        if spec_tag_cols != src_tag_cols:
-            missing = spec_tag_cols - src_tag_cols
-            extra = src_tag_cols - spec_tag_cols
+        issues: list[str] = []
+        narrower: set[str] = set()
+        for role, declared, given in (
+            ("tag", self._tag_schema, source_tag),
+            ("data", self._data_schema, source_data),
+        ):
+            missing = set(declared.keys()) - set(given.keys())
+            extra = set(given.keys()) - set(declared.keys())
             if missing:
-                tag_issues.append(f"missing tag columns: {sorted(missing)}")
+                issues.append(f"missing {role} columns: {sorted(missing)}")
             if extra:
-                tag_issues.append(f"unexpected tag columns: {sorted(extra)}")
+                issues.append(f"unexpected {role} columns: {sorted(extra)}")
+            for name in declared.keys():
+                if name not in given or equivalent_hints(given[name], declared[name]):
+                    continue
+                if _is_narrower(declared[name], given[name]):
+                    narrower.add(name)
+                else:
+                    issues.append(
+                        f"{role} column {name!r} is declared "
+                        f"{_type_text(declared[name])} but the source has "
+                        f"{_type_text(given[name])}"
+                    )
 
-        spec_data_cols = set(self._data_schema.keys())
-        src_data_cols = set(source_data.keys())
-        if spec_data_cols != src_data_cols:
-            missing = spec_data_cols - src_data_cols
-            extra = src_data_cols - spec_data_cols
-            if missing:
-                data_issues.append(f"missing data columns: {sorted(missing)}")
-            if extra:
-                data_issues.append(f"unexpected data columns: {sorted(extra)}")
+        # The slot's rows carry one system-tag pair under the slot's names, which only
+        # a source with exactly one pair can take. A joined or merged stream (one pair
+        # per input) or a stream with none is refused (developer, November 14, 2026,
+        # ITL-1126); binding one properly is ITL-1127.
+        source_ids, record_ids, others = _system_tag_columns(source, source_tag.keys())
+        if len(source_ids) != 1 or len(record_ids) != 1 or others:
+            issues.append(_one_system_tag_pair_issue(source_ids, record_ids, others))
+        else:
+            # The pair must have the types the slot predicts for it (str, bytes).
+            given_tags = source.output_schema(columns={"system_tags": True})[0]
+            for name, declared_type in ((source_ids[0], str), (record_ids[0], bytes)):
+                if given_tags[name] != declared_type:
+                    issues.append(
+                        f"system-tag column {name!r} is declared "
+                        f"{_type_text(declared_type)} but the source has "
+                        f"{_type_text(given_tags[name])}"
+                    )
 
-        if tag_issues or data_issues:
+        if issues:
             raise SourceSpecMismatchError(
                 f"SourceNode '{self._name}' is not compatible with the provided source. "
-                + "; ".join(tag_issues + data_issues)
+                + "; ".join(issues)
             )
+        return source_tag, source_data, frozenset(narrower)
 
     def as_table(
         self,
@@ -582,10 +793,14 @@ class SourceJobNode(SourceNodeBase):
             data_schema=data_schema,
             data_context=data_context,
         )
-        # Direct assignment to the backing attribute — super().__init__() has
-        # already initialised _content_hash_cache, so the property setter is
-        # safe to use here; we bypass it only to make the init path explicit.
-        self._bound_source: StreamProtocol | None = bound_source
+        self._bound_source: StreamProtocol | None = None
+        self._declared_form: _DeclaredForm | None = None
+        if bound_source is not None:
+            # Checks the source and, for a narrower one, records how its rows become
+            # rows of the declared schema (ITL-1112), as the setter does, but does not
+            # stamp the slot as modified (ITL-1095). super().__init__() has
+            # initialised the hash caches it invalidates.
+            self._bind(bound_source)
 
     # ------------------------------------------------------------------
     # bound_source property — explicit binding with cache invalidation
@@ -621,13 +836,33 @@ class SourceJobNode(SourceNodeBase):
     def bound_source(self, value: StreamProtocol | None) -> None:
         """Bind *value* as the concrete source and invalidate both hash caches.
 
+        A source is checked against the slot's declared schema first (``validate``), so
+        one that does not fit is refused before anything changes. A narrower source
+        (``x: int`` for a slot declaring ``x: int | None``) is accepted, and the node
+        gives its rows as rows of the declared schema (ITL-1112). ``None`` unbinds.
         Binding stamps the slot as modified, so every job node fed by it is stale and
         reads empty until it runs again (ITL-1095).
+
+        Raises:
+            SourceSpecMismatchError: If *value* does not fit the declared schema.
         """
+        self._bind(value)
+        self._update_modified_time()
+
+    def _bind(self, value: StreamProtocol | None) -> None:
+        """Check *value* and bind it, invalidating both hash caches.
+
+        The binding the setter and ``__init__`` share. Only the setter stamps the slot
+        as modified (ITL-1095): a node built with its source is not a rebinding.
+
+        Raises:
+            SourceSpecMismatchError: If *value* does not fit the declared schema.
+        """
+        form = None if value is None else self._declared_form_for(value)
         self._bound_source = value
+        self._declared_form = form
         self._invalidate_content_hash_cache()
         self._invalidate_pipeline_hash_cache()
-        self._update_modified_time()
 
     @property
     def last_modified(self) -> datetime | None:
@@ -648,6 +883,101 @@ class SourceJobNode(SourceNodeBase):
         if bound is None or own is None:
             return bound
         return max(own, bound)
+
+    def _declared_form_for(self, source: StreamProtocol) -> _DeclaredForm | None:
+        """Check *source* and return how its rows become rows of the declared schema.
+
+        Args:
+            source: The stream being bound.
+
+        Returns:
+            ``None`` when the source's rows already are rows of the declared schema
+            (the same type objects, column order and system-tag names and order), so
+            they pass unchanged;
+            otherwise the ``_DeclaredForm`` that makes them so.
+
+        Raises:
+            SourceSpecMismatchError: If *source* does not fit the declared schema.
+        """
+        source_tag, source_data, narrower = self._fit(source)
+        # _fit has checked that the source has exactly one pair and nothing else.
+        source_ids, record_ids, _ = _system_tag_columns(source, source_tag.keys())
+        declared_source_id, declared_record_id = system_tag_column_names(
+            self._schema_hash_str
+        )
+        renames = {
+            name: declared
+            for name, declared in (
+                (source_ids[0], declared_source_id),
+                (record_ids[0], declared_record_id),
+            )
+            if name != declared
+        }
+        tag_order = tuple(self._tag_schema.keys())
+        data_order = tuple(self._data_schema.keys())
+        source_system_tags = [
+            name
+            for name in source.keys(columns={"system_tags": True})[0]
+            if name not in source_tag
+        ]
+        # Exactly the declared types: a structural class of the declared identity is
+        # another class object, and the slot shows the declared one.
+        if (
+            dict(source_tag) == dict(self._tag_schema)
+            and dict(source_data) == dict(self._data_schema)
+            and not renames
+            and tuple(source_tag.keys()) == tag_order
+            and tuple(source_data.keys()) == data_order
+            and source_system_tags == [declared_source_id, declared_record_id]
+        ):
+            return None
+        return _DeclaredForm(
+            nullable=narrower,
+            renames=renames,
+            tag_order=tag_order,
+            data_order=data_order,
+            system_tag_order=(declared_source_id, declared_record_id),
+        )
+
+    def _declared_rows(
+        self, rows: Iterator[tuple[TagProtocol, DataProtocol]], form: _DeclaredForm
+    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        """Yield each row of a narrower source as a row of the declared schema."""
+        for tag, data in rows:
+            yield self._declared_row(tag, data, form)
+
+    @staticmethod
+    def _declared_row(
+        tag: TagProtocol, data: DataProtocol, form: _DeclaredForm
+    ) -> tuple[TagProtocol, DataProtocol]:
+        """Return one row of a narrower source as a row of the declared schema.
+
+        The row's tag (with its system tags) and data (with its source info) Arrow
+        tables go through ``form``, and the row is rebuilt from them with its own
+        data context.
+        """
+        tag_table = form.apply(tag.as_table(columns={"system_tags": True}))
+        data_table = form.apply(data.as_table(columns={"source": True, "meta": True}))
+        new_tag = (
+            Tag(tag_table, data_context=tag.data_context_key)
+            if tag_table.num_columns
+            else tag
+        )
+        return new_tag, Data(data_table, data_context=data.data_context_key)
+
+    def _declared_stream(
+        self, source: StreamProtocol, form: _DeclaredForm, table: pa.Table
+    ) -> ArrowTableStream:
+        """Return a stream over *table*, read from *source*, as the declared schema.
+
+        *table* must hold the system-tag, source-info and context columns, so the
+        stream selects, sorts and hashes the declared rows as any stream does.
+        """
+        return ArrowTableStream(
+            form.apply(table),
+            tag_columns=tuple(self._tag_schema.keys()),
+            data_context=source.data_context,  # pyright: ignore[reportAttributeAccessIssue]  # StreamProtocol omits data_context, which every concrete stream provides (ITL-844)
+        )
 
     # ------------------------------------------------------------------
     # Identity — delegate to bound source when set
@@ -679,14 +1009,22 @@ class SourceJobNode(SourceNodeBase):
                 f"SourceJobNode '{self._name}' has no concrete source bound. "
                 "Call job.bind(sources={'<name>': source}) before running."
             )
-        return self._bound_source.iter_data()
+        if self._declared_form is None:
+            return self._bound_source.iter_data()
+        return self._declared_rows(self._bound_source.iter_data(), self._declared_form)
 
     def _typed_zero_row_table(self) -> "pa.Table | None":
-        """The bound source's zero-row table; ``None`` when unbound or unknown.
+        """The bound source's zero-row table in the declared form; ``None`` if unknown.
 
-        See ``typed_zero_row_table``.
+        A source given in the declared form (``_DeclaredForm``) has its zero-row table
+        given in that form too, so it has exactly the schema of the node's populated
+        table (ITL-1112, ITL-912). ``None`` when unbound or when the source cannot type
+        its rows without rows. See ``typed_zero_row_table``.
         """
-        return typed_zero_row_table(self._bound_source)
+        table = typed_zero_row_table(self._bound_source)
+        if table is None or self._declared_form is None:
+            return table
+        return self._declared_form.apply(table)
 
     def _schema_requires_io(self, config: ColumnConfig) -> bool:
         """Whether reading the schema with ``config`` would poll: as for the bound source."""
@@ -701,7 +1039,10 @@ class SourceJobNode(SourceNodeBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> StreamView:
-        """Return the bound source's head, or no rows when no source is bound."""
+        """Return the bound source's head, or no rows when no source is bound.
+
+        A narrower bound source's rows are shown as rows of the declared schema.
+        """
         if self._bound_source is None:
             check_head_size(n)
             return self._head_without_rows(
@@ -709,8 +1050,36 @@ class SourceJobNode(SourceNodeBase):
                 ViewStatus.UNAVAILABLE,
                 note="no source bound",
             )
-        return head_of(
-            self._bound_source.head(n, columns=columns, all_info=all_info), self
+        if self._declared_form is None:
+            return head_of(
+                self._bound_source.head(n, columns=columns, all_info=all_info), self
+            )
+        # The source's own head, read with every column group the declared stream
+        # needs; the declared stream then selects the asked-for groups and computes
+        # the content hashes of the declared rows. Nothing is computed.
+        config = ColumnConfig.handle_config(columns, all_info=all_info)
+        view = head_of(
+            self._bound_source.head(
+                n,
+                columns=ColumnConfig(
+                    meta=True,
+                    source=True,
+                    system_tags=True,
+                    context=True,
+                    sort_by_tags=config.sort_by_tags,
+                ),
+            ),
+            self,
+        )
+        table = self._declared_stream(
+            self._bound_source, self._declared_form, view.table
+        ).as_table(columns=config)
+        renames = self._declared_form.renames
+        tag_columns = {renames.get(c, c) for c in view.tag_columns}
+        return dataclasses.replace(
+            view,
+            table=table,
+            tag_columns=tuple(c for c in table.column_names if c in tag_columns),
         )
 
     async def async_iter_data(
@@ -732,8 +1101,9 @@ class SourceJobNode(SourceNodeBase):
                 f"SourceJobNode '{self._name}' has no concrete source bound. "
                 "Call job.bind(sources={'<name>': source}) before running."
             )
-        async for pair in self._bound_source.async_iter_data():
-            yield pair
+        form = self._declared_form
+        async for tag, data in self._bound_source.async_iter_data():
+            yield (tag, data) if form is None else self._declared_row(tag, data, form)
 
     def output_schema(
         self,
@@ -743,9 +1113,11 @@ class SourceJobNode(SourceNodeBase):
     ) -> tuple[Schema, Schema]:
         """Return ``(tag_schema, data_schema)``, delegating to ``bound_source`` when set.
 
-        When ``bound_source`` is present, this is a transparent pass-through to
-        ``bound_source.output_schema(columns=columns, all_info=all_info)`` so callers
-        get the same result as querying the source directly.
+        When ``bound_source`` has the declared schema, this is a transparent
+        pass-through to ``bound_source.output_schema(columns=columns, all_info=all_info)``
+        so callers get the same result as querying the source directly. A narrower
+        bound source (``x: int`` for a declared ``x: int | None``) is given as the
+        declared schema (ITL-1112).
 
         When unbound, delegates to ``SourceNodeBase.output_schema()`` which includes
         system-tag schema entries derived from the declared schemas.
@@ -757,7 +1129,8 @@ class SourceJobNode(SourceNodeBase):
         Returns:
             Tuple of ``(tag_schema, data_schema)``.
         """
-        if self._bound_source is None:
+        if self._bound_source is None or self._declared_form is not None:
+            # Unbound, or bound to a narrower source given as the declared schema.
             return super().output_schema(columns=columns, all_info=all_info)
         return self._bound_source.output_schema(columns=columns, all_info=all_info)
 
@@ -768,6 +1141,9 @@ class SourceJobNode(SourceNodeBase):
         all_info: bool = False,
     ) -> pa.Table:
         """Materialize the concrete source as a PyArrow Table.
+
+        A narrower bound source's rows are given as rows of the declared schema
+        (ITL-1112).
 
         Args:
             columns: Column selection config.
@@ -781,7 +1157,20 @@ class SourceJobNode(SourceNodeBase):
                 f"SourceJobNode '{self._name}' has no concrete source bound. "
                 "Call job.bind(sources={'<name>': source}) before calling as_table()."
             )
-        return self._bound_source.as_table(columns=columns, all_info=all_info)
+        if self._declared_form is None:
+            return self._bound_source.as_table(columns=columns, all_info=all_info)
+        table = self._bound_source.as_table(
+            columns={
+                "meta": True,
+                "source": True,
+                "system_tags": True,
+                "context": True,
+                "sort_by_tags": False,
+            }
+        )
+        return self._declared_stream(
+            self._bound_source, self._declared_form, table
+        ).as_table(columns=columns, all_info=all_info)
 
     @classmethod
     def from_stream(
@@ -803,6 +1192,11 @@ class SourceJobNode(SourceNodeBase):
         3. Any other concrete stream (``ArrowTableSource``, etc.) — create a
            **bound** ``SourceJobNode`` whose ``content_hash()`` delegates to
            the concrete stream.
+
+        Used by ``Pipeline.compile`` for each leaf of the pipeline. The stream is
+        bound as any source is, so a leaf without exactly one source-id and one
+        record-id system-tag column (a raw ``ArrowTableStream``) is refused
+        (ITL-1126).
 
         Args:
             stream: The stream to wrap.

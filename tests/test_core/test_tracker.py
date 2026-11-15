@@ -105,6 +105,15 @@ def _make_stream(n: int = 3) -> ArrowTableStream:
     return ArrowTableStream(table, tag_columns=["id"])
 
 
+def _make_source(n: int = 3) -> ArrowTableSource:
+    """The rows of ``_make_stream`` as a source: one system-tag pair, so it can be bound.
+
+    A raw ``ArrowTableStream`` carries no system-tag columns, and a source node refuses
+    it (ITL-1126).
+    """
+    return ArrowTableSource(_make_stream(n).as_table(), tag_columns=["id"])
+
+
 def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
     """Stream with tag=id, data={a, b} for binary operator tests. Uses nullable=False schema."""
     schema = pa.schema(
@@ -154,7 +163,7 @@ class TestSourceNode:
     def _make_job_node(self, stream=None, name="test_source"):
         """Create a SourceJobNode wrapping an optional concrete stream."""
         if stream is None:
-            stream = _make_stream()
+            stream = _make_source()
         tag_schema = Schema({"id": int})
         data_schema = Schema({"x": int})
         return SourceJobNode(
@@ -165,7 +174,7 @@ class TestSourceNode:
         )
 
     def test_construction(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         assert node.bound_source is stream
         assert node.node_type == "source"
@@ -173,32 +182,32 @@ class TestSourceNode:
         assert node.upstreams == ()
 
     def test_label_from_argument(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream, name="my_source")
         # label resolves to the name via computed_label()
         assert node.label == "my_source"
 
     def test_label_set_explicitly(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream, name="my_source")
         node._label = "explicit"
         assert node.label == "explicit"
 
     def test_label_defaults_to_name(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream, name="my_source")
         # No explicit label → computed_label() returns the slot name
         assert node.label == "my_source"
 
     def test_repr(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream, name="test")
         r = repr(node)
         assert "SourceJobNode" in r
         assert "test" in r
 
     def test_content_hash_delegates_to_concrete(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         # SourceJobNode with concrete delegates content_hash to the concrete source
         assert node.content_hash() == stream.content_hash()
@@ -209,28 +218,28 @@ class TestSourceNode:
             node.upstreams = (_make_stream(),)
 
     def test_output_schema(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         tag_s, data_s = node.output_schema()
         assert set(tag_s.keys()) == {"id"}
         assert set(data_s.keys()) == {"x"}
 
     def test_keys(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         tag_keys, data_keys = node.keys()
         assert set(tag_keys) == {"id"}
         assert set(data_keys) == {"x"}
 
     def test_delegates_as_table(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         node_table = node.as_table()
         stream_table = stream.as_table()
         assert node_table.equals(stream_table)
 
     def test_delegates_iter_data(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         node_data = list(node.iter_data())
         stream_data = list(stream.iter_data())
@@ -238,19 +247,19 @@ class TestSourceNode:
 
     def test_run_equivalent(self):
         """execute() on SourceJobNode returns all data rows."""
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         result = node.execute()
         assert len(result) == stream.as_table().num_rows
 
     def test_data_context_key(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         # SourceJobNode uses its own data context (not the concrete stream's)
         assert node.data_context_key is not None
 
     def test_data_context(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = self._make_job_node(stream)
         assert node.data_context is not None
         assert node.data_context.context_key is not None
@@ -265,7 +274,7 @@ class TestNodeContextDelegation:
     """All node types delegate data_context to their wrapped entity."""
 
     def test_source_node_context_matches_stream(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = SourceJobNode(
             name="test",
             tag_schema=Schema({"id": int}),
@@ -292,7 +301,7 @@ class TestNodeContextDelegation:
         assert node.data_context.context_key == op.data_context_key
 
     def test_source_node_hash_consistent_with_stream(self):
-        stream = _make_stream()
+        stream = _make_source()
         node = SourceJobNode(
             name="test",
             tag_schema=Schema({"id": int}),

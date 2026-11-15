@@ -392,7 +392,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         When *sources* is provided, each concrete source is validated against
         its matching ``SourceJobNode`` slot schema, then the corresponding
-        ``SourceJobNode.bound_source`` is updated in-place.
+        ``SourceJobNode.bound_source`` is updated in-place. A source fits its slot
+        when its tag and data columns have the declared names, roles and Python
+        types, so a bind never changes a pipeline hash (ITL-1112). Every source is
+        validated before anything is changed: a refused source leaves the job's
+        bindings and database as they were.
 
         When *database* is provided and differs from the current database,
         ``_distribute_databases()`` is called so that all job nodes receive
@@ -404,15 +408,13 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             execution_context: Replaces the current execution context.
 
         Raises:
-            SourceSpecMismatchError: If any source's schema is incompatible.
+            SourceSpecMismatchError: If any source's columns differ from its slot's
+                declared names, roles or types.
             ValueError: If a source key has no matching ``SourceJobNode`` slot.
         """
         from orcapod.core.nodes.source_node import SourceNodeBase
 
         database_changed = database is not None and database is not self._database
-
-        if database is not None:
-            self._database = database
 
         if sources is not None:
             source_names = {
@@ -431,6 +433,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 if isinstance(node, SourceNodeBase) and node.name in sources:
                     node.validate(sources[node.name])
 
+        # Every source is validated before anything changes: a refused source leaves
+        # the job as it was, its database included (ITL-1112).
+        if database is not None:
+            self._database = database
+
+        if sources is not None:
             # Update bound_source on SourceJobNodes and maintain both dicts.
             for h, job_node in (self._persistent_node_map or {}).items():
                 if isinstance(job_node, SourceJobNode) and job_node.name in sources:
@@ -440,8 +448,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                     schema_hash = job_node.as_node().content_hash().to_string()
                     self._sources_by_hash[schema_hash] = sources[job_node.name]
             self._sources.update(sources)
-            # ``validate`` checks column names only, so a rebound source may give a
-            # column another type: every node predicts its schema again (ITL-1111).
+            # Every node predicts its schema again (ITL-1111). Since ITL-1112 a bind
+            # should never change a prediction: ``validate`` refuses a source of other
+            # column names or types, and the slot gives the declared schema, so this
+            # clear is expected to find nothing to change. It is kept so that a bind
+            # can never leave a stale prediction if a bound source's schema ever
+            # differs in a way the check does not see.
             for job_node in (self._persistent_node_map or {}).values():
                 if isinstance(job_node, StreamBase):
                     job_node._forget_output_schema()  # pyright: ignore[reportPrivateUsage]  # the job owns its nodes' bindings
@@ -1540,6 +1552,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         import tempfile
         from pathlib import Path as _Path
 
+        from orcapod.core.nodes.source_node import SourceNodeBase
         from orcapod.pipeline.graph import Pipeline
         from orcapod.pipeline.serialization import (
             SUPPORTED_JOB_FORMAT_VERSIONS,
@@ -1567,6 +1580,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             os.unlink(tmp_path)
 
         # Reconstruct sources (best-effort)
+        slots = {
+            node.name: node
+            for node in pipeline._persistent_node_map.values()
+            if isinstance(node, SourceNodeBase)
+        }
         sources: dict[str, cp.StreamProtocol] = {}
         for spec_name, src_config in (
             data.get("bindings", {}).get("sources", {}).items()
@@ -1575,6 +1593,10 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             try:
                 source = resolve_source_from_config(src_config)
                 if source is not None:
+                    # A rebuilt source its slot refuses (a file whose column types
+                    # changed) is one that could not be rebuilt (ITL-1112).
+                    if spec_name in slots:
+                        slots[spec_name].validate(source)
                     sources[spec_name] = source
             except NotImplementedError:
                 # In-memory sources (DictSource, ListSource, ArrowTableSource,

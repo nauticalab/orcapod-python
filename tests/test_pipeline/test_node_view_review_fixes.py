@@ -111,10 +111,14 @@ def flaky(x: int) -> int:
 
 
 def _base_stream() -> Any:
-    """Two rows, tag ``id`` and data ``x``, both non-nullable ``int64``."""
+    """Two rows, tag ``id`` and data ``x``, both non-nullable ``int64``.
+
+    A source, not a raw ``ArrowTableStream``: the streams built over it are bound to a
+    source slot, which needs one system-tag pair (ITL-1126).
+    """
     import pyarrow as pa
 
-    from orcapod.core.streams import ArrowTableStream
+    from orcapod.core.sources import ArrowTableSource
 
     schema = pa.schema(
         [
@@ -122,8 +126,10 @@ def _base_stream() -> Any:
             pa.field("x", pa.int64(), nullable=False),
         ]
     )
-    return ArrowTableStream(
-        pa.table({"id": [1, 2], "x": [1, 2]}, schema=schema), tag_columns=["id"]
+    return ArrowTableSource(
+        pa.table({"id": [1, 2], "x": [1, 2]}, schema=schema),
+        tag_columns=["id"],
+        source_id="base",
     )
 
 

@@ -425,7 +425,8 @@ def test_an_unrun_loaded_operator_without_its_operator_keeps_its_columns(
 
 def test_a_bound_source_with_no_modified_time_makes_its_slot_unknown() -> None:
     """A source slot bound to a stream with no modified time has none."""
-    stream = ArrowTableStream(pa.table({"k": [0], "x": [1]}), tag_columns=["k"])
+    # A table wrapped as a source: a bound stream needs one system-tag pair (ITL-1126).
+    stream = ArrowTableSource(pa.table({"k": [0], "x": [1]}), tag_columns=["k"])
     slot = SourceJobNode(name="s", bound_source=stream)
     assert slot.last_modified is not None
     stream._set_modified_time(None)  # pyright: ignore[reportPrivateUsage]  # an unknown modified time is what this test is about

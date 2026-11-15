@@ -12,6 +12,7 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.nodes.source_node import SourceJobNode
+from orcapod.core.sources import ArrowTableSource
 from orcapod.core.sources.polling_source import PollingSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import CursorInvalidatedError
@@ -244,7 +245,8 @@ class TestAsyncIterDataDefault:
         """SourceJobNode.async_execute routes through async_iter_data — no regression."""
         from orcapod.types import Schema
 
-        stream = _make_arrow_stream(2)
+        # A bound source needs one system-tag pair (ITL-1126); a raw stream has none.
+        stream = ArrowTableSource(_make_arrow_stream(2).as_table(), tag_columns=["id"])
         node = SourceJobNode(
             name="test",
             tag_schema=Schema({"id": int}),
@@ -262,7 +264,8 @@ class TestAsyncIterDataDefault:
     async def test_source_node_closes_channel_after_exhaustion(self):
         from orcapod.types import Schema
 
-        stream = _make_arrow_stream(1)
+        # A bound source needs one system-tag pair (ITL-1126); a raw stream has none.
+        stream = ArrowTableSource(_make_arrow_stream(1).as_table(), tag_columns=["id"])
         node = SourceJobNode(
             name="test",
             tag_schema=Schema({"id": int}),

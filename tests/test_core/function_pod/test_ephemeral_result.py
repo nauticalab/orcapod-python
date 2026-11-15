@@ -651,7 +651,11 @@ class TestPipelineInjectsStore:
         """PipelineJob.set_ephemeral_store propagates to all compiled nodes."""
         from orcapod.pipeline.job import PipelineJob
 
-        stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
+        # A job's input must be a source (ITL-1126: a raw stream has no system tags).
+        stream = ArrowTableSource(
+            _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}]).as_table(),
+            tag_columns=["id"],
+        )
         pod = _make_pod()
 
         job = PipelineJob(name="test_pipeline")
@@ -671,7 +675,10 @@ class TestPipelineInjectsStore:
         """PipelineJob.set_ephemeral_store(None) detaches the store from all nodes."""
         from orcapod.pipeline.job import PipelineJob
 
-        stream = _make_stream([{"id": 0, "x": 10}])
+        # A job's input must be a source (ITL-1126: a raw stream has no system tags).
+        stream = ArrowTableSource(
+            _make_stream([{"id": 0, "x": 10}]).as_table(), tag_columns=["id"]
+        )
         pod = _make_pod()
 
         job = PipelineJob(name="test_pipeline")

@@ -26,6 +26,7 @@ from orcapod.core.sources import (
 )
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
+from orcapod.errors import SourceSpecMismatchError
 from orcapod.operators import SelectTagColumns
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.job import PipelineJob
@@ -37,6 +38,8 @@ from orcapod.utils import arrow_utils
 from tests.test_core.large_types_cases import (
     ALL_COLUMNS,
     FULL_SCHEMA,
+    JOB_SOURCE_CASES,
+    RAW_STREAM,
     ROWS,
     SOURCE_CASES,
     TAGS,
@@ -71,13 +74,23 @@ class TestEverySourceKind:
         assert non_large_columns(table) == []
         assert non_large_columns(source.head(columns=ALL_COLUMNS).table) == []
 
-    @pytest.mark.parametrize("orchestrator", ["sync", "async"])
-    def test_job_nodes_have_no_non_large_type(
-        self, name: str, n_rows: int, orchestrator: str, tmp_path: Path
-    ) -> None:
-        tables = _job_node_tables(build_source(name, n_rows, tmp_path), orchestrator)
-        for table in tables:
-            assert non_large_columns(table) == []
+
+@pytest.mark.parametrize("orchestrator", ["sync", "async"])
+@pytest.mark.parametrize(("name", "n_rows"), JOB_SOURCE_CASES)
+def test_job_nodes_have_no_non_large_type(
+    name: str, n_rows: int, orchestrator: str, tmp_path: Path
+) -> None:
+    tables = _job_node_tables(build_source(name, n_rows, tmp_path), orchestrator)
+    for table in tables:
+        assert non_large_columns(table) == []
+
+
+@pytest.mark.parametrize("n_rows", [2, 0])
+def test_raw_stream_is_refused_as_a_job_input(n_rows: int, tmp_path: Path) -> None:
+    """A raw ``ArrowTableStream`` has no system tags, so a job refuses it as an input
+    (ITL-1126) and says to wrap its table as a source; binding one is ITL-1127."""
+    with pytest.raises(SourceSpecMismatchError, match="wrap its table as a source"):
+        _job_node_tables(build_source(RAW_STREAM, n_rows, tmp_path), "sync")
 
 
 def test_explicit_arrow_schema_is_normalized(tmp_path: Path) -> None:

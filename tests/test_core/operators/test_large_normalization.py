@@ -44,6 +44,7 @@ from orcapod.protocols.core_protocols import StreamProtocol
 from tests.test_core.large_types_cases import (
     ALL_COLUMNS,
     FULL_SCHEMA,
+    JOB_SOURCE_CASES,
     ROWS,
     SOURCE_CASES,
     SOURCES,
@@ -98,11 +99,14 @@ OPERATORS: dict[str, Apply] = {
 }
 
 
-def _cases(row_counts: tuple[int, ...]) -> list[tuple[str, str, int]]:
-    """Every (source kind, operator, rows) with rows among ``row_counts``."""
+def _cases(
+    row_counts: tuple[int, ...], source_cases: list[tuple[str, int]] = SOURCE_CASES
+) -> list[tuple[str, str, int]]:
+    """Every (source kind, operator, rows) of ``source_cases`` with rows among
+    ``row_counts``."""
     return [
         (source, operator, n_rows)
-        for source, n_rows in SOURCE_CASES
+        for source, n_rows in source_cases
         if n_rows in row_counts
         for operator in OPERATORS
     ]
@@ -154,7 +158,10 @@ def test_zero_row_schema_equals_populated(
 
 
 @pytest.mark.parametrize("orchestrator", ["sync", "async"])
-@pytest.mark.parametrize(("source", "operator", "n_rows"), _cases((2, 0)))
+# Every kind a job takes as input; a raw ArrowTableStream is refused (ITL-1126).
+@pytest.mark.parametrize(
+    ("source", "operator", "n_rows"), _cases((2, 0), JOB_SOURCE_CASES)
+)
 def test_job_has_no_non_large_type_and_equals_plain(
     source: str, operator: str, n_rows: int, orchestrator: str, tmp_path: Path
 ) -> None:

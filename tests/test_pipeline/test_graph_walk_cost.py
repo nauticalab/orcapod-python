@@ -32,7 +32,7 @@ from orcapod import PipelineJob, function_pod
 from orcapod.core.sources import DictSource
 from orcapod.core.streams.base import StreamBase
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.errors import InputValidationError
+from orcapod.errors import InputValidationError, SourceSpecMismatchError
 from orcapod.pipeline import AsyncPipelineOrchestrator, SyncPipelineOrchestrator
 
 STAGES = 20
@@ -521,19 +521,42 @@ def _function_job() -> PipelineJob:
 class TestMemoInvalidation:
     """A memoized schema is predicted again when an input of the prediction changes."""
 
-    def test_bind_to_a_source_of_another_column_type_changes_downstream_schemas(
-        self,
+    @pytest.mark.parametrize("how", ["bind", "bound_source"])
+    def test_a_source_of_another_column_type_is_refused_and_moves_no_schema(
+        self, how: str
     ) -> None:
-        """``job.bind`` to a source with another column type changes every downstream schema."""
+        """A source with another column type is refused; no downstream schema moves.
+
+        The pipeline determines every node's schema (ITL-1112): ``job.bind`` and a
+        direct ``bound_source`` assignment refuse a source whose column types the
+        slot does not declare, so no memoized downstream schema can go stale.
+        """
         job = _rename_job()
-        assert job.nodes["renamed"].output_schema()[1]["y"] is int
+        configs: list[dict[str, bool]] = [{}, {"system_tags": True}, {"meta": True}]
+        before = {
+            (label, str(config)): job.nodes[label].output_schema(columns=config)
+            for label in ("renamed", "renamed_again")
+            for config in configs
+        }
         assert job.nodes["renamed_again"].output_schema()[1]["z"] is int
-        assert job.nodes["renamed_again"].keys() == (("id",), ("z",))
 
-        job.bind(sources={"src": _one_row_source("a")})
+        with pytest.raises(SourceSpecMismatchError, match="declared int"):
+            if how == "bind":
+                job.bind(sources={"src": _one_row_source("a")})
+            else:
+                job.nodes["src"].bound_source = _one_row_source("a")  # pyright: ignore[reportAttributeAccessIssue]  # "src" is a SourceJobNode
 
-        assert job.nodes["renamed"].output_schema()[1]["y"] is str
-        assert job.nodes["renamed_again"].output_schema()[1]["z"] is str
+        for label in ("renamed", "renamed_again"):
+            node = job.nodes[label]
+            assert isinstance(node, StreamBase)
+            # Predict afresh: the test is about the schemas, not the memo.
+            node._forget_output_schema()  # pyright: ignore[reportPrivateUsage]
+        after = {
+            (label, str(config)): job.nodes[label].output_schema(columns=config)
+            for label in ("renamed", "renamed_again")
+            for config in configs
+        }
+        assert after == before
 
     def test_setting_an_operator_nodes_upstreams_changes_its_schema(self) -> None:
         """Setting an operator node's ``upstreams`` changes its own schema."""
@@ -557,25 +580,6 @@ class TestMemoInvalidation:
         node.upstreams = (other,)
 
         assert node.output_schema()[0]["id"] is str
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "A direct bound_source assignment reaches no downstream node, so their "
-            "memoized schemas are not predicted again; use job.bind (ITL-1111). "
-            "Their pipeline hashes are equally stale today."
-        ),
-    )
-    def test_assigning_bound_source_directly_changes_downstream_schemas(
-        self,
-    ) -> None:
-        """A direct ``bound_source`` assignment should change the downstream schemas."""
-        job = _rename_job()
-        assert job.nodes["renamed_again"].output_schema()[1]["z"] is int
-
-        job.nodes["src"].bound_source = _one_row_source("a")
-
-        assert job.nodes["renamed_again"].output_schema()[1]["z"] is str
 
     @pytest.mark.xfail(
         strict=True,

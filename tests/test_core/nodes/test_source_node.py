@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 
 
 @pytest.fixture
@@ -283,6 +286,31 @@ class TestSourceNodeAsTable:
         assert isinstance(table, pa.Table)
 
 
+def _mock_source_with_the_slots_system_tags(
+    node: SourceJobNode, tag_schema: Schema, data_schema: Schema
+) -> MagicMock:
+    """Return a mock source of the slot's schema carrying the slot's system-tag pair.
+
+    A bound source must carry exactly one source-id and one record-id system-tag
+    column (ITL-1126); the slot's own names make the bind pass rows unchanged.
+    """
+    tag_keys = node.keys(columns={"system_tags": True})[0]
+    with_system_tags = node.output_schema(columns={"system_tags": True})
+
+    def output_schema(
+        columns: ColumnConfig | dict[str, bool] | None = None, all_info: bool = False
+    ) -> tuple[Schema, Schema]:
+        """The slot's schema, with its system-tag pair when asked for."""
+        if ColumnConfig.handle_config(columns, all_info=all_info).system_tags:
+            return with_system_tags
+        return tag_schema, data_schema
+
+    mock_source = MagicMock()
+    mock_source.output_schema.side_effect = output_schema
+    mock_source.keys.return_value = (tag_keys, tuple(data_schema.keys()))
+    return mock_source
+
+
 class TestSourceNodeColumnConfig:
     """SourceNodeBase must honour column_config / all_info in keys() and output_schema()."""
 
@@ -322,10 +350,13 @@ class TestSourceNodeColumnConfig:
         via_all_info = node.keys(all_info=True)
         assert via_system_tags == via_all_info
 
-    def test_unbound_output_schema_system_tags_adds_str_entries(
+    def test_unbound_output_schema_system_tags_adds_typed_entries(
         self, tag_schema, data_schema
     ):
-        """output_schema(system_tags=True) tag schema includes two str-typed system-tag entries."""
+        """output_schema(system_tags=True) adds the source id (str) and record id (bytes).
+
+        The types a source's rows have (ITL-1112): ``large_string`` and ``large_binary``.
+        """
         from orcapod.core.nodes.source_node import SourceNode
         from orcapod.system_constants import constants
         from orcapod.types import ColumnConfig
@@ -343,7 +374,14 @@ class TestSourceNodeColumnConfig:
             if k.startswith(constants.SYSTEM_TAG_PREFIX)
         }
         assert len(system_tag_entries) == 2
-        assert all(v is str for v in system_tag_entries.values())
+        types = {
+            k.split(constants.BLOCK_SEPARATOR)[0]: v
+            for k, v in system_tag_entries.items()
+        }
+        assert types == {
+            constants.SYSTEM_TAG_SOURCE_ID_PREFIX: str,
+            constants.SYSTEM_TAG_RECORD_ID_PREFIX: bytes,
+        }
 
     def test_unbound_output_schema_default_unchanged(self, tag_schema, data_schema):
         """Regression: output_schema() with no args still returns plain schemas."""
@@ -385,15 +423,17 @@ class TestSourceNodeColumnConfig:
 
     def test_bound_keys_delegates_to_source(self, tag_schema, data_schema):
         """Bound SourceJobNode.keys() delegates to bound_source.output_schema()."""
-        from unittest.mock import MagicMock
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.types import ColumnConfig
 
-        mock_source = MagicMock()
-        mock_source.output_schema.return_value = (tag_schema, data_schema)
-
-        job_node = SourceJobNode(name="x", bound_source=mock_source)
-        mock_source.output_schema.reset_mock()  # clear init-time schema derivation call
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
+        mock_source = _mock_source_with_the_slots_system_tags(
+            job_node, tag_schema, data_schema
+        )
+        job_node.bound_source = mock_source
+        mock_source.output_schema.reset_mock()  # clear bind-time schema check call
 
         cfg = ColumnConfig(system_tags=True)
         job_node.keys(columns=cfg, all_info=False)
@@ -414,15 +454,17 @@ class TestSourceNodeColumnConfig:
 
     def test_bound_output_schema_delegates_to_source(self, tag_schema, data_schema):
         """Bound SourceJobNode.output_schema() delegates to bound_source.output_schema()."""
-        from unittest.mock import MagicMock
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.types import ColumnConfig
 
-        mock_source = MagicMock()
-        mock_source.output_schema.return_value = (tag_schema, data_schema)
-
-        job_node = SourceJobNode(name="x", bound_source=mock_source)
-        # Reset call history accumulated during __init__ (schema derivation).
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema
+        )
+        mock_source = _mock_source_with_the_slots_system_tags(
+            job_node, tag_schema, data_schema
+        )
+        job_node.bound_source = mock_source
+        # Reset call history accumulated during the bind (schema check).
         mock_source.output_schema.reset_mock()
         cfg = ColumnConfig(system_tags=True)
         job_node.output_schema(columns=cfg, all_info=False)
@@ -479,7 +521,13 @@ class TestFromStreamNonRootSource:
         """SourceJobNode.from_stream(non-RootSource) builds name as label + full content hash."""
         from orcapod.core.nodes.source_node import SourceJobNode
 
-        stream = self._make_arrow_stream()
+        # A stream derived from a source: not a RootSource, and it carries the one
+        # system-tag pair a bound stream must have (ITL-1126; a raw stream has none).
+        from orcapod.core.operators import MapData
+        from orcapod.core.sources import DictSource
+
+        source = DictSource([{"id": 1, "value": 1.0}], tag_columns=["id"])
+        stream = MapData({"value": "v"})(source)
         job_node = SourceJobNode.from_stream(stream)
 
         expected_name = f"{stream.label}:{stream.content_hash().to_hex()}"

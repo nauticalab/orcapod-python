@@ -274,6 +274,14 @@ SOURCE_CASES = [
     (name, n_rows) for name, (_, counts) in SOURCES.items() for n_rows in counts
 ]
 
+# A raw ``ArrowTableStream`` has no system-tag columns, so it cannot be a pipeline's
+# input (ITL-1126; binding one is ITL-1127): the job sweeps take every other kind, and
+# ``test_large_normalization_sources`` asserts the refusal.
+RAW_STREAM = "ArrowTableStream"
+JOB_SOURCE_CASES = [
+    (name, n_rows) for name, n_rows in SOURCE_CASES if name != RAW_STREAM
+]
+
 
 def build_source(name: str, n_rows: int, tmp: Path) -> StreamProtocol:
     """Build the source kind ``name`` with ``n_rows`` rows, its files under ``tmp``."""

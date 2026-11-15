@@ -964,7 +964,18 @@ from that store, and no rows under that key is an empty result, not an error.
   paths. In-memory sources (`DictSource`, `ListSource`, `ArrowTableSource`,
   `DataFrameSource`) keep their data only in memory, so they are not saved; loading logs
   this at INFO level. This does not affect reading the other nodes. To read such a source
-  node itself, bind a source to it: `loaded.bind(sources={"mice": source})`.
+  node itself, bind a source to it: `loaded.bind(sources={"mice": source})`. The source must
+  have the slot's tag and data columns with the same Python types, except that a column the
+  slot declares `T | None` may be `T` (the slot then reads it as `T | None`); `bind` refuses
+  any other (`SourceSpecMismatchError`, an `InputValidationError`). The pipeline determines
+  every node's schema: binding a source never changes a node's stored path or the schema of
+  any node's or stored table, only the values. The check compares Python types, so a
+  difference in Arrow width only (`int32` against `int64`) is not yet refused (ITL-949). A
+  joined or merged stream (one pair of system-tag columns per input), or one with no
+  system-tag columns, is refused too: make the join part of the pipeline, or store the joined
+  stream and bind the stored source. A pipeline built directly over a raw `ArrowTableStream`
+  is refused the same way: wrap its table as a source,
+  `ArrowTableSource(stream.as_table(), tag_columns=[...])`.
 - The results are read from the store recorded in the file. Pass
   `PipelineJob.load(path, database=...)` if the store has moved.
 - The job file may also hold an optional, advisory section, `run.expected_rows`: for each
