@@ -598,7 +598,7 @@ class TestMapTagsStreaming:
     @pytest.mark.asyncio
     async def test_no_matching_rename_passthrough(self):
         stream = make_two_tag_stream()
-        op = MapTags(name_map={"nonexistent": "nope"})
+        op = MapTags(name_map={"nonexistent": "nope"}, strict=False)
         results = await run_unary(op, stream)
 
         assert len(results) == 3
@@ -716,7 +716,7 @@ class TestMapDataStreaming:
     @pytest.mark.asyncio
     async def test_no_matching_rename_passthrough(self):
         stream = make_simple_stream()
-        op = MapData(name_map={"nonexistent": "nope"})
+        op = MapData(name_map={"nonexistent": "nope"}, strict=False)
         results = await run_unary(op, stream)
 
         assert len(results) == 3

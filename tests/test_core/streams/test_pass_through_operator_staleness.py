@@ -146,8 +146,8 @@ PASS_THROUGH: dict[str, Callable[[StreamProtocol], StreamProtocol]] = {
     "select_data": lambda s: SelectDataColumns(list(s.keys()[1]))(s),
     "drop_tags": lambda s: DropTagColumns(["absent"], strict=False)(s),
     "drop_data": lambda s: DropDataColumns(["absent"], strict=False)(s),
-    "map_tags": lambda s: MapTags({"absent": "renamed"})(s),
-    "map_data": lambda s: MapData({"absent": "renamed"})(s),
+    "map_tags": lambda s: MapTags({"absent": "renamed"}, strict=False)(s),
+    "map_data": lambda s: MapData({"absent": "renamed"}, strict=False)(s),
     "filter": lambda s: PolarsFilter()(s),
     "join_one": lambda s: Join()(s),
     "semi_join_disjoint": lambda s: SemiJoin()(s, _unrelated()),
@@ -174,7 +174,9 @@ def _upstream(kind: str) -> tuple[StreamProtocol, StreamProtocol]:
     if kind == "pod_chain":
         return _double_pod().process(first), first
     if kind == "operator_chain":
-        return MapData({"absent": "renamed"})(SelectDataColumns(["y"])(first)), first
+        return MapData({"absent": "renamed"}, strict=False)(
+            SelectDataColumns(["y"])(first)
+        ), first
     raise AssertionError(kind)
 
 

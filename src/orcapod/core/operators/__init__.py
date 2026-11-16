@@ -12,7 +12,7 @@ from .filters import PolarsFilter
 from .group_by import GroupBy
 from .index import Index
 from .join import Join
-from .mappers import MapData, MapTags
+from .mappers import MapColumns, MapData, MapTags
 from .merge_join import MergeJoin
 from .pick import Pick
 from .semijoin import SemiJoin
@@ -23,6 +23,7 @@ __all__ = [
     "SemiJoin",
     "MapTags",
     "MapData",
+    "MapColumns",
     "Batch",
     "GroupBy",
     "SelectTagColumns",

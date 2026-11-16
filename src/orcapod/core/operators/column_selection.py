@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from orcapod.core.operators.meta_columns import WithoutMetaWriter
@@ -583,7 +583,7 @@ class DropDataColumns(UnaryOperator):
         )
 
 
-def _is_meta(name: str) -> bool:
+def is_meta_column(name: str) -> bool:
     """Whether ``name`` is a meta column or a raw stream's source-info column for one."""
     return name.startswith(
         (constants.META_PREFIX, f"{constants.SOURCE_PREFIX}{constants.META_PREFIX}")
@@ -683,7 +683,7 @@ class _TagAndDataColumnsOperator(UnaryOperator, ABC):
         A raw ``ArrowTableStream`` lists its meta (``__``) columns as data columns.
         """
         tag_columns, data_columns = stream.keys()
-        return tag_columns, [c for c in data_columns if not _is_meta(c)]
+        return tag_columns, [c for c in data_columns if not is_meta_column(c)]
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
         """Validate the names against the input stream.
@@ -711,7 +711,7 @@ class _TagAndDataColumnsOperator(UnaryOperator, ABC):
                     c
                     for c in table.column_names
                     # Only data meta goes; a tag column is never stripped as meta.
-                    if c in removed or (_is_meta(c) and c not in tag_columns)
+                    if c in removed or (is_meta_column(c) and c not in tag_columns)
                 ]
             ),
             tag_columns=[c for c in tag_columns if c not in tags_removed],
@@ -736,7 +736,7 @@ class _TagAndDataColumnsOperator(UnaryOperator, ABC):
                 {
                     k: v
                     for k, v in data_schema.items()
-                    if k not in data_removed and not _is_meta(k)
+                    if k not in data_removed and not is_meta_column(k)
                 }
             ),
         )
@@ -824,94 +824,3 @@ class SelectColumns(_TagAndDataColumnsOperator):
 
     def _removed(self, columns: Collection[str]) -> list[str]:
         return [c for c in columns if c not in self.columns]
-
-
-class MapTags(UnaryOperator):
-    """
-    Operator that maps tags in a stream using a user-defined function.
-    The function is applied to each tag in the stream, and the resulting tags
-    are returned as a new stream.
-    """
-
-    def __init__(
-        self, name_map: Mapping[str, str], drop_unmapped: bool = False, **kwargs
-    ):
-        self.name_map = dict(name_map)
-        self.drop_unmapped = drop_unmapped
-        super().__init__(**kwargs)
-
-    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, data_columns = stream.keys()
-        missing_tags = set(tag_columns) - set(self.name_map.keys())
-
-        if not any(n in tag_columns for n in self.name_map):
-            # nothing to rename in the tags, return stream as is
-            return stream
-
-        table = stream.as_table(columns={"source": True, "system_tags": True})
-
-        name_map = {
-            tc: self.name_map.get(tc, tc) for tc in tag_columns
-        }  # rename the tag as necessary
-        new_tag_columns = [name_map[tc] for tc in tag_columns]
-        for c in data_columns:
-            name_map[c] = c  # no renaming on data columns
-
-        renamed_table = table.rename_columns(name_map)
-
-        if missing_tags and self.drop_unmapped:
-            # drop any tags that are not in the name map
-            renamed_table = renamed_table.drop_columns(list(missing_tags))
-
-        return ArrowTableStream(
-            renamed_table,
-            tag_columns=new_tag_columns,
-        )
-
-    def validate_unary_input(self, stream: StreamProtocol) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
-        # verify that renamed value does NOT collide with other columns
-        tag_columns, data_columns = stream.keys()
-        relevant_source = []
-        relevant_target = []
-        for source, target in self.name_map.items():
-            if source in tag_columns:
-                relevant_source.append(source)
-                relevant_target.append(target)
-        remaining_tag_columns = set(tag_columns) - set(relevant_source)
-        overlapping_tag_columns = remaining_tag_columns.intersection(relevant_target)
-        overlapping_data_columns = set(data_columns).intersection(relevant_target)
-
-        if overlapping_tag_columns or overlapping_data_columns:
-            message = f"Renaming {self.name_map} would cause collisions with existing columns: "
-            if overlapping_tag_columns:
-                message += f"overlapping tag columns: {overlapping_tag_columns}."
-            if overlapping_data_columns:
-                message += f"overlapping data columns: {overlapping_data_columns}."
-            raise InputValidationError(message)
-
-    def unary_output_schema(
-        self,
-        stream: StreamProtocol,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        tag_schema, data_schema = stream.output_schema(
-            columns=columns, all_info=all_info
-        )
-
-        # Create new data schema with renamed keys
-        new_tag_schema = {self.name_map.get(k, k): v for k, v in tag_schema.items()}
-
-        return Schema(new_tag_schema), data_schema
-
-    def identity_structure(self) -> Any:
-        return (
-            self.__class__.__name__,
-            self.name_map,
-            self.drop_unmapped,
-        )

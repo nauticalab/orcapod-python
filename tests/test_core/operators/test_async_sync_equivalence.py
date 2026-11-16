@@ -37,6 +37,7 @@ from orcapod.core.operators import (
     GroupBy,
     Index,
     Join,
+    MapColumns,
     MapData,
     MapTags,
     MergeJoin,
@@ -366,6 +367,17 @@ CASES = [
     ),
     Case("map_tags", lambda: MapTags({"ta": "tb"}), lambda: (source_a(),)),
     Case("map_data", lambda: MapData({"i8": "j8"}), lambda: (source_a(),)),
+    # Tag and data columns in one call (ITL-1160); a logical column among them.
+    Case(
+        "map_columns",
+        lambda: MapColumns({"ta": "tb", "i8": "j8", "p": "q"}),
+        lambda: (source_a(),),
+    ),
+    Case(
+        "map_columns_drop_unmapped",
+        lambda: MapColumns({"k": "kk", "st": "su", "nul": "n"}, drop_unmapped=True),
+        lambda: (source_a(),),
+    ),
     Case(
         "select_tag_columns",
         lambda: SelectTagColumns(["k"]),
@@ -1640,13 +1652,13 @@ def test_map_data_does_not_rename_a_meta_column_into_data() -> None:
     lists ``__`` columns, so the meta value reached a data column (CodeRabbit, #369).
     """
     source = _with_meta(source_a(), _meta_columns("m", 3))
-    expected = sync_rows(MapData({"__m_i8": "renamed"}), source)
-    actual = async_rows(MapData({"__m_i8": "renamed"}), source)
+    expected = sync_rows(MapData({"__m_i8": "renamed"}, strict=False), source)
+    actual = async_rows(MapData({"__m_i8": "renamed"}, strict=False), source)
     for rows in (expected, actual):
         for _, data in rows:
             assert "renamed" not in data.keys()
     assert_equivalent(expected, actual)
-    op = MapData({"__m_i8": "renamed"})
+    op = MapData({"__m_i8": "renamed"}, strict=False)
     predicted = op.output_schema(source)
     assert "renamed" not in predicted[1]
     # Non-public on purpose: a prediction is verified against the static result.
@@ -1656,9 +1668,9 @@ def test_map_data_does_not_rename_a_meta_column_into_data() -> None:
 def test_map_data_meta_source_does_not_collide() -> None:
     """A meta source is not a rename source, so it cannot collide with a data column."""
     source = _with_meta(source_b(nested=False), _meta_columns("m", 3))
-    op = MapData({"__m_i8": "i32", "u8": "v8"})
+    op = MapData({"__m_i8": "i32", "u8": "v8"}, strict=False)
     expected = sync_rows(op, source)
-    actual = async_rows(MapData({"__m_i8": "i32", "u8": "v8"}), source)
+    actual = async_rows(MapData({"__m_i8": "i32", "u8": "v8"}, strict=False), source)
     for _, data in expected:
         assert set(data.keys()) == {"i32", "v8", "f32", "ls"}
     assert_equivalent(expected, actual)
@@ -1678,9 +1690,9 @@ def test_map_data_dropping_every_data_column_raises_alike(
     """
     source = _with_meta(source_b(nested=False), _meta_columns("m", 3))
     with pytest.raises(InputValidationError, match="no data column") as sync_error:
-        _ = MapData(name_map, drop_unmapped=True)(source)
+        _ = MapData(name_map, drop_unmapped=True, strict=False)(source)
     with pytest.raises(InputValidationError, match="no data column") as async_error:
-        _ = async_rows(MapData(name_map, drop_unmapped=True), source)
+        _ = async_rows(MapData(name_map, drop_unmapped=True, strict=False), source)
     assert str(async_error.value) == str(sync_error.value)
 
 
@@ -1691,9 +1703,11 @@ def test_map_tags_dropping_every_tag_agrees_on_both_paths() -> None:
     every tag while the sync path and the prediction dropped them.
     """
     source = source_a()
-    op = MapTags({"absent": "a"}, drop_unmapped=True)
+    op = MapTags({"absent": "a"}, drop_unmapped=True, strict=False)
     expected = sync_rows(op, source)
-    actual = async_rows(MapTags({"absent": "a"}, drop_unmapped=True), source)
+    actual = async_rows(
+        MapTags({"absent": "a"}, drop_unmapped=True, strict=False), source
+    )
     assert op.output_schema(source)[0] == {}
     for rows in (expected, actual):
         assert len(rows) == 3

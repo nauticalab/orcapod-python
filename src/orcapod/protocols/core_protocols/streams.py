@@ -348,25 +348,56 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
 
     def map_tags(
         self,
-        name_map: Mapping[str, str],
+        name_map: Mapping[str, str] | None = None,
+        /,
+        *,
         drop_unmapped: bool = False,
+        strict: bool = True,
         label: str | None = None,
+        **renames: str,
     ) -> "StreamProtocol":
         """
         Map tag names in this stream to new names based on the provided mapping.
-        Tags not in the mapping are kept unless ``drop_unmapped`` is True.
+        Tags not in the mapping are kept unless ``drop_unmapped`` is True. With
+        ``strict`` (the default), a name that is not a tag column is refused. The
+        renames are one positional dict or keyword arguments (``old="new"``).
         """
         ...
 
     def map_data(
         self,
-        name_map: Mapping[str, str],
+        name_map: Mapping[str, str] | None = None,
+        /,
+        *,
         drop_unmapped: bool = False,
+        strict: bool = True,
         label: str | None = None,
+        **renames: str,
     ) -> "StreamProtocol":
         """
         Map data names in this stream to new names based on the provided mapping.
         Data columns not in the mapping are kept unless ``drop_unmapped`` is True.
+        With ``strict`` (the default), a name that is not a data column is refused.
+        The renames are one positional dict or keyword arguments (``old="new"``).
+        """
+        ...
+
+    def map_columns(
+        self,
+        name_map: Mapping[str, str] | None = None,
+        /,
+        *,
+        drop_unmapped: bool = False,
+        strict: bool = True,
+        label: str | None = None,
+        **renames: str,
+    ) -> "StreamProtocol":
+        """Rename columns, tag or data, in one step; a tag stays a tag.
+
+        Columns not in the mapping are kept unless ``drop_unmapped`` is True. With
+        ``strict`` (the default), a name that is neither a tag nor a data column
+        is refused. The renames are one positional dict or keyword arguments
+        (``old="new"``).
         """
         ...
 

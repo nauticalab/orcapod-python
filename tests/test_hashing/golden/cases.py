@@ -1637,6 +1637,42 @@ def pipeline_tag_and_data_columns() -> dict[str, Any]:
     return out
 
 
+@case("pipeline", "map_columns")
+def pipeline_map_columns() -> dict[str, Any]:
+    """``MapColumns``: tag and data columns renamed in one step (ITL-1160).
+
+    ``stream_summary`` keys rows by user tags, so every stream pinned here keeps a
+    tag whose values are unique per row.
+    """
+    from orcapod.operators import MapColumns
+    from orcapod.sources import DictSource
+
+    cohort_subjects = DictSource(
+        data=[
+            {"cohort": "a", "subject": "s1", "age": 3, "weight": 20.5},
+            {"cohort": "a", "subject": "s2", "age": 4, "weight": 22.25},
+            {"cohort": "b", "subject": "s3", "age": 5, "weight": 19.0},
+        ],
+        tag_columns=["cohort", "subject"],
+        tag_only_columns=True,
+        source_id="cohort_subjects",
+    )
+    streams = {
+        "rename": MapColumns(name_map={"subject": "animal", "age": "age_years"})(
+            cohort_subjects
+        ),
+        "drop_unmapped": MapColumns(
+            name_map={"subject": "animal", "weight": "kg"}, drop_unmapped=True
+        )(cohort_subjects),
+    }
+    out: dict[str, Any] = {}
+    for name, stream in streams.items():
+        row_keys = [_row_key(tag.as_dict()) for tag, _ in stream.iter_data()]
+        assert len(set(row_keys)) == len(row_keys) == 3, (name, row_keys)
+        out.update(_prefixed(name, stream_summary(stream)))
+    return out
+
+
 @case("pipeline", "polars_filter")
 def pipeline_polars_filter() -> dict[str, Any]:
     from orcapod.operators import PolarsFilter

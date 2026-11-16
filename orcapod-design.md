@@ -86,8 +86,8 @@ Keep only specified tag or data columns. Optional `strict` mode raises on missin
 ### DropTagColumns / DropDataColumns
 Remove specified tag or data columns. `DropDataColumns` also removes associated source-info columns.
 
-### MapTags / MapData
-Rename tag or data columns via a name mapping. `MapData` automatically renames associated source-info columns. Optional `drop_unmapped` mode removes columns not in the mapping.
+### MapTags / MapData / MapColumns
+Rename tag or data columns via a name mapping; `MapColumns` renames both in one step, and a tag stays a tag. A renamed data column's source-info column is renamed with it. Optional `drop_unmapped` mode removes columns not in the mapping. A name that is not a column of the mapped kind is refused by default (`strict=True`, part of the identity; ITL-1160).
 
 ### PolarsFilter
 Applies Polars filtering predicates to rows. Output schema is unchanged from input.

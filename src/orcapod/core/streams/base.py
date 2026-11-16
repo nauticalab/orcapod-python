@@ -230,6 +230,45 @@ def _column_names(columns: tuple[str | Collection[str], ...]) -> tuple[str, ...]
     return tuple(str(name) for name in names)
 
 
+def _rename_map(
+    name_map: Mapping[str, str] | None, renames: Mapping[str, object]
+) -> dict[str, str]:
+    """Normalize the renames of ``map_tags``, ``map_data`` and ``map_columns``.
+
+    The renames are given either as one mapping, the only positional argument, or
+    as keyword arguments, ``old="new"`` (ITL-1171). A name that is not a Python
+    identifier, or that is one of the methods' options (``drop_unmapped``,
+    ``strict``, ``label``), can be renamed only through the mapping.
+
+    Args:
+        name_map: The positional mapping, or ``None`` when none was given.
+        renames: The keyword renames.
+
+    Returns:
+        The renames as one dict, in the order given; empty when there are none.
+
+    Raises:
+        TypeError: When both a mapping and keyword renames are given, or an old or
+            new name is not a string.
+    """
+    if name_map is not None and renames:
+        raise TypeError(
+            "give the renames either as one dict (map_columns({'old': 'new'})) or as "
+            "keyword arguments (map_columns(old='new')), not both"
+        )
+    pairs = dict(name_map if name_map is not None else renames)
+    not_strings = {
+        old: new
+        for old, new in pairs.items()
+        if not isinstance(old, str) or not isinstance(new, str)
+    }
+    if not_strings:
+        raise TypeError(
+            f"old and new column names must be strings, got {not_strings!r}"
+        )
+    return {str(old): str(new) for old, new in pairs.items()}
+
+
 class StreamBase(TraceableBase):
     @property
     @abstractmethod
@@ -304,31 +343,137 @@ class StreamBase(TraceableBase):
 
     def map_tags(
         self,
-        name_map: Mapping[str, str],
+        name_map: Mapping[str, str] | None = None,
+        /,
+        *,
         drop_unmapped: bool = False,
+        strict: bool = True,
         label: str | None = None,
+        **renames: str,
     ) -> StreamBase:
-        """
-        Maps the tags in this stream according to the provided name_map.
-        Tags not in the name_map are kept unless drop_unmapped is True.
+        """Rename tag columns. See ``orcapod.core.operators.MapTags``.
+
+        The renames are one dict, the only positional argument (``map_tags({"subject":
+        "animal"})``), or keyword arguments (``map_tags(subject="animal")``), not both.
+        A name that is not a Python identifier, or a column named ``drop_unmapped``,
+        ``strict`` or ``label`` (the options), is renamed through the dict.
+
+        Args:
+            name_map: Each tag column to rename, mapped to its new name.
+            drop_unmapped: When ``True``, the tags not in ``name_map`` are dropped.
+            strict: When ``True`` (the default), a key of ``name_map`` that is not
+                a tag column raises ``InputValidationError``; when ``False`` it is
+                ignored.
+            label: Optional node label for the pipeline graph.
+            **renames: Each column to rename, mapped to its new name, as
+                keyword arguments.
+
+        Returns:
+            The stream with the tag columns renamed.
+
+        Raises:
+            TypeError: When both a dict and keyword renames are given, or a
+                name is not a string.
+            InputValidationError: When a ``strict`` name is not a tag column, or a
+                new name collides with an existing column.
         """
         from orcapod.core.operators import MapTags
 
-        return MapTags(name_map, drop_unmapped)(self, label=label)
+        return MapTags(_rename_map(name_map, renames), drop_unmapped, strict=strict)(
+            self, label=label
+        )
 
     def map_data(
         self,
-        name_map: Mapping[str, str],
+        name_map: Mapping[str, str] | None = None,
+        /,
+        *,
         drop_unmapped: bool = False,
+        strict: bool = True,
         label: str | None = None,
+        **renames: str,
     ) -> StreamBase:
-        """
-        Maps the data in this stream according to the provided data_map.
-        Data columns not in the name_map are kept unless drop_unmapped is True.
+        """Rename data columns. See ``orcapod.core.operators.MapData``.
+
+        The renames are one dict, the only positional argument (``map_data({"age":
+        "age_weeks"})``), or keyword arguments (``map_data(age="age_weeks")``), not
+        both. A name that is not a Python identifier, or a column named
+        ``drop_unmapped``, ``strict`` or ``label`` (the options), is renamed through the
+        dict.
+
+        Args:
+            name_map: Each data column to rename, mapped to its new name.
+            drop_unmapped: When ``True``, the data columns not in ``name_map``
+                are dropped.
+            strict: When ``True`` (the default), a key of ``name_map`` that is not
+                a data column raises ``InputValidationError``; when ``False`` it is
+                ignored.
+            label: Optional node label for the pipeline graph.
+            **renames: Each column to rename, mapped to its new name, as
+                keyword arguments.
+
+        Returns:
+            The stream with the data columns renamed.
+
+        Raises:
+            TypeError: When both a dict and keyword renames are given, or a
+                name is not a string.
+            InputValidationError: When a ``strict`` name is not a data column, a
+                new name collides with an existing column, or no data column
+                would remain.
         """
         from orcapod.core.operators import MapData
 
-        return MapData(name_map, drop_unmapped)(self, label=label)
+        return MapData(_rename_map(name_map, renames), drop_unmapped, strict=strict)(
+            self, label=label
+        )
+
+    def map_columns(
+        self,
+        name_map: Mapping[str, str] | None = None,
+        /,
+        *,
+        drop_unmapped: bool = False,
+        strict: bool = True,
+        label: str | None = None,
+        **renames: str,
+    ) -> StreamBase:
+        """Rename columns, tag or data, in one step.
+
+        A renamed tag stays a tag and a renamed data column stays data. See
+        ``orcapod.core.operators.MapColumns``.
+
+        The renames are one dict, the only positional argument (``map_columns({"age":
+        "age_weeks"})``), or keyword arguments (``map_columns(age="age_weeks")``), not
+        both. A name that is not a Python identifier, or a column named
+        ``drop_unmapped``, ``strict`` or ``label`` (the options), is renamed through the
+        dict.
+
+        Args:
+            name_map: Each column to rename, tag or data, mapped to its new name.
+            drop_unmapped: When ``True``, every tag and data column not in
+                ``name_map`` is dropped; system tags are kept.
+            strict: When ``True`` (the default), a key of ``name_map`` that is
+                neither a tag nor a data column raises ``InputValidationError``;
+                when ``False`` it is ignored.
+            label: Optional node label for the pipeline graph.
+            **renames: Each column to rename, mapped to its new name, as
+                keyword arguments.
+
+        Returns:
+            The stream with the columns renamed.
+
+        Raises:
+            TypeError: When both a dict and keyword renames are given, or a
+                name is not a string.
+            InputValidationError: When a ``strict`` name is missing, a new name
+                collides with another column, or no data column would remain.
+        """
+        from orcapod.core.operators import MapColumns
+
+        return MapColumns(_rename_map(name_map, renames), drop_unmapped, strict=strict)(
+            self, label=label
+        )
 
     def batch(
         self,

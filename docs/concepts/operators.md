@@ -42,8 +42,8 @@ function pod's `__computed`, that describe how an input row was produced. An ope
 output row is produced by the operator, so its `Data` holds none of them and its predicted
 output schema lists none, on the sync and the async path alike. A way to carry them forward
 across operators is an open design question (ITL-867). The `__` prefix is reserved for meta
-columns: a stream and a source refuse a tag column named with it, and `MapTags` and `MapData`
-refuse it as the new name of a tag or data column.
+columns: a stream and a source refuse a tag column named with it, and `MapTags`, `MapData`
+and `MapColumns` refuse it as the new name of a tag or data column.
 
 ## Operator categories
 
@@ -385,8 +385,11 @@ Selecting no tag column is allowed.
 
 - **`MapTags(name_map={"old_name": "new_name"})`** -- rename tag columns
 - **`MapData(name_map={"old_name": "new_name"})`** -- rename data columns
+- **`MapColumns(name_map={"old_name": "new_name"})`** -- rename columns, tag or data, in
+  one step
 
-Columns that are not in `name_map` are kept unless you pass `drop_unmapped=True`.
+Columns that are not in `name_map` are kept unless you pass `drop_unmapped=True`. A renamed
+data column's source-info column is renamed with it, and system tags are kept.
 
 ```python
 from orcapod.operators import MapData
@@ -394,6 +397,43 @@ from orcapod.operators import MapData
 renamed = MapData(name_map={"age": "age_weeks"})(source)
 print(renamed.keys()[1])  # ('age_weeks', 'weight')
 ```
+
+Streams offer them as `map_tags`, `map_data` and `map_columns`. `map_columns` renames tag and
+data columns in one call; a renamed tag stays a tag and a renamed data column stays data:
+
+```python
+renamed = sessions.map_columns({"session": "session_no", "age": "age_weeks"})
+print(renamed.keys())  # (('subject_id', 'session_no'), ('age_weeks', 'weight'))
+```
+
+The three methods also take the renames as keyword arguments, `old="new"`. Both forms build
+the same operator, with the same hashes:
+
+```python
+by_keyword = sessions.map_columns(session="session_no", age="age_weeks")
+print(by_keyword.pipeline_hash() == renamed.pipeline_hash())  # True
+```
+
+Give the renames as one dict (the only positional argument) or as keyword arguments, not both.
+`drop_unmapped`, `strict` and `label` are options, never renames: a column with one of those
+names, or a name that is not a Python identifier (`"spike count"`), is renamed through the dict.
+
+A name that is not a column the operator renames raises `InputValidationError` when the
+operator is called: a tag name for `map_data`, a data name for `map_tags`, and for all three a
+name that is no column at all. The message names the columns that exist and, for a column of
+the other kind, the method that renames it. Pass `strict=False` to ignore such names instead.
+
+```python
+from orcapod.errors import InputValidationError
+
+try:
+    sessions.map_tags({"age": "age_weeks"})
+except InputValidationError as error:
+    print(error)
+# MapTags: ['age'] not among the tag columns ['subject_id', 'session'] (use strict=False to ignore names that are not tag columns); 'age' is a data column: use map_data
+```
+
+A new name already taken by a column that is not renamed is refused too.
 
 ### PolarsFilter
 
@@ -703,8 +743,8 @@ operators or function pods.
 
 Every stream also exposes the operators as methods, which reads well when chaining:
 `join`, `semi_join`, `batch`, `group_by`, `select_tag_columns`, `select_data_columns`,
-`drop_tag_columns`, `drop_data_columns`, `map_tags`, `map_data`, `polars_filter`,
-`drop_nulls`, `pick` and `index`.
+`drop_tag_columns`, `drop_data_columns`, `select_columns`, `drop_columns`, `map_tags`,
+`map_data`, `map_columns`, `polars_filter`, `drop_nulls`, `pick` and `index`.
 
 ```python
 import polars as pl
@@ -716,8 +756,9 @@ for tag, data in adults.iter_data():
 ```
 
 !!! note
-    The fluent `map_tags` and `map_data` methods and the `MapTags` and `MapData` operator
-    classes all keep the columns they do not rename. Pass `drop_unmapped=True` to drop them.
+    The fluent `map_tags`, `map_data` and `map_columns` methods and the `MapTags`, `MapData`
+    and `MapColumns` operator classes all keep the columns they do not rename. Pass
+    `drop_unmapped=True` to drop them.
 
 ## How it connects to other concepts
 

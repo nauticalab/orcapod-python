@@ -210,8 +210,19 @@ print(renamed.keys())
 # (('subject_id',), ('sex', 'age', 'genotype'))
 ```
 
-Columns you do not rename are kept. Pass `drop_unmapped=True` to keep only the renamed
-ones:
+or the same renames as keyword arguments, which build the same step:
+
+```python
+print(subjects.map_data(age_weeks="age").keys())
+# (('subject_id',), ('sex', 'age', 'genotype'))
+```
+
+A name that is not a Python identifier, such as `"spike count"`, needs the dictionary.
+
+Columns you do not rename are kept. A name that is not a column of that kind is refused: a
+`map_data` of a tag column raises `InputValidationError` and says to use `map_tags`.
+`map_columns` renames tag and data columns in one call. Pass `drop_unmapped=True` to keep only
+the renamed ones:
 
 ```python
 print(subjects.map_data({"age_weeks": "age"}, drop_unmapped=True).keys())
@@ -261,10 +272,10 @@ side_by_side = imec0.map_data({"n_spikes": "n_imec0"}).join(
 )
 pair_tags = ["subject_id", "session", "unit"]
 print(side_by_side.as_pandas_df().sort_values(pair_tags, ignore_index=True).head(3))
-#   subject_id session  unit  n_imec1  n_imec0
-# 0   mouse_01      s1     0      215      149
-# 1   mouse_01      s1     1      299      326
-# 2   mouse_01      s1     2      135      662
+#   subject_id session  unit  n_imec0  n_imec1
+# 0   mouse_01      s1     0      149      215
+# 1   mouse_01      s1     1      326      299
+# 2   mouse_01      s1     2      662      135
 ```
 
 **`MergeJoin`**, when they are repeated measurements of the same quantity and you want them

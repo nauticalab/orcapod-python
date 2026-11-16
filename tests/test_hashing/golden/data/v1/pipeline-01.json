@@ -191,8 +191,8 @@
     "_tag_source_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f",
     "_tag_record_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f"
   ],
-  "drop_nulls_job.node[ratio].content_hash": "semantic_v1:d52ae96e0035a6a05d2e48b12c8e4850c2b2ad3def9733c69ad2ff2c4d354f7d",
-  "drop_nulls_job.node[ratio].pipeline_hash": "semantic_v1:c4956a859077ac1fa38cab2fa7bb4f129c567667ec68d248d273e47356f1c48c",
+  "drop_nulls_job.node[ratio].content_hash": "semantic_v1:91d4c2de93394d5bc615786dbe01bbb8581ef6a3628b6b76bb271ab10721eaab",
+  "drop_nulls_job.node[ratio].pipeline_hash": "semantic_v1:180bd73b49abfa39858cc882112527ce1d053dc50b348425e9e09b7f492df58e",
   "drop_nulls_job.node[ratio].row[{\"k\":\"r1\",\"site\":\"a\"}]._tag_record_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f": "row_0",
   "drop_nulls_job.node[ratio].row[{\"k\":\"r1\",\"site\":\"a\"}]._tag_source_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f": "golden_nullable",
   "drop_nulls_job.node[ratio].row[{\"k\":\"r1\",\"site\":\"a\"}].data_hash": "arrow_v1:00000213e161255a575a960327448c972d8a05c86fd407479b52b964dd417d8e09eae8",
@@ -203,8 +203,8 @@
     "_tag_source_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f",
     "_tag_record_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f"
   ],
-  "drop_nulls_job.node[renamed].content_hash": "semantic_v1:5d2af7b40bcb93c1d12ac684cef0be1a7073d1447bbaef940f0ffac340dc68f9",
-  "drop_nulls_job.node[renamed].pipeline_hash": "semantic_v1:0d2ac225b76434bbb043a19840b957a2583b33ca7345075b3bad25c58ea32cb7",
+  "drop_nulls_job.node[renamed].content_hash": "semantic_v1:2f461039fecf4d121059cc5133bd80eb9bcdf440d7ec782fe0e3f3da730e21fa",
+  "drop_nulls_job.node[renamed].pipeline_hash": "semantic_v1:1d6f3da02138530cc8d6c29a51419be6dad8cf45da673844ef78996a7f96c816",
   "drop_nulls_job.node[renamed].row[{\"k\":\"r1\",\"site\":\"a\"}]._tag_record_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f": "row_0",
   "drop_nulls_job.node[renamed].row[{\"k\":\"r1\",\"site\":\"a\"}]._tag_source_id::a4a91ac74561d231cff4ab05fdb7e199d259e8765f3af954e23d2c152b564b4f": "golden_nullable",
   "drop_nulls_job.node[renamed].row[{\"k\":\"r1\",\"site\":\"a\"}].data_hash": "arrow_v1:000002c619a23da2daa78b89cb32837af1561a1e6613d3ef0af83cf95506abeeedab1f",
@@ -219,13 +219,13 @@
     "arrow_v1:0000026c8d10d614b78d874ef224a78d613befa1a0c773932aaa368237211673d18380",
     "arrow_v1:000002c619a23da2daa78b89cb32837af1561a1e6613d3ef0af83cf95506abeeedab1f"
   ],
-  "drop_nulls_job.table[golden_drop_null_job/golden_ratio/21e6485805726eb7ceed63ef6b677f0b6b11d2eaf48bd9fc44c1dccdf718aa1d/v0/python.function.v0/schema:c4956a859077ac1fa38cab2fa7bb4f129c567667ec68d248d273e47356f1c48c/pdb_v2].record_ids": [
+  "drop_nulls_job.table[golden_drop_null_job/golden_ratio/21e6485805726eb7ceed63ef6b677f0b6b11d2eaf48bd9fc44c1dccdf718aa1d/v0/python.function.v0/schema:180bd73b49abfa39858cc882112527ce1d053dc50b348425e9e09b7f492df58e/pdb_v2].record_ids": [
     "arrow_v1:0000025e66eb58363aca967d1e9fa33dc979d6b78d90c1420ef3031defc7b74df5eafc",
     "arrow_v1:000002fc063fe04b01f009f373104bcc0156b4763c503a27468253e3278f81914b1272"
   ],
   "drop_nulls_job.table_paths": [
     "golden_drop_null_job/_result/golden_ratio/21e6485805726eb7ceed63ef6b677f0b6b11d2eaf48bd9fc44c1dccdf718aa1d/v0/python.function.v0/rdb_v2",
-    "golden_drop_null_job/golden_ratio/21e6485805726eb7ceed63ef6b677f0b6b11d2eaf48bd9fc44c1dccdf718aa1d/v0/python.function.v0/schema:c4956a859077ac1fa38cab2fa7bb4f129c567667ec68d248d273e47356f1c48c/pdb_v2"
+    "golden_drop_null_job/golden_ratio/21e6485805726eb7ceed63ef6b677f0b6b11d2eaf48bd9fc44c1dccdf718aa1d/v0/python.function.v0/schema:180bd73b49abfa39858cc882112527ce1d053dc50b348425e9e09b7f492df58e/pdb_v2"
   ],
   "group_by.content_hash": "semantic_v1:e39fd80bf63f3549d59902281171f1d94fba5202fad99b7b29eb1a48d4e31364",
   "group_by.pipeline_hash": "semantic_v1:a54462063efcb67b3d3df58840d7b63d5d5b6d2d772efc154655859fe7588400",
@@ -436,8 +436,38 @@
   ],
   "list_tag_producerless_stream.as_given": "semantic_v1:4b99af058c91851f2998544963e3b2d6080b7078e5a29b3aaca0ec4fe172e5e2",
   "list_tag_producerless_stream.reversed": "semantic_v1:ad76e4cf890d6cf18777dfc3e1998d322a2e7079a9f5824abe1f34f42f3265da",
-  "map_data.content_hash": "semantic_v1:0b6a94acb6eb95ec5a5d46d4ee9212ddcacffefc20823c164fc8eabaadaef107",
-  "map_data.pipeline_hash": "semantic_v1:3f213330745687310dfb37749ef2f5103b375016fcda3887ed5a30b2b163a6c8",
+  "map_columns.drop_unmapped.content_hash": "semantic_v1:dbee292987b03cb1bdb3ef0fd6be097240b308d08f9eeeb91d180b2740be69cb",
+  "map_columns.drop_unmapped.pipeline_hash": "semantic_v1:27ad3d292121b825fe85b28e54cfb432cecaaa53978431c9039f47df038af54f",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s1\"}]._tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "row_0",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s1\"}]._tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "cohort_subjects",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s1\"}].data_hash": "arrow_v1:0000025eca48b03061872990e7d71bc1d2ff2780795d168481bba072960cf91368c3bf",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s2\"}]._tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "row_1",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s2\"}]._tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "cohort_subjects",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s2\"}].data_hash": "arrow_v1:000002ef0edcfe57d8308fb8f035d58bdd0d4423161cbd05cf90985b32c98aa66e8ccc",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s3\"}]._tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "row_2",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s3\"}]._tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "cohort_subjects",
+  "map_columns.drop_unmapped.row[{\"animal\":\"s3\"}].data_hash": "arrow_v1:000002371aa9a6b18f88c2e770fdae5f1c47c467fa25742439d7dc773bd9aa217d0ee9",
+  "map_columns.drop_unmapped.system_tag_columns": [
+    "_tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec",
+    "_tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec"
+  ],
+  "map_columns.rename.content_hash": "semantic_v1:288ad1168e3be6273284ceed01a56b9e45c8213182f50b19bbe1274e2e2e5432",
+  "map_columns.rename.pipeline_hash": "semantic_v1:a6d3125ac50d611791a691fb8f05be49b3e0350a1b071fc274839ff71d0f79ed",
+  "map_columns.rename.row[{\"animal\":\"s1\",\"cohort\":\"a\"}]._tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "row_0",
+  "map_columns.rename.row[{\"animal\":\"s1\",\"cohort\":\"a\"}]._tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "cohort_subjects",
+  "map_columns.rename.row[{\"animal\":\"s1\",\"cohort\":\"a\"}].data_hash": "arrow_v1:0000022ad1363967c26697bb148943f0b193f748f21da43e4ba5f3763197a04bf53289",
+  "map_columns.rename.row[{\"animal\":\"s2\",\"cohort\":\"a\"}]._tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "row_1",
+  "map_columns.rename.row[{\"animal\":\"s2\",\"cohort\":\"a\"}]._tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "cohort_subjects",
+  "map_columns.rename.row[{\"animal\":\"s2\",\"cohort\":\"a\"}].data_hash": "arrow_v1:000002a61fcaac02c3fd261c22c4fab3c89182aef1912fb4a19ae1c01af9cf69b4b6b6",
+  "map_columns.rename.row[{\"animal\":\"s3\",\"cohort\":\"b\"}]._tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "row_2",
+  "map_columns.rename.row[{\"animal\":\"s3\",\"cohort\":\"b\"}]._tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec": "cohort_subjects",
+  "map_columns.rename.row[{\"animal\":\"s3\",\"cohort\":\"b\"}].data_hash": "arrow_v1:000002ef21c37efbb54c93fff65d16c5222fed1364ebf8ab9a49758b064f3edd83f3a1",
+  "map_columns.rename.system_tag_columns": [
+    "_tag_source_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec",
+    "_tag_record_id::220185c669ba2e7bb644abc11150f3b11d9c41c70b04a6397c68bda95f8d24ec"
+  ],
+  "map_data.content_hash": "semantic_v1:5dc048a18ed101f311e58853fe170a5d6951af7aca7b67c79bdb5252f3f4fd31",
+  "map_data.pipeline_hash": "semantic_v1:e56188c74c72cb812622267bee5fef68c5b9237c8f5b38571c5f5d2a3a4176de",
   "map_data.row[{\"subject\":\"s1\"}]._tag_record_id::ac699f6aae66ff1745c42c76a3cb6cf59ba8588efc02d66e4f23de4be09ac373": "row_0",
   "map_data.row[{\"subject\":\"s1\"}]._tag_source_id::ac699f6aae66ff1745c42c76a3cb6cf59ba8588efc02d66e4f23de4be09ac373": "subjects",
   "map_data.row[{\"subject\":\"s1\"}].data_hash": "arrow_v1:0000022ad1363967c26697bb148943f0b193f748f21da43e4ba5f3763197a04bf53289",
