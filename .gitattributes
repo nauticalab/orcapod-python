@@ -1,0 +1,2 @@
+# Golden hash files are hashed byte for byte: never convert their line endings (ITL-946).
+tests/test_hashing/golden/data/** -text

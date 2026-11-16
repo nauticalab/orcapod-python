@@ -298,7 +298,9 @@ A logical type's identifier is its Arrow extension name plus its Arrow extension
   differently. It is not a package version. Built-in types use `version_metadata(N)`
   (`{"version":N}`); a new built-in type must write one, never empty metadata.
 - A changed identifier is a schema change: it moves stored paths and golden values of that
-  type. Treat it like any other hash change (developer approval, migration assessment).
+  type. Treat it like any other hash change (developer approval, migration assessment). There
+  is no exemption for a logical type's own change (developer, November 15, 2026, ITL-946): if
+  a golden value it moves has shipped in a release, it needs a new data context version.
 - The native containers `list[T]` / `set[T]` of a logical type (`ListLogicalType`) have no
   version of their own, by design: never add a `"version"` key to their metadata. Their
   identifier is the container kind plus the element's identifier; the type hash treats them
@@ -397,14 +399,34 @@ A class a user defines is one of two kinds (developer, November 12, 2026, ITL-97
 ## Golden hash values
 
 Hash values must stay identical across releases (developer, November 10, 2026). Every hash
-Orcapod stores or embeds in a name is pinned in `tests/test_hashing/golden/data/*.json` and
-checked by `tests/test_hashing/golden/test_golden_hashes.py`.
+Orcapod stores or embeds in a name is pinned in the golden folder of the current data context,
+`tests/test_hashing/golden/data/<folder>/<group>-NN.json`, and checked by
+`tests/test_hashing/golden/test_golden_hashes.py`. The mechanism is
+`docs/reference/golden-hashes.md` (developer, November 15, 2026, ITL-946).
 
 - A failing golden entry means a hash moved. Treat it as a bug in the change, not a stale
-  file. Never regenerate the golden files to make a test pass.
-- Regenerate (`uv run python tests/test_hashing/golden/generate_golden_hashes.py`) only to add
-  entries (check the diff adds lines and changes none), or for a hash change the developer has
-  approved together with a migration assessment.
+  file. Never edit or regenerate a golden file to make a test pass.
+- The unit of immutability is the golden file. The manifest's `golden.history`
+  (`src/orcapod/contexts/data/<version>.json`) lists every file with the sha256 of its bytes;
+  a release appends a revision with `added: {}`, pinned in
+  `src/orcapod/contexts/released_manifests.json`. A file listed by a released revision never
+  changes and is never removed or renamed.
+- Adding golden values is allowed in any release:
+  `uv run python tests/test_hashing/golden/generate_golden_hashes.py` writes only entries no
+  file pins yet (into a new `<group>-NN.json` once the group's newest file is released) and
+  records them in the open revision. Check the diff adds and changes no value. `--check`
+  reports drift without writing.
+- Any change to a released golden value needs a new data context version, with no exemption
+  (also not a logical type's own identifier change). A new data context version ships only in
+  a minor release (before 1.0) or a major one, never in a patch. When it starts, the old
+  context's golden files and code move to `orcapod-sanctuary`; this repository carries only
+  the current context's golden folder.
+- Before a release, a value no release lists changes only with the developer's approval and
+  a migration assessment: `generate_golden_hashes.py --remove <entry>` (refuses an entry a
+  release lists), then the generator writes the new value.
+- The release pull request runs `generate_golden_hashes.py --release X.Y.Z`. CI checks HEAD
+  against every release tag (`scripts/check_golden_tags.py`). Never mark a golden entry
+  `skip` or `xfail`; the only skip is the optional-package rule (`torch`).
 - Never move or rename the fixtures in `tests/test_hashing/golden/cases.py`: function pods,
   dataclasses and pydantic models hash with their module path.
 
@@ -713,10 +735,12 @@ current data context are the current entries.
   proceed (developer, November 11, 2026). Operator caches and cached sources have no stable
   name; `PipelineJob.run()` reports one total for them. Every database class implements
   `list_table_paths`.
-- A released data context manifest (`contexts/data/<version>.json`) is frozen: its sha256 is
-  pinned in `contexts/released_manifests.json`. A change that moves an existing golden hash
-  value for a reason other than a logical type's own change needs a new data context version
-  with its own manifest file, never an edit of a released one.
+- A released data context manifest (`contexts/data/<version>.json`) is frozen: the digest of
+  its canonical JSON without `golden` is pinned in `contexts/released_manifests.json`
+  (`manifest`), with one `releases` line per library release (ITL-946). Only its `golden`
+  history grows, by appending. A change that moves a released golden hash value, for any
+  reason (a logical type's own change included), needs a new data context version with its
+  own manifest file, never an edit of a released one.
 - In memory the data context column is still `_context_key` (`ColumnConfig(context=True)`).
 - A writer refuses an input of another data context than its own
   (`contexts/stored.require_same_data_context`, `InputValidationError` naming both keys)

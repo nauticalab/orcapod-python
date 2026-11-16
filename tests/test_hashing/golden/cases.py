@@ -2,8 +2,9 @@
 
 Each case computes a flat ``{entry: value}`` map. ``compute_group`` prefixes each entry with
 its case name, so a golden file entry reads ``<case>.<entry>``. The values are pinned in
-``data/<group>.json`` by ``generate_golden_hashes.py`` and checked by
-``test_golden_hashes.py``.
+the golden folder of the current data context, ``data/<folder>/<group>-NN.json``, by
+``generate_golden_hashes.py`` and checked by ``test_golden_hashes.py`` (ITL-946; see
+``README.md``).
 
 DO NOT MOVE OR RENAME anything defined in this module. Function pods, dataclasses and
 pydantic models hash together with their defining module and qualified name, so moving them
@@ -36,6 +37,7 @@ import pandas as pd
 import pyarrow as pa
 import pydantic
 
+import orcapod as op
 from orcapod import dataclass as structural_dataclass
 from orcapod import function_pod
 
@@ -46,8 +48,8 @@ GROUPS = ("semantic", "schema", "arrow", "datagram", "pipeline", "torch")
 OPTIONAL_GROUPS: dict[str, str] = {"torch": "torch"}
 """Groups that need an optional dependency, mapped to the module they need (ITL-871).
 
-Such a group is computed, generated and checked only where the module is installed; its
-golden file is never rewritten without it.
+Such a group is computed, added to and checked only where the module is installed; a
+golden file is never rewritten, with the module or without it (ITL-946).
 """
 
 
@@ -78,7 +80,8 @@ def case(group: str, name: str) -> Callable[[CaseFn], CaseFn]:
     """Register a golden case under ``group``.
 
     Args:
-        group: One of ``GROUPS``; selects the golden file the entries are written to.
+        group: One of ``GROUPS``; selects the golden files (``<group>-NN.json``) that
+            pin the entries.
         name: Case name, used as the prefix of every entry the case returns.
 
     Returns:
@@ -2060,3 +2063,162 @@ def pipeline_list_tag_producerless_stream() -> dict[str, Any]:
         "as_given": stream([[2], [1]], [20, 10]).content_hash().to_string(),
         "reversed": stream([[1], [2]], [10, 20]).content_hash().to_string(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cases brought in from tests/test_hashing/hash_samples (ITL-946)
+#
+# The values, annotations, schemas and annotated functions that the older sample files
+# pinned and no case above did. The functions are defined here, so their pins carry this
+# module's path. DO NOT MOVE OR RENAME them.
+# ---------------------------------------------------------------------------
+
+SAMPLE_VALUES: dict[str, Any] = {
+    "int_42": 42,
+    "float_pi": 3.14159,
+    "float_negative_e": -2.71828,
+    "str_hello": "hello",
+    "str_hello_world": "Hello, World!",
+    "str_special_chars": "Special chars: !@#$%^&*()",
+    "str_unicode": "Unicode: 你好, Привет, こんにちは",
+    "bytes_hello": b"hello",
+    "bytes_binary": b"\x00\x01\x02\x03",
+    "bytearray_hello_world": bytearray(b"hello world"),
+    "bytearray_abc": bytearray([65, 66, 67]),
+    "list_strs": ["a", "b", "c"],
+    "list_mixed": [1, "a", True],
+    "set_empty": set(),
+    "set_strs": {"a", "b", "c"},
+    "frozenset_empty": frozenset(),
+    "tuple_empty": (),
+    "dict_one": {"a": 1},
+    "dict_other_order": {"b": 1, "a": 2},
+    "dict_nested": {"nested": {"a": 1, "b": 2}},
+    "nested_lists": [1, [2, [3, [4, [5]]]]],
+    "nested_dicts": {"a": {"b": {"c": {"d": {"e": 42}}}}},
+    "nested_dict_list": {"a": [1, 2, {"b": [3, 4, {"c": 5}]}]},
+    "list_of_dicts": [{"a": 1}, {"b": 2}, {"c": [3, 4, 5]}],
+    "dict_keys_values": {"keys": ["a", "b", "c"], "values": [1, 2, 3]},
+    "list_of_dicts_with_lists": [{"a": 1, "b": [2, 3]}, {"c": 4, "d": [5, 6]}],
+    "dict_users": {"users": [{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}]},
+    "dict_points_labels": {
+        "data": {"points": [[1, 2], [3, 4], [5, 6]], "labels": ["A", "B", "C"]}
+    },
+    "ordered_dict": collections.OrderedDict([("a", 1), ("b", 2), ("c", 3)]),
+    "lists_and_dict": [[1, 2], [3, 4], {"a": [5, 6], "b": [7, 8]}],
+}
+
+
+@case("semantic", "sample_value")
+def semantic_sample_values() -> dict[str, Any]:
+    """Semantic hashes of the plain Python values of the older hash sample file."""
+    hasher = _ctx().semantic_hasher
+    return {k: hasher.hash_object(v).to_string() for k, v in SAMPLE_VALUES.items()}
+
+
+def _annotations() -> dict[str, Any]:
+    import typing
+
+    import orcapod as op
+
+    return {
+        "file": op.File,
+        "directory": op.Directory,
+        "list_file": list[op.File],
+        "dict_str_file": dict[str, op.File],
+        "int_or_str": int | str,
+        "file_or_none": op.File | None,
+        "optional_file": typing.Optional[op.File],  # noqa: UP045  (the typing form is the case)
+    }
+
+
+@case("semantic", "annotation")
+def semantic_annotations() -> dict[str, Any]:
+    """Semantic hashes of type annotations over Orcapod's logical types (ITL-638)."""
+    hasher = _ctx().semantic_hasher
+    return {k: hasher.hash_object(t).to_string() for k, t in _annotations().items()}
+
+
+@case("schema", "semantic_schema")
+def schema_semantic_hashes() -> dict[str, Any]:
+    """Semantic hashes of ``Schema`` objects with primitive and logical types."""
+    import orcapod as op
+    from orcapod.types import Schema
+
+    schemas = {
+        "x_int": Schema({"x": int}),
+        "x_int_y_str": Schema({"x": int, "y": str}),
+        "f_file": Schema({"f": op.File}),
+        "d_directory": Schema({"d": op.Directory}),
+        "p_path": Schema({"p": op.Path}),
+        "x_int_f_file": Schema({"x": int, "f": op.File}),
+        "f_file_d_directory": Schema({"f": op.File, "d": op.Directory}),
+        "f_optional_file": Schema({"f": op.File | None}),
+    }
+    hasher = _ctx().semantic_hasher
+    return {k: hasher.hash_object(s).to_string() for k, s in schemas.items()}
+
+
+def golden_annotated_none():
+    """Function without annotations (ITL-946). DO NOT MOVE."""
+    return None
+
+
+def golden_annotated_builtin(x: int, y: str) -> float:
+    """Function annotated with builtins (ITL-946). DO NOT MOVE."""
+    return float(x)
+
+
+def golden_annotated_file_param(f: op.File) -> str:
+    """Function taking a ``File`` (ITL-946). DO NOT MOVE."""
+    return str(f)
+
+
+def golden_annotated_file_return(s: str) -> op.File:
+    """Function returning a ``File`` (ITL-946). DO NOT MOVE."""
+    return op.File(s)  # pyright: ignore[reportArgumentType]  (never called; only hashed)
+
+
+def golden_annotated_file_list(files: list[op.File]) -> list[str]:
+    """Function taking a list of ``File`` (ITL-946). DO NOT MOVE."""
+    return []
+
+
+def golden_annotated_optional_file(f: op.File | None) -> op.File | None:
+    """Function taking and returning an optional ``File`` (ITL-946). DO NOT MOVE."""
+    return f
+
+
+def golden_annotated_mixed(f: op.File, n: int) -> op.Directory:
+    """Function mixing ``File``, ``int`` and ``Directory`` (ITL-946). DO NOT MOVE."""
+    return op.Directory(str(f))  # pyright: ignore[reportArgumentType]  (never called)
+
+
+@case("semantic", "annotated_function")
+def semantic_annotated_functions() -> dict[str, Any]:
+    """Hashes of annotated functions: the extracted signature info and the function value."""
+    from orcapod.hashing.semantic_hashing.function_info_extractors import (
+        FunctionSignatureExtractor,
+    )
+
+    functions = {
+        "none": golden_annotated_none,
+        "builtin": golden_annotated_builtin,
+        "file_param": golden_annotated_file_param,
+        "file_return": golden_annotated_file_return,
+        "file_list": golden_annotated_file_list,
+        "optional_file": golden_annotated_optional_file,
+        "mixed": golden_annotated_mixed,
+    }
+    hasher = _ctx().semantic_hasher
+    extractor = FunctionSignatureExtractor(
+        include_module=True,
+        include_defaults=True,
+        type_converter=_ctx().type_converter,
+    )
+    out: dict[str, Any] = {}
+    for name, fn in functions.items():
+        info = extractor.extract_function_info(fn)
+        out[f"{name}.info"] = hasher.hash_object(info).to_string()
+        out[f"{name}.object"] = hasher.hash_object(fn).to_string()
+    return out

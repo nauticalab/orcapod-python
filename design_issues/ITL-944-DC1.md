@@ -14,10 +14,11 @@ not a generation, and is missing from operator-cache and cached-source record id
 
 **Fix:** (developer's decisions of November 11, 2026, ITL-938 design document Parts 5.5 to 8)
 - The default data context is `std:v1:default`, manifest `contexts/data/v1.json`.
-  `contexts/released_manifests.json` pins the sha256 of every released manifest (`null` while
-  a manifest is open); `tests/test_contexts/test_data_context_v1.py` fails when a pinned file
-  changes, when more than the default manifest is open, or when a final release ships an open
-  manifest. `v1.json` is pinned once, in the v0.3.0 release-preparation commit.
+  `contexts/released_manifests.json` pins the digest of every released manifest without its
+  `golden` history (`null` while a manifest is open) and, since ITL-946, one revision digest
+  per release; `tests/test_contexts/test_data_context_v1.py` fails when a pinned manifest
+  changes, when more than the default manifest is open, or when a final release has no
+  releases line. `v1.json` is pinned once, by the v0.3.0 release step.
 - Every stored row carries `__data_context` (`large_string`): function pipeline and result
   tables, operator-cache tables, cached-source tables, side-effect invocation logs. It
   replaces `__input_data_context_key` and the result table's `_context_key`. The value is the
@@ -52,8 +53,9 @@ Known limits, follow-ups:
   their value handlers moved to the unfrozen `contexts/logical_types.json`. The names under
   `definitions` are labels only: nothing in the code reads them or checks that a definition
   changed, and `changes` lists what is true on this branch (starfix format 2); the entries
-  for ITL-935 and ITL-942 are added when those land. `golden.digest` stays `null` until the
-  manifest is frozen, because the golden files still move.
+  for ITL-935 and ITL-942 are added when those land. `golden` holds the golden folder and the
+  append-only history of the golden files, and `released_manifests.json` pins the manifest
+  without `golden` and one revision digest per release (ITL-946).
 - `v0.1.json` is removed (to live in `orcapod-sanctuary`); `std:v0.1:default` raises
   `ContextResolutionError`, and a node saved under it loads under the current data context
   with a warning (`contexts.resolve_saved_context`).

@@ -14,7 +14,7 @@ and v0.2, for example, the semantic hashes of the `Path`, `UUID`, `DataFrame`, `
 carrying those types. That change was noticed only by comparing releases.
 
 **Fix:** `tests/test_hashing/golden/` pins about 600 values in committed JSON files, one
-generator regenerates them, and every entry is its own test, so a failure names the value that
+generator writes them, and every entry is its own test, so a failure names the value that
 moved. Coverage: semantic hashes of scalars, collections, type objects and logical-type values;
 `Schema` hashes and stored Arrow types for scalar, nested, nullable and logical types
 (`Path`, `UUID`, `ndarray`, `DataFrame`, dataclass, pydantic, `list[Path]`, `set[UUID]`);
@@ -24,6 +24,9 @@ nullability, nesting, column and row order, extension columns); and end-to-end i
 (content and pipeline hashes, system-tag columns, record ids, per-row data hashes, database
 table paths) of representative pipelines and a `PipelineJob`. Values are checked in
 subprocesses with different `PYTHONHASHSEED` values and were verified identical on Python
-3.11, 3.12 and 3.13. The generator's header says when regeneration is legitimate: a changed
-value needs a migration assessment and the developer's approval. Not pinned yet: the
-`StarfixArrowHasher` gaps tracked in ITL-848.
+3.11, 3.12 and 3.13. Not pinned yet: the `StarfixArrowHasher` gaps tracked in ITL-848.
+Since ITL-946 the files live in one folder per data context version
+(`data/v1/<group>-NN.json`), the manifest's `golden` history pins each file's bytes, a file a
+release listed never changes (new values go into new files), a change to a released value
+needs a new data context version, and CI checks HEAD against every release tag; see
+`docs/reference/golden-hashes.md`.

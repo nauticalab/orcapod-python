@@ -148,7 +148,7 @@ def get_context_info(version: str) -> dict[str, Any]:
     Example:
         >>> info = get_context_info("v1")
         >>> print(info['description'])
-        'Data context of Orcapod v0.3: the hashing generation H1. Frozen when v0.3.0 is released; editable in place while that release is prepared.'
+        'Data context of Orcapod v0.3: the hashing generation H1. Frozen when v0.3.0 is released, except its golden history, which only grows; editable in place while that release is prepared.'
     """
     registry = _get_registry()
     return registry.get_context_info(version)

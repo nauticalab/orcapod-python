@@ -1,21 +1,20 @@
 """The data context of v0.3 is ``std:v1:default``, and released manifests are frozen (ITL-944).
 
-A data context version names one generation of hashing. Its manifest file
-(``src/orcapod/contexts/data/<version>.json``) must not change once released, so
-``released_manifests.json`` pins the sha256 of every released file. The manifest of the
-version under development is listed with ``null`` until the release-preparation commit
-sets its digest, once.
+A data context version names one generation of hashing. ``released_manifests.json`` pins,
+for each version, the sha256 of its manifest without the ``golden`` section (``null`` while
+the manifest is open) and, under ``releases``, the digest of each library release's
+revision in the manifest's golden history (ITL-946). The rules of the golden history and
+its folder are stated in ``tests/test_hashing/golden/store.py``.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 import pytest
-from packaging.version import Version
 
 import orcapod
 from orcapod import contexts
@@ -23,19 +22,30 @@ from orcapod.hashing.semantic_hashing.type_handler_registry import (
     PythonTypeHandlerRegistry,
 )
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+from tests.test_hashing.golden import store
 
 CONTEXTS_DIR = Path(str(resources.files("orcapod.contexts")))
 MANIFEST_DIR = CONTEXTS_DIR / "data"
 
 
-def _pins() -> dict[str, str | None]:
-    """The pinned sha256 of each manifest, by version; ``None`` for an open manifest."""
+def _pins() -> dict[str, dict[str, Any]]:
+    """The pin of each manifest, by version: ``{"manifest": ..., "releases": {...}}``."""
     return json.loads((CONTEXTS_DIR / "released_manifests.json").read_text())
 
 
 def _manifest_files() -> dict[str, Path]:
     """The manifest files shipped in the package, by version."""
     return {path.stem: path for path in sorted(MANIFEST_DIR.glob("*.json"))}
+
+
+def _manifest(version: str) -> dict[str, Any]:
+    """A shipped manifest as parsed JSON."""
+    return json.loads(_manifest_files()[version].read_text())
+
+
+def _history(version: str) -> list[dict[str, Any]]:
+    """The golden history of a shipped manifest."""
+    return _manifest(version)["golden"]["history"]
 
 
 def test_default_data_context_is_v1() -> None:
@@ -56,60 +66,70 @@ def test_every_manifest_is_listed() -> None:
     assert set(_pins()) == set(_manifest_files())
 
 
-def test_released_manifests_are_unchanged() -> None:
-    """Each pinned manifest file still has the sha256 recorded for it."""
-    files = _manifest_files()
-    for version, pinned in _pins().items():
-        if pinned is None:
-            continue
-        found = hashlib.sha256(files[version].read_bytes()).hexdigest()
-        assert found == pinned, (
-            f"The released data context manifest {files[version].name} was edited. "
-            "A released manifest is frozen: a change to hashing needs a new data "
-            "context version with its own manifest file."
-        )
+@pytest.mark.parametrize("version", sorted(_pins()))
+def test_a_pinned_manifest_is_unchanged(version: str) -> None:
+    """A pinned manifest without its golden section still has the pinned sha256."""
+    pinned = _pins()[version]["manifest"]
+    if pinned is None:
+        return
+    assert store.fixed_manifest_digest(_manifest(version)) == pinned, (
+        f"The released data context manifest {version}.json was edited. A released "
+        "manifest is frozen: a change to hashing needs a new data context version with "
+        "its own manifest file."
+    )
 
 
 def test_only_the_default_manifest_is_open() -> None:
     """At most one manifest has no pinned sha256, and it is the default version's."""
-    open_versions = [version for version, pinned in _pins().items() if pinned is None]
+    open_versions = [v for v, pin in _pins().items() if pin["manifest"] is None]
     assert open_versions in ([], [contexts.get_default_context().version])
 
 
-def test_a_final_release_ships_no_open_manifest() -> None:
-    """A final release (not a prerelease or local build) pins every manifest."""
-    version = Version(orcapod.__version__)
-    if version.is_prerelease or version.local is not None:
-        # A development build or a release candidate: the manifest may still be open.
-        return
-    assert None not in _pins().values(), (
-        "A release must freeze its data context manifest: set its sha256 in "
-        "src/orcapod/contexts/released_manifests.json."
+def test_a_final_release_has_its_releases_line_and_a_pinned_manifest() -> None:
+    """A final release (not dev, rc or local) is recorded in the pins of its context."""
+    pin = _pins()[contexts.get_default_context().version]
+    assert store.final_release_problems(pin, orcapod.__version__) == []
+
+
+# ---------------------------------------------------------------------------
+# The golden history (ITL-946)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("version", sorted(_pins()))
+def test_the_golden_history_chain_recomputes(version: str) -> None:
+    """Each revision's digest recomputes and names the revision before it."""
+    assert store.history_problems(_history(version)) == []
+
+
+@pytest.mark.parametrize("version", sorted(_pins()))
+def test_every_golden_file_is_listed_once_with_its_hash(version: str) -> None:
+    """Every listed file exists with its sha256; every file is listed by one revision."""
+    manifest = _manifest(version)
+    folder = store.golden_folder(store.PROJECT_ROOT, manifest)
+    assert store.folder_problems(manifest["golden"]["history"], folder) == []
+
+
+@pytest.mark.parametrize("version", sorted(_pins()))
+def test_the_pins_agree_with_the_golden_history(version: str) -> None:
+    """Each pinned release is a release revision with that version and digest, and the
+    reverse; ``released_in`` is set exactly when the manifest is pinned.
+    """
+    manifest = _manifest(version)
+    problems = store.pin_problems(
+        manifest, _pins()[version], manifest["golden"]["history"]
     )
+    assert problems == []
 
 
 # ---------------------------------------------------------------------------
 # The contents of the manifest (ITL-938 design document, section 7.4)
 # ---------------------------------------------------------------------------
 
-GOLDEN_DIR = Path(__file__).parents[1] / "test_hashing" / "golden" / "data"
-
 
 def _v1() -> dict[str, object]:
     """The v1 manifest as parsed JSON."""
     return json.loads((MANIFEST_DIR / "v1.json").read_text())
-
-
-def golden_digest() -> str:
-    """The digest a manifest's ``golden`` field holds once the manifest is frozen.
-
-    sha256 over the golden hash files in name order; each file contributes its name, a
-    NUL byte, its bytes and a NUL byte.
-    """
-    digest = hashlib.sha256()
-    for path in sorted(GOLDEN_DIR.glob("*.json")):
-        digest.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
-    return digest.hexdigest()
 
 
 def test_v1_follows_the_pre_v1_data_context() -> None:
@@ -134,23 +154,6 @@ def test_v1_names_its_definitions_libraries_and_changes() -> None:
         assert change["definition"] in definitions or change["definition"] in (
             "arrow_hasher",
             "semantic_hasher",
-        )
-
-
-def test_released_in_is_set_exactly_when_the_manifest_is_pinned() -> None:
-    """An open manifest has no ``released_in`` and no golden digest; a frozen one has both."""
-    pinned = _pins()["v1"]
-    manifest = _v1()
-    golden = manifest["golden"]
-    assert isinstance(golden, dict)
-    if pinned is None:
-        assert manifest["released_in"] is None
-        assert golden["digest"] is None
-    else:
-        assert isinstance(manifest["released_in"], str) and manifest["released_in"]
-        assert golden["digest"] == golden_digest(), (
-            "The golden hash files differ from the ones this released data context "
-            "stands for. A released data context's values must not move."
         )
 
 

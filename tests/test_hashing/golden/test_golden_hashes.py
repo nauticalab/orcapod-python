@@ -1,12 +1,18 @@
-"""Golden hash regression tests (ITL-626).
+"""Golden hash regression tests (ITL-626, ITL-946).
 
 Every hash Orcapod stores, keys data on, or embeds in a column name or a database table path
-is pinned in ``data/<group>.json``. These tests recompute each value and compare it with the
-pinned one, one test per entry, so a failure names exactly what moved.
+is pinned in the golden folder of the current data context,
+``data/<folder>/<group>-NN.json`` (the folder is named by the manifest's ``golden.folder``).
+These tests recompute each value and compare it with the pinned one, one test per entry, so
+a failure names exactly what moved.
 
 A failing entry is a BREAKING change: stored data keyed on the old value is stranded. Do not
-regenerate the golden files to make a failure go away; read the header of
-``generate_golden_hashes.py`` first.
+edit the golden files to make a failure go away; read the header of
+``generate_golden_hashes.py`` and ``README.md`` first.
+
+A golden entry is never skipped or expected to fail, except for the optional-package rule
+(ITL-871): a group whose optional package is not installed, and an entry the installed
+version of that package cannot compute.
 """
 
 from __future__ import annotations
@@ -25,40 +31,42 @@ import pytest
 
 from orcapod.contexts import get_default_context
 from orcapod.types import Schema
-from tests.test_hashing.golden import cases
-from tests.test_hashing.golden.generate_golden_hashes import golden_path
+from tests.test_hashing.golden import cases, store
+from tests.test_hashing.golden.marks import (
+    disallowed_marks,
+    entry_marks,
+    golden_entry_violations,
+    needs,
+)
 
 GENERATOR = Path(__file__).with_name("generate_golden_hashes.py")
 
-
-def _load_golden() -> dict[str, dict[str, Any]]:
-    golden: dict[str, dict[str, Any]] = {}
-    for group in cases.GROUPS:
-        path = golden_path(group)
-        golden[group] = (
-            json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-        )
-    return golden
+MANIFEST = store.read_json(
+    store.manifest_path(store.PROJECT_ROOT, get_default_context().version)
+)
+FOLDER = store.golden_folder(store.PROJECT_ROOT, MANIFEST)
 
 
-GOLDEN = _load_golden()
+def _load_golden() -> tuple[dict[str, dict[str, Any]], str | None]:
+    """The pinned entries of every group, and the error that stopped reading them."""
+    try:
+        loaded = store.load_folder(FOLDER)
+    except (store.GoldenLayoutError, OSError) as exc:
+        loaded, error = {}, str(exc)
+    else:
+        error = None
+    return {group: loaded.get(group, {}) for group in {*cases.GROUPS, *loaded}}, error
 
 
-def _needs(group: str) -> Any:
-    """A skip mark for a group whose optional dependency is not installed (ITL-871)."""
-    module = cases.OPTIONAL_GROUPS.get(group)
-    return pytest.mark.skipif(
-        not cases.group_available(group),
-        reason=f"golden group {group!r} needs the optional package {module!r}",
-    )
+GOLDEN, LOAD_ERROR = _load_golden()
 
 
 GOLDEN_ENTRIES = [
-    pytest.param(group, entry, id=f"{group}:{entry}", marks=_needs(group))
+    pytest.param(group, entry, id=f"{group}:{entry}", marks=entry_marks(group))
     for group in cases.GROUPS
     for entry in GOLDEN[group]
 ]
-GROUP_PARAMS = [pytest.param(group, marks=_needs(group)) for group in cases.GROUPS]
+GROUP_PARAMS = [pytest.param(group, marks=needs(group)) for group in cases.GROUPS]
 
 
 def _moved_message(group: str, entry: str, expected: Any, actual: Any) -> str:
@@ -78,16 +86,30 @@ def live() -> dict[str, dict[str, Any]]:
     return cases.compute_all()
 
 
+def test_golden_folder_reads() -> None:
+    """The golden folder holds only ``<group>-NN.json`` files, no entry pinned twice."""
+    assert LOAD_ERROR is None, LOAD_ERROR
+
+
+def test_golden_folder_names_only_known_groups() -> None:
+    """Every golden file belongs to a group of ``cases.GROUPS``."""
+    unknown = sorted(set(GOLDEN) - set(cases.GROUPS))
+    assert not unknown, f"golden files of unknown groups in {FOLDER}: {unknown}"
+
+
 @pytest.mark.parametrize("group", cases.GROUPS)
-def test_golden_file_present(group: str) -> None:
-    assert golden_path(group).exists(), (
-        f"missing golden file {golden_path(group)}; run generate_golden_hashes.py"
+def test_golden_group_has_a_file(group: str) -> None:
+    assert GOLDEN[group], (
+        f"no {group}-NN.json in {FOLDER}; run generate_golden_hashes.py"
     )
 
 
 @pytest.mark.parametrize(("group", "entry"), GOLDEN_ENTRIES)
 def test_golden_entry(live: dict[str, dict[str, Any]], group: str, entry: str) -> None:
     if entry in cases.unavailable_entries(group):
+        # The optional-package rule only: an entry the installed version of an optional
+        # package cannot compute (ITL-871).
+        assert group in cases.OPTIONAL_GROUPS, f"{group}:{entry} may not be skipped"
         pytest.skip(f"{group}:{entry} needs a newer version of an optional dependency")
     actual = live[group].get(entry, "<entry no longer produced>")
     expected = GOLDEN[group][entry]
@@ -99,8 +121,113 @@ def test_no_unpinned_entries(live: dict[str, dict[str, Any]], group: str) -> Non
     unpinned = sorted(set(live[group]) - set(GOLDEN[group]))
     assert not unpinned, (
         f"{len(unpinned)} {group} entries are computed but not pinned (new cases need "
-        f"the generator run; check the diff adds entries only): {unpinned[:10]}"
+        f"generate_golden_hashes.py --add; check the diff adds entries only): "
+        f"{unpinned[:10]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# No golden entry is skipped or expected to fail, but for a missing optional package
+# ---------------------------------------------------------------------------
+
+
+def test_golden_entry_params_carry_only_the_optional_package_skip() -> None:
+    """No parametrized golden entry is marked skip or xfail but by the ITL-871 rule."""
+    found = {
+        param.id: disallowed_marks(str(param.values[0]), param.marks)
+        for param in GOLDEN_ENTRIES
+    }
+    assert not {k: v for k, v in found.items() if v}
+
+
+def test_collected_golden_entries_carry_only_the_optional_package_skip(
+    request: pytest.FixtureRequest,
+) -> None:
+    """The collected golden entry tests carry no other skip or xfail, whoever added it."""
+    found = golden_entry_violations(request.session.items)
+    assert not found, f"golden entries marked skip or xfail: {found}"
+
+
+class _FakeItem:
+    """A collected golden entry test with the given group and marks."""
+
+    originalname = "test_golden_entry"
+
+    def __init__(
+        self, group: str, marks: list[Any], path: Path = Path(__file__)
+    ) -> None:
+        self.nodeid = f"test_golden_hashes.py::test_golden_entry[{group}:x]"
+        self.path = path
+        self.callspec = type(
+            "CallSpec", (), {"params": {"group": group, "entry": "x"}}
+        )()
+        self._marks = [getattr(mark, "mark", mark) for mark in marks]
+
+    def iter_markers(self) -> list[Any]:
+        return self._marks
+
+
+def test_the_collection_hook_refuses_a_skipped_golden_entry(
+    pytestconfig: pytest.Config,
+) -> None:
+    """The conftest hook, outside this module, fails the collection on a forbidden mark."""
+    from tests.test_hashing.golden import conftest
+
+    skipped = _FakeItem("semantic", [pytest.mark.skip(reason="module-level skip")])
+    with pytest.raises(pytest.UsageError, match="semantic:x"):
+        conftest.pytest_collection_modifyitems(pytestconfig, [skipped])
+
+
+def test_the_collection_hook_allows_the_optional_package_skip(
+    pytestconfig: pytest.Config,
+) -> None:
+    """The torch group's optional-package skip passes the collection hook."""
+    from tests.test_hashing.golden import conftest
+
+    items = [_FakeItem("torch", [needs("torch")]), _FakeItem("semantic", [])]
+    conftest.pytest_collection_modifyitems(pytestconfig, items)
+
+
+def test_the_collection_hook_ignores_other_modules(pytestconfig: pytest.Config) -> None:
+    """A test of the same name in another module is not a golden entry."""
+    from tests.test_hashing.golden import conftest
+
+    other = _FakeItem(
+        "semantic",
+        [pytest.mark.skip(reason="x")],
+        path=Path(__file__).with_name("x.py"),
+    )
+    conftest.pytest_collection_modifyitems(pytestconfig, [other])
+
+
+def test_golden_test_module_marks_nothing() -> None:
+    """Neither the module nor the entry test function carries a mark of its own."""
+    assert "pytestmark" not in globals()
+    own = [
+        mark.name
+        for mark in getattr(test_golden_entry, "pytestmark", [])
+        if mark.name != "parametrize"
+    ]
+    assert not own
+
+
+@pytest.mark.parametrize(
+    ("group", "mark"),
+    [
+        ("semantic", pytest.mark.xfail(reason="moved")),
+        ("schema", pytest.mark.skip(reason="later")),
+        ("torch", pytest.mark.skipif(True, reason="another reason")),
+        ("arrow", needs("torch")),
+    ],
+)
+def test_a_forbidden_mark_is_reported(group: str, mark: Any) -> None:
+    """``disallowed_marks`` names a skip or xfail other than the optional-package skip."""
+    assert disallowed_marks(group, [mark.mark])
+
+
+def test_the_optional_package_skip_is_allowed() -> None:
+    """The optional-package skip of an optional group is not reported."""
+    assert disallowed_marks("torch", [needs("torch").mark]) == []
 
 
 GENERATOR_TIMEOUT_S = 600
@@ -396,13 +523,18 @@ def test_tensor_and_ndarray_pins_differ(name: str) -> None:
 
 
 OLDER_TORCH_GOLDEN = """
-import json
 import pathlib
-import shutil
 import sys
 
-from tests.test_hashing.golden import cases
-from tests.test_hashing.golden.generate_golden_hashes import golden_path, main
+from orcapod.contexts import get_default_context
+from tests.test_hashing.golden import cases, store
+from tests.test_hashing.golden.marks import (
+    disallowed_marks,
+    entry_marks,
+    golden_entry_violations,
+    needs,
+)
+from tests.test_hashing.golden.generate_golden_hashes import main
 
 # Stand in for a supported PyTorch that predates float8_e8m0fnu (added in torch
 # 2.7). The attribute itself cannot be removed: torch.save refers to it.
@@ -414,16 +546,16 @@ cases.installed_torch_dtype = (
 live = cases.compute_group("torch")
 print("produced:", "value.float8_e8m0fnu" in live)
 print("unavailable:", sorted(cases.unavailable_entries("torch")))
-out = pathlib.Path(sys.argv[1])
-shutil.copy(golden_path("torch"), out / "torch.json")
-main(["--group", "torch", "--output-dir", str(out)])
-kept = json.loads((out / "torch.json").read_text())
-pinned = json.loads(golden_path("torch").read_text())
-print("pins kept:", kept == pinned)
-empty = out / "empty"
-main(["--group", "torch", "--output-dir", str(empty)])
-fresh = json.loads((empty / "torch.json").read_text())
-print("pins kept in an empty output dir:", fresh == pinned)
+root = pathlib.Path(sys.argv[1])
+version = get_default_context().version
+store.copy_tree(store.PROJECT_ROOT, root, version)
+manifest = store.manifest_path(root, version)
+folder = store.golden_folder(root, store.read_json(manifest))
+before = {p.name: p.read_bytes() for p in [manifest, *sorted(folder.iterdir())]}
+main(["--root", str(root), "--group", "torch"])
+main(["--root", str(root), "--check", "--group", "torch"])
+after = {p.name: p.read_bytes() for p in [manifest, *sorted(folder.iterdir())]}
+print("pins kept:", before == after)
 """
 
 
@@ -444,4 +576,3 @@ def test_torch_group_runs_on_a_torch_without_a_newer_dtype(tmp_path: Path) -> No
     assert "produced: False" in lines
     assert "unavailable: ['value.float8_e8m0fnu']" in lines
     assert "pins kept: True" in lines
-    assert "pins kept in an empty output dir: True" in lines

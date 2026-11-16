@@ -33,6 +33,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev --python ${{ matrix.python-version }}
 
+      - name: Check golden files against release tags
+        # Every golden file and pin a release tag of the current data context shipped must
+        # be unchanged in HEAD (ITL-946). Fails when git, the history or the tags are missing.
+        run: uv run --python ${{ matrix.python-version }} python scripts/check_golden_tags.py
+
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -v -rsxX --durations=20 -m "not postgres" --cov=src --cov-report=term-missing --cov-report=xml
 

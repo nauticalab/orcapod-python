@@ -3,6 +3,8 @@
 This document is a developer-facing reference for every hash computation site in the
 orcapod-python framework. For conceptual background on the two identity chains
 (`content_hash` and `pipeline_hash`), see [Identity & Hashing](../concepts/identity.md).
+Every hash listed here that Orcapod stores or embeds in a name is pinned as a golden value;
+how released values are protected is described in [Golden Hashes](golden-hashes.md).
 
 ---
 
@@ -424,7 +426,8 @@ definition. Consequences:
   change to the encoding of a supported construct needs a new label (`polars_expr_v2`).
 
 The canonical trees of a corpus of expressions are pinned in
-`tests/test_hashing/test_polars_expr_hashing.py`, and their hashes in the golden suite.
+`tests/test_hashing/test_polars_expr_hashing.py`, and their hashes in the golden suite
+([Golden Hashes](golden-hashes.md)).
 
 ### 1d. Function values and parameter defaults
 
@@ -726,7 +729,7 @@ topology suffix, encoding the full join lineage into each column name.
 | **Known exclusions** | When `record_id_column` is not specified, the row index is used as the provenance token; `record_id` changes if rows are **reordered** within the source table |
 
 The recipe recomputes a record id from the source id and the token alone. The value below is
-the one pinned for this row in the golden hash file (`pipeline.json`):
+the one pinned for this row in the golden hash file (`v1/pipeline-01.json`):
 
 ```python
 import uuid
@@ -1297,7 +1300,9 @@ whenever any existing hash value can change (the hashers, the identity definitio
 record-id recipes, the libraries behind them). Orcapod v0.3 writes `std:v1:default`;
 everything stored before v0.3 is the earlier generation, `std:v0.1:default`. The manifest of
 the current data context is `orcapod/contexts/data/v1.json`. It is frozen at the release of
-the library version that contains it and never edited afterwards. It names the hashers, the
+the library version that contains it and never edited afterwards, except that its `golden`
+history gains revisions as golden values are added and released
+([Golden Hashes](golden-hashes.md)). It names the hashers, the
 definitions that live in code, the libraries the hashes depend on and what changed from the
 previous data context. Logical types are not part of it: they are registered in
 `orcapod/contexts/logical_types.json` and versioned by their own identifier.

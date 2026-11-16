@@ -54,10 +54,29 @@ Do these on `metamorphic-labs` `main` before anything is pushed:
 
    The GitHub Release body is generated from PR titles; `CHANGELOG.md` is the curated
    record.
-2. **Check that `main` is green** — the `Run Tests` workflow on the commit you are
+2. **Record the release in the golden history**, in the same release pull request, as its
+   last change (see *Golden hash values* below):
+
+   ```
+   uv run python tests/test_hashing/golden/generate_golden_hashes.py --release X.Y.Z
+   ```
+
+   It appends the release revision to the `golden` history of the current data context's
+   manifest, writes its digest under `releases` in
+   `src/orcapod/contexts/released_manifests.json`, and at the data context's first release
+   sets `released_in` and the `manifest` pin. It computes no hash and refuses a version
+   already released. Commit both files with the release pull request; the release is tagged
+   on a commit that contains them. The Release workflow's build job checks this before it
+   creates the tag (`scripts/check_golden_tags.py --release-version X.Y.Z`) and stops if the
+   release is not recorded, or if a golden file was added after the release step (the
+   release revision must be the last revision when the commit is tagged). It also runs the
+   tag check (`scripts/check_golden_tags.py`) there, so a branch that changed what an earlier
+   release of the data context shipped is not released. Tags of earlier data contexts are
+   not checked, so the first release of a data context passes with nothing to check.
+3. **Check that `main` is green** — the `Run Tests` workflow on the commit you are
    releasing. The Release workflow re-runs the unit tests on Python 3.11, 3.12 and 3.13
    and the license check, but not the PostgreSQL or SpiralDB integration jobs.
-3. **Check the version is free** — the tag must not exist on origin, and the version must
+4. **Check the version is free** — the tag must not exist on origin, and the version must
    not exist on PyPI or TestPyPI; neither index allows a version to be uploaded twice, even
    after it is deleted.
 
@@ -71,11 +90,32 @@ All of these hold before the developer is asked for the go:
 1. **The full suite is green**: `uv run pytest tests/` passes on the commit to be pushed.
 2. **The release pull request is merged** on `metamorphic-labs` (`CHANGELOG.md` folded, section
    dated, `changelog.d/` fragments deleted).
-3. **The data context freeze is done**: every released manifest is pinned in
-   `contexts/released_manifests.json` and the golden hash tests pass unchanged.
+3. **The golden release step is done**: `contexts/released_manifests.json` has the current
+   data context's `releases` line for this version and a pinned `manifest`, and the golden
+   hash tests and the data context tests pass unchanged.
 4. **`main` is green** on `metamorphic-labs`, and `git status` is clean.
 5. **The version is free**: the tag does not exist on `nauticalab`, and the version is on
    neither PyPI nor TestPyPI.
+
+## Golden hash values
+
+Developer decisions, November 15, 2026 (ITL-946); the mechanism and what each check protects
+against are in `docs/reference/golden-hashes.md`.
+
+- A golden file that a release listed never changes, and is never removed or renamed.
+- New golden values can be added in any release, a patch included.
+- Any change to a released golden value, a logical type's own identifier change included,
+  needs a new data context version. A new data context version ships only in a minor release
+  (before 1.0) or a major one, never in a patch.
+- When a new data context starts, the old context's golden files and code move to
+  `orcapod-sanctuary`; this repository carries only the current context's golden folder.
+- Release tags are protected on both `metamorphic-labs/orcapod-python` and
+  `nauticalab/orcapod-python`: the repository ruleset `protect-release-tags` (target
+  `refs/tags/v*`; rules deletion, update and non-fast-forward; no bypass actors) is in place
+  since 2026-11-15. A `v*` tag can be created, as the Release workflow does, but never moved
+  or deleted. This is a precondition of the CI tag check (`scripts/check_golden_tags.py`),
+  which compares HEAD with every release tag of the current data context. Agents never change
+  repository settings.
 
 ## Cutting a Release
 
@@ -142,7 +182,11 @@ environments:
    that name `metamorphic-labs`, if any.
 3. Protect `main` on `nauticalab` (no force push, no deletion). It is written only by the
    fast-forward push above.
-4. Optional: set `CODECOV_TOKEN` there. The Codecov, SpiralDB and Linear jobs run only on
+4. Protect release tags on both `metamorphic-labs/orcapod-python` and
+   `nauticalab/orcapod-python` with the ruleset `protect-release-tags` (target
+   `refs/tags/v*`; deletion, update, non-fast-forward; no bypass actors), so the golden tag
+   check has a fixed anchor (ITL-946). Done on 2026-11-15.
+5. Optional: set `CODECOV_TOKEN` there. The Codecov, SpiralDB and Linear jobs run only on
    `metamorphic-labs` and are skipped on `nauticalab`.
 
 ## Pre-releases

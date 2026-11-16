@@ -65,6 +65,10 @@ differently**.
 The identifier is therefore not a package version. A type can go through many releases
 under one identifier.
 
+A built-in type's values are pinned as golden hashes. Once a release has shipped them, a new
+identifier for that type moves released golden values, so it needs a new data context
+version, like any other change to a released hash ([Golden Hashes](../reference/golden-hashes.md)).
+
 ## Built-in types
 
 Orcapod's own types follow the same contract as yours. Their metadata is the JSON text

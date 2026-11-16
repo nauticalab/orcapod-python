@@ -86,6 +86,17 @@ jobs:
           fetch-depth: 0  # required: hatch-vcs reads tag to set version
           ref: ${{ inputs.branch }}
 
+      - name: Check the golden release step
+        # Nothing is tagged or published unless the release pull request ran
+        # generate_golden_hashes.py --release for this version (ITL-946).
+        run: python3 scripts/check_golden_tags.py --release-version "${{ steps.normalize.outputs.version }}"
+
+      - name: Check golden files against release tags
+        # Every golden file, revision and pin an earlier release tag of the current data
+        # context shipped is unchanged here (ITL-946). Tags of no such release (older
+        # data contexts) are not checked; it fails only without git, history or tags.
+        run: python3 scripts/check_golden_tags.py
+
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"

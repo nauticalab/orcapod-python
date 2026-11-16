@@ -70,4 +70,5 @@ nav:
     - Types: api/types.md
   - Reference:
     - Hashing: reference/hashing.md
+    - Golden hashes: reference/golden-hashes.md
   - Troubleshooting: troubleshooting.md
