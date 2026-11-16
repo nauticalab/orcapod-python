@@ -100,6 +100,7 @@ class TestPollingSourcePipelineJobIntegration:
         src = PollingSource(
             _TwoBatchImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05,
                 duration=0.5,

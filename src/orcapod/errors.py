@@ -9,6 +9,15 @@ class InputValidationError(Exception):
     """
 
 
+class RowIdentifierError(InputValidationError, ValueError):
+    """A source's rows cannot be identified by the given key columns (ITL-1154).
+
+    A key column is missing or of a type that cannot identify a row, a key value is
+    null, or two rows share a key. The rows are wrong, not the moment: a retry reads
+    the same rows and fails again, so a polling source stops on it at once.
+    """
+
+
 class SchemaInconsistencyError(InputValidationError):
     """Raised when a data batch has a schema that is incompatible with the expected schema.
 

@@ -1243,10 +1243,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
         run_id = uuid.uuid4().hex[:16]
 
-        # Snapshot hash: SHA-256 of sink-node content digests for the run URI.
-        # Digests only: a hash label is never part of a hash input.
+        # Snapshot hash: SHA-256 of the sink nodes' content hashes, for the run URI.
+        # Each enters with its label (ITL-1154); the result is written into a name,
+        # the run URI, and so is bare hex.
         leaf_hashes = sorted(
-            node.content_hash().to_hex()
+            node.content_hash().to_string()
             for node in exec_dag.nodes()
             if not exec_dag.successors(node) and hasattr(node, "content_hash")
         )

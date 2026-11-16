@@ -20,6 +20,8 @@ from typing import Any
 import polars as pl
 import pytest
 
+from orcapod.core.operators.batch import BATCH_FOLD_LABEL
+from orcapod.core.operators.group_by import GROUP_BY_FOLD_LABEL
 from orcapod import PipelineJob
 from orcapod.core.operators import (
     Batch,
@@ -82,6 +84,7 @@ class OpCase:
         expected: The rows the output must hold, from the fixtures by the operator's
             rule (``expectations.py``); ``None`` where they depend on arrival order
             (``Batch``'s boundaries), which ``covers`` checks instead.
+        fold_label: The label of the operator's source-id fold (``Batch``, ``GroupBy``).
     """
 
     name: str
@@ -95,6 +98,7 @@ class OpCase:
     covers: tuple[str, str] | None = None
     expected: Callable[[Sources], list[RowIdentity]] | None = None
     dropped_tags: tuple[str, ...] = ()
+    fold_label: str | None = None
 
 
 def every_column(tags: tuple[str, ...], data: tuple[str, ...]) -> frozenset[str]:
@@ -149,6 +153,7 @@ CASES = [
         "batch",
         lambda s: Batch(4)(s.a),
         members=every_column,
+        fold_label=BATCH_FOLD_LABEL,
         keyed_by_record_ids=False,
         covers=("x", "A"),
     ),
@@ -156,6 +161,7 @@ CASES = [
         "group_by_g",
         lambda s: GroupBy(by=["g"])(s.a),
         members=data_only,
+        fold_label=GROUP_BY_FOLD_LABEL,
         covers=("x", "A"),
         expected=lambda s: groups(s.oracle, "A", ["g"]),
         dropped_tags=("n",),
@@ -164,6 +170,7 @@ CASES = [
         "group_by_all_tags",
         lambda s: GroupBy(by=["g", "n"])(s.a),
         members=data_only,
+        fold_label=GROUP_BY_FOLD_LABEL,
         covers=("x", "A"),
         expected=lambda s: groups(s.oracle, "A", ["g", "n"]),
     ),
@@ -253,6 +260,7 @@ def case_layout(case: OpCase, stream: Any, config: dict[str, Any]) -> Layout:
         members=case.members(tuple(tags), tuple(data)),
         merged=case.merged,
         content_hash_column=content_hash_column(config),
+        fold_label=case.fold_label,
     )
 
 

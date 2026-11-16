@@ -598,10 +598,10 @@ class TestIdentityPinned:
         _ = node.execute(src)
 
         assert node.pipeline_hash().to_string() == (
-            "semantic_v1:62bd560f1fa945b5cac83f3eb99b6f8bb0fea607ce7e9503c987df4c36134da4"
+            "semantic_v1:c8cae9378bede79d28f76996ed259870c8d2ca5a098acc6ff51c5e9d1f1ef7f8"
         )
         assert node.content_hash().to_string() == (
-            "semantic_v1:2a73f6156d2ad32c6daa75c400ed265df967d2a8fdddb825a383320b2a0ee7a8"
+            "semantic_v1:d1aec65936bf8878f51638b2fdc5350d976a46e06eb27f1900e2cf43402d8d87"
         )
         ids = _record_ids(node)
         assert ids["a"] == ROW_ZERO_RECORD_ID
@@ -628,20 +628,23 @@ class TestIdentityPinned:
 # (``b"arrow_v1:" + digest``, ITL-945) by reproducing the pre-fix broadcast with
 # ``_broadcast_row_zero``. Re-recorded once more for ITL-957: the pinned source has no
 # given ``source_id``, and its default id (now ``arrow_table:<label>:<hex>``) is part of
-# every source-info token these record hashes cover.
+# every source-info token these record hashes cover. Re-recorded for ITL-1154: a
+# source-info token now holds the row identifier (``row_<n>``) and the full-length
+# default source id. Re-recorded again for ITL-1154 (key columns in a source's
+# identity): the node content hash, which every stored row hash covers, moved.
 ROW_ZERO_RECORD_ID = b"arrow_v1:" + bytes.fromhex(
-    "000002a5cac2713a6f95bb9fc0ffbc253dd6889a4b57584653be52c1c374f92516c047"
+    "000002bbc126062384bfa4de05339a770b5f3e57180a980b25a58dbbd8b82a699c646e"
 )
 PRE_FIX_RECORD_IDS = frozenset(
     {
         ROW_ZERO_RECORD_ID,
         b"arrow_v1:"
         + bytes.fromhex(
-            "000002a8e0ed9f26c79c30b169b8084f771d183b5de166128dd360ce58e996fd68f49a"
+            "000002b8a3da15135dad402dfb5c8743130749eccff27236d54677d4b12fbc2ef656d7"
         ),
         b"arrow_v1:"
         + bytes.fromhex(
-            "000002ca41256b75c5e733eb7488bd8a71eca066db16103796ec7463cd4227dda4f2ce"
+            "00000222756f5e433bce8378cf38aace9a2d6686ae621241da4ff47ea3936bbd0bb44d"
         ),
     }
 )

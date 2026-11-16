@@ -13,16 +13,23 @@ The content hash captures schema, topology, and the **identity of the sources** 
 pipeline. It is computed recursively: each element's content hash depends on its own identity
 plus the content hashes of all its upstream elements, all the way back to the sources.
 
-A source's identity is its class, its schema and its `source_id`. What the `source_id` is
-depends on how the source was created:
+A source's identity is its class, its schema, its `source_id` and its key columns (the
+`record_id_columns` that name its rows, or none when rows are named by position). What the
+`source_id` is depends on how the source was created:
 
 - If you do not pass `source_id`, an in-memory source such as `DictSource` or
   `ArrowTableSource` derives it from the data, so two sources with different rows have
   different content hashes, and two sources with identical rows have the same one.
 - File- and table-backed sources default to a name derived from their location (the file
-  path for `CSVSource`, the table directory name for `DeltaTableSource`), not from the rows.
+  path for `CSVSource`, the table folder's path or URI for `DeltaTableSource`), not from the
+  rows.
 - If you pass `source_id` yourself, you are naming the source: two sources with the same
-  class, schema and `source_id` have the same content hash even when their rows differ.
+  class, schema, `source_id` and key columns have the same content hash even when their rows
+  differ.
+
+Two sources that differ only in their key columns name the same rows differently, so they
+are two sources: different content hashes (each gets its own cache), the same pipeline hash
+and the same `source_id`.
 
 Rows are still identified individually. Each row carries its own content hash, and that
 per-row hash is what caching uses.

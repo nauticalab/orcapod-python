@@ -17,6 +17,7 @@ from typing import Any
 
 import pyarrow as pa
 
+from orcapod.core.operators.group_by import GROUP_BY_FOLD_LABEL
 from orcapod import PipelineJob
 from orcapod.core.operators import GroupBy, Join
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
@@ -133,7 +134,7 @@ def make_run(
     return Run(job, sources, store, summary, completed)
 
 
-def function_tokens(job: PipelineJob) -> dict[tuple[str, bytes], str]:
+def function_tokens(job: PipelineJob) -> dict[tuple[str, str], str]:
     """The stored ``_source_y`` of every ``scaled`` record, keyed by its input record id."""
     records = job.nodes["scaled"].get_all_records(all_info=True)
     assert records is not None, "the function node stored no records"
@@ -209,6 +210,7 @@ def layout(job: PipelineJob, view: View, config: dict[str, Any]) -> Layout:
         tag_keys=tuple(tag_keys),
         data_keys=tuple(data_keys),
         members=members,
+        fold_label=GROUP_BY_FOLD_LABEL if view.node == "grouped" else None,
         content_hash_column=content_hash_column(config),
         # ITL-1059: a plain DerivedSource has null source info and no system tags by
         # design (for now).
@@ -237,7 +239,7 @@ def natural_keys(scenario: str, input_order: str) -> list[int]:
 
 def stream_function_tokens(
     stream: Any, column: str = "y"
-) -> dict[tuple[str, bytes], str]:
+) -> dict[tuple[str, str], str]:
     """Each row's function token for ``column``, keyed by the row's record id.
 
     Read from the ``Data`` objects ``iter_data`` yields (``source_info()``), a path that
@@ -248,9 +250,9 @@ def stream_function_tokens(
 
 def pairs_function_tokens(
     pairs: Iterable[tuple[Any, Any]], column: str = "y"
-) -> dict[tuple[str, bytes], str]:
+) -> dict[tuple[str, str], str]:
     """The function token of ``column`` of each ``(tag, data)`` pair, keyed by record id."""
-    tokens: dict[tuple[str, bytes], str] = {}
+    tokens: dict[tuple[str, str], str] = {}
     for tag, data in pairs:
         system_tags = tag.as_dict(columns={"system_tags": True})
         (record_id,) = [
@@ -259,6 +261,6 @@ def pairs_function_tokens(
             if k.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
         ]
         token = data.source_info()[column]
-        assert isinstance(token, str) and isinstance(record_id, bytes)
+        assert isinstance(token, str) and isinstance(record_id, str)
         tokens[(column, record_id)] = token
     return tokens

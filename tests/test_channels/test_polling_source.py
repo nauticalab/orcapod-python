@@ -411,7 +411,10 @@ class TestPollingSourceSyncMode:
         """First iter_data() triggers fetch(cursor=None) and returns rows."""
         fake = FakeDynamicSource(batches=[_batch(1, 10)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         rows = list(src.iter_data())
@@ -423,7 +426,10 @@ class TestPollingSourceSyncMode:
         """Second iter_data() polls first; if poll returns False, cache is served."""
         fake = FakeDynamicSource(batches=[_batch(1, 10)], poll_always_false=True)
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         list(src.iter_data())  # first call — fetches
@@ -442,7 +448,10 @@ class TestPollingSourceSyncMode:
 
         fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
         assert typed_zero_row_table(src) is None
         assert fake.fetch_cursors == [] and fake.poll_cursors == []
@@ -463,7 +472,10 @@ class TestPollingSourceSyncMode:
         """Second iter_data() re-fetches when poll returns True."""
         fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         rows1 = list(src.iter_data())  # fetches batch 0
@@ -476,7 +488,10 @@ class TestPollingSourceSyncMode:
         """fetch() receives the cursor returned by the previous fetch call."""
         fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         list(src.iter_data())  # first fetch → cursor returned is Cursor(value=1)
@@ -496,7 +511,10 @@ class TestPollingSourceSyncMode:
         ts = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
         fake = FakeDynamicSource(batches=[_batch(1, 10)], cursor_modified_at=ts)
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         before = datetime.now(timezone.utc)
@@ -509,7 +527,10 @@ class TestPollingSourceSyncMode:
         """When cursor.modified_at is None, last_modified is updated to wall clock."""
         fake = FakeDynamicSource(batches=[_batch(1, 10)], cursor_modified_at=None)
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         before = datetime.now(timezone.utc)
@@ -523,7 +544,10 @@ class TestPollingSourceSyncMode:
         """output_schema() lazily triggers fetch on first access."""
         fake = FakeDynamicSource(batches=[_batch(1, 10)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         tag_schema, data_schema = src.output_schema()
@@ -533,7 +557,10 @@ class TestPollingSourceSyncMode:
     def test_keys_triggers_fetch(self):
         fake = FakeDynamicSource(batches=[_batch(1, 10)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         tag_keys, data_keys = src.keys()
@@ -546,6 +573,7 @@ class TestPollingSourceSyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
         # Should not raise even though no fetch has occurred
@@ -559,10 +587,16 @@ class TestPollingSourceSyncMode:
         fake1 = FakeDynamicSource(batches=[])
         fake2 = NoArgSource()
         src1 = PollingSource(
-            fake1, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake1,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
         src2 = PollingSource(
-            fake2, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake2,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
         assert src1.identity_structure() != src2.identity_structure()
 
@@ -572,6 +606,7 @@ class TestPollingSourceSyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(),
             source_id="my_source",
         )
@@ -589,6 +624,7 @@ class TestPollingSourceSyncMode:
         src = PollingSource(
             NoArgSource(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=2.0),
             source_id="recon_source",
         )
@@ -620,6 +656,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             # Use a wider interval and generous overrun budget so stream-building
             # latency (Arrow schema inference, SourceStreamBuilder) never trips
             # the overrun guard in CI environments.
@@ -642,6 +679,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=0.01, duration=0.05),
         )
 
@@ -659,6 +697,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
 
@@ -685,6 +724,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             # Wide interval + generous overrun budget — same rationale as
             # test_async_streaming_emits_rows.
             polling_config=PollingConfig(
@@ -709,6 +749,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=0.01, duration=0.0),
         )
 
@@ -734,6 +775,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=0.01, duration=0.08),
         )
 
@@ -751,6 +793,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=0.01, duration=0.0),
         )
 
@@ -776,6 +819,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             # Wide interval + generous overrun budget — same rationale as
             # test_async_streaming_emits_rows.
             polling_config=PollingConfig(
@@ -807,6 +851,7 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.01, duration=0.01, max_missed_intervals=1000
             ),
@@ -854,6 +899,7 @@ class TestPollingSourceErrorHandling:
         src = PollingSource(
             TransientImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.01,
                 duration=0.5,
@@ -879,6 +925,7 @@ class TestPollingSourceErrorHandling:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.01,
                 max_consecutive_errors=3,
@@ -903,6 +950,7 @@ class TestPollingSourceErrorHandling:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=0.01),
         )
 
@@ -924,6 +972,7 @@ class TestPollingSourceErrorHandling:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.01,  # 10 ms tick — fetch will always overrun
                 max_missed_intervals=3,  # terminate after 3 cumulative misses
@@ -984,6 +1033,7 @@ class TestPollingSourceErrorHandling:
         src = PollingSource(
             DriftingImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1027,6 +1077,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
 
@@ -1045,6 +1096,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
 
@@ -1065,6 +1117,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
         rows = list(src.iter_data())
@@ -1080,6 +1133,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
 
@@ -1096,6 +1150,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
 
@@ -1112,6 +1167,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(interval=1.0),
         )
 
@@ -1126,7 +1182,10 @@ class TestPollingSourceSchemaValidation:
 
         with pytest.raises(ValueError, match="missing tag columns"):
             PollingSource(
-                fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+                fake,
+                tag_columns="id",
+                record_id_columns="id",
+                polling_config=PollingConfig(interval=1.0),
             )
 
     # -----------------------------------------------------------------------
@@ -1169,6 +1228,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             TypeDriftImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1214,6 +1274,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             ColumnDriftImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1233,7 +1294,10 @@ class TestPollingSourceSchemaValidation:
         """
         fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20), _batch(3, 30)])
         src = PollingSource(
-            fake, tag_columns="id", polling_config=PollingConfig(interval=1.0)
+            fake,
+            tag_columns="id",
+            record_id_columns="id",
+            polling_config=PollingConfig(interval=1.0),
         )
 
         rows1 = list(src.iter_data())  # fetch 1 — builds initial stream
@@ -1261,6 +1325,7 @@ class TestPollingSourceSchemaValidation:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1309,6 +1374,7 @@ class TestPollingSourceSyncAccessDuringAsyncRun:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.02, duration=1.0, max_missed_intervals=100
             ),
@@ -1354,6 +1420,7 @@ class TestPollingSourceSyncAccessDuringAsyncRun:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.02, duration=1.0, max_missed_intervals=100
             ),
@@ -1474,6 +1541,7 @@ class TestPollingSourceZeroRowBatch:
         src = PollingSource(
             self._make_emit_once_then_empty_impl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1500,6 +1568,7 @@ class TestPollingSourceZeroRowBatch:
         src = PollingSource(
             self._make_emit_once_then_empty_impl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1563,6 +1632,7 @@ class TestPollingSourceZeroRowBatch:
         src = PollingSource(
             DeclaredNullableImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1599,6 +1669,7 @@ class TestPollingSourceZeroRowBatch:
         src = PollingSource(
             fake,
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),
@@ -1674,6 +1745,7 @@ class TestPollingSourceZeroRowBatch:
         src = PollingSource(
             ZeroFirstImpl(),
             tag_columns="id",
+            record_id_columns="id",
             polling_config=PollingConfig(
                 interval=0.05, duration=0.5, max_missed_intervals=50
             ),

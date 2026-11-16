@@ -205,12 +205,13 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
        column's own extension metadata), replacing the column with a
        ``pa.large_binary()`` value of the form::
 
-           <identifier_text_bytes> + b"::" + content_hash.digest
+           <identifier_text_bytes> + b"::" + content_hash.to_prefixed_digest()
 
        where the identifier text is the logical type's whole identifier,
        ``"<extension name>;<lowercase hex of the extension metadata>"``
-       (``LogicalTypeIdentifier.text``). The label of the value hash is not
-       part of the bytes.
+       (``LogicalTypeIdentifier.text``), and the prefixed digest is
+       ``b"<label>:" + digest``: a hash fed into another hash carries its label
+       (ITL-1154).
     3. If no hasher is registered (or the converter doesn't know the type),
        return the extension type and storage value unchanged. The downstream
        ``StarfixArrowHasher`` / ``ArrowDigester`` will see the full extension
@@ -312,7 +313,28 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
                 return self._hashes_container_elements(args[0])
         if python_type is typing.Any or not isinstance(python_type, type):
             return False
-        return self._python_hasher.type_handler_registry.has_handler(python_type)
+        return self._column_value_handled(python_type)
+
+    def _column_value_handled(self, python_type: type) -> bool:
+        """Return True if a column of ``python_type`` is hashed through a value handler.
+
+        A logical type gets a column value handler only when its stored form is not its
+        identity (ITL-1154, rule 3): a handler for the Python type is registered and does
+        not declare ``COLUMN_VALUE_HANDLER = False``. ``UUIDHandler`` declares it: a UUID
+        column's 16 stored bytes are its identity, so starfix hashes the column as stored
+        (the extension identity in the field metadata, then the bytes), while a bare
+        ``uuid.UUID`` value keeps its tagged value hash.
+
+        Args:
+            python_type: The Python type of the column's logical type.
+
+        Returns:
+            Whether the column's values are replaced by their value hashes.
+        """
+        handler = self._python_hasher.type_handler_registry.get_handler_for_type(
+            python_type
+        )
+        return handler is not None and getattr(handler, "COLUMN_VALUE_HANDLER", True)
 
     def _hashes_container_elements(self, element_python_type: Any) -> bool:
         """Return True if a native container's elements are hashed by value.
@@ -338,7 +360,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         return (
             isinstance(inner, type)
             and self._type_converter.get_logical_type(inner) is not None
-            and self._python_hasher.type_handler_registry.has_handler(inner)
+            and self._column_value_handled(inner)
         )
 
     def visit_extension(
@@ -432,7 +454,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
             return extension_type, storage_value
 
         # Only hash if a semantic hasher is registered for this Python type.
-        if not self._python_hasher.type_handler_registry.has_handler(python_type):
+        if not self._column_value_handled(python_type):
             return extension_type, storage_value
 
         # Convert storage value → Python object and hash it.
@@ -447,14 +469,16 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         else:
             content_hash = self._python_hasher.hash_object(python_obj)
 
-        # Encode as binary: "<identifier text>::<digest>", where the identifier text
-        # is "<extension name>;<hex of extension metadata>"
+        # Encode as binary: "<identifier text>::<label>:<digest>", where the
+        # identifier text is "<extension name>;<hex of extension metadata>"
         # (``LogicalTypeIdentifier.text``): the cell commits to the whole identifier
-        # of its logical type, so a changed identifier moves the row hash. Only the
-        # digest of the value hash is fed in, never its label: a label names the
-        # algorithm and is not part of any hash input.
+        # of its logical type, so a changed identifier moves the row hash. The value
+        # hash enters with its label: a hash fed into another hash carries the name
+        # of the algorithm that produced it (ITL-1154).
         type_name = arrow_type_identifier(extension_type).text
-        hash_bytes = type_name.encode("utf-8") + b"::" + content_hash.digest
+        hash_bytes = (
+            type_name.encode("utf-8") + b"::" + content_hash.to_prefixed_digest()
+        )
         return pa.large_binary(), hash_bytes
 
     def visit_struct(

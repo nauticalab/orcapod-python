@@ -41,6 +41,14 @@ def _null_last_key(value: Any) -> tuple[Any, ...]:
     return (0, value)
 
 
+GROUP_BY_FOLD_LABEL = "group_v1"
+"""Label of the folds of ``GroupBy``: the folded source id and record id are
+``"group_v1:<hex>"`` (ITL-1154). It names the operation; the procedure is
+``arrow_utils.fold_system_tag_values``. Change it only when this operation's fold
+would give an existing member list a different value.
+"""
+
+
 class GroupBy(UnaryOperator):
     """Reduce rows sharing a key into one row with list-valued data members.
 
@@ -213,15 +221,18 @@ class GroupBy(UnaryOperator):
         # was joined into.  So *every* record_id column has to take part --
         # consulting only the first would tie on exactly the fan-out rows the
         # tiebreaker exists for.  They are sorted by name so the key order is
-        # itself independent of column order in the input table.
+        # itself independent of column order in the input table. A record id
+        # names a row within its source only (ITL-1154), so the source-id columns
+        # come last: two members with equal record ids from different sources still
+        # have one order.
         sort_columns = dropped_tags
-        sort_columns += tuple(
-            sorted(
-                c
-                for c in system_tag_columns
-                if c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
+        for prefix in (
+            constants.SYSTEM_TAG_RECORD_ID_PREFIX,
+            constants.SYSTEM_TAG_SOURCE_ID_PREFIX,
+        ):
+            sort_columns += tuple(
+                sorted(c for c in system_tag_columns if c.startswith(prefix))
             )
-        )
 
         groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
         for row in table.to_pylist():
@@ -244,7 +255,7 @@ class GroupBy(UnaryOperator):
                     **{c: [m[c] for m in members] for c in member_columns},
                     **{
                         c: arrow_utils.fold_system_tag_values(
-                            c, [m[c] for m in members]
+                            [m[c] for m in members], label=GROUP_BY_FOLD_LABEL
                         )
                         for c in system_tag_columns
                     },

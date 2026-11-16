@@ -103,14 +103,14 @@ def _run_once(
             _table(probes),
             tag_columns=["probe"],
             source_id="probes",
-            record_id_column="probe",
+            record_id_columns="probe",
             tag_only_columns=True,
         )
         method_source = ArrowTableSource(
             _table(methods),
             tag_columns=method_tags,
             source_id="methods",
-            record_id_column="w",
+            record_id_columns="w",
             tag_only_columns=True,
         )
         sink = sink_pod(deliver)

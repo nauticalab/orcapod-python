@@ -178,7 +178,7 @@ def _join_stream() -> Any:
 
 def _polling_source() -> Any:
     """A ``PollingSource`` over a fake dynamic source of one row."""
-    return PollingSource(_FakeDynamicSource(), tag_columns="id")
+    return PollingSource(_FakeDynamicSource(), tag_columns="id", record_id_columns="id")
 
 
 def _cached_source() -> Any:
@@ -455,7 +455,7 @@ def test_job_node_run_over_a_pass_through_chain_returns_its_rows() -> None:
 def test_polling_source_run_polls() -> None:
     """A polling source's ``run()`` polls, as ``as_table()`` does; ``head()`` never does."""
     fake = _FakeDynamicSource()
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
     _ = source.head()
     assert (fake.polls, fake.fetches) == (0, 0)
     view = source.run()

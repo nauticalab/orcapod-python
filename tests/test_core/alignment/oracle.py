@@ -1,57 +1,46 @@
 """What every row of a test's sources is, derived from the rows the test wrote (ITL-1034).
 
 The oracle never reads a table Orcapod produced. It takes the Arrow table a test hands to a
-source, and recomputes each row's provenance token and record id by the recipe the library
-documents (``docs/reference/hashing.md``, site 5): the token is ``"<column>=<value>"`` with a
-``record_id_column``, else ``"row_<index>"``; the record id is the UUID v5 of
-``"<source_id>::<token>"``. Aggregated system tags fold by site 6b.
+source, and recomputes each row's record id by the recipe the library documents
+(``docs/reference/hashing.md``, "Default source ids and row identifiers"; ITL-1154): the
+record id is the row identifier itself, the canonical JSON object of the key columns in key
+order (``{"x":3}``) with ``record_id_columns``, else ``"row_<index>"``; a source-info token
+is ``"<source_id>::<record id>::<column>"``. Aggregated system tags fold by site 6b.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 import pyarrow as pa
 
-# The namespace of a source row's record id. The code (``core/sources/stream_builder.py``,
-# ``_SOURCE_RECORD_ID_NAMESPACE``) is the authority: docs/reference/hashing.md site 5 names
-# another string, a documentation error reported with ITL-1034.
-SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
-    uuid.NAMESPACE_URL, "https://orcapod.org/namespaces/source-record-id"
-)
-# The namespace of a folded (aggregated) record id: docs/reference/hashing.md site 6b.
-AGGREGATED_RECORD_ID_NAMESPACE = uuid.uuid5(
-    uuid.NAMESPACE_URL, "https://orcapod.org/namespaces/aggregated-record-id"
-)
 BLOCK_SEPARATOR = "::"
 
 
-def source_record_id(source_id: str, token: str) -> bytes:
-    """The record id of the source row ``token`` of ``source_id`` (site 5)."""
-    return uuid.uuid5(
-        SOURCE_RECORD_ID_NAMESPACE, f"{source_id}{BLOCK_SEPARATOR}{token}"
-    ).bytes
+def key_record_id(values: Mapping[str, Any], key_columns: Sequence[str]) -> str:
+    """The record id of a row identified by ``key_columns``: their canonical JSON."""
+    return json.dumps(
+        {c: values[c] for c in key_columns}, separators=(",", ":"), ensure_ascii=False
+    )
 
 
-def fold_record_ids(record_ids: Sequence[bytes | None]) -> bytes:
-    """The folded record id of an ordered member list (site 6b)."""
-    name = BLOCK_SEPARATOR.join("null" if v is None else v.hex() for v in record_ids)
-    return uuid.uuid5(AGGREGATED_RECORD_ID_NAMESPACE, name).bytes
+def fold_values(values: Sequence[Any], label: str) -> str:
+    """The folded value of any other system tag of an ordered member list (site 6b).
 
-
-def fold_values(values: Sequence[Any]) -> str:
-    """The folded value of any other system tag of an ordered member list (site 6b)."""
+    ``"<label>:<hex>"``: the fold's label (``BATCH_FOLD_LABEL`` or
+    ``GROUP_BY_FOLD_LABEL``, each defined once beside the fold), then the SHA-256 of the
+    canonical JSON member list, computed here on its own.
+    """
     members = json.dumps(
         [None if v is None else str(v) for v in values],
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    return hashlib.sha256(members.encode("utf-8")).hexdigest()
+    return f"{label}:{hashlib.sha256(members.encode('utf-8')).hexdigest()}"
 
 
 @dataclass(frozen=True)
@@ -61,7 +50,7 @@ class Origin:
     Attributes:
         source_id: The source's id.
         token: The row's provenance token within the source.
-        record_id: The row's record id, recomputed from ``source_id`` and ``token``.
+        record_id: The row's record id: its row identifier, the same as ``token``.
         values: Every column of the row (tags and data), as Python values.
         data_table: The row's data columns as a one-row Arrow table with the source's
             types: what the source's ``Data`` hashes.
@@ -69,7 +58,7 @@ class Origin:
 
     source_id: str
     token: str
-    record_id: bytes
+    record_id: str
     values: Mapping[str, Any]
     data_table: pa.Table = field(compare=False, repr=False)
 
@@ -96,7 +85,8 @@ class Oracle:
 
     def __init__(self) -> None:
         """Build an oracle with no sources."""
-        self.by_record_id: dict[bytes, Origin] = {}
+        # A record id names a row within its source: keyed by (source id, record id).
+        self.by_record_id: dict[tuple[str, str], Origin] = {}
         self.by_token: dict[tuple[str, str], Origin] = {}
         self.origins: list[Origin] = []
         self.derivations: dict[str, Derivation] = {}
@@ -110,7 +100,7 @@ class Oracle:
         *,
         tag_columns: Sequence[str],
         schema_hash: str,
-        record_id_column: str | None = None,
+        record_id_columns: str | Sequence[str] | None = None,
         tokens: Sequence[str] | None = None,
     ) -> None:
         """Register the rows of a source from the table the test gave it.
@@ -122,29 +112,33 @@ class Oracle:
             schema_hash: The schema hash that names the source's system tag columns
                 (``_tag_source_id::<schema hash>``). Every system tag column holding
                 this source's rows, however extended downstream, starts with it.
-            record_id_column: The source's record id column, if any.
-            tokens: Each row's provenance token, for a source with its own documented
-                token recipe (SpiralDB: the labelled Arrow hash of the row's key),
-                computed by the test from its own rows.
+            record_id_columns: The source's key columns, if any.
+            tokens: Each row's record id, for a source whose key the test computes
+                from its own rows (SpiralDB: its primary key).
         """
         self.schema_hashes[source_id] = schema_hash
+        key_columns = (
+            (record_id_columns,)
+            if isinstance(record_id_columns, str)
+            else tuple(record_id_columns or ())
+        )
         data_columns = [c for c in table.column_names if c not in tag_columns]
         for index, values in enumerate(table.to_pylist()):
             if tokens is not None:
                 token = tokens[index]
-            elif record_id_column is not None:
-                token = f"{record_id_column}={values[record_id_column]}"
+            elif key_columns:
+                token = key_record_id(values, key_columns)
             else:
                 token = f"row_{index}"
             origin = Origin(
                 source_id=source_id,
                 token=token,
-                record_id=source_record_id(source_id, token),
+                record_id=token,
                 values=values,
                 data_table=table.slice(index, 1).select(data_columns),
             )
             self.origins.append(origin)
-            self.by_record_id[origin.record_id] = origin
+            self.by_record_id[(source_id, origin.record_id)] = origin
             self.by_token[(source_id, token)] = origin
 
     def derive(

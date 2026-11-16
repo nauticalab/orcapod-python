@@ -110,7 +110,7 @@ def derived_tags_as_data(sources: Sources) -> Any:
     ``g`` must be that row's ``g``.
     """
     derived = DerivedSource(
-        sources.a, tags_as_data={"g": "g_data"}, record_id_column="x"
+        sources.a, tags_as_data={"g": "g_data"}, record_id_columns="x"
     )
     table = sources.oracle_tables["A"]
     copied = table.append_column(
@@ -122,7 +122,7 @@ def derived_tags_as_data(sources: Sources) -> Any:
         copied,
         tag_columns=TAG_COLUMNS,
         schema_hash=schema_hash_of(derived),
-        record_id_column="x",
+        record_id_columns="x",
     )
     sources.oracle = oracle
     sources.expected_source = derived.source_id

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -10,7 +10,10 @@ from typing_extensions import override
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.reload import same_rows
 from orcapod.core.sources.source_ids import hash_source_id
-from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.core.sources.stream_builder import (
+    SourceStreamBuilder,
+    normalize_record_id_columns,
+)
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.view import (
     ViewStatus,
@@ -38,7 +41,7 @@ else:
 def _derivation_hash(
     origin: "FunctionJobNode | OperatorJobNode | RootSource",
     tags_as_data: Mapping[str, str],
-    record_id_column: str | None,
+    record_id_columns: tuple[str, ...] | None,
 ) -> ContentHash:
     """Return the content hash an operator node doing this derivation would have.
 
@@ -46,16 +49,16 @@ def _derivation_hash(
     ``content_hash``: the producer's identity (class name and parameters) followed
     by its upstreams. Here that is ``(("DerivedSource", sorted tags_as_data items),
     (origin,))``, with the origin entering through its own ``content_hash``. A
-    ``record_id_column`` is a parameter of the derivation too, since it decides
-    the record IDs: when one is set, ``("record_id_column", name)`` is appended to
-    the parameters. The hasher is the origin's, so the result depends on the
+    ``record_id_columns`` is a parameter of the derivation too, since it decides
+    the record IDs: when they are given, ``("record_id_columns", names)`` is
+    appended to the parameters. The hasher is the origin's, so the result depends on the
     origin's identity and on these parameters, and on nothing else.
 
     Args:
         origin: The source or job node the derived source reads from.
         tags_as_data: Maps a tag column of the origin to the name of its data copy.
-        record_id_column: The column that identifies a row, or ``None`` for the
-            row position.
+        record_id_columns: The key columns that identify a row, or ``None`` for
+            the row position.
 
     Returns:
         The derivation hash, from which ``_default_source_id`` builds the default
@@ -63,8 +66,8 @@ def _derivation_hash(
     """
     hasher = origin.data_context.semantic_hasher
     parameters: tuple[Any, ...] = ("DerivedSource", tuple(sorted(tags_as_data.items())))
-    if record_id_column is not None:
-        parameters += (("record_id_column", record_id_column),)
+    if record_id_columns is not None:
+        parameters += (("record_id_columns", record_id_columns),)
     return hasher.hash_object(
         (parameters, (origin,)),
         resolver=lambda obj: obj.content_hash(hasher),
@@ -139,7 +142,7 @@ class DerivedSource(RootSource):
 
     Being a source, this form starts provenance afresh by the rule every source
     follows: its own system-tag columns, record IDs derived from its ``source_id``
-    and each row's position (or ``record_id_column``), and a source-info token
+    and each row's position (or ``record_id_columns``), and a source-info token
     for every data column, the copies included. It stores nothing itself; like
     any source it can be wrapped with ``cached(database)``.
 
@@ -148,7 +151,7 @@ class DerivedSource(RootSource):
           where label and digest are the derivation hash: the content hash an
           operator node doing this derivation over the origin would have, built
           from the origin's content hash, the sorted ``tags_as_data`` items and
-          the ``record_id_column`` when one is set. It changes when the origin's
+          the ``record_id_columns`` when one is set. It changes when the origin's
           identity or one of these parameters changes. An explicit ``source_id``
           replaces it.
         - ``content_hash`` follows the rule of every root source (class name,
@@ -170,7 +173,7 @@ class DerivedSource(RootSource):
         source_id: Canonical source name. Defaults as described above.
         tags_as_data: Maps a tag column of the origin to the name of the data
             column that receives a copy of it.
-        record_id_column: Column whose value identifies a row in record IDs and
+        record_id_columns: Key columns whose values identify a row in record IDs and
             provenance tokens, instead of the row position. Only with
             ``tags_as_data``.
         **kwargs: ``label``, ``data_context`` (defaults to the origin's) and
@@ -180,7 +183,7 @@ class DerivedSource(RootSource):
         InputValidationError: If ``tags_as_data`` names a column that is not a tag
             of the origin, or a new name that is already a column, is repeated,
             or is reserved.
-        ValueError: If ``record_id_column`` is given without ``tags_as_data``.
+        ValueError: If ``record_id_columns`` is given without ``tags_as_data``.
         TypeError: If the origin is a source and ``tags_as_data`` is not given.
 
     Example::
@@ -203,7 +206,7 @@ class DerivedSource(RootSource):
         cls,
         origin: "FunctionJobNode | OperatorJobNode | RootSource",
         tags_as_data: Mapping[str, str],
-        record_id_column: str | None,
+        record_id_columns: tuple[str, ...] | None,
     ) -> str:
         """Return the default ``source_id`` of a source built with ``tags_as_data``.
 
@@ -218,13 +221,13 @@ class DerivedSource(RootSource):
         Args:
             origin: The source or job node the derived source reads from.
             tags_as_data: Maps a tag column of the origin to the name of its copy.
-            record_id_column: The column that identifies a row, or ``None`` for
+            record_id_columns: The key columns that identify a row, or ``None`` for
                 the row position.
 
         Returns:
             The default source id.
         """
-        derivation_hash = _derivation_hash(origin, tags_as_data, record_id_column)
+        derivation_hash = _derivation_hash(origin, tags_as_data, record_id_columns)
         return f"{cls.TAGS_AS_DATA_KIND}:{derivation_hash.to_string()}"
 
     def __init__(
@@ -232,18 +235,19 @@ class DerivedSource(RootSource):
         origin: "FunctionJobNode | OperatorJobNode | RootSource",
         source_id: str | None = None,
         tags_as_data: Mapping[str, str] | None = None,
-        record_id_column: str | None = None,
+        record_id_columns: str | Collection[str] | None = None,
         **kwargs: Any,
     ) -> None:
+        key_columns = normalize_record_id_columns(record_id_columns)
         if tags_as_data is None:
             if isinstance(origin, RootSource):
                 raise TypeError(
                     "A DerivedSource over a source needs tags_as_data: the plain "
                     "form reads the stored records of a job node."
                 )
-            if record_id_column is not None:
+            if key_columns is not None:
                 raise ValueError(
-                    "record_id_column is only used together with tags_as_data."
+                    "record_id_columns is only used together with tags_as_data."
                 )
             self._tags_as_data: dict[str, str] | None = None
         else:
@@ -262,11 +266,12 @@ class DerivedSource(RootSource):
                 source_id = hash_source_id(self.SOURCE_KIND, origin.content_hash())
             else:
                 source_id = self._default_source_id(
-                    origin, self._tags_as_data, record_id_column
+                    origin, self._tags_as_data, key_columns
                 )
         super().__init__(source_id=source_id, **kwargs)
         self._origin = origin
-        self._record_id_column = record_id_column
+        self._record_id_columns = key_columns
+        self._key_columns = key_columns or ()
         self._cached_table: pa.Table | None = None
         self._cached_stream: ArrowTableStream | None = None
         # The origin job node's modified time when its rows were cached: a check reads
@@ -282,7 +287,7 @@ class DerivedSource(RootSource):
 
         The plain form is tied to the origin node's content hash. The
         ``tags_as_data`` form is the root source rule (class name, output schema,
-        ``source_id``) followed by the sorted mapping items: two mappings can give
+        ``source_id``, key columns) followed by the sorted mapping items: two mappings can give
         the same schema (two tag columns of one type copied to one name) while the
         copy holds different values, so with an explicit ``source_id`` the mapping
         has to tell the sources apart (ITL-1000).
@@ -318,7 +323,9 @@ class DerivedSource(RootSource):
         config: dict[str, Any] = {
             "source_type": self.SOURCE_KIND,
             "tags_as_data": self._tags_as_data,
-            "record_id_column": self._record_id_column,
+            "record_id_columns": None
+            if self._record_id_columns is None
+            else list(self._record_id_columns),
             "source_id": self._explicit_source_id,
         }
         # Every concrete source has to_config; the abstract RootSource does not
@@ -362,7 +369,7 @@ class DerivedSource(RootSource):
             origin,
             source_id=config.get("source_id"),
             tags_as_data=config["tags_as_data"],
-            record_id_column=config.get("record_id_column"),
+            record_id_columns=config.get("record_id_columns"),
         )
 
     # -------------------------------------------------------------------------
@@ -443,7 +450,7 @@ class DerivedSource(RootSource):
             table,
             tag_columns=self._origin.keys()[0],
             source_id=self.source_id,
-            record_id_column=self._record_id_column,
+            record_id_columns=self._record_id_columns or (),
         )
         return result.stream
 
@@ -486,7 +493,7 @@ class DerivedSource(RootSource):
         its modified time moved since this source last read them: a source origin that
         took in new data, by this check or by a check made through another source over
         it, or a job node that ran again. The rows read are compared with the rows
-        held (in any order only when a ``record_id_column`` gives the record ids); when
+        held (in any order only when a ``record_id_columns`` gives the record ids); when
         they differ the source holds the new ones and moves its
         modified time. A read or comparison that raises leaves everything as it was, so
         the next check reads again. A source that holds nothing (it has not read its
@@ -511,7 +518,7 @@ class DerivedSource(RootSource):
         if self._tags_as_data is not None:
             stream, has_rows = self._build_derived_stream(self._tags_as_data)
             unchanged = same_rows(
-                held, stream.as_table(), ordered=self._record_id_column is None
+                held, stream.as_table(), ordered=not self._record_id_columns
             )
             self._origin_seen = seen
             if unchanged:
@@ -521,8 +528,8 @@ class DerivedSource(RootSource):
             records = self._origin_records()
             read = self._empty_origin_table() if records is None else records
             # The stored rows' ids may not be theirs to keep in another order: order
-            # counts unless a record_id_column was given (never assume).
-            unchanged = same_rows(held, read, ordered=self._record_id_column is None)
+            # counts unless a record_id_columns were given (never assume).
+            unchanged = same_rows(held, read, ordered=not self._record_id_columns)
             self._origin_seen = seen
             if unchanged:
                 return False

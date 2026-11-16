@@ -264,6 +264,47 @@ class TestCachedSourceStreaming:
 # ---------------------------------------------------------------------------
 
 
+class TestCachedSourceKeyPolicy:
+    """Two sources that differ only in key policy never share a cache (ITL-1154)."""
+
+    @staticmethod
+    def _record_ids(source: CachedSource) -> list[str]:
+        table = source.as_table(columns={"system_tags": True})
+        (column,) = [
+            c
+            for c in table.column_names
+            if c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
+        ]
+        return sorted(str(value) for value in table.column(column).to_pylist())
+
+    def test_one_source_id_two_key_policies_get_separate_caches(self, db):
+        table = pa.table({"k": ["a", "b"], "v": [1, 2]})
+        by_position = ArrowTableSource(
+            table, tag_columns=["k"], source_id="s", tag_only_columns=True
+        )
+        by_key = ArrowTableSource(
+            table,
+            tag_columns=["k"],
+            source_id="s",
+            record_id_columns="k",
+            tag_only_columns=True,
+        )
+        assert by_position.pipeline_hash() == by_key.pipeline_hash()
+        assert by_position.content_hash() != by_key.content_hash()
+
+        cached_by_position = CachedSource(by_position, cache_database=db)
+        cached_by_key = CachedSource(by_key, cache_database=db)
+        assert cached_by_position.cache_path != cached_by_key.cache_path
+        cached_by_position.flow()
+        cached_by_key.flow()
+
+        # A later read of either source sees only its own rows.
+        again_by_position = CachedSource(by_position, cache_database=db)
+        again_by_key = CachedSource(by_key, cache_database=db)
+        assert self._record_ids(again_by_position) == ["row_0", "row_1"]
+        assert self._record_ids(again_by_key) == ['{"k":"a"}', '{"k":"b"}']
+
+
 class TestCachedSourceCumulative:
     def test_dedup_on_same_data(self, simple_source, db):
         """Running twice with the same data produces no duplicates."""

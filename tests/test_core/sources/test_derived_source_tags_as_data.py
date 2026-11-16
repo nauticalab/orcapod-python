@@ -257,7 +257,7 @@ class TestArrowTypesPreserved:
 # ---------------------------------------------------------------------------
 
 
-def _expected_default_source_id(origin, tags_as_data, record_id_column=None) -> str:
+def _expected_default_source_id(origin, tags_as_data, record_id_columns=None) -> str:
     """The documented definition: ``tags_as_data:`` plus the labelled derivation hash.
 
     The derivation hash is the content hash an operator node doing the derivation
@@ -265,8 +265,13 @@ def _expected_default_source_id(origin, tags_as_data, record_id_column=None) -> 
     """
     hasher = origin.data_context.semantic_hasher
     parameters = ("DerivedSource", tuple(sorted(tags_as_data.items())))
-    if record_id_column is not None:
-        parameters += (("record_id_column", record_id_column),)
+    if record_id_columns is not None:
+        key = (
+            (record_id_columns,)
+            if isinstance(record_id_columns, str)
+            else tuple(record_id_columns)
+        )
+        parameters += (("record_id_columns", key),)
     derivation_hash = hasher.hash_object(
         (parameters, (origin,)),
         resolver=lambda obj: obj.content_hash(hasher),
@@ -313,7 +318,7 @@ class TestProvenance:
         origin = _experiment()
         by_position = DerivedSource(origin, tags_as_data=COPY)
         by_value = DerivedSource(
-            origin, tags_as_data=COPY, record_id_column="experiment_start_timestamp"
+            origin, tags_as_data=COPY, record_id_columns="experiment_start_timestamp"
         )
         assert by_value.source_id == _expected_default_source_id(
             origin, COPY, "experiment_start_timestamp"
@@ -366,13 +371,13 @@ class TestProvenance:
             _experiment(),
             tags_as_data=COPY,
             source_id="exp",
-            record_id_column="experiment_start_timestamp",
+            record_id_columns="experiment_start_timestamp",
         )
         table = derived.as_table(all_info=True)
         first = table["experiment_start_timestamp"][0].as_py()
         assert (
             table["_source_task_id"][0].as_py()
-            == f"exp::experiment_start_timestamp={first}::task_id"
+            == f'exp::{{"experiment_start_timestamp":{first}}}::task_id'
         )
 
     def test_equals_the_hand_written_recipe_with_the_same_source_id(self):
@@ -420,6 +425,7 @@ class TestIdentity:
             "DerivedSource",
             derived.output_schema(),
             derived.source_id,
+            (),  # the key columns: none, rows are named by position (ITL-1154)
             ("tags_as_data", tuple(sorted(COPY.items()))),
         )
 
@@ -571,8 +577,8 @@ class TestValidation:
 
     def test_record_id_column_needs_tags_as_data(self):
         job = _upper_job()
-        with pytest.raises(ValueError, match="record_id_column"):
-            DerivedSource(job.nodes["upper"], record_id_column="task_upper")
+        with pytest.raises(ValueError, match="record_id_columns"):
+            DerivedSource(job.nodes["upper"], record_id_columns="task_upper")
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +634,10 @@ class TestPipelineJob:
             )
             Join()(lengths, probe, label="back")
         job.run()
-        assert set(job.sources) == {"probe", derived.source_id}
+        assert set(job.sources) == {
+            f"sqlite_table:{db_path}:main.probe",
+            derived.source_id,
+        }
         assert job.nodes["back"].as_table().num_rows == 3
 
     def test_saved_job_reloads_the_derived_source(self, tmp_path):
@@ -658,7 +667,7 @@ class TestPipelineJob:
             SQLiteTableSource(db_path, "probe", tag_only_columns=True),
             tags_as_data={"name": "name_copy"},
             source_id="probe_named",
-            record_id_column="name",
+            record_id_columns="name",
         )
         config = derived.to_config()
         assert config["source_type"] == "derived"

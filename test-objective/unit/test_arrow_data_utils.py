@@ -6,7 +6,7 @@ based on documented behavior in the design specification.
 
 from __future__ import annotations
 
-import uuid
+import itertools
 
 import pyarrow as pa
 import pytest
@@ -22,9 +22,12 @@ from orcapod.utils.arrow_utils import (
 )
 
 
-def _make_uuid_bytes() -> bytes:
-    """Return 16 UUID bytes for use as a record_id."""
-    return uuid.uuid4().bytes
+_ROW_NUMBERS = itertools.count()
+
+
+def _make_row_identifier() -> str:
+    """Return a row identifier text for use as a record_id."""
+    return f"row_{next(_ROW_NUMBERS)}"
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +45,7 @@ class TestAddSystemTagColumns:
             table,
             schema_hash="abc123",
             source_ids="src1",
-            record_ids=[_make_uuid_bytes(), _make_uuid_bytes()],
+            record_ids=[_make_row_identifier(), _make_row_identifier()],
         )
         # Should have original columns plus new system tag columns
         assert result.num_rows == 2
@@ -68,7 +71,11 @@ class TestAddSystemTagColumns:
                 table,
                 schema_hash="abc",
                 source_ids=["s1", "s2"],  # 2 source_ids for 3 rows
-                record_ids=[_make_uuid_bytes(), _make_uuid_bytes(), _make_uuid_bytes()],
+                record_ids=[
+                    _make_row_identifier(),
+                    _make_row_identifier(),
+                    _make_row_identifier(),
+                ],
             )
 
 
@@ -87,7 +94,7 @@ class TestAppendToSystemTags:
             table,
             schema_hash="abc",
             source_ids="src1",
-            record_ids=[_make_uuid_bytes(), _make_uuid_bytes()],
+            record_ids=[_make_row_identifier(), _make_row_identifier()],
         )
         result = append_to_system_tags(table_with_tags, value="::extra:0")
         # System tag column names should have changed (appended)
@@ -131,7 +138,7 @@ class TestSortSystemTagValues:
             table,
             schema_hash="abc",
             source_ids="src1",
-            record_ids=[_make_uuid_bytes(), _make_uuid_bytes()],
+            record_ids=[_make_row_identifier(), _make_row_identifier()],
         )
         result = sort_system_tag_values(table_with_tags)
         assert result.num_rows == table_with_tags.num_rows

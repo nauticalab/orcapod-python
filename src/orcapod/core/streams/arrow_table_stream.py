@@ -129,6 +129,10 @@ class ArrowTableStream(StreamBase):
         self._data_columns = tuple(
             c for c in table.column_names if c not in self._all_tag_columns
         )
+        # No user column name holds the source-info separator (ITL-1154).
+        schema_utils.require_names_without_separator(
+            (*self._tag_columns, *self._data_columns)
+        )
         self._table = table
         self._source_info_table = prefix_tables[constants.SOURCE_PREFIX]
         self._data_context_table = data_context_table

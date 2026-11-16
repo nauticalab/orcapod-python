@@ -27,9 +27,11 @@ useful kind is the **sink**, made with `@sink_pod`: it runs once for each row an
 which rows it has already handled, so a re-run does not repeat the effect for them. A row
 counts as handled once its function has returned and that has been recorded; if the process
 stops in between, the next run calls the function for that row again. A row is identified by
-its position unless its source names a column that is unique per row (`record_id_column`
-on `ArrowTableSource`), so reordering the rows of a source without one can make the sink
-handle them again.
+its source's name and its position, unless the source names key columns that are unique per
+row (`record_id_columns`). Reordering the rows of a source without them can make the sink
+handle them again, and so can a source whose name changes: an in-memory source without a
+`source_id` is named after its content, so adding a row renames it. For a sink, give the
+source both a `source_id` and key columns.
 
 ```python
 from orcapod import InvocationContext, sink_pod

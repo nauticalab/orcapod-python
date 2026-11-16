@@ -340,6 +340,24 @@ class PostgreSQLConnector:
                 )
                 return [row[0] for row in cur.fetchall()]
 
+    def current_location(self) -> tuple[str, str]:
+        """Return ``(current_database(), current_schema())`` of the connection.
+
+        Where the connector finds its tables: the first two parts of a table's
+        three-part name, ``database.schema.table``.
+
+        Returns:
+            The database and schema names.
+        """
+        with self._lock:
+            conn = self._require_open()
+            with conn.cursor() as cur:
+                cur.execute("SELECT current_database(), current_schema()")
+                row = cur.fetchone()
+        if row is None or row[0] is None or row[1] is None:
+            raise ValueError("the PostgreSQL connection has no current schema")
+        return str(row[0]), str(row[1])
+
     def get_pk_columns(self, table_name: str) -> list[str]:
         """Return primary-key column names in key-sequence order."""
         with self._lock:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import get_origin
+from typing import Any, get_origin
 
 import pyarrow as pa
 import pytest
@@ -263,16 +263,18 @@ class TestGroupByOrdering:
     def test_falls_back_to_record_id_when_key_covers_all_tags(self):
         """by covering every tag leaves no non-key tag to sort on.
 
-        record_id is a uuid5 of source content, so the order it imposes is not
-        human-predictable but IS stable across processes.  Asserted exactly --
-        sorting the result before comparing would make this blind to the very
-        ordering it exists to pin down.  The default source_id is an Arrow table
-        hash, so this order moved with starfix hash format 2 (ITL-910), and again
-        when the default became ``arrow_table:<label>:<hex>`` (ITL-957).
+        The record id is the row identifier (ITL-1154): here the key ``path``, so
+        the members follow ``{"path":"a"}`` < ``{"path":"b"}``, against emission
+        order. Asserted exactly -- sorting the result before comparing would make
+        this blind to the very ordering it exists to pin down.
         """
         table = pa.table({"subject": ["G", "G"], "path": ["b", "a"]})
         src = ArrowTableSource(
-            table, tag_columns=["subject"], infer_nullable=True, tag_only_columns=True
+            table,
+            tag_columns=["subject"],
+            record_id_columns="path",
+            infer_nullable=True,
+            tag_only_columns=True,
         )
         out = GroupBy(by=["subject"]).process(src)
         assert len(out.as_table()) == 1
@@ -282,11 +284,42 @@ class TestGroupByOrdering:
         """Duplicate tag tuples must not fall back to raw emission order."""
         table = pa.table({"s": ["G", "G"], "p": [1, 1], "path": ["z", "a"]})
         src = ArrowTableSource(
-            table, tag_columns=["s", "p"], infer_nullable=True, tag_only_columns=True
+            table,
+            tag_columns=["s", "p"],
+            record_id_columns="path",
+            infer_nullable=True,
+            tag_only_columns=True,
         )
         out = GroupBy(by=["s"]).process(src)
         # Emission order would give ["z", "a"]; record_id imposes ["a", "z"].
         assert out.as_table().column("path").to_pylist()[0] == ["a", "z"]
+
+    def test_source_id_breaks_ties_between_equal_record_ids(self):
+        """Equal record ids from two sources still have one member order (ITL-1154).
+
+        A record id names a row within its source only, so two members can share
+        one; the source-id column orders them. A raw stream with one system-tag
+        pair holding two sources stands in for such an input.
+        """
+        source_col = (
+            f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}h"
+        )
+        record_col = (
+            f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}h"
+        )
+
+        def grouped(order: list[int]) -> list[Any]:
+            rows = {
+                "g": ["G", "G"],
+                source_col: ["source_b", "source_a"],
+                record_col: ["row_0", "row_0"],
+                "v": [2, 1],
+            }
+            table = pa.table({k: [v[i] for i in order] for k, v in rows.items()})
+            stream = ArrowTableStream(table, tag_columns=["g"])
+            return GroupBy(by=["g"]).process(stream).as_table().column("v").to_pylist()
+
+        assert grouped([0, 1]) == grouped([1, 0]) == [[1, 2]]
 
     def test_join_fan_out_ties_broken_by_every_record_id_column(self):
         """A joined stream carries one record_id per canonical input position.
@@ -306,8 +339,9 @@ class TestGroupByOrdering:
         make the test blind to the ordering it exists to pin down.
         """
         left = ArrowTableSource(
-            pa.table({"k": ["t", "t"], "a": [10, 20]}),
+            pa.table({"k": ["t", "t"], "a": [10, 20], "id": ["y", "x"]}),
             tag_columns=["k"],
+            record_id_columns="id",
             infer_nullable=True,
             tag_only_columns=True,
         )

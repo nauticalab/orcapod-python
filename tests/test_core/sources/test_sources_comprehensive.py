@@ -41,7 +41,7 @@ from orcapod.core.sources import (
     SourceRegistry,
 )
 from orcapod.protocols.core_protocols import StreamProtocol
-from orcapod.types import Schema
+from orcapod.types import ContentHash, Schema
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +106,7 @@ class TestCSVSource:
 
     def test_source_id_defaults_to_file_path(self, csv_path):
         src = CSVSource(file_path=csv_path)
-        assert src.source_id == csv_path
+        assert src.source_id == f"csv:{csv_path}"
 
     def test_source_id_explicit_overrides_default(self, csv_path):
         src = CSVSource(file_path=csv_path, source_id="my_csv_name")
@@ -173,8 +173,8 @@ class TestCSVSource:
         assert isinstance(src.as_table(), pa.Table)
 
     def test_nonexistent_record_id_column_raises(self, csv_path):
-        with pytest.raises(ValueError, match="record_id_column"):
-            CSVSource(file_path=csv_path, record_id_column="no_such_col")
+        with pytest.raises(ValueError, match="record_id_columns"):
+            CSVSource(file_path=csv_path, record_id_columns="no_such_col")
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +197,9 @@ class TestDeltaTableSource:
         assert "id" in tag_keys
         assert "value" in data_keys
 
-    def test_source_id_defaults_to_directory_name(self, delta_path):
+    def test_source_id_defaults_to_path_as_passed(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path)
-        assert src.source_id == delta_path.name
+        assert src.source_id == f"delta_table:{delta_path}"
 
     def test_source_id_explicit_overrides_default(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, source_id="my_delta")
@@ -228,8 +228,8 @@ class TestDeltaTableSource:
         assert src.source_id == "delta_id"
 
     def test_nonexistent_record_id_column_raises(self, delta_path):
-        with pytest.raises(ValueError, match="record_id_column"):
-            DeltaTableSource(delta_table_path=delta_path, record_id_column="no_col")
+        with pytest.raises(ValueError, match="record_id_columns"):
+            DeltaTableSource(delta_table_path=delta_path, record_id_columns="no_col")
 
 
 @pytest.fixture
@@ -427,10 +427,11 @@ class TestListSourceAdditional:
             expected_tag_keys=["bucket"],
             tag_function_hash_mode="content",
         )
-        # Identity structure should include a non-empty hash
+        # The identity holds the source text's hash as a ContentHash, so it enters the
+        # source's hash with its label (ITL-1154).
         identity = src.identity_structure()
-        assert isinstance(identity[3], str)
-        assert len(identity[3]) > 0
+        assert isinstance(identity[3], ContentHash)
+        assert identity[3].method == "semantic_v1"
 
     def test_tag_function_hash_mode_name(self):
         """'name' mode uses the qualified name of the function."""
@@ -441,7 +442,9 @@ class TestListSourceAdditional:
             expected_tag_keys=["label"],
             tag_function_hash_mode="name",
         )
-        assert _tag_fn_for_signature.__qualname__ in src._tag_function_hash
+        tag_function_hash = src._tag_function_hash
+        assert isinstance(tag_function_hash, str)
+        assert _tag_fn_for_signature.__qualname__ in tag_function_hash
 
     def test_empty_list_raises(self):
         """An empty ListSource cannot build a valid stream."""

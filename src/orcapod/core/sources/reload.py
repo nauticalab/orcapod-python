@@ -65,9 +65,9 @@ def same_rows(held: pa.Table, read: pa.Table, *, ordered: bool) -> bool:
     """Return whether two tables hold the same rows, in the same order if ``ordered``.
 
     The rule for row order (developer, November 14, 2026, ITL-1102): a source whose
-    record ids are row positions (no ``record_id_column``) compares in order, so a
+    record ids are row positions (no ``record_id_columns``) compares in order, so a
     change of row order is a change and the ids are given again at once; a source
-    with a ``record_id_column`` compares in any order, so only content counts. A
+    with a ``record_id_columns`` compares in any order, so only content counts. A
     caller that cannot tell which rule applies passes ``ordered=True``: never assume.
     The model is deliberately simple; a fuller design is ITL-1103 / ITL-1104.
 

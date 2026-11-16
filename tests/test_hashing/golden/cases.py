@@ -24,6 +24,7 @@ Values that are volatile by design are deliberately not pinned:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import collections
@@ -35,6 +36,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.csv as pa_csv
 import pydantic
 
 import orcapod as op
@@ -648,7 +650,7 @@ def schema_source_stream_builder() -> dict[str, Any]:
         "named_source_id": {"source_id": "golden_source"},
         "record_id_column": {
             "source_id": "golden_source",
-            "record_id_column": "subject",
+            "record_id_columns": "subject",
         },
     }.items():
         result = builder.build(_builder_table(), tag_columns=["subject"], **kwargs)
@@ -657,6 +659,154 @@ def schema_source_stream_builder() -> dict[str, Any]:
         out[f"{variant}.source_id"] = result.source_id
         out[f"{variant}.system_tag_columns"] = list(result.system_tag_columns)
         out.update(_prefixed(variant, stream_summary(result.stream)))
+    return out
+
+
+@case("schema", "row_identifiers")
+def schema_row_identifiers() -> dict[str, Any]:
+    """Pin the row identifier forms of the record id (ITL-1154).
+
+    Position (``row_<n>``), and the canonical JSON of the key columns: one string key,
+    a composite key (string, then integer, in key order), and timestamp, date and
+    boolean keys. Each variant's stream summary pins the record ids and the
+    source-info tokens built on them.
+
+    Returns:
+        Each variant's stream summary.
+    """
+    import datetime as dt
+
+    from orcapod.core.sources import ArrowTableSource
+
+    table = pa.table(
+        {
+            "subject": pa.array(["s2", "s1"], pa.large_string()),
+            "trial": pa.array([7, 3], pa.int64()),
+            "start": pa.array(
+                [dt.datetime(2026, 1, 2, 3, 4, 5, 6), dt.datetime(1969, 12, 31)],
+                pa.timestamp("us"),
+            ),
+            "day": pa.array([dt.date(2026, 1, 2), dt.date(2000, 2, 29)], pa.date32()),
+            "ok": pa.array([True, False], pa.bool_()),
+            "value": pa.array([1.5, 2.5], pa.float64()),
+        }
+    )
+    out: dict[str, Any] = {}
+    for variant, key in {
+        "position": None,
+        "string_key": "subject",
+        "composite_key": ["subject", "trial"],
+        "timestamp_key": "start",
+        "date_key": "day",
+        "bool_key": "ok",
+    }.items():
+        source = ArrowTableSource(
+            table,
+            tag_columns=["subject"],
+            record_id_columns=key,
+            source_id="golden_rows",
+            data_context=_ctx(),
+            tag_only_columns=True,
+        )
+        out.update(_prefixed(variant, stream_summary(source)))
+    return out
+
+
+class GoldenPollingImpl:
+    """A polling source implementation whose identity is fixed (default source id).
+
+    Only ``identity`` is used by the golden case; the source is never polled.
+    """
+
+    def identity(self) -> Any:
+        return ("golden_polling", 1)
+
+    def to_config(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> GoldenPollingImpl:
+        raise NotImplementedError
+
+    def schema(self) -> Any:
+        return None
+
+    async def poll(self, cursor: Any = None) -> bool:
+        return False
+
+    async def fetch(self, cursor: Any = None) -> Any:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        return None
+
+
+@case("schema", "location_default_source_ids")
+def schema_location_default_source_ids() -> dict[str, Any]:
+    """Pin the default source id of every source built from a location (ITL-1154).
+
+    Each source reads ``_builder_table()``'s rows from a fixed relative location in a
+    temporary directory (``rows.csv``, a Delta folder ``golden_delta``, a SQLite table
+    ``golden_trials``), so no value depends on the machine. Pinned: the default
+    ``<kind>:<location>`` and the stream summary (record ids are ``row_<n>``, and the
+    primary key's JSON for SQLite). The polling source's default is the semantic hash of its
+    implementation's identity.
+
+    Returns:
+        Each source's default source id and stream summary.
+    """
+    import os
+    import sqlite3
+    import tempfile
+
+    from deltalake import write_deltalake
+
+    from orcapod.core.sources import (
+        CSVSource,
+        DeltaTableSource,
+        PollingSource,
+        SQLiteTableSource,
+    )
+
+    table = _builder_table()
+    out: dict[str, Any] = {}
+    previous = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(tmp)
+        try:
+            pa_csv.write_csv(table, "rows.csv")
+            write_deltalake("golden_delta", table)
+            # ``with conn`` commits; ``closing`` closes the file before the
+            # temporary directory is removed (Windows refuses an open file).
+            with contextlib.closing(sqlite3.connect("golden.sqlite")) as conn, conn:
+                conn.execute(
+                    "CREATE TABLE golden_trials "
+                    "(subject TEXT PRIMARY KEY, weight REAL NOT NULL, count INTEGER)"
+                )
+                conn.executemany(
+                    "INSERT INTO golden_trials VALUES (?, ?, ?)",
+                    list(zip(*table.to_pydict().values())),
+                )
+            sources = {
+                "csv": CSVSource(
+                    "rows.csv", tag_columns="subject", tag_only_columns=True
+                ),
+                "delta_table": DeltaTableSource(
+                    "golden_delta", tag_columns="subject", tag_only_columns=True
+                ),
+                "sqlite_table": SQLiteTableSource(
+                    "golden.sqlite", "golden_trials", tag_only_columns=True
+                ),
+            }
+            for kind, source in sources.items():
+                out[f"{kind}.source_id"] = source.source_id
+                out.update(_prefixed(kind, stream_summary(source)))
+        finally:
+            os.chdir(previous)
+    polling = PollingSource(
+        GoldenPollingImpl(), tag_columns="subject", record_id_columns="subject"
+    )
+    out["polling_source.source_id"] = polling.source_id
     return out
 
 
@@ -684,13 +834,105 @@ def schema_derived_source_tags_as_data() -> dict[str, Any]:
     for variant, kwargs in {
         "default_source_id": {},
         "named_source_id": {"source_id": "golden_derived"},
-        "record_id_column": {"record_id_column": "subject"},
+        "record_id_column": {"record_id_columns": "subject"},
     }.items():
         derived = DerivedSource(
             origin, tags_as_data={"subject": "subject_value"}, **kwargs
         )
         out[f"{variant}.source_id"] = derived.source_id
         out.update(_prefixed(variant, stream_summary(derived)))
+    return out
+
+
+@case("schema", "key_policy_identity")
+def schema_key_policy_identity() -> dict[str, Any]:
+    """Pin sources that differ only in key policy (developer, November 16, 2026, ITL-1154).
+
+    A root source's identity holds its resolved key columns (``()`` for the
+    position), so two sources with one ``source_id`` and schema that name their rows
+    differently have different content hashes and the same pipeline hash. Pinned per
+    source kind, for two key policies each: the content hash, and the pipeline hash
+    where the source has a schema without polling.
+
+    Returns:
+        Each variant's content hash and pipeline hash.
+    """
+    import sqlite3
+    import tempfile
+
+    from orcapod.core.sources import (
+        ArrowTableSource,
+        DerivedSource,
+        ListSource,
+        PollingSource,
+        SQLiteTableSource,
+    )
+
+    table = _builder_table()
+    out: dict[str, Any] = {}
+
+    def pin(variant: str, source: Any, *, pipeline: bool = True) -> None:
+        out[f"{variant}.content_hash"] = source.content_hash().to_string()
+        if pipeline:
+            out[f"{variant}.pipeline_hash"] = source.pipeline_hash().to_string()
+
+    for variant, key in {"position": None, "key": "subject"}.items():
+        arrow = ArrowTableSource(
+            table,
+            tag_columns=["subject"],
+            record_id_columns=key,
+            source_id="golden_keys",
+            data_context=_ctx(),
+            tag_only_columns=True,
+        )
+        pin(f"arrow_table.{variant}", arrow)
+        derived = DerivedSource(
+            arrow,
+            tags_as_data={"subject": "subject_value"},
+            source_id="golden_keys_derived",
+            record_id_columns=key,
+        )
+        pin(f"derived_tags_as_data.{variant}", derived)
+    for variant, key in {"position": None, "key": "element_index"}.items():
+        listed = ListSource(
+            "value",
+            [10, 20, 30],
+            source_id="golden_keys_list",
+            record_id_columns=key,
+            data_context=_ctx(),
+        )
+        pin(f"list.{variant}", listed)
+    for variant, key in {
+        "subject": "subject",
+        "subject_count": ["subject", "count"],
+    }.items():
+        polling = PollingSource(
+            GoldenPollingImpl(),
+            tag_columns="subject",
+            record_id_columns=key,
+            source_id="golden_keys_polling",
+        )
+        pin(f"polling_source.{variant}", polling, pipeline=False)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = f"{tmp}/golden.sqlite"
+        with contextlib.closing(sqlite3.connect(path)) as conn, conn:
+            conn.execute(
+                "CREATE TABLE golden_trials "
+                "(subject TEXT PRIMARY KEY, weight REAL NOT NULL, count INTEGER)"
+            )
+            conn.executemany(
+                "INSERT INTO golden_trials VALUES (?, ?, ?)",
+                list(zip(*table.to_pydict().values())),
+            )
+        for variant, key in {"primary_key": None, "position": ()}.items():
+            sqlite = SQLiteTableSource(
+                path,
+                "golden_trials",
+                record_id_columns=key,
+                source_id="golden_keys_sqlite",
+                tag_only_columns=True,
+            )
+            pin(f"sqlite_table.{variant}", sqlite)
     return out
 
 

@@ -18,7 +18,7 @@ from typing import Any
 TYPE_KEY = "__type__"
 """The key that carries the tag of an encoded value in the hashed JSON tree."""
 
-HASHER_TAGS = frozenset({"tuple", "set", "dict", "namedtuple", "hash"})
+HASHER_TAGS = frozenset({"tuple", "set", "frozenset", "dict", "namedtuple", "hash"})
 """Tags written by the structure hasher itself; a type handler may not use them.
 
 ``hash`` is the tag of a nested hash (ITL-945).

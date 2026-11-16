@@ -7,6 +7,7 @@ and the checker must name that column.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -14,6 +15,8 @@ from typing import Any, cast
 import pyarrow as pa
 import pytest
 
+from orcapod.core.operators.batch import BATCH_FOLD_LABEL
+from orcapod.core.operators.group_by import GROUP_BY_FOLD_LABEL
 from orcapod.core.operators import Batch, Join
 from orcapod.system_constants import constants
 
@@ -159,7 +162,10 @@ def test_a_rotated_folded_record_id_is_named() -> None:
     table = batched.as_table(all_info=True)
     tag_keys, data_keys = batched.keys()
     layout = Layout(
-        tag_keys=tag_keys, data_keys=data_keys, members=frozenset(tag_keys + data_keys)
+        tag_keys=tag_keys,
+        data_keys=data_keys,
+        members=frozenset(tag_keys + data_keys),
+        fold_label=BATCH_FOLD_LABEL,
     )
     checked = assert_rows_aligned(table, layout, sources.oracle, batched.data_context)
     assert_all_columns_checked(table, checked)
@@ -175,6 +181,39 @@ def test_a_rotated_folded_record_id_is_named() -> None:
         assert_rows_aligned(
             rotated(table, record_id), layout, sources.oracle, batched.data_context
         )
+
+
+def test_a_folded_source_id_with_the_other_fold_label_is_named() -> None:
+    """A Batch's folded source id carrying ``GroupBy``'s fold label is caught.
+
+    Only the label changes: the digest, the member list and the record ids stay right.
+    """
+    sources = make_sources("unique")
+    batched = Batch(2)(sources.a)
+    table = batched.as_table(all_info=True)
+    tag_keys, data_keys = batched.keys()
+    layout = Layout(
+        tag_keys=tag_keys,
+        data_keys=data_keys,
+        members=frozenset(tag_keys + data_keys),
+        fold_label=BATCH_FOLD_LABEL,
+    )
+    (source_id,) = [
+        c
+        for c in table.column_names
+        if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+    ]
+    values = cast("list[str]", table.column(source_id).to_pylist())
+    relabelled = [
+        GROUP_BY_FOLD_LABEL + value.removeprefix(BATCH_FOLD_LABEL) for value in values
+    ]
+    changed = table.set_column(
+        table.column_names.index(source_id),
+        table.field(source_id),
+        pa.array(relabelled, type=table.field(source_id).type),
+    )
+    with pytest.raises(AssertionError, match="folds no member list"):
+        assert_rows_aligned(changed, layout, sources.oracle, batched.data_context)
 
 
 def test_identity_comparison_ignores_row_order_but_not_cell_moves() -> None:
@@ -405,7 +444,10 @@ def test_exchanged_tokens_of_a_repeated_derived_value_are_named() -> None:
     oracle.derive("p", "A", lambda o: o.values["x"] % 2)
     origins = [o for o in oracle.origins if o.source_id == "A"]
     sep = constants.BLOCK_SEPARATOR
-    tokens = {o.record_id: f"fn{sep}{o.record_id.hex()}{sep}p" for o in origins}
+    tokens = {
+        o.record_id: f"fn{sep}{hashlib.md5(o.record_id.encode()).hexdigest()}{sep}p"
+        for o in origins
+    }
     table = pa.table(
         {
             "g": [o.values["g"] for o in origins],
@@ -440,7 +482,10 @@ def test_a_derived_token_is_checked_against_an_origin_known_from_another_column(
     oracle.derive("p", "A", lambda o: o.values["x"] % 2)
     origins = [o for o in oracle.origins if o.source_id == "A"]
     sep = constants.BLOCK_SEPARATOR
-    tokens = {o.record_id: f"fn{sep}{o.record_id.hex()}{sep}p" for o in origins}
+    tokens = {
+        o.record_id: f"fn{sep}{hashlib.md5(o.record_id.encode()).hexdigest()}{sep}p"
+        for o in origins
+    }
     table = pa.table(
         {
             "g": [o.values["g"] for o in origins],
@@ -557,7 +602,10 @@ def test_a_batch_table_repeating_one_batch_instead_of_another_is_named() -> None
     repeated = table.take([0, 0, 2])
     tag_keys, data_keys = batched.keys()
     layout = Layout(
-        tag_keys=tag_keys, data_keys=data_keys, members=frozenset(tag_keys + data_keys)
+        tag_keys=tag_keys,
+        data_keys=data_keys,
+        members=frozenset(tag_keys + data_keys),
+        fold_label=BATCH_FOLD_LABEL,
     )
     assert_rows_aligned(repeated, layout, sources.oracle, batched.data_context)
     with pytest.raises(AssertionError, match="are not the input rows"):
@@ -595,7 +643,10 @@ def test_a_folded_row_whose_members_only_the_tags_resolve_passes() -> None:
     ]
     bare = table.select([*tag_keys, "m", *pair])
     layout = Layout(
-        tag_keys=tag_keys, data_keys=("m",), members=frozenset((*tag_keys, "m"))
+        tag_keys=tag_keys,
+        data_keys=("m",),
+        members=frozenset((*tag_keys, "m")),
+        fold_label=BATCH_FOLD_LABEL,
     )
     assert any(None in (v or []) for v in bare.column("m").to_pylist())
     assert_rows_aligned(bare, layout, sources.oracle, batched.data_context)

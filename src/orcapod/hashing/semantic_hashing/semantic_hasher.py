@@ -27,7 +27,7 @@ recursive with ``_expand_structure``:
   - Primitive elements  → passed through as-is (become leaves in the tree)
   - Nested structures   → recurse via ``_expand_structure``
   - Everything else     → call ``hash_object``, embed the resulting
-                          the tagged digest of the ContentHash (no label)
+                          the tagged label and digest of the ContentHash
 
 The boundary between the two functions encodes a key semantic distinction:
 a ContentIdentifiableProtocol object X whose identity_structure returns [A, B]
@@ -47,7 +47,7 @@ structurally similar but type-distinct containers produce different hashes:
   dict       → {"__type__": "dict",      "items": [[k, v], ...]}  # any other key; sorted pairs
   tuple      → {"__type__": "tuple",     "items": [...]}
   set        → {"__type__": "set",       "items": [...]}   # items sorted by canonical JSON
-  frozenset  → {"__type__": "set",       "items": [...]}   # same tag as set
+  frozenset  → {"__type__": "frozenset", "items": [...]}   # its own type; sorted as set
   namedtuple → {"__type__": "namedtuple","name": "T",
                 "fields": [[name, value], ...]}             # declared field order
 
@@ -95,18 +95,25 @@ the label.
 def _nested_hash(content_hash: ContentHash) -> dict[str, str]:
     """Return the form in which a hash enters the structure that contains it.
 
-    Only the digest is fed into the enclosing hash. The label names the algorithm that
-    produced the digest and is never part of a hash input, so renaming a label changes
-    no hash. The tag keeps a nested hash apart from a string that happens to equal its
-    hex digest.
+    A hash fed into another hash carries its label (ITL-1154): the label names the
+    algorithm that produced the digest, so two algorithms that happen to produce the
+    same digest (a file's ``sha256`` over bytes that are some value's canonical JSON,
+    and that value's ``semantic_v1``) never feed the same input into the enclosing
+    hash. A label changes only when its algorithm's digests change, so this costs no
+    stability. The tag keeps a nested hash apart from a string or a dict that happens
+    to equal its fields.
 
     Args:
         content_hash: The hash of a nested element.
 
     Returns:
-        ``{"__type__": "hash", "digest": "<hex digest>"}``.
+        ``{"__type__": "hash", "label": "<label>", "digest": "<hex digest>"}``.
     """
-    return {"__type__": "hash", "digest": content_hash.to_hex()}
+    return {
+        "__type__": "hash",
+        "label": content_hash.method,
+        "digest": content_hash.to_hex(),
+    }
 
 
 _MEMADDR_RE = re.compile(r" at 0x[0-9a-fA-F]+")
@@ -260,8 +267,8 @@ class SemanticAwarePythonHasher:
         Only called for structural types (list, tuple, dict, set, frozenset,
         namedtuple).  Within nested structures this function recurses into
         itself for container elements and calls ``hash_object`` for all
-        non-container, non-primitive elements, embedding the resulting
-        the tagged digest of the ContentHash (no label).
+        non-container, non-primitive elements, embedding the tagged label and
+        digest of the resulting ContentHash.
 
         Primitives are passed through as-is.
 
@@ -278,7 +285,7 @@ class SemanticAwarePythonHasher:
         if isinstance(obj, (type(None), bool, int, float, str)):
             return obj
 
-        # ContentHash is a terminal leaf -- embed its digest, never its label.
+        # ContentHash is a terminal leaf -- embed its label and digest.
         if isinstance(obj, ContentHash):
             return _nested_hash(obj)
 
@@ -319,8 +326,9 @@ class SemanticAwarePythonHasher:
             # Sort by each item's canonical JSON text: a total order that never
             # ties two distinct items ({1, "1"} sorts as [1, "1"]), so the order,
             # and the hash, never depend on set iteration order (PYTHONHASHSEED).
+            # A frozenset is a type of its own (ITL-1154): tagged apart from set.
             return {
-                "__type__": "set",
+                "__type__": "frozenset" if isinstance(obj, frozenset) else "set",
                 "items": sorted(expanded_items, key=_canonical_json),
             }
 
@@ -346,7 +354,7 @@ class SemanticAwarePythonHasher:
         if _is_structure(obj):
             return self._expand_structure(obj, _visited, resolver=resolver)
 
-        # Non-structure, non-primitive: hash independently and embed the digest.
+        # Non-structure, non-primitive: hash independently and embed the hash.
         return _nested_hash(self.hash_object(obj, resolver=resolver))
 
     def _expand_mapping(

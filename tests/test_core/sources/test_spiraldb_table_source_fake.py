@@ -280,19 +280,19 @@ class TestSourceId:
         )
         return (
             source.content_hash().to_string(),
-            table.column(record_id)[0].as_py().hex(),
+            table.column(record_id)[0].as_py(),
             table.column("_source_sex")[0].as_py(),
         )
 
-    # The row token of subject "m1": the Arrow hash of its primary key (ITL-186).
-    _M1 = "arrow_v1:00000290f26c354e2b6a1683a500d4a3dd8dc0a10d8db76aa7d2c804fc908bd44f749e"
+    # The record id of subject "m1": the canonical JSON of its primary key (ITL-1154).
+    _M1 = '{"subject_id":"m1"}'
 
     def test_default_source_id_is_project_dataset_table_and_table_id(
         self, two_projects
     ):
         """The default source id is the project, dataset, table and table id."""
         source = SpiralDBTableSource("edi-sample-a", "subject", tag_only_columns=True)
-        expected = f"edi-sample-a/default.subject@{source.table_id}"
+        expected = f"spiraldb_table:edi-sample-a.default.subject@{source.table_id}"
         assert source.source_id == expected
         assert self._identity(source)[2] == f"{expected}::{self._M1}::sex"
 
@@ -301,8 +301,14 @@ class TestSourceId:
         a = SpiralDBTableSource("edi-sample-a", "subject", tag_only_columns=True)
         b = SpiralDBTableSource("edi-sample-b", "subject", tag_only_columns=True)
         assert a.pipeline_hash() == b.pipeline_hash()  # schema only
-        identity_a, identity_b = self._identity(a), self._identity(b)
-        assert all(x != y for x, y in zip(identity_a, identity_b, strict=True))
+        (hash_a, rid_a, token_a), (hash_b, rid_b, token_b) = (
+            self._identity(a),
+            self._identity(b),
+        )
+        # The record id names the row by its key; the source id tells them apart.
+        assert rid_a == rid_b
+        assert hash_a != hash_b
+        assert token_a != token_b
 
     def test_unrecorded_table_hashes_are_unchanged(self, two_projects):
         # A table without a nullability record reads exactly as before ITL-936: every
@@ -321,12 +327,12 @@ class TestSourceId:
             Schema({"sex": str | None}),
         )
         assert self._identity(source) == (
-            "semantic_v1:896d8f323df90ee26e6a38f1eb730be7a9de343fd1c852dbf0f7655b360bc7ff",
-            "1493a9f4caa95b7ca33dcf61e15d5eca",
+            "semantic_v1:742aca7f6359844b4999e5bce29fda0769dca57e737d585e9ab4020c6dc6147c",
+            self._M1,
             f"subject::{self._M1}::sex",
         )
         assert source.pipeline_hash().to_string() == (
-            "semantic_v1:cc6c553ba26af325cd96432edb5bc4ea5453427594965cca7e85a66a420e87f1"
+            "semantic_v1:657ec561c0408591d01265e8e3a4e70223d1301634f8c3fc4edced2be6f34948"
         )
         row_hash = source.as_table(columns={"content_hash": True}).column(
             "_content_hash"
@@ -345,12 +351,12 @@ class TestSourceId:
             "edi-sample-a", "subject", source_id="subject", tag_only_columns=True
         )
         assert self._identity(source) == (
-            "semantic_v1:a06a417294cabb0625e47a9357ebf9cc8183576b17498282901bd68d0f02e820",
-            "1493a9f4caa95b7ca33dcf61e15d5eca",
+            "semantic_v1:6f4e8a26863d5efe7ccdc6d0859624960c9a6c6e36a0ca94ce62e48b68149dcc",
+            self._M1,
             f"subject::{self._M1}::sex",
         )
         assert source.pipeline_hash().to_string() == (
-            "semantic_v1:2e5095e09a558132e652e106af1dca4abf8654285409fc4db63a66ddc63a9f94"
+            "semantic_v1:762a06a391948ba159c51df90475d609d745b9bf054e2b040f42495513b5498a"
         )
 
 

@@ -23,6 +23,14 @@ else:
 from orcapod.types import Schema
 
 
+BATCH_FOLD_LABEL = "batch_v1"
+"""Label of the folds of ``Batch``: the folded source id and record id are
+``"batch_v1:<hex>"`` (ITL-1154). It names the operation; the procedure is
+``arrow_utils.fold_system_tag_values``. Change it only when this operation's fold
+would give an existing member list a different value.
+"""
+
+
 class Batch(UnaryOperator):
     """
     Base class for all operators.
@@ -86,7 +94,9 @@ class Batch(UnaryOperator):
             {
                 **{c: [m[c] for m in members] for c in member_columns},
                 **{
-                    c: arrow_utils.fold_system_tag_values(c, [m[c] for m in members])
+                    c: arrow_utils.fold_system_tag_values(
+                        [m[c] for m in members], label=BATCH_FOLD_LABEL
+                    )
                     for c in system_tag_columns
                 },
             }

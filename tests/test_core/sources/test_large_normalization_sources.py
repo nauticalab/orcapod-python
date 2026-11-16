@@ -190,7 +190,10 @@ class _Impl:
 @pytest.mark.parametrize("as_arrow", [False, True])
 def test_polling_source_is_large(as_arrow: bool) -> None:
     source = PollingSource(
-        _Impl(as_arrow), tag_columns="t", polling_config=PollingConfig(duration=0.01)
+        _Impl(as_arrow),
+        tag_columns="t",
+        record_id_columns="t",
+        polling_config=PollingConfig(duration=0.01),
     )
     assert non_large_columns(source.as_table(columns=ALL_COLUMNS)) == []
 

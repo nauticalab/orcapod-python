@@ -139,10 +139,10 @@ def main() -> None:
 
     print(f"    alice {source_id_col!r}  = {alice_sys[source_id_col][0].as_py()!r}")
     print(
-        f"    alice {record_id_col!r}  = {alice_sys[record_id_col][0].as_py().hex()!r}  (UUID v5 bytes)"
+        f"    alice {record_id_col!r}  = {alice_sys[record_id_col][0].as_py()!r}  (row identifier text)"
     )
     print(
-        f"    bob   {record_id_col!r}  = {bob_sys[record_id_col][0].as_py().hex()!r}  (UUID v5 bytes)"
+        f"    bob   {record_id_col!r}  = {bob_sys[record_id_col][0].as_py()!r}  (row identifier text)"
     )
 
     sub("Site 6 — Post-join system tag column names (topology suffix appended)")
@@ -252,8 +252,9 @@ def main() -> None:
     # Edge (u_hash, v_hash): u is upstream → v is downstream.
     # Leaf = node whose hash does NOT appear as the upstream (u) in any edge.
     upstream_set = {u_hash for u_hash, _ in job._graph_edges}
+    # Each leaf hash enters with its label, as PipelineJob.run() feeds it (ITL-1154).
     leaf_hashes = sorted(
-        n.content_hash().to_hex()
+        n.content_hash().to_string()
         for h, n in job._persistent_node_map.items()
         if h not in upstream_set and hasattr(n, "content_hash")
     )

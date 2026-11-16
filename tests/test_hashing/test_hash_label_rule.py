@@ -12,8 +12,12 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import os
 import re
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -31,6 +35,7 @@ from orcapod.contexts import get_default_context
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.sources import CachedSource
 from orcapod.core.sources.derived_source import DerivedSource
+from orcapod.core.sources.list_source import ListSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.hashing import directory_hashers, pandas_value_hash
@@ -43,15 +48,17 @@ from orcapod.hashing.semantic_hashing.builtin_handlers import (
     PolarsDataFrameHandler,
     PolarsSeriesHandler,
 )
-from orcapod.operators import Join
+from orcapod.operators import Batch, GroupBy, Join
+from orcapod.pipeline.observer import NoOpObserver
 from orcapod.sources import DictSource
 from orcapod.types import CacheMode, ContentHash
-from tests.test_hashing.golden import cases
+from tests.test_hashing.golden import label_feeds
 
 LABEL_FORMAT = re.compile(r"[a-z][a-z0-9_]*_v[1-9][0-9]*")
 BARE_SHA256 = re.compile(r"[0-9a-f]{64}")
 # A starfix digest: 3 bytes of hash format number, then SHA-256.
 ARROW_DIGEST_BYTES = 35
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @function_pod(output_keys="doubled")
@@ -99,6 +106,12 @@ class TestLabelFormat:
         hasher = get_default_context().arrow_hasher
         assert hasher.hasher_id == "arrow_v1"
         assert hasher.hash_table(pa.table({"x": [1]})).method == "arrow_v1"
+
+    def test_ordered_arrow_hash_has_its_own_label(self) -> None:
+        """The order-including Arrow hash is a procedure of its own: ``arrow_ordered_v1``."""
+        hasher = get_default_context().arrow_hasher
+        table = pa.table({"x": [1]})
+        assert hasher.hash_table_ordered(table).method == "arrow_ordered_v1"
 
     def test_value_hash_labels(self, tmp_path: Path) -> None:
         """Array, pandas, Polars expression and directory values carry their own label."""
@@ -150,20 +163,31 @@ class TestLabelFormat:
 
 
 # ---------------------------------------------------------------------------
-# Rule 6: a label never enters a hash computation
+# Rule 1 (ITL-1154): a hash fed into another hash carries its label
 # ---------------------------------------------------------------------------
 
 
-class TestNestedHashForm:
-    """Rule 6 in the structure hasher: a nested hash contributes its digest only."""
+class TestNestedHashCarriesItsLabel:
+    """In the structure hasher a nested hash enters as its label and digest."""
 
-    def test_nested_hash_contributes_its_digest_only(self) -> None:
-        """Two nested hashes that differ only in label give the same enclosing hash."""
+    def test_nested_hash_is_its_tagged_label_and_digest(self) -> None:
+        """A nested hash is ``{"__type__": "hash", "label": ..., "digest": ...}``."""
+        hasher = get_default_context().semantic_hasher
+        digest = bytes(range(32))
+        tree = ["x", {"__type__": "hash", "digest": digest.hex(), "label": "one_v1"}]
+        text = json.dumps(tree, sort_keys=True, separators=(",", ":"))
+        expected = hashlib.sha256(text.encode("utf-8")).digest()
+        assert hasher.hash_object(["x", ContentHash("one_v1", digest)]).digest == (
+            expected
+        )
+
+    def test_nested_hashes_that_differ_only_in_label_differ(self) -> None:
+        """Two nested hashes with one digest and different labels give different hashes."""
         hasher = get_default_context().semantic_hasher
         digest = bytes(range(32))
         one = hasher.hash_object(["x", ContentHash("one_v1", digest)])
         other = hasher.hash_object(["x", ContentHash("other_v7", digest)])
-        assert one == other
+        assert one != other
 
     def test_nested_hash_differs_from_its_hex_string(self) -> None:
         """A nested hash and a string equal to its hex digest hash differently."""
@@ -181,139 +205,148 @@ class TestNestedHashForm:
         assert one != other
 
 
-RENAMED = {
-    "semantic_v1": "renamedsemantic_v9",
-    "arrow_v1": "renamedarrow_v9",
-    "ndarray_v1": "renamedndarray_v9",
-    "pandas_dataframe_v1": "renamedpandasdataframe_v9",
-    "pandas_series_v1": "renamedpandasseries_v9",
-    "polars_expr_v1": "renamedpolarsexpr_v9",
-    "polars_dataframe_v1": "renamedpolarsdataframe_v9",
-    "polars_series_v1": "renamedpolarsseries_v9",
-    "directory_v1": "renameddirectory_v9",
-}
-
-
 @pytest.fixture
-def renamed_labels(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, str]]:
+def renamed_labels() -> Iterator[dict[str, str]]:
     """Rename every label in place, for the duration of one test.
 
-    There is no public way to rename a label (each is defined once, in code), so this
-    fixture sets the non-public definitions directly.
+    ``label_feeds.rename_labels`` sets the non-public definitions (there is no public way
+    to rename a label); the fixture restores them afterwards.
     """
+    from orcapod.hashing import arrow_hashers
+
     context = get_default_context()
-    # Non-public: the label of the default context's two hashers.
-    monkeypatch.setattr(
-        context.semantic_hasher, "_hasher_id", RENAMED["semantic_v1"], raising=True
-    )
-    monkeypatch.setattr(
-        context.arrow_hasher, "_hasher_id", RENAMED["arrow_v1"], raising=True
-    )
-    monkeypatch.setattr(NumpyArrayHandler, "HASH_LABEL", RENAMED["ndarray_v1"])
-    # The pandas labels: the definition, and the handlers that carry it.
-    monkeypatch.setattr(
-        pandas_value_hash,
-        "PANDAS_DATAFRAME_HASH_LABEL",
-        RENAMED["pandas_dataframe_v1"],
-    )
-    monkeypatch.setattr(
-        pandas_value_hash, "PANDAS_SERIES_HASH_LABEL", RENAMED["pandas_series_v1"]
-    )
-    monkeypatch.setattr(
-        PandasDataFrameHandler, "HASH_LABEL", RENAMED["pandas_dataframe_v1"]
-    )
-    monkeypatch.setattr(PandasSeriesHandler, "HASH_LABEL", RENAMED["pandas_series_v1"])
-    monkeypatch.setattr(
-        polars_expr, "POLARS_EXPR_HASH_LABEL", RENAMED["polars_expr_v1"]
-    )
-    monkeypatch.setattr(
-        PolarsDataFrameHandler, "HASH_LABEL", RENAMED["polars_dataframe_v1"]
-    )
-    monkeypatch.setattr(PolarsSeriesHandler, "HASH_LABEL", RENAMED["polars_series_v1"])
-    monkeypatch.setattr(
-        directory_hashers, "DIRECTORY_HASH_LABEL", RENAMED["directory_v1"]
-    )
-    yield RENAMED
+    saved: list[tuple[object, str, object]] = [
+        (context.semantic_hasher, "_hasher_id", context.semantic_hasher.hasher_id),
+        (context.arrow_hasher, "_hasher_id", context.arrow_hasher.hasher_id),
+        (NumpyArrayHandler, "HASH_LABEL", NumpyArrayHandler.HASH_LABEL),
+        (PandasDataFrameHandler, "HASH_LABEL", PandasDataFrameHandler.HASH_LABEL),
+        (PandasSeriesHandler, "HASH_LABEL", PandasSeriesHandler.HASH_LABEL),
+        (PolarsDataFrameHandler, "HASH_LABEL", PolarsDataFrameHandler.HASH_LABEL),
+        (PolarsSeriesHandler, "HASH_LABEL", PolarsSeriesHandler.HASH_LABEL),
+    ]
+    try:  # torch is optional
+        from orcapod.hashing.semantic_hashing.torch_handler import TorchTensorHandler
+    except ImportError:
+        pass
+    else:
+        saved.append((TorchTensorHandler, "HASH_LABEL", TorchTensorHandler.HASH_LABEL))
+    for module, name in (
+        (pandas_value_hash, "PANDAS_DATAFRAME_HASH_LABEL"),
+        (pandas_value_hash, "PANDAS_SERIES_HASH_LABEL"),
+        (polars_expr, "POLARS_EXPR_HASH_LABEL"),
+        (directory_hashers, "DIRECTORY_HASH_LABEL"),
+        (arrow_hashers, "ARROW_ORDERED_HASH_LABEL"),
+    ):
+        if hasattr(module, name):
+            saved.append((module, name, getattr(module, name)))
+    try:
+        label_feeds.rename_labels()
+        yield label_feeds.RENAMED
+    finally:
+        for owner, name, value in saved:
+            setattr(owner, name, value)
 
 
-# Golden cases built on a default source id (no ``source_id`` given): "<group>:<case>.".
-DEFAULT_ID_CASES = (
-    "schema:source_stream_builder.default_source_id.",
-    "pipeline:default_source_ids.",
-    # A ``tags_as_data`` source with no ``source_id`` (ITL-939).
-    "schema:derived_source_tags_as_data.default_source_id.",
-    "schema:derived_source_tags_as_data.record_id_column.",
-)
+_HEX_RUN = re.compile(r"[0-9a-f]{16,}")
 
 
-def _fresh_golden_values() -> str:
-    """Every pinned hash, path and column name, computed now, as one JSON text.
+def _subprocess_env() -> dict[str, str]:
+    """The environment for a fresh interpreter: ``src`` on ``PYTHONPATH``.
 
-    Hash caches of the golden cases' module-level function pods are keyed by the label of
-    the hasher that filled them, so a renamed label is computed afresh.
+    The child does not inherit pytest.ini's ``pythonpath = src``, so it is passed
+    explicitly rather than relying on orcapod being installed.
     """
-    return json.dumps(cases.compute_all(), sort_keys=True, indent=0)
+    env = dict(os.environ)
+    src = str(PROJECT_ROOT / "src")
+    env["PYTHONPATH"] = (
+        os.pathsep.join([src, env["PYTHONPATH"]]) if env.get("PYTHONPATH") else src
+    )
+    return env
 
 
-class TestRenamingALabelChangesNoDigest:
-    """Rule 6 end to end: renamed labels leave every digest and name unchanged."""
+def _run_module(side: str) -> Any:
+    """Run ``label_feeds`` in a fresh process and return its JSON output."""
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.test_hashing.golden.label_feeds", side],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=PROJECT_ROOT,
+        env=_subprocess_env(),
+    )
+    return json.loads(result.stdout)
 
-    def test_every_pinned_value_keeps_its_digest(
-        self, request: pytest.FixtureRequest
-    ) -> None:
-        """Every golden value, recomputed under renamed labels, differs in label text only.
 
-        The one exception is what follows from a default source id (rule 5a).
+def _by_name_pattern(values: dict[str, Any]) -> dict[str, list[tuple[str, str]]]:
+    """Group entries by their name with every hex run replaced, so moved names align."""
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    for name, value in values.items():
+        key = _HEX_RUN.sub("<H>", name)
+        grouped.setdefault(key, []).append((name, json.dumps(value, sort_keys=True)))
+    return {key: sorted(entries) for key, entries in grouped.items()}
+
+
+class TestRenamingALabelMovesEveryHashItFeeds:
+    """Rule 1 end to end: renaming a label moves exactly the hashes it feeds."""
+
+    def test_golden_values_move_exactly_where_a_label_feeds_them(self) -> None:
+        """A golden value moves under renamed labels if and only if a label feeds it.
+
+        One fresh process computes every golden value and records, for each digest it
+        produces, the hashes fed into it (``label_feeds.record_feeds``); another computes
+        every golden value under renamed labels. A value is fed when a digest in its name
+        or value embeds a renamed label's hash, directly or through other digests.
         """
-        before = _fresh_golden_values()
-        renamed: dict[str, str] = request.getfixturevalue("renamed_labels")
-        after = _fresh_golden_values()
+        recorded = _run_module("feeds")
+        renamed: dict[str, dict[str, Any]] = _run_module("renamed")
+        values: dict[str, dict[str, Any]] = recorded["values"]
+        feeds: dict[str, list[list[str]]] = recorded["feeds"]
 
-        # The labels did change ...
-        assert RENAMED["semantic_v1"] in after
-        assert RENAMED["arrow_v1"] in after
-        assert RENAMED["pandas_dataframe_v1"] in after
-        # ... and nothing else: putting the old labels back gives the old values.
-        restored = after
-        for old, new in renamed.items():
-            restored = restored.replace(new, old)
-        before_values: dict[str, dict[str, Any]] = json.loads(before)
-        restored_values: dict[str, dict[str, Any]] = json.loads(restored)
-        moved = [
-            f"{group}:{entry}"
-            for group, entries in before_values.items()
-            for entry, value in entries.items()
-            if restored_values[group].get(entry) != value
-        ]
-        # Rule 5a, the stated exception: a default source id built from a hash is a
-        # name that holds the label (``<source kind>:<algorithm label>:<hex>``), and
-        # the name is an input of the source's content hash and of its record ids.
-        # So a renamed label moves those for a source with no given ``source_id``
-        # (developer, November 11, 2026; ITL-957), and for nothing else. The golden
-        # cases with such an id are exactly ``DEFAULT_ID_CASES``.
-        unexpected = [
-            entry
-            for entry in moved
-            if not (
-                entry.startswith(DEFAULT_ID_CASES)
-                and (entry.endswith(".content_hash") or "._tag_record_id::" in entry)
+        memo: dict[str, bool] = {}
+
+        def moves(digest: str) -> bool:
+            if digest not in memo:
+                memo[digest] = False
+                memo[digest] = any(
+                    label in label_feeds.RENAMED or moves(inner)
+                    for label, inner in feeds.get(digest, [])
+                )
+            return memo[digest]
+
+        def fed(run: str) -> bool:
+            return (
+                any(
+                    moves(digest)
+                    for digest in feeds
+                    if digest.startswith(run) and len(run) >= 16
+                )
+                if len(run) < 64
+                else moves(run)
             )
-        ]
-        assert not unexpected, (
-            f"{len(unexpected)} values depend on a label: {unexpected[:10]}"
-        )
-        cases_that_moved = {
-            case
-            for case in DEFAULT_ID_CASES
-            for entry in moved
-            if entry.startswith(case)
-        }
-        assert cases_that_moved == set(DEFAULT_ID_CASES), cases_that_moved
 
-    def test_directory_hash_keeps_its_digest(
+        moved: set[str] = set()
+        reached: set[str] = set()
+        for group, entries in values.items():
+            before = _by_name_pattern(entries)
+            after = _by_name_pattern(renamed[group])
+            for key in before.keys() | after.keys():
+                if before.get(key) != after.get(key):
+                    moved.add(f"{group}:{key}")
+                runs = [
+                    run
+                    for name, value in before.get(key, [])
+                    for run in _HEX_RUN.findall(name + value)
+                ]
+                if any(fed(run) for run in runs):
+                    reached.add(f"{group}:{key}")
+        assert moved, "renaming the labels moved no golden value"
+        assert sorted(moved - reached) == [], "moved, but no label feeds it"
+        assert sorted(reached - moved) == [], "a label feeds it, but it did not move"
+
+    def test_nested_directory_hash_moves(
         self, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
-        """No golden case reaches ``directory_v1``, so it is checked here."""
+        """A structure holding a ``Directory`` moves when ``directory_v1`` is renamed."""
         (tmp_path / "sub").mkdir()
         (tmp_path / "a.txt").write_text("alpha")
         (tmp_path / "sub" / "b.txt").write_text("beta")
@@ -327,21 +360,162 @@ class TestRenamingALabelChangesNoDigest:
 
         assert before.method == "directory_v1"
         assert after.method == renamed["directory_v1"]
+        # The directory hash itself embeds no renamed label: its digest stays.
         assert after.digest == before.digest
-        assert nested_after.digest == nested_before.digest
+        # The structure it is fed into moves.
+        assert nested_after.digest != nested_before.digest
 
-    def test_operator_cache_and_cached_source_keys_keep_their_digest(
+    def test_directory_entry_takes_the_file_hash_with_its_label(
+        self, tmp_path: Path
+    ) -> None:
+        """A directory's file entry embeds ``b"sha256:" + file digest`` (D2)."""
+        (tmp_path / "a.txt").write_bytes(b"alpha")
+        file_digest = hashlib.sha256(b"alpha").digest()
+        entry = hashlib.sha256(b"file\x00a.txt\x00" + b"sha256:" + file_digest).digest()
+        expected = hashlib.sha256(b"directory\x00" + entry).digest()
+        hasher = get_default_context().semantic_hasher
+        assert hasher.hash_object(op.Directory(tmp_path)).digest == expected
+
+    def test_logical_type_cell_moves_with_the_value_label(
         self, request: pytest.FixtureRequest
     ) -> None:
-        """Row keys of the two cache tables keep their digest under a renamed Arrow label."""
+        """A table with an array column moves when ``ndarray_v1`` is renamed."""
+        context = get_default_context()
+        stream = DictSource(
+            data=[{"id": "a", "arr": np.arange(3)}],
+            tag_columns=["id"],
+            source_id="label_rule_arrays",
+            tag_only_columns=True,
+        )
+        table = stream.as_table()
+        before = context.arrow_hasher.hash_table(table)
+        _ = request.getfixturevalue("renamed_labels")
+        after = context.arrow_hasher.hash_table(table)
+        assert after.digest != before.digest
+
+    @pytest.mark.parametrize(
+        "value",
+        [pd.DataFrame({"a": [1, 2]}), pd.Series([1, 2], name="a")],
+        ids=["dataframe", "series"],
+    )
+    def test_pandas_value_moves_with_the_ordered_arrow_label(
+        self, value: Any, request: pytest.FixtureRequest
+    ) -> None:
+        """A pandas value hash takes the ordered Arrow digest with its label (D1)."""
+        hasher = get_default_context().semantic_hasher
+        before = hasher.hash_object(value)
+        _ = request.getfixturevalue("renamed_labels")
+        assert hasher.hash_object(value).digest != before.digest
+
+    def test_plain_table_keeps_its_digest(self, request: pytest.FixtureRequest) -> None:
+        """A table of plain columns embeds no hash: a renamed label leaves its digest."""
+        context = get_default_context()
+        table = pa.table({"id": ["a", "b"], "x": [1, 2]})
+        before = context.arrow_hasher.hash_table(table)
+        _ = request.getfixturevalue("renamed_labels")
+        after = context.arrow_hasher.hash_table(table)
+        assert after.digest == before.digest
+
+    def test_entry_ids_move_with_the_data_hash_label(
+        self, request: pytest.FixtureRequest
+    ) -> None:
+        """Pipeline entry ids move when the Arrow label of the input data hash is renamed."""
+
+        def entry_ids() -> list[bytes]:
+            _, store = _run_job()
+            path = next(
+                p
+                for p in store.list_sources()
+                if "label_rule_double" in p and "_result" not in p
+            )
+            records = store.get_all_records(path)
+            assert records is not None
+            return sorted(
+                ContentHash.from_prefixed_digest(value).digest
+                for value in cast(
+                    "list[bytes]",
+                    records.column("__pipeline_base_entry_id").to_pylist(),
+                )
+            )
+
+        before = entry_ids()
+        _ = request.getfixturevalue("renamed_labels")
+        after = entry_ids()
+        assert len(before) == 2
+        assert len(after) == 2
+        assert set(after).isdisjoint(before)
+
+    def test_operator_cache_and_cached_source_keys_move(
+        self, request: pytest.FixtureRequest
+    ) -> None:
+        """Both cache row keys move under renamed labels.
+
+        The operator-cache row embeds the node content hash; both rows carry system-tag
+        column names that hold the schema digest, which moves with the structure label.
+        """
         before = _stored_row_keys()
         renamed: dict[str, str] = request.getfixturevalue("renamed_labels")
         after = _stored_row_keys()
         prefix_old, prefix_new = b"arrow_v1:", renamed["arrow_v1"].encode() + b":"
-        assert [key.removeprefix(prefix_old) for key in before] == [
-            key.removeprefix(prefix_new) for key in after
-        ]
+        before_digests = [key.removeprefix(prefix_old) for key in before]
+        after_digests = [key.removeprefix(prefix_new) for key in after]
         assert all(key.startswith(prefix_new) for key in after)
+        assert len(before_digests) == 4
+        assert len(after_digests) == 4
+        assert set(after_digests).isdisjoint(before_digests)
+
+    def test_run_snapshot_moves_with_the_structure_label(
+        self, request: pytest.FixtureRequest
+    ) -> None:
+        """The snapshot in the run URI is built from labelled sink hashes."""
+
+        class _Uri(NoOpObserver):
+            uri: str = ""
+
+            def on_run_start(self, run_id: str, pipeline_uri: str = "") -> None:
+                del run_id
+                type(self).uri = pipeline_uri
+
+        def snapshot() -> str:
+            job = PipelineJob(
+                name="label_rule_snapshot", database=InMemoryArrowDatabase()
+            )
+            with job:
+                joined = Join(label="joined")(_source(), _other_source())
+                label_rule_double.pod(joined, label="double")
+            job.run(observer=_Uri())
+            return _Uri.uri.split("@")[1]
+
+        before = snapshot()
+        _ = request.getfixturevalue("renamed_labels")
+        after = snapshot()
+        assert BARE_SHA256.fullmatch(before.ljust(64, "0"))
+        assert after != before
+
+    def test_list_source_tag_function_hash_carries_its_label(
+        self, request: pytest.FixtureRequest
+    ) -> None:
+        """A ``ListSource`` hashing its tag function's source text embeds that hash."""
+
+        def content_hash() -> bytes:
+            source = ListSource(
+                name="item",
+                data=[1, 2],
+                tag_function=_label_rule_tag,
+                expected_tag_keys=["index"],
+                tag_function_hash_mode="content",
+            )
+            return source.content_hash().digest
+
+        before = content_hash()
+        _ = request.getfixturevalue("renamed_labels")
+        assert content_hash() != before
+
+
+def _label_rule_tag(element: int, index: int) -> dict[str, int]:
+    """Tag function of the ``ListSource`` test: the element's position."""
+    del element
+    return {"index": index}
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +657,39 @@ def _stored_row_keys() -> list[bytes]:
 class TestStoredHashValuesCarryTheirLabel:
     """Rule 4: a hash stored as a value carries its label."""
 
+    @pytest.mark.parametrize(
+        ("operator", "label"),
+        [(Batch(batch_size=2), "batch_v1"), (GroupBy(by=["cohort"]), "group_v1")],
+        ids=["batch", "group_by"],
+    )
+    def test_folded_source_id_carries_the_fold_label(
+        self, operator: Batch | GroupBy, label: str
+    ) -> None:
+        """A folded source id and record id are both ``"<fold label>:<hex>"``."""
+        source = DictSource(
+            data=[
+                {"id": "a", "cohort": "x", "v": 1},
+                {"id": "b", "cohort": "x", "v": 2},
+            ],
+            tag_columns=["id", "cohort"],
+            source_id="label_rule_fold",
+            tag_only_columns=True,
+        )
+        table = operator(source).as_table(columns={"system_tags": True})
+        (source_column,) = [
+            n for n in table.column_names if n.startswith("_tag_source_id")
+        ]
+        (record_column,) = [
+            n for n in table.column_names if n.startswith("_tag_record_id")
+        ]
+        (folded,) = cast("list[str]", table.column(source_column).to_pylist())
+        assert folded.startswith(f"{label}:")
+        assert BARE_SHA256.fullmatch(folded.removeprefix(f"{label}:"))
+        # The folded record id carries the operation's label too (ITL-1154).
+        (record_id,) = cast("list[str]", table.column(record_column).to_pylist())
+        assert record_id.startswith(f"{label}:")
+        assert BARE_SHA256.fullmatch(record_id.removeprefix(f"{label}:"))
+
     def test_operator_cache_and_cached_source_row_keys_are_labelled(self) -> None:
         """The row keys of the two cache tables are ``b"arrow_v1:" + digest``."""
         keys = _stored_row_keys()
@@ -529,7 +736,7 @@ def _bare_stream(
     context_key: str | None = None,
 ) -> ArrowTableStream:
     """Build a one-row stream with no producer; each argument sets one value."""
-    names = ["id", "x", "__note", "_tag::origin"]
+    names = ["id", "x", "__note", "_tag_origin"]
     arrays: list[pa.Array[Any]] = [
         pa.array([tag], pa.large_string()),
         pa.array([data], pa.int64()),
@@ -593,11 +800,14 @@ SOURCE_ROOT = Path(orcapod.__file__).parent
 LABEL_DEFINITIONS = {
     "semantic_v1": "hashing/semantic_hashing/semantic_hasher.py",
     "arrow_v1": "hashing/arrow_hashers.py",
+    "arrow_ordered_v1": "hashing/arrow_hashers.py",
     "directory_v1": "hashing/directory_hashers.py",
     "ndarray_v1": "hashing/semantic_hashing/builtin_handlers.py",
     "polars_expr_v1": "hashing/semantic_hashing/polars_expr.py",
     "polars_dataframe_v1": "hashing/semantic_hashing/builtin_handlers.py",
     "polars_series_v1": "hashing/semantic_hashing/builtin_handlers.py",
+    "group_v1": "core/operators/group_by.py",
+    "batch_v1": "core/operators/batch.py",
 }
 
 

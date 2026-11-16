@@ -102,6 +102,7 @@ def _polling(impl: _GrowingImpl) -> PollingSource[int]:
     return PollingSource(
         impl,
         tag_columns="k",
+        record_id_columns="k",
         polling_config=PollingConfig(
             interval=0.02, duration=0.1, max_missed_intervals=50
         ),

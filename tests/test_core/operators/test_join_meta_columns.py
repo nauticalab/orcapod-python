@@ -270,5 +270,10 @@ def test_raw_inputs_keep_their_other_columns() -> None:
     left = meta_stream("x", "vx", [f"{META}m"])
     right = meta_stream("y", "vy", [f"{META}m"])
     table = Join()(left, right).as_table()
-    assert table.column_names == ["k", "vx", "vy"]
-    assert table.schema.types == [pa.int16(), pa.int8(), pa.int8()]
+    # The data columns follow Join's canonical input order (by pipeline hash), so only
+    # the set of columns and their types are checked.
+    assert dict(zip(table.column_names, table.schema.types)) == {
+        "k": pa.int16(),
+        "vx": pa.int8(),
+        "vy": pa.int8(),
+    }

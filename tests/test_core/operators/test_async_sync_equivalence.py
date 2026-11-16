@@ -939,10 +939,10 @@ PINNED_ROW_HASHES = {
     ),
 }
 PINNED_STREAM_CONTENT_HASH = (
-    "semantic_v1:1ff5a58dbf661279f4fe767477adcc7d95f6f4f6ee47c5ccb53a6a7ab1a2306f"
+    "semantic_v1:1a1287b527e0b08f2bc4af1084a9da9e1e7c1177b73f757ca5c6d742dc832067"
 )
 PINNED_STREAM_PIPELINE_HASH = (
-    "semantic_v1:8f8d1f2e44624b0e42a55ad513a38626d54012d783e1f2c7cdcd706e22ea709a"
+    "semantic_v1:45e033fc620875ff4704cc3ca60aee3c5f219a664c15f482428cda95bae2588e"
 )
 
 

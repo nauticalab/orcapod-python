@@ -1017,7 +1017,7 @@ def test_an_extra_system_tag_column_is_refused(
     stream = _stream_with_system_tags(
         {
             SOURCE_ID: pa.array(["s"], pa.large_string()),
-            RECORD_ID: pa.array([b"r"], pa.large_binary()),
+            RECORD_ID: pa.array(["r"], pa.large_string()),
             "_tag_extra": pa.array(["e"], pa.large_string()),
         }
     )
@@ -1033,15 +1033,15 @@ def test_an_extra_system_tag_column_is_refused(
 def test_a_system_tag_pair_of_other_types_is_refused(
     bind: Callable[[PipelineJob, Any], None], x_type: Any
 ) -> None:
-    """The source id must be ``str`` and the record id ``bytes``, as the slot predicts."""
+    """The source id and the record id must be ``str``, as the slot predicts (ITL-1154)."""
     stream = _stream_with_system_tags(
         {
             SOURCE_ID: pa.array(["s"], pa.large_string()),
-            RECORD_ID: pa.array(["r"], pa.large_string()),
+            RECORD_ID: pa.array([b"r"], pa.large_binary()),
         }
     )
     job = PipelineJob(name="j", database=InMemoryArrowDatabase())
     with job:
         _ = MapData({"x": "y"})(_slot(x_type), label="renamed")
-    with pytest.raises(SourceSpecMismatchError, match=r"declared bytes but the source"):
+    with pytest.raises(SourceSpecMismatchError, match=r"declared str but the source"):
         bind(job, stream)

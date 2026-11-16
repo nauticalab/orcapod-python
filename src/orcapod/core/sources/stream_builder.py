@@ -8,13 +8,15 @@ tag columns, and wrapping the result in an ``ArrowTableStream``.
 
 from __future__ import annotations
 
-import uuid
+import datetime
+import json
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.core.sources.source_ids import hash_source_id
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.errors import RowIdentifierError
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
 from orcapod.utils import arrow_utils, schema_utils
@@ -30,42 +32,232 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
 
-# Namespace UUID for Orcapod source record IDs.
-# Derived as UUID v5 of NAMESPACE_URL + a stable Orcapod-specific URL so the
-# value is principled rather than an opaque hex literal.  This value is fixed for
-# the lifetime of the project — changing it would invalidate all existing stored
-# record IDs.
-# Computed value: uuid.UUID('877ec89b-6645-5852-ba37-a94604043f5e')
-_SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
-    uuid.NAMESPACE_URL,
-    "https://orcapod.org/namespaces/source-record-id",
-)
 
+def normalize_record_id_columns(
+    record_id_columns: str | Collection[str] | None,
+) -> tuple[str, ...] | None:
+    """Normalize a source's ``record_id_columns`` argument (ITL-1154).
 
-def _make_provenance_token(
-    record_id_column: str | None, row_index: int, value: object
-) -> str:
-    """Build the human-readable provenance token for a single row.
+    Args:
+        record_id_columns: ``None`` for the source's default (the primary key of a
+            database table, the position otherwise), a column name or several key
+            columns in key order, or ``()`` for the position.
 
-    When *record_id_column* is given the token is ``"{column}={value}"``,
-    giving a stable, human-readable key that survives row reordering.
-    When no column is specified the fallback is ``"row_{index}"``.
+    Returns:
+        ``None``, or the key columns as a tuple (empty for the position).
 
-    The fallback is positional: the token names a row position, not a row.
-    If the same rows are supplied in a different order under the same
-    ``source_id``, a moved row gets a different record ID. Downstream record
-    identities (``FunctionJobNode`` pipeline entries, ``SideEffectPod``
-    completion records) are derived from the system tags plus the row's data
-    hash, so the moved row is treated as a new entry: it is recorded again,
-    giving two entries with identical tag values but distinct record IDs, and
-    a ``SideEffectPod`` delivers it again. Because every identity includes the
-    row's own data hash, no result is ever paired with the wrong row. Pass
-    ``record_id_column`` (with a stable ``source_id``) whenever row order is
-    not guaranteed to be identical between runs.
+    Raises:
+        TypeError: If several key columns are given in a collection without an
+            order (a set or a mapping): the key order is part of every row
+            identifier, so it must be stated.
     """
-    if record_id_column is not None:
-        return f"{record_id_column}={value}"
+    if record_id_columns is None:
+        return None
+    if isinstance(record_id_columns, str):
+        return (record_id_columns,)
+    if not isinstance(record_id_columns, Sequence):
+        raise TypeError(
+            "record_id_columns must list the key columns in key order (a list or "
+            f"a tuple), not a {type(record_id_columns).__name__}: the order is part "
+            "of every row identifier."
+        )
+    return tuple(record_id_columns)
+
+
+def positional_row_identifier(row_index: int) -> str:
+    """Return the row identifier of a row named by its position: ``row_<n>``.
+
+    The identifier names a row position, not a row: rows supplied in another order
+    under the same source id get other identifiers. Name key columns
+    (``record_id_columns``) when row order is not fixed.
+
+    Args:
+        row_index: The row's position, from 0.
+
+    Returns:
+        ``"row_<n>"``.
+    """
     return f"row_{row_index}"
+
+
+_FRACTION_DIGITS = {"s": 0, "ms": 3, "us": 6, "ns": 9}
+"""Fractional-second digits of a timestamp key value, fixed by the column's unit."""
+
+
+def _timestamp_text(value: int, unit: str, *, utc: bool) -> str:
+    """Return a timestamp key value as ISO-8601 text, from its stored integer.
+
+    Formatted from the integer, never from a float or a library object, so it is
+    exact at every unit. A time-zone-aware timestamp is written in UTC with ``Z``; a
+    naive one without an offset, so the two never share a form.
+
+    Args:
+        value: The stored integer: units since the epoch (UTC for a zoned column).
+        unit: The column's unit, ``s``, ``ms``, ``us`` or ``ns``.
+        utc: Whether the column has a time zone.
+
+    Returns:
+        ``YYYY-MM-DDTHH:MM:SS[.fraction][Z]``, the year always four digits.
+
+    Raises:
+        OverflowError: If the moment lies outside years 1 to 9999.
+    """
+    digits = _FRACTION_DIGITS[unit]
+    seconds, fraction = divmod(value, 10**digits)
+    moment = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=seconds)
+    # ``isoformat`` always writes four year digits; ``strftime("%Y")`` does not on
+    # every platform.
+    text = moment.isoformat(timespec="seconds")
+    if digits:
+        text += "." + str(fraction).zfill(digits)
+    return text + ("Z" if utc else "")
+
+
+def _key_values(column: "pa.ChunkedArray[Any]") -> list[object]:
+    """Return a key column's values as JSON values (ITL-1154).
+
+    Strings, integers and booleans as they are. A timestamp is ISO-8601 text
+    (``_timestamp_text``) and a date ``YYYY-MM-DD``, both formatted from the stored
+    integers. A null stays ``None`` (``row_identifiers`` refuses it).
+
+    Args:
+        column: A key column of an allowed type (``key_column_type_allowed``).
+
+    Returns:
+        One value per row.
+
+    Raises:
+        OverflowError: If a timestamp or date lies outside years 1 to 9999, which
+            Arrow can store and ISO-8601 text here cannot write.
+    """
+    arrow_type = column.type
+    if pa.types.is_timestamp(arrow_type):
+        unit, utc = arrow_type.unit, arrow_type.tz is not None
+        ints = column.cast(pa.int64()).to_pylist()
+        return [None if v is None else _timestamp_text(v, unit, utc=utc) for v in ints]
+    if pa.types.is_date32(arrow_type):
+        days = column.cast(pa.int32()).to_pylist()
+        epoch = datetime.date(1970, 1, 1)
+        return [
+            None if d is None else (epoch + datetime.timedelta(days=d)).isoformat()
+            for d in days
+        ]
+    if pa.types.is_date64(arrow_type):
+        millis = column.cast(pa.int64()).to_pylist()
+        epoch = datetime.date(1970, 1, 1)
+        return [
+            None
+            if m is None
+            else (epoch + datetime.timedelta(milliseconds=m)).isoformat()
+            for m in millis
+        ]
+    return cast("list[object]", column.to_pylist())
+
+
+def key_row_identifier(key: Sequence[tuple[str, object]]) -> str:
+    """Return the row identifier of a row named by its key columns.
+
+    The canonical JSON object of the key columns in the declared key order, with no
+    spaces: ``{"unit":"u1","time":1700000000}``. It handles composite keys and keeps
+    value types apart (``17`` and ``"17"`` differ). This is the one definition of the
+    form (ITL-1154).
+
+    Args:
+        key: ``(column, value)`` pairs in the declared key order; each value a
+            ``str``, ``int`` or ``bool`` (``key_columns_problem`` checks the types).
+
+    Returns:
+        The JSON text.
+    """
+    return json.dumps(dict(key), separators=(",", ":"), ensure_ascii=False)
+
+
+def key_column_type_allowed(arrow_type: pa.DataType) -> bool:
+    """Whether a column of ``arrow_type`` may be a key column (ITL-1154).
+
+    Allowed: strings, integers, booleans, timestamps and dates (written as ISO-8601
+    text, ``_key_values``). Everything else (floats, bytes, times of day, durations,
+    UUIDs, containers, logical types) is refused; more types can be added later
+    without moving an existing identifier.
+
+    Args:
+        arrow_type: The column's Arrow type.
+
+    Returns:
+        True for a string, integer or boolean type.
+    """
+    return (
+        pa.types.is_string(arrow_type)
+        or pa.types.is_large_string(arrow_type)
+        or pa.types.is_integer(arrow_type)
+        or pa.types.is_boolean(arrow_type)
+        or pa.types.is_timestamp(arrow_type)
+        or pa.types.is_date32(arrow_type)
+        or pa.types.is_date64(arrow_type)
+    )
+
+
+def row_identifiers(table: pa.Table, record_id_columns: Sequence[str]) -> list[str]:
+    """Return each row's identifier: its key, or its position when no key is named.
+
+    Args:
+        table: The source's rows.
+        record_id_columns: The key columns, in key order; empty for position.
+
+    Returns:
+        One identifier per row, in row order.
+
+    Raises:
+        RowIdentifierError: If a key column is missing or of a type that is not allowed, a
+            key value is null, a timestamp or date key lies outside years 1 to 9999,
+            or two rows have the same key. The message names the column or the key.
+    """
+    if not record_id_columns:
+        return [positional_row_identifier(i) for i in range(table.num_rows)]
+    missing = [c for c in record_id_columns if c not in table.column_names]
+    if missing:
+        raise RowIdentifierError(
+            f"record_id_columns {missing} not found in table columns: "
+            f"{table.column_names}"
+        )
+    for column in record_id_columns:
+        arrow_type = table.schema.field(column).type
+        if not key_column_type_allowed(arrow_type):
+            raise RowIdentifierError(
+                f"key column {column!r} has type {arrow_type}, which cannot identify "
+                "a row: a key column must hold strings, integers, booleans, "
+                "timestamps or dates. Name a string or integer key column in "
+                "record_id_columns, or pass record_id_columns=() to identify rows by "
+                "position."
+            )
+    columns: dict[str, list[object]] = {}
+    for column in record_id_columns:
+        try:
+            columns[column] = _key_values(table.column(column))
+        except OverflowError as exc:
+            raise RowIdentifierError(
+                f"key column {column!r} holds a {table.schema.field(column).type} "
+                "value outside years 1 to 9999, which a row identifier cannot write"
+            ) from exc
+    identifiers: list[str] = []
+    seen: dict[str, int] = {}
+    for i in range(table.num_rows):
+        key = [(c, columns[c][i]) for c in record_id_columns]
+        nulls = [c for c, value in key if value is None]
+        if nulls:
+            raise RowIdentifierError(
+                f"key column {nulls[0]!r} is null in row {i}: a key value identifies "
+                "the row and cannot be null"
+            )
+        identifier = key_row_identifier(key)
+        if identifier in seen:
+            raise RowIdentifierError(
+                f"key {identifier} appears in rows {seen[identifier]} and {i}: key "
+                "values must be unique, so each row has its own identifier"
+            )
+        seen[identifier] = i
+        identifiers.append(identifier)
+    return identifiers
 
 
 def _unhashable_columns(
@@ -92,28 +284,6 @@ def _unhashable_columns(
         except ValueError:
             failing.append((name, table.schema.field(name).type))
     return failing
-
-
-def _make_record_id(source_id: str, provenance_token: str) -> uuid.UUID:
-    """Build a stable record ID UUID from source_id and provenance token.
-
-    Uses UUID v5 (name-based, SHA-1) to produce a deterministic UUID from
-    the source identity and row provenance token. The result is stable across
-    runs for the same source_id and provenance_token.
-
-    Callers that need raw bytes for Arrow storage (``pa.binary(16)``)
-    should call ``.bytes`` on the returned UUID.
-
-    Args:
-        source_id: The canonical source identifier.
-        provenance_token: Human-readable per-row provenance key
-            (e.g. ``"row_0"`` or ``"col=value"``).
-
-    Returns:
-        A deterministic ``uuid.UUID`` identifying this (source, row) pair.
-    """
-    name = f"{source_id}::{provenance_token}"
-    return uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, name)
 
 
 @dataclass(frozen=True)
@@ -145,7 +315,7 @@ class SourceStreamBuilder:
         table: pa.Table,
         tag_columns: Collection[str],
         source_id: str | None = None,
-        record_id_column: str | None = None,
+        record_id_columns: str | Collection[str] | None = (),
         system_tag_columns: Collection[str] = (),
         source_kind: str | None = None,
     ) -> SourceStreamResult:
@@ -165,11 +335,11 @@ class SourceStreamBuilder:
                 ``<source_kind>:<algorithm label>:<hex>`` of the table hash
                 (``hash_source_id``), which changes when rows are reordered;
                 pass an explicit value when record IDs must survive reordering.
-            record_id_column: Column whose value identifies a row, giving
-                record IDs that follow the row regardless of its position
-                (given a stable ``source_id``). When ``None`` the record ID is
-                derived from the row's position (``row_{index}``), so it is
-                stable only while row order is.
+            record_id_columns: The key columns whose values identify a row, in key
+                order: the row identifier is their canonical JSON
+                (``key_row_identifier``), which follows the row regardless of its
+                position (given a stable ``source_id``). Empty: the row's position,
+                ``row_<n>``, stable only while row order is.
             system_tag_columns: Additional system-level tag columns.
             source_kind: Kind prefix of the default source id, for example
                 ``dict``. Required when ``source_id`` is not given; not used
@@ -180,7 +350,8 @@ class SourceStreamBuilder:
 
         Raises:
             ValueError: If the table has no columns ("Table is empty"), if
-                tag_columns or record_id_column are not in the table, or if
+                tag_columns or a key column are not in the table, a key column's
+                type is not allowed, a key value is null or repeated, or if
                 neither ``source_id`` nor ``source_kind`` is given.
         """
         tag_columns_tuple = tuple(tag_columns)
@@ -209,12 +380,10 @@ class SourceStreamBuilder:
                 f"Available columns: {list(table.column_names)}"
             )
 
-        # 3. Validate record_id_column.
-        if record_id_column is not None and record_id_column not in table.column_names:
-            raise ValueError(
-                f"record_id_column {record_id_column!r} not found in table columns: "
-                f"{table.column_names}"
-            )
+        # 3. The row identifiers (validates the key columns).
+        identifiers = row_identifiers(
+            table, normalize_record_id_columns(record_id_columns) or ()
+        )
 
         # 4. Compute schema hash from tag/data python schemas.
         # Nullable flags in the incoming table are trusted as-is — callers must
@@ -254,39 +423,25 @@ class SourceStreamBuilder:
                 f"({exc}). Drop or convert before building the source."
             ) from exc
 
-        # 6. Default source_id: the source kind and the labelled table hash. A
-        # source id is the source's name, so a default built from a hash says
-        # what kind of source it is and which algorithm made the hash. Only the
-        # hex is shortened by ``hashing.path_n_char``.
+        # 6. Default source_id: the source kind and the labelled table hash, at
+        # full length. A source id is the source's name, so a default built from a
+        # hash says what kind of source it is and which algorithm made the hash.
         if source_id is None:
             if source_kind is None:
                 raise ValueError(
                     "build() needs a source_id or a source_kind to make a default "
                     "source id from."
                 )
-            source_id = hash_source_id(
-                source_kind, table_hash, hexdigits=self._config.hashing.path_n_char
-            )
+            source_id = hash_source_id(source_kind, table_hash)
 
-        # 7. Build per-row source-info strings and deterministic UUID record IDs.
-        # Only the record-ID column's values are needed (none for positional
-        # tokens), so convert that one column to Python, never the whole table.
-        record_values: Sequence[object] = (
-            table.column(record_id_column).to_pylist()
-            if record_id_column is not None
-            else [None] * table.num_rows
-        )
-        provenance_tokens = [
-            _make_provenance_token(record_id_column, i, value)
-            for i, value in enumerate(record_values)
-        ]
+        # 7. Attach the source-info tokens and the system tags.
         stream = self.attach_provenance(
             table,
             tag_columns=tag_columns_tuple,
             system_tag_columns=system_tag_columns_tuple,
             schema_hash=schema_hash,
             source_id=source_id,
-            provenance_tokens=provenance_tokens,
+            row_identifiers=identifiers,
         )
 
         return SourceStreamResult(
@@ -306,16 +461,17 @@ class SourceStreamBuilder:
         system_tag_columns: Sequence[str],
         schema_hash: str,
         source_id: str,
-        provenance_tokens: Sequence[str],
+        row_identifiers: Sequence[str],
     ) -> ArrowTableStream:
         """Add source-info and system-tag columns to ``table`` and wrap it as a stream.
 
-        Each row's source-info prefix is ``<source_id>::<token>``: the value in a
-        source-info column is that prefix followed by ``::<column>`` (for example
-        ``_source_amplitude`` holds ``<source_id>::<token>::amplitude``). The row's
-        record ID is the UUID v5 of ``source_id`` and ``token``, so a row keeps its
-        record ID wherever and however often it is read, as long as its token is the
-        same.
+        A row's record id is its row identifier itself, as text (``row_<n>`` or the
+        key's canonical JSON), and its source id is the source's name: the two
+        system-tag columns. Each source-info value is
+        ``<source_id>::<record id>::<column>`` (for example ``_source_amplitude``
+        holds ``<source_id>::row_3::amplitude``). A row keeps its record id wherever
+        and however often it is read, as long as its identifier is the same
+        (ITL-1154).
 
         Args:
             table: The rows, with nullable flags already set correctly.
@@ -323,19 +479,15 @@ class SourceStreamBuilder:
             system_tag_columns: Additional system-level tag columns.
             schema_hash: The source's schema hash, which names its system-tag columns.
             source_id: The canonical source name.
-            provenance_tokens: One token per row, identifying the row within the source.
+            row_identifiers: One identifier per row, identifying the row within the
+                source.
 
         Returns:
             The stream over the enriched table.
         """
         source_info = [
-            f"{source_id}{constants.BLOCK_SEPARATOR}{token}"
-            for token in provenance_tokens
-        ]
-        # Record IDs stored in the system tag column are stable UUID v5 bytes —
-        # deterministically derived from source_id and per-row provenance token.
-        record_id_values = [
-            _make_record_id(source_id, token).bytes for token in provenance_tokens
+            f"{source_id}{constants.BLOCK_SEPARATOR}{identifier}"
+            for identifier in row_identifiers
         ]
         table = arrow_utils.add_source_info(
             table, source_info, exclude_columns=tag_columns
@@ -344,7 +496,7 @@ class SourceStreamBuilder:
             table,
             schema_hash,
             source_id,
-            record_id_values,
+            row_identifiers,
         )
         # Nullable flags are already correct — the caller set them.
         return ArrowTableStream(

@@ -118,7 +118,7 @@ class TestSemanticHashingVisitorExtension:
         assert hash1 != hash2
 
     def test_binary_encoding_format(self, ctx, tmp_path):
-        """Hash bytes have format b'<type_name>::<digest>', with no hash label."""
+        """Hash bytes have format b'<identifier>::<label>:<digest>' (ITL-1154)."""
         file = tmp_path / "test.txt"
         file.write_text("test")
 
@@ -132,8 +132,10 @@ class TestSemanticHashingVisitorExtension:
         type_prefix, hash_part = hash_bytes.split(b"::", 1)
         # Extension name "orcapod.file" → then ';' and the extension metadata in hex
         assert type_prefix == b"orcapod.file;7b2276657273696f6e223a317d"
-        # hash_part is the raw digest of the value hash; its label is not included
-        assert hash_part == ctx.semantic_hasher.hash_object(File(file)).digest
+        # hash_part is the value hash with its label: b"sha256:" + digest
+        value_hash = ctx.semantic_hasher.hash_object(File(file))
+        assert hash_part == value_hash.to_prefixed_digest()
+        assert hash_part.startswith(b"sha256:")
 
     def test_null_value_passthrough(self, ctx):
         """Null storage values pass through as-is."""
@@ -213,16 +215,16 @@ class TestCrossPathConsistency:
         arrow_type = ctx.type_converter.register_python_class(File)
         storage_val = ctx.type_converter.python_to_storage(File(file), File)
 
-        # Arrow path: visit_extension encodes as b"<type_name>::<digest>"
+        # Arrow path: visit_extension encodes as b"<identifier>::<label>:<digest>"
         visitor = SemanticHashingVisitor(ctx.type_converter, ctx.semantic_hasher)
         _, arrow_hash_bytes = visitor.visit(arrow_type, storage_val)
-        # Strip the "orcapod:file::" type prefix to get the raw digest
+        # Strip the identifier to get the labelled value hash
         digest_from_arrow = arrow_hash_bytes.split(b"::", 1)[1]
 
         # Python path: hash_object returns ContentHash directly
         python_content_hash = ctx.semantic_hasher.hash_object(File(file))
 
-        assert digest_from_arrow == python_content_hash.digest
+        assert digest_from_arrow == python_content_hash.to_prefixed_digest()
 
     def test_same_content_two_files_cross_path(self, ctx, tmp_path):
         """Two files with identical content: Arrow path and Python path agree."""
@@ -241,7 +243,7 @@ class TestCrossPathConsistency:
 
         python_content_hash = ctx.semantic_hasher.hash_object(File(file_python))
 
-        assert digest_from_arrow == python_content_hash.digest
+        assert digest_from_arrow == python_content_hash.to_prefixed_digest()
 
 
 class TestListExtensionHashing:

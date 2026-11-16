@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os
+
 from collections.abc import Collection
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any, ClassVar, TYPE_CHECKING
 
 from typing_extensions import override
 
 from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.source_ids import location_source_id
 from orcapod.core.sources.reload import same_rows
 from orcapod.core.sources.stream_builder import (
+    normalize_record_id_columns,
     SourceStreamBuilder,
     SourceStreamResult,
 )
@@ -35,10 +39,10 @@ class DeltaTableSource(RootSource):
 
     At the start of every run (``check_for_new_data``, ITL-1102) the source checks the
     table's Delta version. When the version moved, it reads the table again and, if
-    the rows changed (in order without a ``record_id_column``, in any order with one: a
+    the rows changed (in order without a ``record_id_columns``, in any order with one: a
     version that only compacted files or
     changed metadata changes nothing), holds the new rows and moves its modified time.
-    Record ids keep their rule: the ``record_id_column`` value, or the row's position.
+    Record ids keep their rule: the ``record_id_columns`` value, or the row's position.
 
     Plain tags: ``tag_only_columns`` (keyword-only) is ``True``, the default, and keeps
     every tag column a tag only, not data, as every source does in v0.3. Any other value
@@ -46,12 +50,15 @@ class DeltaTableSource(RootSource):
     and ``tag_only_columns`` names the tags kept plain.
     """
 
+    SOURCE_KIND: ClassVar[str] = "delta_table"
+    """Config type key and default source-id kind of this source (one vocabulary)."""
+
     def __init__(
         self,
         delta_table_path: PathLike,
         tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        record_id_column: str | None = None,
+        record_id_columns: str | Collection[str] | None = None,
         source_id: str | None = None,
         *,
         tag_only_columns: TagOnlyColumns = True,
@@ -61,7 +68,10 @@ class DeltaTableSource(RootSource):
         resolved = Path(delta_table_path).resolve()
 
         if source_id is None:
-            source_id = resolved.name
+            # The table folder's path or URI as passed: a relative path stays relative.
+            source_id = location_source_id(
+                self.SOURCE_KIND, os.fspath(delta_table_path)
+            )
         super().__init__(source_id=source_id, **kwargs)
 
         self._delta_table_path = resolved
@@ -73,7 +83,8 @@ class DeltaTableSource(RootSource):
 
         self._tag_columns: Collection[str] = _normalize_column_list(tag_columns)
         self._system_tag_columns: Collection[str] = system_tag_columns
-        self._record_id_column = record_id_column
+        self._record_id_columns = normalize_record_id_columns(record_id_columns)
+        self._key_columns = self._record_id_columns or ()
         self._version: int = self._delta_table.version()
         table = self._read_table()
         # The rows as read, columns and types included: a check compares a new read
@@ -101,7 +112,7 @@ class DeltaTableSource(RootSource):
             table,
             tag_columns=self._tag_columns,
             source_id=self._source_id,
-            record_id_column=self._record_id_column,
+            record_id_columns=self._record_id_columns or (),
             system_tag_columns=self._system_tag_columns,
         )
 
@@ -135,7 +146,7 @@ class DeltaTableSource(RootSource):
                 "read it"
             )
         # Row positions are record ids without a record_id_column: order counts.
-        if same_rows(self._table, table, ordered=self._record_id_column is None):
+        if same_rows(self._table, table, ordered=not self._record_id_columns):
             self._version = version
             return False
         stream = self._build(table).stream
@@ -148,11 +159,13 @@ class DeltaTableSource(RootSource):
     def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize this source's configuration to a JSON-compatible dict."""
         return {
-            "source_type": "delta_table",
+            "source_type": self.SOURCE_KIND,
             "delta_table_path": str(self._delta_table_path),
             "tag_columns": list(self._tag_columns),
             "system_tag_columns": list(self._system_tag_columns),
-            "record_id_column": self._record_id_column,
+            "record_id_columns": None
+            if self._record_id_columns is None
+            else list(self._record_id_columns),
             "source_id": self.source_id,
             **self._identity_config(),
         }
@@ -167,6 +180,6 @@ class DeltaTableSource(RootSource):
             tag_columns=config.get("tag_columns", ()),
             tag_only_columns=config.get("tag_only_columns", True),
             system_tag_columns=config.get("system_tag_columns", ()),
-            record_id_column=config.get("record_id_column"),
+            record_id_columns=config.get("record_id_columns"),
             source_id=config.get("source_id"),
         )

@@ -30,8 +30,8 @@ class TestSourceNodeHashStability:
 
     For tag_schema=Schema({"id": int}), data_schema=Schema({"value": float}),
     name="slot_a":
-      content_hash  = semantic_v1:0d746e4cf3c0e7bf150b64b02a7e7c05603a8285165411a415b2b6f2d57cc822
-      pipeline_hash = semantic_v1:63230a5b2478c091f8fbb68df445144964ca0de0105079a6a738c1e04dbcd510
+      content_hash  = semantic_v1:bc46ec2ad863ec701368caf0be5f548a59fe53c0ccc0820e45d38e21c06761e7
+      pipeline_hash = semantic_v1:196ea4256aa0a44bcb4340c3bad22b0ed811337d9636e9fbe386ab7d47785aaf
     """
 
     def test_content_hash_is_deterministic(self, tag_schema, data_schema):
@@ -48,7 +48,7 @@ class TestSourceNodeHashStability:
     def test_content_hash_stable_value(self, tag_schema, data_schema):
         """content_hash must match the value anchored at migration time.
 
-        Digest (hex): 0d746e4cf3c0e7bf150b64b02a7e7c05603a8285165411a415b2b6f2d57cc822
+        Digest (hex): bc46ec2ad863ec701368caf0be5f548a59fe53c0ccc0820e45d38e21c06761e7
 
         Note: hash changed in ENG-493 when identity_structure() prefix was updated
         from ``"SourceSpec"`` to ``"source_node"`` to better reflect the node type.
@@ -60,7 +60,7 @@ class TestSourceNodeHashStability:
         expected = ContentHash(
             method="semantic_v1",
             digest=bytes.fromhex(
-                "0d746e4cf3c0e7bf150b64b02a7e7c05603a8285165411a415b2b6f2d57cc822"
+                "bc46ec2ad863ec701368caf0be5f548a59fe53c0ccc0820e45d38e21c06761e7"
             ),
         )
         assert node.content_hash() == expected
@@ -79,7 +79,7 @@ class TestSourceNodeHashStability:
     def test_pipeline_hash_stable_value(self, tag_schema, data_schema):
         """pipeline_hash must match the value anchored at migration time.
 
-        Digest (hex): 63230a5b2478c091f8fbb68df445144964ca0de0105079a6a738c1e04dbcd510
+        Digest (hex): 196ea4256aa0a44bcb4340c3bad22b0ed811337d9636e9fbe386ab7d47785aaf
         """
         from orcapod.core.nodes.source_node import SourceNode
         from orcapod.types import ContentHash
@@ -88,7 +88,7 @@ class TestSourceNodeHashStability:
         expected = ContentHash(
             method="semantic_v1",
             digest=bytes.fromhex(
-                "63230a5b2478c091f8fbb68df445144964ca0de0105079a6a738c1e04dbcd510"
+                "196ea4256aa0a44bcb4340c3bad22b0ed811337d9636e9fbe386ab7d47785aaf"
             ),
         )
         assert node.pipeline_hash() == expected
@@ -367,7 +367,7 @@ class TestSourceNodeColumnConfig:
     def test_unbound_output_schema_system_tags_adds_typed_entries(
         self, tag_schema, data_schema
     ):
-        """output_schema(system_tags=True) adds the source id (str) and record id (bytes).
+        """output_schema(system_tags=True) adds the source id and the record id (both str).
 
         The types a source's rows have (ITL-1112): ``large_string`` and ``large_binary``.
         """
@@ -394,7 +394,7 @@ class TestSourceNodeColumnConfig:
         }
         assert types == {
             constants.SYSTEM_TAG_SOURCE_ID_PREFIX: str,
-            constants.SYSTEM_TAG_RECORD_ID_PREFIX: bytes,
+            constants.SYSTEM_TAG_RECORD_ID_PREFIX: str,
         }
 
     def test_unbound_output_schema_default_unchanged(self, tag_schema, data_schema):

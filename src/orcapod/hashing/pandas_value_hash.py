@@ -2,15 +2,18 @@
 
 A pandas value hashes as::
 
-    sha256(canonical_json(descriptor) + b"\\x00" + arrow_hasher.hash_table_ordered(values_table))
+    sha256(canonical_json(descriptor) + b"\\x00"
+           + arrow_hasher.hash_table_ordered(values_table).to_prefixed_digest())
 
 under the ``ContentHash`` method label ``"pandas_dataframe_v1"`` (a frame) or
 ``"pandas_series_v1"`` (a Series); see ``orcapod.hashing.labelled_hash``. The label names this
 whole procedure: the grammar, the values table and the ordered Arrow digest it embeds. It
 changes only when the procedure would give an existing value a different digest (then
-``pandas_dataframe_v2`` / ``pandas_series_v2``), and it never enters the computation: only the
-digest bytes of ``hash_table_ordered`` are hashed, not that hash's own label. Such a change
-also changes the identifier of the pandas logical types (``logical_types/pandas_type.py``).
+``pandas_dataframe_v2`` / ``pandas_series_v2``). The ordered Arrow digest is a hash fed into
+another hash, so it enters with its own label, ``b"arrow_ordered_v1:" + digest`` (ITL-1154):
+the data context's Arrow hasher computes it, and its label says which procedure did. Such a
+change also changes the identifier of the pandas logical types
+(``logical_types/pandas_type.py``).
 
 The hash is strict (developer's decisions, November 11 and 12, 2026): everything about a
 value that can be changed is part of its identity, ``attrs`` and ``-0.0`` versus ``0.0``
@@ -1267,7 +1270,7 @@ def pandas_frame_content_hash(
         bare = _in_canonical_column_order(bare)
     values, stored = _values_table(bare)
     descriptor = _frame_descriptor(df, stored, ignore)
-    digest = arrow_hasher.hash_table_ordered(values).digest
+    digest = arrow_hasher.hash_table_ordered(values).to_prefixed_digest()
     return labelled_content_hash(PANDAS_DATAFRAME_HASH_LABEL, descriptor, digest)
 
 
@@ -1295,5 +1298,5 @@ def pandas_series_content_hash(
     """
     values, stored = _values_table(_series_as_stored_frame(series))
     descriptor = _series_descriptor(series, stored, ignore)
-    digest = arrow_hasher.hash_table_ordered(values).digest
+    digest = arrow_hasher.hash_table_ordered(values).to_prefixed_digest()
     return labelled_content_hash(PANDAS_SERIES_HASH_LABEL, descriptor, digest)

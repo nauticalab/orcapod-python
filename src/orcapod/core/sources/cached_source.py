@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import Any, ClassVar, TYPE_CHECKING
 
 from typing_extensions import override
 
@@ -70,6 +70,9 @@ class CachedSource(RootSource):
         # or equivalently:
         cached = source.cached(cache_database=db)
     """
+
+    SOURCE_KIND: ClassVar[str] = "cached"
+    """Config type key and default source-id kind of this source (one vocabulary)."""
 
     HASH_COLUMN_NAME = "_record_hash"
 
@@ -142,7 +145,7 @@ class CachedSource(RootSource):
         inner_source_config = self._source.to_config(db_registry=db_registry)
 
         return {
-            "source_type": "cached",
+            "source_type": self.SOURCE_KIND,
             "inner_source": inner_source_config,
             "cache_database": cache_db_ref,
             "cache_path_prefix": list(self._cache_path_prefix),

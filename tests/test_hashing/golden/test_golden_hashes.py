@@ -178,6 +178,54 @@ def test_the_collection_hook_refuses_a_skipped_golden_entry(
         conftest.pytest_collection_modifyitems(pytestconfig, [skipped])
 
 
+def test_the_collection_hook_names_a_broken_store_first(
+    pytestconfig: pytest.Config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store that cannot be read is named before the skipped entries it causes.
+
+    A golden file that cannot be read (an entry repeated inside it) leaves no entry to
+    parametrize, and pytest marks the empty parameter set skipped; the refusal names the
+    store problem first, not only the skip.
+    """
+    from tests.test_hashing.golden import conftest
+
+    problem = "semantic-01.json: key 'value.int.one' appears twice"
+    monkeypatch.setattr(conftest, "golden_store_problems", lambda: [problem])
+    skipped = _FakeItem(
+        "semantic", [pytest.mark.skip(reason="got empty parameter set")]
+    )
+    with pytest.raises(pytest.UsageError) as raised:
+        conftest.pytest_collection_modifyitems(pytestconfig, [skipped])
+    message = str(raised.value)
+    assert problem in message
+    assert message.index(problem) < message.index("semantic:x")
+
+
+def test_golden_store_problems_names_a_repeated_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``golden_store_problems`` reports a key repeated inside a golden file."""
+    from tests.test_hashing.golden import conftest
+
+    version = get_default_context().version
+    store.copy_tree(store.PROJECT_ROOT, tmp_path, version)
+    folder = store.golden_folder(
+        tmp_path, store.read_json(store.manifest_path(tmp_path, version))
+    )
+    path = sorted(folder.glob("semantic-*.json"))[0]
+    text = path.read_text(encoding="utf-8")
+    first_line = text.splitlines()[1]
+    key = first_line.split('"')[1]
+    path.write_text(text.replace(first_line, first_line + "\n" + first_line, 1))
+    monkeypatch.setattr(conftest, "GOLDEN_ROOT", tmp_path)
+    problems = conftest.golden_store_problems()
+    # The file's digest no longer matches either; the repeated key must be named too.
+    assert any(
+        path.name in problem and f"the key {key!r} appears twice" in problem
+        for problem in problems
+    ), problems
+
+
 def test_the_collection_hook_allows_the_optional_package_skip(
     pytestconfig: pytest.Config,
 ) -> None:

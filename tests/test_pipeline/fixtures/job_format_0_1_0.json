@@ -5,7 +5,7 @@
     "status": "pending",
     "unbound_sources": [],
     "node_job_content_hashes": {
-      "add_values": "semantic_v1:3c72ef670ee28f1ff79c08282a799e188c738a884a916a2b24247597be6c0bdc"
+      "add_values": "semantic_v1:3cf4d96606905dcba95296e3add31de3cbc9e1a057d89ddddf9d33f3319a58da"
     },
     "node_has_stored_records": {
       "add_values": false
@@ -19,11 +19,11 @@
       ]
     },
     "nodes": {
-      "semantic_v1:d4ce5e9dae3c9843b233c0485cedf00c68e8f986d13e22ad0917de0e3a7f6904": {
+      "semantic_v1:1a6e7943cc0e9a52915f326f7978513a9f335cee8c1d9ec1efdda896bb9e5e9b": {
         "node_type": "source",
         "label": "fixture_value",
-        "content_hash": "semantic_v1:d4ce5e9dae3c9843b233c0485cedf00c68e8f986d13e22ad0917de0e3a7f6904",
-        "pipeline_hash": "semantic_v1:dc09f4294237350029cae758c700057d198a001a0f24d5cd603994965cb1725c",
+        "content_hash": "semantic_v1:1a6e7943cc0e9a52915f326f7978513a9f335cee8c1d9ec1efdda896bb9e5e9b",
+        "pipeline_hash": "semantic_v1:d004a52e9fece21a41276d8c8ae2c3f13b8727c5b155d1ec79c13589c0215114",
         "output_schema": {
           "tag": {
             "key": "large_string"
@@ -50,11 +50,11 @@
         },
         "reconstructable": true
       },
-      "semantic_v1:14d8a00d66deb43e21eca83110591ea0445cba923cc951be2164cc0ce45dabad": {
+      "semantic_v1:3b1922564f3ebea8c8a2d6ad2ad95657f1c41f4fe9b21d0acefa847dc2bc79a6": {
         "node_type": "source",
         "label": "fixture_score",
-        "content_hash": "semantic_v1:14d8a00d66deb43e21eca83110591ea0445cba923cc951be2164cc0ce45dabad",
-        "pipeline_hash": "semantic_v1:7e7a28e16328840586a1ba4623698559df16a510016a3edb4660e86535893029",
+        "content_hash": "semantic_v1:3b1922564f3ebea8c8a2d6ad2ad95657f1c41f4fe9b21d0acefa847dc2bc79a6",
+        "pipeline_hash": "semantic_v1:c526f41de59878e3326f58be7dd96b246c62bc424bf015c8a2cff2b8bfbb4a3b",
         "output_schema": {
           "tag": {
             "key": "large_string"
@@ -81,11 +81,11 @@
         },
         "reconstructable": true
       },
-      "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3": {
+      "semantic_v1:ddc97363cb2a174f6546bf35cda6d7f25c6d9c9ad84df071b800b6534500b153": {
         "node_type": "operator",
         "label": "Join",
-        "content_hash": "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3",
-        "pipeline_hash": "semantic_v1:cba9b4b824f074a4e1123066a7f1da0f98897f5451b6e54e52f990c0e7818d5c",
+        "content_hash": "semantic_v1:ddc97363cb2a174f6546bf35cda6d7f25c6d9c9ad84df071b800b6534500b153",
+        "pipeline_hash": "semantic_v1:09b483535c0d9c1fc9a3a82b93739225dd44bae3ab51673532ca890bb4e5975d",
         "output_schema": {
           "tag": {
             "key": "large_string"
@@ -108,11 +108,11 @@
         },
         "table_scope": "pipeline_hash"
       },
-      "semantic_v1:b8357687fdfc83a0496fd3be1be7cf5818316321d135ad563e8f8b747111f1c5": {
+      "semantic_v1:9852c2a9d0f61d0f860346a3637b2a01e8dfaf6241123d01019fcf48f798dbbf": {
         "node_type": "function",
         "label": "add_values",
-        "content_hash": "semantic_v1:b8357687fdfc83a0496fd3be1be7cf5818316321d135ad563e8f8b747111f1c5",
-        "pipeline_hash": "semantic_v1:a34ccddbc257a6feb93523aa1ae912b185ea690ae2fdfcd5b99a7c7ffb00e282",
+        "content_hash": "semantic_v1:9852c2a9d0f61d0f860346a3637b2a01e8dfaf6241123d01019fcf48f798dbbf",
+        "pipeline_hash": "semantic_v1:dee09e45313a974d51cddc9a8968feef821ef3533f694d0f504f9a4359a4d77e",
         "output_schema": {
           "tag": {
             "key": "large_string"
@@ -123,7 +123,7 @@
         },
         "node_uri": [
           "add_values",
-          "a7d1e858291de2e2845d14f310a69d2af3305ebe038312f889035fb5660c917c",
+          "30e83b6a62ec3bb3db155d703e98c3dba3a34eb5b2dc3d23e404177a49eb4bfd",
           "v0",
           "python.function.v0"
         ],
@@ -132,7 +132,7 @@
         "function_config": {
           "uri": [
             "add_values",
-            "a7d1e858291de2e2845d14f310a69d2af3305ebe038312f889035fb5660c917c",
+            "30e83b6a62ec3bb3db155d703e98c3dba3a34eb5b2dc3d23e404177a49eb4bfd",
             "v0",
             "python.function.v0"
           ],
@@ -140,7 +140,7 @@
             "data_function_type_id": "python.function.v0",
             "uri": [
               "add_values",
-              "a7d1e858291de2e2845d14f310a69d2af3305ebe038312f889035fb5660c917c",
+              "30e83b6a62ec3bb3db155d703e98c3dba3a34eb5b2dc3d23e404177a49eb4bfd",
               "v0",
               "python.function.v0"
             ],
@@ -168,16 +168,16 @@
     },
     "edges": [
       [
-        "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3",
-        "semantic_v1:b8357687fdfc83a0496fd3be1be7cf5818316321d135ad563e8f8b747111f1c5"
+        "semantic_v1:ddc97363cb2a174f6546bf35cda6d7f25c6d9c9ad84df071b800b6534500b153",
+        "semantic_v1:9852c2a9d0f61d0f860346a3637b2a01e8dfaf6241123d01019fcf48f798dbbf"
       ],
       [
-        "semantic_v1:d4ce5e9dae3c9843b233c0485cedf00c68e8f986d13e22ad0917de0e3a7f6904",
-        "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3"
+        "semantic_v1:1a6e7943cc0e9a52915f326f7978513a9f335cee8c1d9ec1efdda896bb9e5e9b",
+        "semantic_v1:ddc97363cb2a174f6546bf35cda6d7f25c6d9c9ad84df071b800b6534500b153"
       ],
       [
-        "semantic_v1:14d8a00d66deb43e21eca83110591ea0445cba923cc951be2164cc0ce45dabad",
-        "semantic_v1:bb95874cbbbdbdcb6b443a1b96b63f481147e4d783d765b656a5f4b48c17a8e3"
+        "semantic_v1:3b1922564f3ebea8c8a2d6ad2ad95657f1c41f4fe9b21d0acefa847dc2bc79a6",
+        "semantic_v1:ddc97363cb2a174f6546bf35cda6d7f25c6d9c9ad84df071b800b6534500b153"
       ]
     ]
   },
@@ -189,8 +189,8 @@
           "key"
         ],
         "source_id": "fixture_score",
-        "content_hash": "semantic_v1:cda8158fa2f84a77919f1dd4e11d04e8d70afc4b6134d8786453966114805b36",
-        "pipeline_hash": "semantic_v1:7e7a28e16328840586a1ba4623698559df16a510016a3edb4660e86535893029",
+        "content_hash": "semantic_v1:8c6b8a8c967dfd1c3f6cc0abaa48e914faee09d2b1b70748e7b868bd64f03f71",
+        "pipeline_hash": "semantic_v1:c526f41de59878e3326f58be7dd96b246c62bc424bf015c8a2cff2b8bfbb4a3b",
         "tag_schema": {
           "key": "large_string"
         },
@@ -204,8 +204,8 @@
           "key"
         ],
         "source_id": "fixture_value",
-        "content_hash": "semantic_v1:8abefd8ae5549aa51ad87753c006c0c4cc06c6e6801634b36877415665453bb4",
-        "pipeline_hash": "semantic_v1:dc09f4294237350029cae758c700057d198a001a0f24d5cd603994965cb1725c",
+        "content_hash": "semantic_v1:d0307a2315b3cb4d86bb62da21806d31ce6f10d057030e248ee1ebbc987a181a",
+        "pipeline_hash": "semantic_v1:d004a52e9fece21a41276d8c8ae2c3f13b8727c5b155d1ec79c13589c0215114",
         "tag_schema": {
           "key": "large_string"
         },

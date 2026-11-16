@@ -14,13 +14,15 @@ from __future__ import annotations
 
 from collections.abc import Collection, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from typing_extensions import override
 
 from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.db_table_source import DBTableSource
+from orcapod.core.sources.source_ids import joined_location
 from orcapod.databases.postgresql_connector import PostgreSQLConnector
+from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 
 if TYPE_CHECKING:
     from orcapod import contexts
@@ -53,8 +55,10 @@ class PostgreSQLTableSource(DBTableSource):
             the table's primary-key columns are used. Raises ``ValueError``
             if the table has no primary key and no explicit columns are given.
         system_tag_columns: Additional system-level tag columns.
-        record_id_column: Column for stable per-row record IDs in provenance.
-        source_id: Canonical source name. Defaults to *table_name*.
+        record_id_columns: The key columns that identify a row; ``None``: the
+            primary key (a table without one is refused); ``()``: the position.
+        source_id: Canonical source name. Defaults to
+            ``postgresql_table:<database>.<schema>.<table>``.
         label: Human-readable label for this source node.
         data_context: Data context governing type conversion and hashing.
         config: OrcaPod configuration.
@@ -70,13 +74,16 @@ class PostgreSQLTableSource(DBTableSource):
         psycopg.OperationalError: If the DSN is invalid or connection fails.
     """
 
+    SOURCE_KIND: ClassVar[str] = "postgresql_table"
+    """Config type key and default source-id kind of this source (one vocabulary)."""
+
     def __init__(
         self,
         dsn: str,
         table_name: str,
         tag_columns: str | Collection[str] | None = None,
         system_tag_columns: Collection[str] = (),
-        record_id_column: str | None = None,
+        record_id_columns: str | Collection[str] | None = None,
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
@@ -95,7 +102,7 @@ class PostgreSQLTableSource(DBTableSource):
                 table_name,
                 tag_columns=tag_columns,
                 system_tag_columns=system_tag_columns,
-                record_id_column=record_id_column,
+                record_id_columns=record_id_columns,
                 source_id=source_id,
                 label=label,
                 data_context=data_context,
@@ -107,6 +114,25 @@ class PostgreSQLTableSource(DBTableSource):
                 connector.close()
             except Exception:
                 pass  # suppress close errors; don't mask original __init__ failure
+
+    @override
+    def _table_address(self, connector: DBConnectorProtocol, table_name: str) -> str:
+        """Return ``<database>.<schema>.<table>``, the table's three-part name.
+
+        The SQL standard's catalog.schema.table, which PostgreSQL documents as
+        ``database.schema.table``; the database and schema are the connection's
+        ``current_database()`` and ``current_schema()``, where the connector finds
+        the table (ITL-1154).
+
+        Args:
+            connector: The connector the source reads through.
+            table_name: The table's name.
+
+        Returns:
+            The table's address.
+        """
+        database, schema = cast("PostgreSQLConnector", connector).current_location()
+        return joined_location(".", database, schema, table_name)
 
     @contextmanager
     @override
@@ -128,7 +154,7 @@ class PostgreSQLTableSource(DBTableSource):
         # was closed after construction.
         base = super().to_config()
         base.pop("connector", None)
-        return {**base, "source_type": "postgresql_table", "dsn": self._dsn}
+        return {**base, "source_type": self.SOURCE_KIND, "dsn": self._dsn}
 
     @classmethod
     def from_config(
@@ -148,7 +174,7 @@ class PostgreSQLTableSource(DBTableSource):
             tag_columns=config.get("tag_columns"),
             tag_only_columns=config.get("tag_only_columns", True),
             system_tag_columns=config.get("system_tag_columns", ()),
-            record_id_column=config.get("record_id_column"),
+            record_id_columns=config.get("record_id_columns"),
             source_id=config.get("source_id"),
             label=config.get("label"),
             data_context=config.get("data_context"),

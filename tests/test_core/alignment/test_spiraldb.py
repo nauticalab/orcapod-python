@@ -19,7 +19,6 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from orcapod.contexts import get_default_context
 from orcapod.sources import SpiralDBTableSource
 from tests.test_databases import fake_pyspiral
 
@@ -31,7 +30,7 @@ from .checker import (
 )
 from .expectations import rows
 from .fixtures import COLUMN_CONFIGS, content_hash_column, schema_hash_of
-from .oracle import Oracle
+from .oracle import key_record_id, Oracle
 
 PROJECT = "alignment"
 SOURCE_ID = "spiral_events"
@@ -57,14 +56,11 @@ def written_table() -> pa.Table:
 
 
 def key_tokens(table: pa.Table) -> list[str]:
-    """Each row's token by the documented recipe: the labelled Arrow hash of its key.
+    """Each row's record id by the documented recipe: the JSON object of its key.
 
-    The key fields are hashed as non-nullable (a key is never null).
+    The canonical JSON of the key columns in key order, with no spaces (ITL-1154).
     """
-    keys = table.select(KEYS.names)
-    keys = keys.cast(pa.schema([f.with_nullable(False) for f in keys.schema]))
-    hasher = get_default_context().arrow_hasher
-    return [hasher.hash_table(keys.slice(i, 1)).to_string() for i in range(len(keys))]
+    return [key_record_id(row, KEYS.names) for row in table.to_pylist()]
 
 
 @pytest.fixture()

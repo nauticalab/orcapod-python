@@ -344,8 +344,6 @@ class TestSystemTagColumnNames:
     def test_col_names_match_add_system_tag_columns_output(self):
         """Column names from system_tag_column_names() must match those
         added to a table by add_system_tag_columns()."""
-        import uuid
-
         import pyarrow as pa
         from orcapod.utils.arrow_utils import (
             add_system_tag_columns,
@@ -354,9 +352,7 @@ class TestSystemTagColumnNames:
 
         schema_hash = "testhash"
         table = pa.table({"id": pa.array([1]), "v": pa.array([1.0])})
-        enriched = add_system_tag_columns(
-            table, schema_hash, ["src_a"], [uuid.uuid4().bytes]
-        )
+        enriched = add_system_tag_columns(table, schema_hash, ["src_a"], ["row_0"])
         src_col, rec_col = system_tag_column_names(schema_hash)
         assert src_col in enriched.column_names
         assert rec_col in enriched.column_names
@@ -823,65 +819,64 @@ class TestMakeEmptyTable:
 
 
 class TestFoldSystemTagValues:
-    """Folding N members' system-tag values into one scalar (NPIPE-204).
+    """Folding N members' system-tag values into one scalar (NPIPE-204, ITL-1154).
 
-    The expected digests below are hard-coded on purpose.  A fold that used
-    hash() or set-iteration order would still be self-consistent within one
-    process; pinning the values is what catches it.
+    One helper for both system tags: ``"<operation label>:<hex>"``, the SHA-256 of the
+    canonical JSON member list. The expected digest is hard-coded on purpose: a fold
+    that used hash() or set-iteration order would still be self-consistent within one
+    process; pinning the value is what catches it.
     """
 
-    SOURCE_COL = "_tag_source_id::abc123"
-    RECORD_COL = "_tag_record_id::abc123"
+    GROUP = "group_v1"
+    # sha256 of the canonical JSON member list ["src_a","src_b"] (ITL-942 H).
+    EXPECTED = (
+        "group_v1:45a8bc201b275f241aeba79d5225d475d91d80e12a58adffb2e46393eb8c5482"
+    )
 
-    RIDS = [
-        bytes.fromhex("0102030405060708090a0b0c0d0e0f10"),
-        bytes.fromhex("1112131415161718191a1b1c1d1e1f20"),
-    ]
-    EXPECTED_RID = bytes.fromhex("853be16a3f38565f8ced039f84fdbea6")
-    # sha256 of the canonical JSON member list (ITL-942 H; was the bare concatenation 7916442d...)
-    EXPECTED_SID = "45a8bc201b275f241aeba79d5225d475d91d80e12a58adffb2e46393eb8c5482"
-
-    def test_record_id_folds_to_16_bytes(self):
+    def test_digest_is_pinned(self):
         from orcapod.utils.arrow_utils import fold_system_tag_values
 
-        result = fold_system_tag_values(self.RECORD_COL, self.RIDS)
-        assert isinstance(result, bytes)
-        assert len(result) == 16
+        assert fold_system_tag_values(["src_a", "src_b"], label=self.GROUP) == (
+            self.EXPECTED
+        )
 
-    def test_record_id_digest_is_pinned(self):
+    def test_record_ids_fold_the_same_way(self):
+        """A record id folds like a source id: the members' texts, labelled."""
         from orcapod.utils.arrow_utils import fold_system_tag_values
 
-        assert fold_system_tag_values(self.RECORD_COL, self.RIDS) == self.EXPECTED_RID
+        result = fold_system_tag_values(["row_0", "row_1"], label=self.GROUP)
+        assert result.startswith("group_v1:")
+        assert len(result) == len("group_v1:") + 64
 
-    def test_source_id_digest_is_pinned(self):
+    def test_the_label_names_the_operation(self):
+        """Batch and GroupBy fold one member list under their own labels."""
         from orcapod.utils.arrow_utils import fold_system_tag_values
 
-        result = fold_system_tag_values(self.SOURCE_COL, ["src_a", "src_b"])
-        assert result == self.EXPECTED_SID
+        group = fold_system_tag_values(["a"], label="group_v1")
+        batch = fold_system_tag_values(["a"], label="batch_v1")
+        assert group.split(":")[1] == batch.split(":")[1]
+        assert group != batch
 
     def test_order_matters(self):
         """Member order is part of the identity, matching the data lists."""
         from orcapod.utils.arrow_utils import fold_system_tag_values
 
-        forward = fold_system_tag_values(self.RECORD_COL, self.RIDS)
-        reverse = fold_system_tag_values(self.RECORD_COL, list(reversed(self.RIDS)))
+        forward = fold_system_tag_values(["row_0", "row_1"], label=self.GROUP)
+        reverse = fold_system_tag_values(["row_1", "row_0"], label=self.GROUP)
         assert forward != reverse
 
     def test_single_member_is_still_folded(self):
         """A one-member group folds rather than passing the value through."""
         from orcapod.utils.arrow_utils import fold_system_tag_values
 
-        result = fold_system_tag_values(self.RECORD_COL, self.RIDS[:1])
-        assert isinstance(result, bytes) and len(result) == 16
-        assert result != self.RIDS[0]
+        assert fold_system_tag_values(["row_0"], label=self.GROUP) != "row_0"
 
-    def test_none_members_are_tolerated(self):
+    def test_none_members_are_tolerated_and_differ_from_empty(self):
         from orcapod.utils.arrow_utils import fold_system_tag_values
 
-        assert isinstance(
-            fold_system_tag_values(self.RECORD_COL, [None, self.RIDS[0]]), bytes
-        )
-        assert isinstance(fold_system_tag_values(self.SOURCE_COL, [None, "src_a"]), str)
+        with_none = fold_system_tag_values([None, "src_a"], label=self.GROUP)
+        with_empty = fold_system_tag_values(["", "src_a"], label=self.GROUP)
+        assert with_none != with_empty
 
     def test_digest_is_stable_across_processes(self):
         """Fresh interpreter, therefore fresh PYTHONHASHSEED.
@@ -897,14 +892,8 @@ class TestFoldSystemTagValues:
 
         script = (
             "from orcapod.utils.arrow_utils import fold_system_tag_values\n"
-            "rids = [bytes.fromhex('0102030405060708090a0b0c0d0e0f10'),\n"
-            "        bytes.fromhex('1112131415161718191a1b1c1d1e1f20')]\n"
-            "print(fold_system_tag_values('_tag_record_id::abc123', rids).hex())\n"
-            "print(fold_system_tag_values('_tag_source_id::abc123', ['src_a','src_b']))\n"
+            "print(fold_system_tag_values(['src_a','src_b'], label='group_v1'))\n"
         )
-        # The subprocess does not inherit pytest.ini's `pythonpath = src`, so
-        # pass it explicitly rather than relying on orcapod being installed in
-        # the active environment.
         src_dir = Path(__file__).resolve().parents[2] / "src"
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join(
@@ -919,8 +908,7 @@ class TestFoldSystemTagValues:
             check=True,
             env=env,
         ).stdout.split()
-        assert out[0] == self.EXPECTED_RID.hex()
-        assert out[1] == self.EXPECTED_SID
+        assert out[0] == self.EXPECTED
 
 
 class TestColumnArrowType:

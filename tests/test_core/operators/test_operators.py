@@ -917,9 +917,8 @@ class TestJoinOutputSchemaSystemTags:
             if not col_name.startswith(constants.SYSTEM_TAG_PREFIX):
                 continue
             if col_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
-                assert col_type is bytes, (
-                    f"record_id column '{col_name}' should map to bytes, "
-                    f"got {col_type!r}"
+                assert col_type is str, (
+                    f"record_id column '{col_name}' should map to str, got {col_type!r}"
                 )
             else:
                 assert col_type is str, (
@@ -1569,12 +1568,12 @@ class TestJoinSystemTagCanonicalOrdering:
             assert len(values) == result_table.num_rows
             for val in values:
                 if col.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
-                    # record_id columns store 16-byte UUID values
-                    assert isinstance(val, bytes), (
-                        f"record_id column {col!r} should contain bytes, got {type(val)}"
+                    # record_id columns store the row identifier as text (ITL-1154)
+                    assert isinstance(val, str), (
+                        f"record_id column {col!r} should contain str, got {type(val)}"
                     )
-                    assert len(val) == 16, (
-                        f"record_id column {col!r} should be 16 bytes"
+                    assert val.startswith("row_"), (
+                        f"record_id column {col!r} should name a row position"
                     )
                 else:
                     # source_id and other system tag columns are large_string

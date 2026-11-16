@@ -140,7 +140,7 @@ def check_every_config(
     job: PipelineJob,
     view: View,
     oracle: Any,
-    tokens: dict[tuple[str, bytes], str] | None,
+    tokens: dict[tuple[str, str], str] | None,
 ) -> None:
     """Check ``view`` under every column configuration; name every one that fails.
 

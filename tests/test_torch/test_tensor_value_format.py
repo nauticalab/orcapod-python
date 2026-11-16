@@ -55,7 +55,7 @@ def data_hash(value: Any) -> Any:
 
 
 def test_table_token_carries_identifier_and_digest() -> None:
-    """A stored cell hashes as the logical type identifier and the digest, no label."""
+    """A stored cell hashes as the logical type identifier and the labelled hash."""
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
 
     hasher = get_default_context().arrow_hasher
@@ -73,7 +73,7 @@ def test_table_token_carries_identifier_and_digest() -> None:
         == b"orcapod.torch.tensor;"
         + metadata.hex().encode()
         + b"::"
-        + semantic_hash(t).digest
+        + semantic_hash(t).to_prefixed_digest()
     )
 
 

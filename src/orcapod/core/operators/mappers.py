@@ -32,6 +32,7 @@ class MapData(UnaryOperator):
         # A data column never gets a meta column's name (ITL-1080): refused here,
         # so no path (sync, async or the prediction) can produce one.
         schema_utils.require_names_not_meta(name_map.values())
+        schema_utils.require_names_without_separator(name_map.values())
         self.name_map = dict(name_map)
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
@@ -199,6 +200,7 @@ class MapTags(UnaryOperator):
         # A tag never gets a meta column's name (ITL-1080): refused here, so no
         # path (sync, async or the prediction) can produce one.
         schema_utils.require_names_not_meta(name_map.values())
+        schema_utils.require_names_without_separator(name_map.values())
         self.name_map = dict(name_map)
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)

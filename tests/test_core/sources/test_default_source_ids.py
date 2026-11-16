@@ -161,12 +161,13 @@ class TestInMemoryDefaultSourceId:
         sep = constants.BLOCK_SEPARATOR
         assert info == [f"{given}{sep}row_{i}{sep}{data_column}" for i in range(3)]
 
-    def test_path_n_char_truncates_the_hex_only(self, cls, kind, make, data_column):
+    def test_default_is_full_length_whatever_path_n_char(
+        self, cls, kind, make, data_column
+    ):
+        """A default source id is a name, never shortened (developer, November 16, 2026)."""
         full = make().source_id
         config = OrcapodConfig(hashing=HashingConfig(path_n_char=12))
-        short = make(config=config).source_id
-        kind_part, label, full_hex = full.split(":")
-        assert short == f"{kind_part}:{label}:{full_hex[:12]}"
+        assert make(config=config).source_id == full
 
 
 class TestArrowTableDefaultIsTheLabelledTableHash:

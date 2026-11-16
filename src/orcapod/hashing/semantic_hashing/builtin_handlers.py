@@ -1,8 +1,8 @@
 """
 Built-in PythonTypeHandlerProtocol implementations.
 
-  UUIDHandler           -- uuid.UUID: 16-byte binary representation
-  BytesHandler          -- bytes/bytearray: hex string representation
+  UUIDHandler           -- uuid.UUID: tagged hex ("uuid")
+  BytesHandler          -- bytes/bytearray: tagged hex ("bytes")
   FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
   TypeObjectHandler     -- type objects: logical type identifier, else "type:<module>.<qualname>"
   SpecialFormHandler    -- typing._SpecialForm
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import UUID
 
 from typing_extensions import override
@@ -66,18 +66,59 @@ logger = logging.getLogger(__name__)
 
 
 class UUIDHandler:
-    """Hasher for ``uuid.UUID`` objects — returns the raw 16-byte binary representation."""
+    """Hasher for a bare ``uuid.UUID`` value: the tagged value ``{"__type__": "uuid", "hex": ...}``.
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
-        return obj.bytes
+    A value handler describes its value as tagged data (ITL-1154, rule 2), so a UUID
+    never shares a hash with its 16 bytes or with the text of its hex digits.
+
+    A UUID column is not hashed through this handler (``COLUMN_VALUE_HANDLER``): its
+    stored 16 bytes are its identity, so the Arrow hasher hashes the column as stored
+    (rule 3).
+    """
+
+    COLUMN_VALUE_HANDLER: ClassVar[bool] = False
+    """A column of ``orcapod.uuid`` is hashed as stored, never through this handler."""
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Encoded:
+        """Encode ``obj`` as its 32 lowercase hex digits under the tag ``uuid``.
+
+        Args:
+            obj: A ``uuid.UUID``.
+            hasher: The semantic hasher (unused).
+
+        Returns:
+            ``Encoded("uuid", {"hex": obj.hex})``.
+
+        Raises:
+            TypeError: If ``obj`` is not a ``uuid.UUID``.
+        """
+        if isinstance(obj, UUID):
+            return Encoded("uuid", {"hex": obj.hex})
+        raise TypeError(f"UUIDHandler: expected uuid.UUID, got {type(obj)!r}")
 
 
 class BytesHandler:
-    """Hasher for bytes and bytearray objects — returns the lowercase hex string."""
+    """Hasher for bytes and bytearray objects: the tagged value ``{"__type__": "bytes", "hex": ...}``.
 
-    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+    The tag keeps a bytes value apart from the ``str`` of its hex digits (ITL-1152;
+    ITL-1154, rule 2). ``bytes`` and ``bytearray`` of equal content hash equal.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Encoded:
+        """Encode ``obj`` as its lowercase hex digits under the tag ``bytes``.
+
+        Args:
+            obj: A ``bytes`` or ``bytearray`` value.
+            hasher: The semantic hasher (unused).
+
+        Returns:
+            ``Encoded("bytes", {"hex": obj.hex()})``.
+
+        Raises:
+            TypeError: If ``obj`` is not ``bytes`` or ``bytearray``.
+        """
         if isinstance(obj, (bytes, bytearray)):
-            return obj.hex()
+            return Encoded("bytes", {"hex": obj.hex()})
         raise TypeError(f"BytesHandler: expected bytes or bytearray, got {type(obj)!r}")
 
 
@@ -227,17 +268,21 @@ def _sorted_hashes(
 ) -> list[ContentHash]:
     """Hash each of ``args`` and return the hashes ordered by digest.
 
-    The hashes are returned as ``ContentHash`` objects: the structure hasher feeds only
-    their digests into the enclosing hash, never their labels.
+    The hashes are returned as ``ContentHash`` objects, which the structure hasher
+    embeds with their labels (ITL-1154).
 
     Args:
         hasher: The structure hasher in use.
         args: The members of a union.
 
     Returns:
-        One hash per member, sorted by hex digest so that member order does not matter.
+        One hash per member, sorted by hex digest and then label, so that member
+        order does not matter even for two members whose digests are equal.
     """
-    return sorted((hasher.hash_object(arg) for arg in args), key=ContentHash.to_hex)
+    return sorted(
+        (hasher.hash_object(arg) for arg in args),
+        key=lambda member: (member.to_hex(), member.method),
+    )
 
 
 class GenericAliasHandler:
@@ -249,7 +294,12 @@ class GenericAliasHandler:
         origin = getattr(obj, "__origin__", None)
         args = getattr(obj, "__args__", None) or ()
         if origin is None:
-            return f"generic_alias:{obj!r}"
+            # No typing or collections.abc alias lacks an origin (Python 3.11 to 3.13);
+            # a third-party one's repr is not stable, so it is refused, never hashed.
+            raise TypeError(
+                f"GenericAliasHandler: the generic alias {obj!r} has no __origin__, so "
+                "it has no stable identity to hash."
+            )
         if origin is typing.Union:
             return Encoded("union", {"args": _sorted_hashes(hasher, args)})
         return Encoded(

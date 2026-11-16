@@ -230,18 +230,18 @@
         "folder": "v1",
         "history": [
             {
-                "date": "2026-11-15",
+                "date": "2026-11-16",
                 "release": null,
                 "added": {
-                    "arrow-01.json": "d62d1fd8ef374e4fd55a82d7eeb09f3ed5906b9de6fc96b6b1596edcb1579da8",
-                    "datagram-01.json": "1151c8d391f6f7303657da83720e4fcfc8c5b5082e9cd670ef51ba8886575ca9",
-                    "pipeline-01.json": "e4e4e71b4ef9bdd9211b5c5dc15db03ee333f66af606a832d1b5fccfa21f44da",
-                    "schema-01.json": "f1bfda8bc4da3ecfc7973998c5579b5a3f151f7ec1f9c75c20ac5ad5244856ae",
-                    "semantic-01.json": "7fd0ccad63a7e3f83314b27e9d6df87a8cb15694758f92e517a0d9c988f98a53",
-                    "torch-01.json": "99af07350bc23a0200cecfd786ccd6c17985c2270ad5e3f44aca74273a1bcdc2"
+                    "arrow-01.json": "c66fa55619178f2631d04232555cd58059813e97e9ecd2b9de9e63699e60c964",
+                    "datagram-01.json": "598d4a2851819d76ba674e189222e61733ca1861ca82a59e990a8ee5e1b0a7b3",
+                    "pipeline-01.json": "f6fd38d591b20876725d4050ce4f11ad541460e9913262b05d61c1b398770711",
+                    "schema-01.json": "79aa2a068e0724891cf43ee528ce8f569e65f08864faa5e34773bfc69ac9576e",
+                    "semantic-01.json": "8e5d9dfff461f9f1d6bdd49a3019e7bf6122e75d799d725b17531d31b080003c",
+                    "torch-01.json": "af2e8b68d66dffaa37e1d0ad75acd42f595d65b9fae00ddcde81bf9e13a265c8"
                 },
                 "previous": null,
-                "digest": "e20d0af197e1d2eca72f0524e626cb4a46b37d261cc7a06ea5768cce65d153a5"
+                "digest": "2a2dcc4dd5e52a906f79f0ca3a26989ef0869b5531882831da004570f70c4a4d"
             }
         ]
     },
@@ -252,15 +252,15 @@
         },
         {
             "definition": "semantic_hasher",
-            "change": "hash label rule: a nested hash enters its parent as its digest only, never with its label, so every structure hash that contains a nested hash moves; labels are <algorithm>_v1 (semantic_v1, arrow_v1, directory_v1, ndarray_v1, polars_expr_v1; the file hash keeps sha256), each defined once in code beside its algorithm and not in this file (ITL-945)"
+            "change": "hash label rule: a hash fed into another hash carries its label, so a nested hash enters its parent as {\"__type__\": \"hash\", \"label\": ..., \"digest\": ...} and every structure hash that contains a nested hash moves; bytes and UUID values hash as tagged data, and frozenset is tagged apart from set; labels are <algorithm>_v1, each defined once in code beside its algorithm and not in this file; the file hash keeps sha256 (ITL-945, revised by ITL-1154)"
         },
         {
             "definition": "arrow_hasher",
-            "change": "hash label rule: the token of a value-hashed extension cell holds the extension name and the raw digest, no label (ITL-945)"
+            "change": "hash label rule: the token of a value-hashed extension cell is the logical type identifier, then the value hash with its label (<identifier>::<label>:<digest>); a UUID column is hashed as stored; the order-including table hash is labelled arrow_ordered_v1 and enters the value hashes built on it with its label (ITL-945, revised by ITL-1154)"
         },
         {
             "definition": "entry_id",
-            "change": "hash label rule: the input data hash enters the entry-id table, and the node content hash enters the operator-cache row key, as raw digests without a label; names (function uri, path components) hold bare hex digests (ITL-945)"
+            "change": "hash label rule: the input data hash enters the entry-id table, and the node content hash enters the operator-cache row key, with their labels; the folded source id of Batch and GroupBy carries batch_v1 / group_v1; names (function uri, path components) hold bare hex digests (ITL-945, revised by ITL-1154)"
         }
     ]
 }

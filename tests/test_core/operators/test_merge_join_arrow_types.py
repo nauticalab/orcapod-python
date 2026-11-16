@@ -589,8 +589,8 @@ class TestPassThroughColumns:
     def test_merge_join_pass_through_types(self, rows: int) -> None:
         """Data, source-info, tag and system-tag columns: normalized input type.
 
-        System-tag record ids stay ``large_binary``, the type a source gives
-        them (ITL-942); ``float32`` keeps its width.
+        System-tag record ids stay ``large_string``, the type a source gives
+        them (the row identifier as text, ITL-1154); ``float32`` keeps its width.
         """
         left, right = _sources(rows)
         op = MergeJoin()
@@ -618,7 +618,7 @@ class TestPassThroughColumns:
             f.type for f in table.schema if f.name.startswith("_tag")
         }
         assert output_system_tag_types == input_system_tag_types
-        assert pa.large_binary() in output_system_tag_types
+        assert output_system_tag_types == {pa.large_string()}
         assert len(table) == rows
         if rows:
             # The empty inputs come from PolarsFilter, which drops non-null

@@ -1154,12 +1154,8 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         # is present in storage but filtering is never applied on reads.
         n_rows = output_table.num_rows
         node_content_hash = self.content_hash()
-        # The row that is hashed carries the node content hash as its raw digest:
-        # a hash label is never part of a hash input. The stored column is labelled.
-        hashed_table = output_table.append_column(
-            constants.NODE_CONTENT_HASH_COL,
-            pa.array([node_content_hash.digest] * n_rows, type=pa.large_binary()),
-        )
+        # The node content hash enters the hashed row as it is stored, with its label:
+        # a hash fed into another hash carries its label (ITL-1154).
         output_table = output_table.append_column(
             constants.NODE_CONTENT_HASH_COL,
             pa.array(
@@ -1171,7 +1167,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
         # Per-row record hashes for dedup: hash(tag + data + system_tags + node_content_hash).
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
-        for batch in hashed_table.to_batches():
+        for batch in output_table.to_batches():
             for i in range(len(batch)):
                 # A hash stored as a value carries its label: b"<label>:<digest>".
                 record_hashes.append(

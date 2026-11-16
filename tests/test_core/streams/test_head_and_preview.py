@@ -407,7 +407,7 @@ class _FakeDynamicSource:
 def test_polling_source_head_never_polls() -> None:
     """A polling source's head shows polled rows only and never polls."""
     fake = _FakeDynamicSource()
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
     head = source.head()
     _ = source._repr_html_()
     assert (fake.polls, fake.fetches) == (0, 0)
@@ -424,7 +424,7 @@ def test_polling_source_head_never_polls() -> None:
 def test_polling_source_head_shows_declared_system_tags_without_polling() -> None:
     """A declared schema answers head's columns, system tags included, without a poll."""
     fake = _FakeDynamicSource(declared=Schema({"id": int, "val": int}))
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
     head = source.head(columns={"system_tags": True})
     assert (fake.polls, fake.fetches) == (0, 0)
     tag_schema, data_schema = source.output_schema(columns={"system_tags": True})
@@ -435,7 +435,7 @@ def test_polling_source_head_shows_declared_system_tags_without_polling() -> Non
 def test_derived_source_over_a_polling_source_never_polls() -> None:
     """A derived source's head asks its origin for its head, so nothing is polled."""
     fake = _FakeDynamicSource()
-    origin = PollingSource(fake, tag_columns="id")
+    origin = PollingSource(fake, tag_columns="id", record_id_columns="id")
     # Building the derived source reads the origin's columns, which polls it once.
     derived = DerivedSource(origin, tags_as_data={"id": "id_value"})
     seen = (fake.polls, fake.fetches)
@@ -449,7 +449,7 @@ def test_derived_source_over_a_polling_source_never_polls() -> None:
 def test_downstream_of_an_unpolled_source_never_polls() -> None:
     """A stream over a source whose columns are known only by polling shows none."""
     fake = _FakeDynamicSource()
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
 
     def deliver(val: int) -> None:
         """The side effect; recording or refusing a delivery."""
@@ -485,7 +485,7 @@ def test_downstream_head_never_polls_for_data_columns(
     content hashes are known only from polled rows: the head then shows no columns.
     """
     fake = _FakeDynamicSource(declared=Schema({"id": int, "val": int}))
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
 
     def deliver(val: int) -> None:
         """The side effect; refusing a delivery."""
@@ -683,7 +683,7 @@ class _BatchedDynamicSource(_FakeDynamicSource):
 def test_polling_source_head_over_several_batches_is_the_prefix() -> None:
     """With several polled batches, head is the prefix of all rows, with the full count."""
     fake = _BatchedDynamicSource()
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
     for _ in range(3):
         _ = list(source.iter_data())
     seen = (fake.polls, fake.fetches)
@@ -696,7 +696,7 @@ def test_polling_source_head_over_several_batches_is_the_prefix() -> None:
 def test_derived_source_rowless_head_has_its_own_columns() -> None:
     """Before its origin polls, a derived source shows its columns, tag copies included."""
     fake = _FakeDynamicSource(declared=Schema({"id": int, "val": int}))
-    origin = PollingSource(fake, tag_columns="id")
+    origin = PollingSource(fake, tag_columns="id", record_id_columns="id")
     derived = DerivedSource(origin, tags_as_data={"id": "id_value"})
     head = derived.head()
     assert (fake.polls, fake.fetches) == (0, 0)
@@ -708,7 +708,7 @@ def test_derived_source_rowless_head_has_its_own_columns() -> None:
 def test_cached_source_keeps_the_wrapped_explanation_when_it_has_no_rows() -> None:
     """A cached source over an unpolled source says why there are no rows."""
     source = CachedSource(
-        PollingSource(_FakeDynamicSource(), tag_columns="id"),
+        PollingSource(_FakeDynamicSource(), tag_columns="id", record_id_columns="id"),
         cache_database=InMemoryArrowDatabase(),
     )
     head = source.head()

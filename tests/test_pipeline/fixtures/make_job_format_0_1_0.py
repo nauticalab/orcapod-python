@@ -7,6 +7,11 @@ commit cdb4f160, which predates the ``orcapod_version`` stamp and the 0.2.0 bump
     PYTHONPATH=<dir>/src uv run python make_job_format_0_1_0.py job_format_0_1_0.json
 
 Running it on a later checkout writes a newer format; do not regenerate the fixture.
+
+Its hashes were re-recorded once for the v1 hash definition (ITL-1154): this script
+was run on origin/main (it reproduced every hash in the file) and on the ITL-1154
+branch, and each hash in the file was replaced by the branch's value for the same
+node, uri or source. The format, keys and layout of the file are unchanged.
 """
 
 import sys

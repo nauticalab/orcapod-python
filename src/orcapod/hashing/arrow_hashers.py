@@ -29,6 +29,15 @@ label (``arrow_v2``). The number is not kept equal to the starfix hash format nu
 The data context file names the hasher class and does not repeat the label.
 """
 
+ARROW_ORDERED_HASH_LABEL = "arrow_ordered_v1"
+"""``ContentHash.method`` of ``StarfixArrowHasher.hash_table_ordered``: the single definition.
+
+The order-including table hash is a procedure of its own (column order and, by default,
+struct field order are part of the digest; the options are an input of the digest), so it
+has its own label: one label, one procedure (ITL-1154). It is fed, with this label, into the
+value hashes built on it (pandas ``DataFrame`` and ``Series``).
+"""
+
 
 class StarfixArrowHasher:
     """Arrow table hasher backed by the starfix-python ``ArrowDigester``.
@@ -201,9 +210,9 @@ class StarfixArrowHasher:
         ``ordered_columns`` and ``ordered_struct_fields`` options). The options are an input
         of the digest, so the hashes of one table under different options never coincide,
         even for a one-column table. Value types whose own equality depends on order build
-        their hash on this digest (pandas ``DataFrame`` and ``Series``); the ``ContentHash``
-        returned here carries this hasher's label, and such a type uses the digest bytes
-        only, under its own label.
+        their hash on this digest (pandas ``DataFrame`` and ``Series``), which they take with
+        its label. The ``ContentHash`` returned here is labelled
+        ``ARROW_ORDERED_HASH_LABEL``: it is another procedure than ``hash_table``.
 
         Args:
             table: The table or record batch to hash.
@@ -212,7 +221,7 @@ class StarfixArrowHasher:
                 column order stays part of the hash.
         """
         return ContentHash(
-            method=self._hasher_id,
+            method=ARROW_ORDERED_HASH_LABEL,
             digest=self._digest(
                 table, ordered_columns=True, ordered_struct_fields=struct_field_order
             ),

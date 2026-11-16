@@ -531,8 +531,8 @@ class SourceNodeBase(TraceableBase, ABC):
 
         When ``columns.system_tags`` is ``True`` (or ``all_info=True``), the
         returned tag schema is extended with the two system-tag entries for this
-        node's schema: the source id as ``str`` and the record id as ``bytes``, the
-        types every source's rows have (Arrow ``large_string`` and ``large_binary``).
+        node's schema: the source id and the record id, both ``str``, the types every
+        source's rows have (Arrow ``large_string``).
         Their names are deterministic from the declared schemas and match what a
         concrete source with the same schema would produce.
 
@@ -555,7 +555,7 @@ class SourceNodeBase(TraceableBase, ABC):
                 self._schema_hash_str
             )
             tag_schema = Schema(
-                {**dict(tag_schema), source_id_col: str, record_id_col: bytes}
+                {**dict(tag_schema), source_id_col: str, record_id_col: str}
             )
         return tag_schema, self._data_schema
 
@@ -665,9 +665,9 @@ class SourceNodeBase(TraceableBase, ABC):
         if len(source_ids) != 1 or len(record_ids) != 1 or others:
             issues.append(_one_system_tag_pair_issue(source_ids, record_ids, others))
         else:
-            # The pair must have the types the slot predicts for it (str, bytes).
+            # The pair must have the types the slot predicts for it (str, str).
             given_tags = source.output_schema(columns={"system_tags": True})[0]
-            for name, declared_type in ((source_ids[0], str), (record_ids[0], bytes)):
+            for name, declared_type in ((source_ids[0], str), (record_ids[0], str)):
                 if given_tags[name] != declared_type:
                     issues.append(
                         f"system-tag column {name!r} is declared "

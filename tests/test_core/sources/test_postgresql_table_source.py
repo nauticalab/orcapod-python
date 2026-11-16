@@ -73,6 +73,7 @@ def _make_mock_connector(
 
     mock.get_table_names.return_value = table_names
     mock.get_pk_columns.return_value = pk_columns
+    mock.current_location.return_value = ("orcapod", "public")
     mock.get_column_info.return_value = []
     mock.iter_batches.return_value = iter(batches)
     return mock
@@ -181,7 +182,7 @@ class TestPKAsDefaultTags:
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements", tag_only_columns=True)
-        assert src.source_id == "measurements"
+        assert src.source_id == "postgresql_table:orcapod.public.measurements"
 
     def test_explicit_source_id_overrides_default(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -441,7 +442,10 @@ class TestToConfig:
         assert "session_id" in self._make_src().to_config()["tag_columns"]
 
     def test_has_source_id(self):
-        assert self._make_src().to_config()["source_id"] == "measurements"
+        assert (
+            self._make_src().to_config()["source_id"]
+            == "postgresql_table:orcapod.public.measurements"
+        )
 
     def test_has_content_hash(self):
         assert "content_hash" in self._make_src().to_config()

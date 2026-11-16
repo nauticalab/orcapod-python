@@ -76,9 +76,9 @@ print_lineage(job.nodes["session_means"])
 #     GroupBy
 #       rates
 #         Join
-#           SelectDataColumns_1
-#             units
 #           SelectDataColumns_3
+#             units
+#           SelectDataColumns_1
 #             sessions
 ```
 
@@ -131,7 +131,7 @@ source_columns = [c for c in table.columns if c.startswith("_tag_source_id")]
 print(len(source_columns))
 # 2
 print(table.select(source_columns).unique().rows())
-# [('sessions', 'units')]
+# [('units', 'sessions')]
 ```
 
 Two system-tag columns, because two sources feed `rates`; every row depends on one row of
@@ -268,9 +268,9 @@ result of the node, including those of earlier runs over other inputs, like
     print_lineage(job.nodes["rates"])
     # rates
     #   Join
-    #     SelectDataColumns_1
-    #       units
     #     SelectDataColumns_3
+    #       units
+    #     SelectDataColumns_1
     #       sessions
     ```
 

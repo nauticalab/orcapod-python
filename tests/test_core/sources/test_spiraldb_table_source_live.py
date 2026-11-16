@@ -57,7 +57,9 @@ def test_building_a_source_is_quick_and_names_the_table():
     elapsed = time.monotonic() - start
 
     assert elapsed < 10
-    assert source.source_id == f"{PROJECT}/default.spike_event@{source.table_id}"
+    assert source.source_id == (
+        f"spiraldb_table:{PROJECT}.default.spike_event@{source.table_id}"
+    )
     assert source.table_id.startswith("table_")
     assert "unit_id" in source.keys()[0]
     assert source.row_count_estimate > 0
@@ -162,7 +164,8 @@ def test_tags_as_data_gives_each_unit_its_spike_times_in_time_order():
     )
     unit_key = [c for c in spikes.keys()[0] if c != "timestamp"]
 
-    per_unit = spikes.group_by(unit_key).drop_tag_columns("timestamp")
+    # GroupBy keeps only its keys, so ``timestamp`` is dropped already (ITL-1070).
+    per_unit = spikes.group_by(unit_key)
 
     assert "spike_time_us" in per_unit.keys()[1]
     rows = per_unit.as_table().to_pylist()

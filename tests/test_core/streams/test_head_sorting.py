@@ -190,7 +190,7 @@ class _OneBatch:
 def test_a_polling_source_sorts_the_rows_it_has_polled_and_polls_nothing() -> None:
     """Before a poll there are no rows to sort; after one, the polled rows sort."""
     fake = _OneBatch()
-    source = PollingSource(fake, tag_columns="id")
+    source = PollingSource(fake, tag_columns="id", record_id_columns="id")
     assert source.head(3, all_info=True).status is ViewStatus.NOT_COMPUTED
     assert (fake.polls, fake.fetches) == (0, 0)
 

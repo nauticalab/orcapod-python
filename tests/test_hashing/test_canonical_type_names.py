@@ -301,7 +301,7 @@ class TestFunctionSignatureGolden:
     def test_function_object_hash(self):
         hasher = get_default_context().semantic_hasher
         assert hasher.hash_object(golden_fn).to_string() == (
-            "semantic_v1:a55cef45f6b09c6d4189f958f97153bcfe1b510ea620695098e9b6c44695868b"
+            "semantic_v1:a6d4ca792c9f488285974f11622ccd32a725b499deec28650a3300bb352d0f16"
         )
 
 
@@ -315,7 +315,8 @@ class TestFunctionPodGolden:
     def test_function_signature_hash(self, data_function: PythonDataFunction):
         variation = data_function.get_function_variation_data()
         assert variation["function_signature_hash"] == (
-            b"semantic_v1:\x0bHO\x1c\xc0K\xb9qp\x9cf\xcd\xb3\x15\x90T2fS<\xd4\xe5.\xcf\x05\x88\n\xdf*\x1d&\x9e"
+            b"semantic_v1:\t\xab;\xa6\x95t\xa2\xc7\xcc\t \xe7\xdb\x14\x1c6\xa4y\xea8"
+            b"\xeb\xe6\xfc@K\x10\x12\xd3\xcb\xf0\x86\xe9"
         )
 
     def test_function_content_hash(self, data_function: PythonDataFunction):
@@ -329,7 +330,7 @@ class TestFunctionPodGolden:
     def test_uri(self, data_function: PythonDataFunction):
         assert data_function.uri == (
             "golden_pod_fn",
-            "7323b2a60208dd00f290ea4a14aac02285017eedc669ea4eb0bb6aa66b94b700",
+            "7f73f4eca0b57ef29a6acbea0664eb60e3a7e5886b75be06b3463ed1f56b981a",
             "v0",
             "python.function.v0",
         )

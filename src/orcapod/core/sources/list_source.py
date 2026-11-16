@@ -4,9 +4,12 @@ from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 from orcapod.core.sources.base import RootSource
-from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.core.sources.stream_builder import (
+    SourceStreamBuilder,
+    normalize_record_id_columns,
+)
 from orcapod.protocols.core_protocols import TagProtocol
-from orcapod.types import SchemaLike
+from orcapod.types import ContentHash, SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.canonical_type_names import stabilize_type_names
 from orcapod.utils.tensor_conversions import warn_source_tensor_conversions
@@ -39,6 +42,7 @@ class ListSource(RootSource):
         tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
         data_schema: SchemaLike | None = None,
         source_id: str | None = None,
+        record_id_columns: str | Collection[str] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(source_id=source_id, **kwargs)
@@ -88,12 +92,14 @@ class ListSource(RootSource):
                 arrow_utils.infer_schema_nullable(arrow_table)
             )
 
+        self._key_columns = normalize_record_id_columns(record_id_columns) or ()
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             arrow_table,
             tag_columns=tag_columns,
             source_id=self._source_id,
             source_kind=self.SOURCE_KIND,
+            record_id_columns=self._key_columns,
         )
 
         self._stream = result.stream
@@ -101,8 +107,16 @@ class ListSource(RootSource):
             self._source_id = result.source_id
         warn_source_tensor_conversions(self._source_id, rows)
 
-    def _hash_tag_function(self) -> str:
-        """Produce a stable hash string for the tag function."""
+    def _hash_tag_function(self) -> str | ContentHash:
+        """Produce the stable identity of the tag function.
+
+        Returns:
+            The function's qualified name (``"name"``), its signature text
+            (``"signature"``), or the semantic hash of its source text
+            (``"content"``). The hash is returned as a ``ContentHash``, never as its
+            hex text: it enters ``identity_structure``, and a hash fed into another
+            hash carries its label (ITL-1154).
+        """
         if self._tag_function_hash_mode == "name":
             fn = self._tag_function
             return f"{fn.__module__}.{fn.__qualname__}"
@@ -121,11 +135,11 @@ class ListSource(RootSource):
             import inspect
 
             src = inspect.getsource(self._tag_function)
-            return self.data_context.semantic_hasher.hash_object(src).to_hex()
+            return self.data_context.semantic_hasher.hash_object(src)
 
     def identity_structure(self) -> Any:
-        """Return identity including class name, field name, elements, and tag
-        function hash.
+        """Return identity including class name, field name, elements, tag
+        function hash and key columns (``()`` for the position; ITL-1154).
         """
         try:
             elements_repr: Any = tuple(self._elements)
@@ -136,6 +150,7 @@ class ListSource(RootSource):
             self.name,
             elements_repr,
             self._tag_function_hash,
+            self._key_columns,
         )
 
     def to_config(self, db_registry=None) -> dict[str, Any]:

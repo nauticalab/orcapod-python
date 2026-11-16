@@ -1,9 +1,11 @@
 """SQLiteTableSource — a read-only RootSource backed by a SQLite table.
 
 Wraps a SQLite table as an OrcaPod Source. Primary-key columns are used
-as tag columns by default. For tables with no explicit primary key
-(ROWID-only tables), the implicit ``rowid`` integer column is used
-automatically.
+as tag columns and as the row identifier (the record id) by default. For a
+table with no explicit primary key (a ROWID-only table) the implicit ``rowid``
+integer column becomes the tag, but the rows have no default identifier: pass
+``record_id_columns="rowid"`` (or ``()`` for the position), since SQLite may
+renumber the rowids of such a table (``VACUUM``).
 
 Example::
 
@@ -24,13 +26,16 @@ from __future__ import annotations
 import os
 from collections.abc import Collection, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any, ClassVar, TYPE_CHECKING
 
 from typing_extensions import override
 
 from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.db_table_source import DBTableSource
+from orcapod.core.sources.source_ids import joined_location
+from orcapod.core.sources.stream_builder import normalize_record_id_columns
 from orcapod.databases.sqlite_connector import SQLiteConnector
+from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
@@ -59,7 +64,8 @@ class SQLiteTableSource(DBTableSource):
        - If *tag_columns* is provided, uses them as-is.
        - Otherwise uses the table's primary-key columns.
        - If the table has no explicit PK (ROWID-only), falls back to the
-         implicit ``rowid`` integer column.
+         implicit ``rowid`` integer column; such a table also needs
+         ``record_id_columns`` (``"rowid"`` or ``()``), or it is refused.
     4. Determines the fetch query: injects ``SELECT rowid, *`` when
        ``"rowid"`` is a resolved tag column and not a normal table column
        (handles both auto-detection and ``from_config`` reconstruction).
@@ -76,8 +82,10 @@ class SQLiteTableSource(DBTableSource):
             the table's primary-key columns are used; ROWID-only tables fall
             back to ``["rowid"]``.
         system_tag_columns: Additional system-level tag columns.
-        record_id_column: Column for stable per-row record IDs in provenance.
-        source_id: Canonical source name. Defaults to *table_name*.
+        record_id_columns: The key columns that identify a row; ``None``: the
+            primary key (a table without one is refused); ``()``: the position.
+        source_id: Canonical source name. Defaults to
+            ``sqlite_table:<db path as passed>:main.<table>``.
         label: Human-readable label for this source node.
         data_context: Data context governing type conversion and hashing.
         config: OrcaPod configuration.
@@ -92,13 +100,16 @@ class SQLiteTableSource(DBTableSource):
         sqlite3.OperationalError: If *db_path* cannot be opened.
     """
 
+    SOURCE_KIND: ClassVar[str] = "sqlite_table"
+    """Config type key and default source-id kind of this source (one vocabulary)."""
+
     def __init__(
         self,
         db_path: str | os.PathLike,
         table_name: str,
         tag_columns: str | Collection[str] | None = None,
         system_tag_columns: Collection[str] = (),
-        record_id_column: str | None = None,
+        record_id_columns: str | Collection[str] | None = None,
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
@@ -114,20 +125,34 @@ class SQLiteTableSource(DBTableSource):
         connector = SQLiteConnector(db_path)
 
         try:
+            # A missing table is reported as missing, not as a table without a key.
+            if table_name not in connector.get_table_names():
+                raise ValueError(f"Table {table_name!r} not found in database.")
             # Step 3: Resolve tag columns.
+            pk_cols = connector.get_pk_columns(table_name)
+            if record_id_columns is None and not pk_cols:
+                raise ValueError(
+                    f"Table {table_name!r} has no primary key, so its rows have no "
+                    'identifier: pass record_id_columns="rowid" (SQLite may renumber '
+                    "rowids, for example on VACUUM), name other key columns, or pass "
+                    "record_id_columns=() to identify rows by position."
+                )
             if tag_columns is None:
-                pk_cols = connector.get_pk_columns(table_name)
                 resolved_tags: list[str] = pk_cols if pk_cols else ["rowid"]
             else:
                 resolved_tags = _normalize_column_list(tag_columns)
 
             # Step 4: Determine the fetch query.
-            # If "rowid" is in resolved_tags but not a real column, we need
+            # If "rowid" is a tag or a key column but not a real column, we need
             # SELECT rowid, * to include it.  This also handles from_config
             # reconstruction where tag_columns=["rowid"] is passed explicitly.
             normal_cols = {ci.name for ci in connector.get_column_info(table_name)}
-            if "rowid" in resolved_tags and "rowid" not in normal_cols:
-                _query: str | None = f'SELECT rowid, * FROM "{table_name}"'
+            needs_rowid = "rowid" in resolved_tags or "rowid" in (
+                normalize_record_id_columns(record_id_columns) or ()
+            )
+            if needs_rowid and "rowid" not in normal_cols:
+                # Aliased: unaliased, SQLite names it after an INTEGER PRIMARY KEY.
+                _query: str | None = f'SELECT rowid AS rowid, * FROM "{table_name}"'
             else:
                 _query = None
 
@@ -136,7 +161,7 @@ class SQLiteTableSource(DBTableSource):
                 table_name,
                 tag_columns=resolved_tags,
                 system_tag_columns=system_tag_columns,
-                record_id_column=record_id_column,
+                record_id_columns=record_id_columns,
                 source_id=source_id,
                 label=label,
                 data_context=data_context,
@@ -150,6 +175,31 @@ class SQLiteTableSource(DBTableSource):
             except Exception:
                 # Suppress connector close errors to avoid masking __init__ failures.
                 pass
+
+    @override
+    def _table_address(self, connector: DBConnectorProtocol, table_name: str) -> str:
+        """Return ``<db path as passed>:main.<table>``.
+
+        SQLite names a table ``<schema>.<table>``, the schema of the main database
+        file being ``main``; the file itself is the database's address, so it comes
+        first, as passed (a relative path stays relative; ITL-1154).
+
+        Args:
+            connector: The connector (unused: the path is the source's own).
+            table_name: The table's name.
+
+        Returns:
+            The table's address.
+
+        Raises:
+            ValueError: If the table name contains ``:``, which would make the
+                boundary after the path ambiguous; give the source a ``source_id``.
+        """
+        del connector
+        # The path is read up to the last ``:main.``, so only the table name must not
+        # hold a ``:``; the path is kept as passed, colons included (``C:\\data``).
+        table = joined_location(":", f"main.{table_name}")
+        return f"{os.fspath(self._db_path)}:{table}"
 
     @contextmanager
     @override
@@ -168,7 +218,7 @@ class SQLiteTableSource(DBTableSource):
         """Serialize source configuration to a JSON-compatible dict."""
         base = super().to_config()
         base.pop("connector", None)
-        return {**base, "source_type": "sqlite_table", "db_path": str(self._db_path)}
+        return {**base, "source_type": self.SOURCE_KIND, "db_path": str(self._db_path)}
 
     @classmethod
     def from_config(
@@ -192,7 +242,7 @@ class SQLiteTableSource(DBTableSource):
             tag_columns=config.get("tag_columns"),
             tag_only_columns=config.get("tag_only_columns", True),
             system_tag_columns=config.get("system_tag_columns", ()),
-            record_id_column=config.get("record_id_column"),
+            record_id_columns=config.get("record_id_columns"),
             source_id=config.get("source_id"),
             label=config.get("label"),
             data_context=config.get("data_context"),

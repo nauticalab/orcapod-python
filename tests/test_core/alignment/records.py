@@ -37,14 +37,14 @@ NOT_ROW_DERIVED_PREFIXES = ("__pf_var_", "__pf_exec_")
 NOT_ROW_DERIVED = {"__pod_ts", "__computed", "__is_ephemeral"}
 
 
-def node_outputs(job: PipelineJob) -> dict[bytes, tuple[bytes, str]]:
+def node_outputs(job: PipelineJob) -> dict[str, tuple[bytes, str]]:
     """The uuid and ``y`` token of each in-memory output of ``scaled``, by record id.
 
     Read from the ``Data`` objects the node holds after its run (``iter_data``), a path
     independent of the stored records: what a record's ``__data_id`` and ``_source_y``
     must match.
     """
-    outputs: dict[bytes, tuple[bytes, str]] = {}
+    outputs: dict[str, tuple[bytes, str]] = {}
     for tag, data in job.nodes["scaled"].iter_data():
         system_tags = tag.as_dict(columns={"system_tags": True})
         (record_id,) = [
@@ -52,7 +52,7 @@ def node_outputs(job: PipelineJob) -> dict[bytes, tuple[bytes, str]]:
             for k, v in system_tags.items()
             if k.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
         ]
-        assert isinstance(record_id, bytes)
+        assert isinstance(record_id, str)
         token = data.source_info()["y"]
         assert isinstance(token, str)
         outputs[record_id] = (data.datagram_uuid.bytes, token)
@@ -130,7 +130,7 @@ def assert_records_aligned(
             """Record a failure of ``column`` in this record."""
             failures.append(f"record {index}, column {column!r}: {message}")
 
-        origin = oracle.by_record_id.get(row[record_id_column])
+        origin = oracle.by_record_id.get((row[source_id_column], row[record_id_column]))
         if origin is None or origin.source_id != row[source_id_column]:
             fail(record_id_column, "record id is not a row of its source")
             continue

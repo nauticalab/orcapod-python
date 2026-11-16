@@ -18,7 +18,7 @@ import pytest
 from orcapod import PipelineJob, function_pod
 from orcapod.databases import DeltaTableDatabase
 from orcapod.databases.spiraldb_connector import _serialize_arrow_metadata
-from orcapod.errors import SourceTooLargeError
+from orcapod.errors import RowIdentifierError, SourceTooLargeError
 from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 from orcapod.pipeline.serialization import resolve_source_from_config
 from orcapod.sources import SpiralDBTableSource
@@ -400,7 +400,9 @@ class TestIdentity:
         table_id = project.table("default.event").table_id
 
         assert source.table_id == table_id
-        assert source.source_id == f"{_PROJECT}/default.event@{table_id}"
+        assert source.source_id == (
+            f"spiraldb_table:{_PROJECT}.default.event@{table_id}"
+        )
 
     def test_a_given_source_id_is_used_as_it_is(self, project):
         """A ``source_id`` given by the user is used unchanged."""
@@ -420,7 +422,9 @@ class TestIdentity:
         assert after.source_id != before.source_id
         assert after.content_hash() != before.content_hash()
         assert after.pipeline_hash() == before.pipeline_hash()
-        assert _record_ids(after)[1] != _record_ids(before)[1]
+        # The record id is the row's key, not the source: the same key, the same id
+        # (ITL-1154); the source-id system tag tells the two tables' rows apart.
+        assert _record_ids(after)[1] == _record_ids(before)[1]
 
     def test_restrictions_do_not_change_identity(self, project):
         """Restrictions on the read leave the source id and both hashes unchanged."""
@@ -443,27 +447,14 @@ class TestIdentity:
 class TestRecordIdentity:
     """A row's record identity comes from its primary key."""
 
-    def test_the_row_token_is_the_labelled_hash_of_the_primary_key(self, project):
-        """The source-info row token is the labelled Arrow hash of the primary key."""
+    def test_the_row_token_is_the_json_of_the_primary_key(self, project):
+        """The record id is the canonical JSON of the primary key (ITL-1154)."""
         source = SpiralDBTableSource(_PROJECT, "event", limit=1, tag_only_columns=True)
-        key = pa.table(
-            {
-                "subject_id": pa.array(["m1"], pa.large_string()),
-                "timestamp": pa.array([1], pa.uint64()),
-            },
-            schema=pa.schema(
-                [
-                    pa.field("subject_id", pa.large_string(), nullable=False),
-                    pa.field("timestamp", pa.uint64(), nullable=False),
-                ]
-            ),
-        )
-        token = source.data_context.arrow_hasher.hash_table(key).to_string()
+        token = '{"subject_id":"m1","timestamp":1}'
 
         (info,) = source.as_table(columns={"source": True}).column("_source_amplitude")
 
         assert info.as_py() == f"{source.source_id}::{token}::amplitude"
-        assert "::" not in token
 
     def test_a_row_has_the_same_record_id_in_every_read(self, project):
         """A row has the same record id in a whole, a limited and a filtered read."""
@@ -557,8 +548,13 @@ class TestSaveAndLoad:
         project.create_table("default.blobs", key_schema=keys).write(
             pa.table({"blob": pa.array([b"\x00\xff", b"\x01"]), "n": [1, 2]})
         )
+        # A bytes key cannot identify a row (ITL-1154): the int column ``n`` does.
         source = SpiralDBTableSource(
-            _PROJECT, "blobs", where={"blob": b"\x00\xff"}, tag_only_columns=True
+            _PROJECT,
+            "blobs",
+            where={"blob": b"\x00\xff"},
+            record_id_columns="n",
+            tag_only_columns=True,
         )
 
         saved = json.loads(json.dumps(source.to_config()))
@@ -838,3 +834,25 @@ class TestNotebookPreview:
         # The two tag columns are marked in the display (ITL-1081).
         assert "bold = tag" in html
         assert html.count("font-weight:bold") == 2
+
+
+class TestNamedKeyColumns:
+    """``record_id_columns`` on a SpiralDB table (ITL-1154)."""
+
+    def test_a_key_repeated_in_another_slice_is_refused(self, project):
+        """Keys must be unique across the whole read, not only within one slice."""
+        source = SpiralDBTableSource(
+            _PROJECT, "event", batch_rows=1, record_id_columns="subject_id"
+        )
+        with pytest.raises(RowIdentifierError, match="appears in two rows"):
+            list(source.iter_data())
+
+    def test_named_keys_leave_the_primary_key_as_the_tags(self, project):
+        """The default tags are the primary key, whatever identifies the rows."""
+        source = SpiralDBTableSource(_PROJECT, "event", record_id_columns="timestamp")
+        assert tuple(source.keys()[0]) == ("subject_id", "timestamp")
+
+    def test_position_is_not_offered(self, project):
+        """A SpiralDB scan order does not identify a row: ``()`` is refused."""
+        with pytest.raises(ValueError, match="record_id_columns=\\(\\)"):
+            SpiralDBTableSource(_PROJECT, "event", record_id_columns=())

@@ -66,6 +66,7 @@ class Pick(UnaryOperator):
         # as ``MapData`` refuses it, so no path can produce one and drop it.
         if out is not None:
             schema_utils.require_names_not_meta([out])
+            schema_utils.require_names_without_separator([out])
         self.out = out
         self.fail_on_miss = fail_on_miss
         self._output_type: type = None  # type: ignore[assignment]

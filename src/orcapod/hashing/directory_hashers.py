@@ -20,7 +20,8 @@ DIRECTORY_HASH_LABEL = "directory_v1"
 
 It names the whole procedure of this module: a Merkle tree over the directory's
 entries with SHA-256 entry and node digests, file leaves taken from the file hasher's
-digest, symlinks recorded by target. A change that gives an existing directory a
+hash with its label (``b"<label>:" + digest``: a hash fed into another hash carries its
+label, ITL-1154), symlinks recorded by target. A change that gives an existing directory a
 different digest takes a new label (``directory_v2``).
 """
 
@@ -104,7 +105,10 @@ def _hash_dir(
             entry_bytes = b"symlink\x00" + name_bytes + b"\x00" + target.encode("utf-8")
         elif child.is_file():
             file_hash = file_hasher.hash_file(child)
-            entry_bytes = b"file\x00" + name_bytes + b"\x00" + file_hash.digest
+            # The file hash comes from another hasher: it enters with its label.
+            entry_bytes = (
+                b"file\x00" + name_bytes + b"\x00" + file_hash.to_prefixed_digest()
+            )
         elif child.is_dir():
             subdir_digest = _hash_dir(child, root, filter_fn, algorithm, file_hasher)
             entry_bytes = b"dir\x00" + name_bytes + b"\x00" + subdir_digest

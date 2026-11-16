@@ -50,3 +50,23 @@ Known limits, follow-ups:
   other columns were not re-checked against the current recipe.
 - `hashing/stored_hash_labels.py` still recognises v0.2 operator-node and cached-source rows
   by their bare hex digest; ITL-944 replaces that module with the data context column.
+
+**Revision (ITL-1154, developer, November 15, 2026):** rule 6 is reversed. Before data
+context `v1` was first released, the developer chose the from-scratch design: **a hash always
+carries its label, except where it is written into a name, whose grammar fixes which
+algorithm produced it.** Rule 6's argument ("the position and type of the value already tell
+the two apart") held in Arrow cells but not in semantic structures, where a nested hash had no
+type and no label, and several algorithms are plain SHA-256 over byte strings that can
+overlap (a `File` whose bytes are a value's canonical JSON shared that value's digest). Every
+site listed above now takes the hash with its label: the nested structure hash
+(`{"__type__": "hash", "label": ..., "digest": ...}`), the logical-type cell
+(`<identifier>::<label>:<digest>`), `__input_data_hash` in the entry-id preimage,
+`__node_content_hash` in the operator-cache row hash, the run snapshot; and, found by the
+ITL-1154 inventory, the `ListSource` content-mode tag function hash, the ordered Arrow digest
+in the pandas value hash (now labelled `arrow_ordered_v1`) and the file hash in a directory
+entry. `test_hash_label_rule.py` is flipped: a golden value moves under renamed labels if and
+only if a label feeds it. The known limits above about `InvocationContext.invocation_hash` and
+the derived default source id still apply; the latter is now the stated source-id rule
+(`<kind>:<label>:<hex>`, and `<algorithm>_v<N>:<hex>` for a dedicated algorithm such as the
+`batch_v1` / `group_v1` folds). The inventory of every hash site, with its class, is in
+`docs/reference/hashing.md` ("Hash site inventory").

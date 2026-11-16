@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Collection, Sequence
 from typing import Any, TYPE_CHECKING, cast
@@ -1292,10 +1291,10 @@ def system_tag_column_names(schema_hash: str) -> tuple[str, str]:
 
     Returns:
         Tuple of ``(source_id_column_name, record_id_column_name)``.
-        Both start with ``constants.SYSTEM_TAG_PREFIX``. The source_id column
-        has ``large_string`` type; the record_id column has ``large_binary``
-        type (16 bytes per value), the type it keeps everywhere: through a
-        ``Tag``, through every operator and in every stored table (ITL-942).
+        Both start with ``constants.SYSTEM_TAG_PREFIX``. Both columns are
+        ``large_string``: the source id is the source's name and the record id the
+        row identifier, the type each keeps everywhere: through a ``Tag``, through
+        every operator and in every stored table (ITL-1154).
     """
     source_id_col = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
     record_id_col = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
@@ -1306,9 +1305,13 @@ def add_system_tag_columns(
     table: "pa.Table",
     schema_hash: str,
     source_ids: str | Collection[str],
-    record_ids: Collection[bytes],
+    record_ids: Collection[str],
 ) -> "pa.Table":
-    """Add paired source_id and record_id system tag columns to an Arrow table."""
+    """Add paired source_id and record_id system tag columns to an Arrow table.
+
+    Both are text (``large_string``): the source id is the source's name and the record
+    id is the row identifier, ``row_<n>`` or the key's canonical JSON (ITL-1154).
+    """
     if not table.column_names:
         raise ValueError("Table is empty")
 
@@ -1329,10 +1332,7 @@ def add_system_tag_columns(
     source_id_col_name, record_id_col_name = system_tag_column_names(schema_hash)
 
     source_id_array = pa.array(source_ids, type=pa.large_string())
-    # large_binary, not fixed_size_binary(16): a Tag rebuilds its system tags as
-    # large_binary, stored tables hold large_binary, and one record id must hash
-    # the same on every path (ITL-942 G).
-    record_id_array = pa.array(record_ids, type=pa.large_binary())
+    record_id_array = pa.array(record_ids, type=pa.large_string())
 
     # System tag columns are always computed, never null — declare nullable=False
     # explicitly so the schema intent is not lost in Polars round-trips.
@@ -1340,7 +1340,7 @@ def add_system_tag_columns(
         pa.field(source_id_col_name, pa.large_string(), nullable=False), source_id_array
     )
     table = table.append_column(
-        pa.field(record_id_col_name, pa.large_binary(), nullable=False),
+        pa.field(record_id_col_name, pa.large_string(), nullable=False),
         record_id_array,
     )
     return table
@@ -1360,59 +1360,41 @@ def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
     return table.rename_columns(column_name_map)
 
 
-# Fixed namespace for aggregated record IDs produced by many->one operators.
-# Mirrors _SOURCE_RECORD_ID_NAMESPACE in core/sources/stream_builder.py.
-# Computed value: uuid.UUID('96411bfc-d3ba-5395-ba6f-5bb5726f18ad')
-_AGGREGATED_RECORD_ID_NAMESPACE = uuid.uuid5(
-    uuid.NAMESPACE_URL,
-    "https://orcapod.org/namespaces/aggregated-record-id",
-)
+def fold_system_tag_values(values: Sequence[Any], *, label: str) -> str:
+    """Fold a group's system-tag values into one scalar: ``"<label>:<hex>"``.
 
+    The one fold helper (ITL-1154). Many->one operators must emit scalar system tags,
+    because ``_build_record_id_preimage`` (``core/nodes/function_node.py``) hashes
+    those columns directly to derive a record's identity. Each column folds
+    independently over its own ordered member values, the source-id column and the
+    record-id column alike; both are text.
 
-def fold_system_tag_values(column_name: str, values: Sequence[Any]) -> str | bytes:
-    """Fold a group's system-tag values into one scalar of the same type.
+    The hex is the SHA-256 of the canonical JSON array of the members in order (a null
+    member is ``null``, never ``""``), so the preimage decodes back to the ordered
+    member list and no two member lists share a fold (ITL-942 H). The digest is stable
+    across processes: never substitute ``hash()`` or a set-based construction, since
+    the result is a cache key. The label names the operation that applied the fold;
+    each operation defines its own constant beside its use of this helper
+    (``GROUP_BY_FOLD_LABEL`` in ``group_by.py``, ``BATCH_FOLD_LABEL`` in
+    ``batch.py``), so an operation's procedure can change on its own.
 
-    Many->one operators must emit scalar system tags, because
-    ``_build_record_id_preimage`` (``core/nodes/function_node.py``) hashes
-    those columns directly to derive a record's identity.  Each column folds
-    independently over its own ordered member values.
-
-    Both digests are SHA-based and therefore stable across processes, and both
-    preimages decode back to the ordered member list (no two member lists share
-    a fold).  Never
-    substitute ``hash()`` or a set-based construction: orcapod uses the result
-    as a cache key, so a per-process digest would miss the cache on every new
-    driver run while looking correct in a single-process test.
-
-    Member order is significant -- it matches the order of the list-valued
-    data columns the folded tag accompanies.
+    Member order is significant: it matches the order of the list-valued data columns
+    the folded tag accompanies.
 
     Args:
-        column_name: The system-tag column name, used to select the fold.
-            Names starting with ``constants.SYSTEM_TAG_RECORD_ID_PREFIX`` fold
-            to 16 bytes (stored as ``large_binary``); everything else folds to a
-            hex string.
-        values: The group's member values, in emission order.
+        values: The group's member values, in member order.
+        label: The operation's fold label.
 
     Returns:
-        16 raw bytes for a record_id column, a 64-character hex string
-        otherwise.
+        ``"<label>:<64 hex digits>"``.
     """
-    if column_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
-        # Hex never contains the separator or "null", so the joined name decodes
-        # back to the member list.
-        name = constants.BLOCK_SEPARATOR.join(
-            "null" if v is None else v.hex() for v in values
-        )
-        return uuid.uuid5(_AGGREGATED_RECORD_ID_NAMESPACE, name).bytes
-    # The canonical JSON array of the members: where one member ends and the next
-    # begins is part of the preimage, and a null member differs from "" (ITL-942 H).
     members = json.dumps(
         [None if v is None else str(v) for v in values],
         separators=(",", ":"),
         ensure_ascii=False,
     )
-    return hashlib.sha256(members.encode("utf-8")).hexdigest()
+    # A folded value is a hash stored as a value: it carries its label.
+    return f"{label}:{hashlib.sha256(members.encode('utf-8')).hexdigest()}"
 
 
 def aggregated_list_type(

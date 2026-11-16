@@ -24,7 +24,7 @@ from orcapod.core.sources import (
 # ---------------------------------------------------------------------------
 
 
-def _make_arrow_source(record_id_column=None, source_id=None):
+def _make_arrow_source(record_id_columns=None, source_id=None):
     table = pa.table(
         {
             "user_id": pa.array(["u1", "u2", "u3"], type=pa.large_string()),
@@ -34,7 +34,7 @@ def _make_arrow_source(record_id_column=None, source_id=None):
     return ArrowTableSource(
         table=table,
         tag_columns=["user_id"],
-        record_id_column=record_id_column,
+        record_id_columns=record_id_columns,
         source_id=source_id,
         infer_nullable=True,
         tag_only_columns=True,
@@ -79,9 +79,9 @@ class TestSourceId:
 class TestArrowTableSourceRecordIdColumnValidation:
     def test_nonexistent_record_id_column_raises_at_construction(self):
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        with pytest.raises(ValueError, match="record_id_column"):
+        with pytest.raises(ValueError, match="record_id_columns"):
             ArrowTableSource(
-                table=table, record_id_column="nonexistent", infer_nullable=True
+                table=table, record_id_columns="nonexistent", infer_nullable=True
             )
 
 
@@ -101,12 +101,12 @@ class TestArrowTableSourceInfoTokens:
         assert all("row_" in v for v in values)
 
     def test_column_value_tokens_in_source_info(self):
-        src = _make_arrow_source(record_id_column="user_id")
+        src = _make_arrow_source(record_id_columns="user_id")
         table = src.as_table(all_info=True)
         source_col = [c for c in table.column_names if c.startswith("_source_score")]
         assert source_col, "Expected a _source_score column"
         values = table.column(source_col[0]).to_pylist()
-        assert all("user_id=" in v for v in values)
+        assert all(v is not None and '::{"user_id":' in v for v in values)
 
     def test_source_id_appears_in_provenance_token(self):
         src = _make_arrow_source(source_id="my_ds")

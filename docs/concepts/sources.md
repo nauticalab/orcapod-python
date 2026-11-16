@@ -35,7 +35,10 @@ hashing) and produces the final immutable stream.
 
 `orcapod.sources` also provides database-backed sources (`SQLiteTableSource`,
 `PostgreSQLTableSource`, `SpiralDBTableSource`) and `PollingSource` for data that arrives over
-time; see the [API reference](../api/sources.md).
+time; see the [API reference](../api/sources.md). Their default `source_id` names the table
+where it lives (`sqlite_table:<db path>:main.<table>`). `DBTableSource`, the base they share,
+can also be used directly over any connector; a connector gives no address of its database,
+so it then has no default and needs a `source_id`.
 
 Two construction rules apply to every source and are the most common first errors:
 
@@ -131,13 +134,15 @@ Things to know about Spiral tables:
   timestamps without one) and Orcapod logical types such as `Path` (they come back as their
   storage type).
 - **Source identity.** A Spiral source is identified by where its table is, never by its
-  rows. The default `source_id` is `<project id>/<dataset>.<table>@<Spiral table id>`, for
-  example `edi-tutorial-v1-841226/default.session@table_Jo7J0lpkLcOM`. The table id is
+  rows. The default `source_id` is `spiraldb_table:<project id>.<dataset>.<table>@<Spiral
+  table id>`, for example
+  `spiraldb_table:edi-tutorial-v1-841226.default.session@table_Jo7J0lpkLcOM`. The table id is
   SpiralDB's own, so tables with the same name in different projects stay apart, and a table
   that is dropped and created again under the same name is a different source: nothing
   recorded for the old table is reused. A renamed table also gets a new `source_id`.
-- **Record identity.** A row is identified by its primary key: its record ID is derived from
-  the hash of its key columns. A row keeps its record ID when other rows are added, and has
+- **Record identity.** A row is identified by its primary key: its record ID is the
+  canonical JSON of its key columns (`{"session_id":"s1"}`). A row keeps its record ID when
+  other rows are added, and has
   the same one whichever read returned it.
 
 #### Reading a Spiral table
@@ -467,10 +472,10 @@ and neither does a source's own `run()` outside a job (`source.run()` does what
 |---|---|
 | `ArrowTableSource`, `DictSource`, `ListSource`, `DataFrameSource` | nothing: data held in memory cannot change; build a new source and bind it to run on new data |
 | `PollingSource` | polls once (and fetches when the poll reports new data); its modified time moves only when the fetch returned rows, to the moment it found them (a cursor's `modified_at` is informational) |
-| `DeltaTableSource` | reads the Delta log only; when the table's version moved, reads the table again and, if its rows changed (row order counts only without a `record_id_column`, see below; a version that only compacted files changes nothing), holds the new rows |
-| `SpiralDBTableSource` | holds no rows (every read scans the pinned version); reads the table's current version (metadata only: no row, and `max_rows` does not apply) and pins it when it is newer, so the next read returns the new rows; an `asof` you gave never moves; record ids are the hash of the key, so only new or changed rows are new entries (a version that moves without a change, if SpiralDB moves it on compaction, re-runs the nodes below and reuses every stored result) |
-| `CSVSource` | reads the file's modification time and size; when either changed, reads the file again and holds the new rows if they changed (row order counts only without a `record_id_column`) |
-| `SQLiteTableSource`, `PostgreSQLTableSource`, `DBTableSource` | reads the whole table again and holds the new rows if they changed (with a `record_id_column` in any order, so an unordered `SELECT` is not a change) |
+| `DeltaTableSource` | reads the Delta log only; when the table's version moved, reads the table again and, if its rows changed (row order counts only without key columns, see below; a version that only compacted files changes nothing), holds the new rows |
+| `SpiralDBTableSource` | holds no rows (every read scans the pinned version); reads the table's current version (metadata only: no row, and `max_rows` does not apply) and pins it when it is newer, so the next read returns the new rows; an `asof` you gave never moves; record ids are the canonical JSON of the key columns, so only new or changed rows are new entries (a version that moves without a change, if SpiralDB moves it on compaction, re-runs the nodes below and reuses every stored result) |
+| `CSVSource` | reads the file's modification time and size; when either changed, reads the file again and holds the new rows if they changed (row order counts only without key columns) |
+| `SQLiteTableSource`, `PostgreSQLTableSource`, `DBTableSource` | reads the whole table again and holds the new rows if they changed (with key columns in any order, so an unordered `SELECT` is not a change) |
 | `CachedSource` | checks the source it wraps; when that source's modified time moved since the cache last took in its rows (also when another source over it made the check), compares the rows' record hashes with the rows it presents (before its first read, with the cache: a read; nothing is written) and moves only when it will present new rows, (a row removed from the wrapped source stays cached); the check guarantees nothing for two cached sources that share one cache (the same `cache_path` or table): give each its own cache (ITL-1143) |
 | `DerivedSource` | over a source, checks it; reads the origin's rows again when the origin's modified time moved since this source read them (a source that took in new data, a job node that ran again); holds the new rows if they changed; one that holds no rows (over a job node that had not run) moves when its origin's time moves |
 | `SourceProxy` | checks the source bound to it; its modified time follows that source's, and binding or unbinding moves it |
@@ -480,11 +485,11 @@ Rows read again are compared with the rows read before, as read from the table o
 NaN equal to a NaN (and -0.0 equal to 0.0), so a table holding a NaN is not a change at every
 check. A check that raises part way changes nothing, so the next run checks again.
 
-Row order follows the source's record id rule (developer, November 14, 2026). Without a
-`record_id_column` a row's record id is its position: a change of row order is a change, so
+Row order follows the source's record id rule (developer, November 14, 2026). Without
+key columns a row's record id is its position: a change of row order is a change, so
 the source takes the rows in their new order and every row gets the id of its new position
 at once (the nodes below run again and reuse every stored function result, because results
-are stored by the hash of the row's data). With a `record_id_column`, only content counts:
+are stored by the hash of the row's data). With key columns, only content counts:
 the same rows in another order are no change. A source that cannot tell which rule applies
 counts order. The model is deliberately simple; a fuller design is ITL-1103 / ITL-1104.
 
@@ -514,13 +519,14 @@ below it runs) polls it again, and a poll that fails again raises, as it did bef
 check existed; a run whose nodes are all current proceeds. Reading a polling source's held
 rows after a failed check is ITL-1139.
 
-A source that takes in new data keeps its record id rule. Without `record_id_column`, a
-row's record id comes from its position, so a row that moves (a reorder, rows inserted
-before it, or a polling source's batches, each numbered from `row_0`) gets
-another id and is recorded as a new entry; its function result is still reused, because
+A source that takes in new data keeps its record id rule. Without key columns, a
+row's record id comes from its position, so a row that moves (a reorder or rows inserted
+before it) gets another id and is recorded as a new entry; its function result is still reused, because
 results are stored by the hash of the row's data. Give a source that will take in new data
-a `record_id_column` that is unique per row (ITL-1104). Further revisions of what each kind
-checks are collected in ITL-1103.
+key columns that are unique per row (ITL-1104). A `PollingSource` requires them: its
+rows arrive in batches, so a key identifies a polled row, and a batch that repeats a key
+already polled is refused. Further revisions of what each kind checks are collected in
+ITL-1103.
 
 ## How sources add provenance columns
 
@@ -536,9 +542,11 @@ source adds two of them, `_tag_source_id::<hash>` and `_tag_record_id::<hash>`, 
 is the source's pipeline hash. These columns are used internally during
 [joins](operators.md) to maintain provenance through multi-stream operations.
 
-Each row's system tag carries a record ID derived from the source's `source_id` and a
-per-row token. By default that token is the row's position, so a row that moves to another
-position under the same `source_id` gets a different record ID. Downstream pipeline entries
+Each row carries two system tags: the source's `source_id` and the row's record ID, the row
+identifier itself (ITL-1154). By default the record ID of a row of an in-memory, CSV or Delta
+source is its position, `row_<n>`, so a row that moves to another position under the same
+`source_id` gets a different record ID; a database or SpiralDB table names its rows by their
+primary key, as canonical JSON (`{"trial":17}`). Downstream pipeline entries
 and `sink_pod` completion records are keyed on the system tags together with a hash of the
 row's data, so the moved row is treated as a new entry: a function node records it again,
 and its stored table then shows two entries with identical tag values but distinct record
@@ -546,14 +554,14 @@ IDs, and a `sink_pod` delivers it again. Because every key includes the hash of 
 data, no result is ever paired with the wrong row; a function's stored result for that data
 is reused rather than recomputed.
 
-Sources that accept `record_id_column` use that column's value instead, so the record ID
-follows the row. Both halves of the record ID must be stable: when you omit `source_id` an
-in-memory source is named after a hash of its table, as
-`<source kind>:<algorithm label>:<hex>` (for example `dict:arrow_v1:000002fe…`), which changes
-when the rows are reordered. Whenever row
-order can vary between runs, pass an explicit, stable `source_id` **and** set
-`record_id_column` to a column that is unique per row; this avoids both the duplicate entries
-and the repeated deliveries.
+Every source accepts `record_id_columns`, one or several key columns whose values name the
+row instead (`{"unit":"u1","time":1700000000}`), so the record ID follows the row. Both
+system tags must be stable: when you omit `source_id` an in-memory source is named after a
+hash of its table, as `<source kind>:<algorithm label>:<hex>` (for example
+`dict:arrow_v1:000002fe…`), which changes when any row changes or is reordered. Whenever row
+order or content can vary between runs, pass an explicit, stable `source_id` **and** name
+key columns that are unique per row; this avoids both the duplicate entries and the repeated
+deliveries.
 
 These columns are hidden by default. You can reveal them using `ColumnConfig`:
 

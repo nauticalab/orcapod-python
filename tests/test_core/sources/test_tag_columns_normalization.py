@@ -393,12 +393,14 @@ class TestDBTableSourceTagColumns:
             connector=_MockConnector(),
             table_name="events",
             tag_columns="session_id",
+            source_id="lab.db",
             tag_only_columns=True,
         )
         src_list = DBTableSource(
             connector=_MockConnector(),
             table_name="events",
             tag_columns=["session_id"],
+            source_id="lab.db",
             tag_only_columns=True,
         )
         tag_keys_str, _ = src_str.keys()
@@ -412,6 +414,7 @@ class TestDBTableSourceTagColumns:
             connector=_MockConnector(),
             table_name="events",
             tag_columns=("session_id",),
+            source_id="lab.db",
             tag_only_columns=True,
         )
         tag_keys, _ = src.keys()
@@ -425,6 +428,7 @@ class TestDBTableSourceTagColumns:
                 connector=_MockConnector(),
                 table_name="events",
                 tag_columns=42,  # pyright: ignore[reportArgumentType]  # an invalid type on purpose
+                source_id="lab.db",
                 tag_only_columns=True,
             )
 
@@ -536,8 +540,12 @@ class TestPollingSourceTagColumns:
         from orcapod.core.sources.polling_source import PollingSource
 
         stub = _FakePollingImpl()
-        src_str = PollingSource(impl=stub, tag_columns="session_id")
-        src_list = PollingSource(impl=stub, tag_columns=["session_id"])
+        src_str = PollingSource(
+            impl=stub, tag_columns="session_id", record_id_columns="session_id"
+        )
+        src_list = PollingSource(
+            impl=stub, tag_columns=["session_id"], record_id_columns=["session_id"]
+        )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
@@ -546,7 +554,9 @@ class TestPollingSourceTagColumns:
         from orcapod.core.sources.polling_source import PollingSource
 
         stub = _FakePollingImpl()
-        src = PollingSource(impl=stub, tag_columns=("session_id",))
+        src = PollingSource(
+            impl=stub, tag_columns=("session_id",), record_id_columns=("session_id",)
+        )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
 
@@ -555,4 +565,4 @@ class TestPollingSourceTagColumns:
 
         stub = _FakePollingImpl()
         with pytest.raises(TypeError):
-            PollingSource(impl=stub, tag_columns=42)
+            PollingSource(impl=stub, tag_columns=42, record_id_columns="id")

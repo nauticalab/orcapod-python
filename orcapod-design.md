@@ -28,7 +28,7 @@ A **source** acts as a stream from external data with no upstream dependencies, 
 
 - **Derived source** — wraps the computed output of a `FunctionNode` or `OperatorNode`, reading from their pipeline database. Represents an explicit materialization declaration — an intermediate result given durable identity in the pipeline database, detached from the upstream topology that produced it.
 
-Every source has a `source_id` — a canonical registry name used to register the source in a `SourceRegistry` so that provenance tokens in downstream data can be resolved back to the originating source. If not explicitly provided, `source_id` defaults to a truncated content hash.
+Every source has a `source_id` — a canonical registry name used to register the source in a `SourceRegistry` so that provenance tokens in downstream data can be resolved back to the originating source. If not explicitly provided, `source_id` defaults to a name that says the source's kind: `<kind>:<label>:<hex>` of its content hash for an in-memory source, `<kind>:<location>` for a file or table (`csv:<path>`, `sqlite_table:<db path>:main.<table>`); a given `source_id` is used exactly as given (ITL-1154).
 
 ### Function Pod
 
@@ -214,8 +214,8 @@ Every data column carries a **source info** string — a provenance pointer to t
 ```
 
 Where:
-- `source_id` — canonical identifier of the originating source (defaults to content hash)
-- `record_id` — row identifier, either positional (`row_0`) or column-based (`user_id=abc123`)
+- `source_id` — canonical identifier of the originating source (defaults to `<kind>:<rest>`)
+- `record_id` — row identifier, either positional (`row_0`) or key-based: the canonical JSON of the key columns (`{"user_id":"abc123"}`; ITL-1154)
 - `column_name` — the original column name
 
 Source info columns are stored with a `_source_` prefix and are excluded from content hashing and standard output by default. They are included when `ColumnConfig(source=True)` is set.
@@ -251,13 +251,13 @@ Example at the root level:
 
 ```
 _tag_source_id::schema1   (e.g., value: "customers_2024")
-_tag_record_id::schema1   (e.g., value: "row_42" or "user_id=abc123")
+_tag_record_id::schema1   (e.g., value: "row_42" or '{"user_id":"abc123"}')
 ```
 
 ### Three Evolution Rules
 
 **1. Name-Preserving (~90% of operations)**
-Single-stream operations (filter, select, rename, batch, map). System tag column names and values pass through unchanged.
+Single-stream operations (filter, select, rename, map). System tag column names and values pass through unchanged. `Batch` is a single-stream operation too, but it reduces rows and follows rule 3.
 
 **2. Name-Extending (multi-input operations)**
 Joins and merges. Each incoming system tag column name is extended by appending `::node_pipeline_hash:canonical_position`. The `::` delimiter separates each extension segment, and `:` separates the pipeline hash from the canonical position within a segment. Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by `pipeline_hash` to ensure identical column names regardless of wiring order.
@@ -279,7 +279,7 @@ _tag_record_id::schema1::abc123:0::def456:0
 The full column name is a chain of `::` delimited segments tracing the provenance path: `_tag_{field}::{source_schema_hash}::{join1_hash}:{position}::{join2_hash}:{position}::...`
 
 **3. Type-Evolving (aggregation operations)**
-Batch and similar grouping operations. Column names are unchanged but types evolve: `str → list[str]` as values collect all contributing source row IDs. Both `source_id` and `record_id` columns evolve independently.
+Batch and GroupBy. System tags stay scalar: each column folds its group's member values into `<operation label>:<hex>` (`batch_v1`, `group_v1`; the SHA-256 of the canonical JSON member list), and the column name gains the input's pipeline hash. Both `source_id` and `record_id` columns fold independently (ITL-1154).
 
 ### System Tag Value Sorting
 

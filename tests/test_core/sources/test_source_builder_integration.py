@@ -128,7 +128,7 @@ class TestCSVSourceBuilder:
         src = CSVSource(
             file_path=str(csv_file),
             tag_columns=["id"],
-            record_id_column="id",
+            record_id_columns="id",
             tag_only_columns=True,
         )
         config = src.to_config()
@@ -203,7 +203,8 @@ class TestListSourceBuilder:
         assert identity[0] == "ListSource"
         assert identity[1] == "val"
         assert identity[2] == (1, 2, 3)
-        assert len(identity) == 4  # includes tag_function_hash
+        assert identity[4] == ()  # the key columns: the position (ITL-1154)
+        assert len(identity) == 5  # includes tag_function_hash and the key columns
 
     def test_with_tag_function(self):
         src = ListSource(

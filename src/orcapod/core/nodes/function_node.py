@@ -135,10 +135,10 @@ def _build_record_id_preimage(
     single-row Arrow table.  ``NODE_CONTENT_HASH_COL`` is intentionally excluded —
     it is redundant (fully determined by the table path + system tags).
 
-    The input data hash enters as its raw digest, without its label: a label names
-    the algorithm that produced a digest and is never part of a hash input, so
-    renaming the Arrow label changes no entry id. The stored ``INPUT_DATA_HASH_COL``
-    column of the pipeline and result tables keeps the labelled form.
+    The input data hash enters with its label, ``b"<label>:" + digest``, the form
+    the stored ``INPUT_DATA_HASH_COL`` column of the pipeline and result tables
+    keeps: a hash fed into another hash carries the name of the algorithm that
+    produced it (ITL-1154).
 
     Args:
         tag: The tag datagram for the input row.
@@ -146,11 +146,13 @@ def _build_record_id_preimage(
 
     Returns:
         A single-row ``pa.Table`` with system-tag columns and
-        ``INPUT_DATA_HASH_COL`` (``large_binary``, the raw digest).
+        ``INPUT_DATA_HASH_COL`` (``large_binary``, the prefixed digest).
     """
     return tag.as_table(columns={"system_tags": True}).append_column(
         constants.INPUT_DATA_HASH_COL,
-        pa.array([input_data.content_hash().digest], type=pa.large_binary()),
+        pa.array(
+            [input_data.content_hash().to_prefixed_digest()], type=pa.large_binary()
+        ),
     )
 
 

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.streams.base import StreamBase, typed_zero_row_table
+from orcapod.system_constants import constants
 from orcapod.core.streams.view import StreamView
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -61,6 +62,22 @@ class RootSource(StreamBase):
             data_context=data_context,
             config=config,
         )
+        if source_id == "":
+            raise ValueError(
+                "source_id is empty: a source id is the source's name, and an empty "
+                "one would make every source-info token start with "
+                f"{constants.BLOCK_SEPARATOR!r}; give the source a name, or leave "
+                "source_id unset for the default"
+            )
+        if source_id is not None and (
+            constants.BLOCK_SEPARATOR in source_id or source_id.endswith(":")
+        ):
+            raise ValueError(
+                f"source_id {source_id!r} contains {constants.BLOCK_SEPARATOR!r} or ends "
+                "with ':', which would blur the separator of the parts of a source-info "
+                "token (<source id>::<record id>::<column>); give the source another "
+                "name"
+            )
         self._source_id = source_id
 
     # -------------------------------------------------------------------------
@@ -80,9 +97,24 @@ class RootSource(StreamBase):
     # Content identity
     # -------------------------------------------------------------------------
 
+    _key_columns: tuple[str, ...]
+    """The resolved key columns of the record ids, in key order; ``()`` for the
+    position. Every concrete source sets it in ``__init__``."""
+
     def identity_structure(self) -> Any:
-        """Default identity based on class name, output schema, and source_id."""
-        return (self.__class__.__name__, self.output_schema(), self.source_id)
+        """Identity from the class name, output schema, ``source_id`` and key columns.
+
+        The key columns are the resolved ``record_id_columns`` (``()`` for the
+        position): two sources that differ only in how they name their rows are two
+        sources, so their records never share a cache (developer, November 16, 2026,
+        ITL-1154). The pipeline hash stays schema-only.
+        """
+        return (
+            self.__class__.__name__,
+            self.output_schema(),
+            self.source_id,
+            self._key_columns,
+        )
 
     # -------------------------------------------------------------------------
     # PipelineElementProtocol — schema-only identity (base case of Merkle chain)

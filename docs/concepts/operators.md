@@ -112,9 +112,9 @@ measurements = DictSource(
 join = Join()
 joined = join.process(subjects, measurements)
 print(joined.as_table().to_pandas())
-#   subject_id  age  weight
-# 0   mouse_01   12    25.3
-# 1   mouse_02    8    22.1
+#   subject_id  weight  age
+# 0   mouse_01    25.3   12
+# 1   mouse_02    22.1    8
 ```
 
 ### MergeJoin
@@ -712,7 +712,7 @@ import polars as pl
 adults = subjects.join(measurements).polars_filter(pl.col("age") > 10)
 for tag, data in adults.iter_data():
     print(tag.as_dict(), "->", data.as_dict())
-# {'subject_id': 'mouse_01'} -> {'age': 12, 'weight': 25.3}
+# {'subject_id': 'mouse_01'} -> {'weight': 25.3, 'age': 12}
 ```
 
 !!! note

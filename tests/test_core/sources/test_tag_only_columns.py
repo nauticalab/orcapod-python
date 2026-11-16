@@ -117,7 +117,7 @@ def _sqlite(tmp: Path, **option: Unpack[Option]) -> SourceProtocol:
 def _db_table(tmp: Path, **option: Unpack[Option]) -> SourceProtocol:
     connector = SQLiteConnector(_sqlite_path(tmp))
     try:
-        return DBTableSource(connector, "r", **option)
+        return DBTableSource(connector, "r", source_id="lab.db", **option)
     finally:
         connector.close()
 

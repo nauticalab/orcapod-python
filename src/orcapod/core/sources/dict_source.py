@@ -5,7 +5,10 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
-from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.core.sources.stream_builder import (
+    SourceStreamBuilder,
+    normalize_record_id_columns,
+)
 from orcapod.types import DataValue, SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.schema_utils import _normalize_column_list
@@ -43,6 +46,7 @@ class DictSource(RootSource):
         source_id: str | None = None,
         *,
         tag_only_columns: TagOnlyColumns = True,
+        record_id_columns: str | Collection[str] | None = None,
         **kwargs: Any,
     ) -> None:
         check_tag_only_columns(tag_only_columns)
@@ -70,12 +74,14 @@ class DictSource(RootSource):
                     arrow_utils.infer_schema_nullable(arrow_table)
                 )
 
+        self._key_columns = normalize_record_id_columns(record_id_columns) or ()
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             arrow_table,
             tag_columns=tag_columns,
             source_id=self._source_id,
             source_kind=self.SOURCE_KIND,
+            record_id_columns=self._key_columns,
             system_tag_columns=system_tag_columns,
         )
 
