@@ -55,6 +55,7 @@ def _arrow_source(
     return ArrowTableSource(
         pa.table({"id": ids, "x": xs}, schema=schema),
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id="same",
     )
 
@@ -144,7 +145,15 @@ def test_a_narrower_source_is_accepted_and_moves_nothing(
     """``x: int`` binds to a slot of ``x: int | None``; schemas and pipeline hashes stay."""
     job = make_job(tmp_path)
     before = _pipeline_hashes(job)
-    bind(job, DictSource([{"id": 0, "x": 1}], tag_columns=["id"], source_id="d"))
+    bind(
+        job,
+        DictSource(
+            [{"id": 0, "x": 1}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="d",
+        ),
+    )
     assert _pipeline_hashes(job) == before
     assert dict(job.nodes["src"].output_schema()[1]) == {"x": int | None}
     assert dict(job.nodes["renamed"].output_schema()[1]) == {"y": int | None}
@@ -182,7 +191,13 @@ def test_a_narrower_tag_column_is_accepted(tmp_path: pathlib.Path) -> None:
     job = PipelineJob(name="j", database=InMemoryArrowDatabase())
     with job:
         _ = MapData({"x": "y"})(slot, label="renamed")
-    job.bind(sources={"src": DictSource([{"id": 0, "x": 1}], tag_columns=["id"])})
+    job.bind(
+        sources={
+            "src": DictSource(
+                [{"id": 0, "x": 1}], tag_columns=["id"], tag_only_columns=True
+            )
+        }
+    )
     assert dict(job.nodes["src"].output_schema()[0]) == {"id": int | None}
     assert job.nodes["src"].as_table().schema.field("id").nullable
 
@@ -202,7 +217,11 @@ def test_only_the_none_member_may_be_missing(
     value: Any = {str: "a", int: 1, float: 1.5}[given]
     with pytest.raises(SourceSpecMismatchError, match="'x'"):
         job.bind(
-            sources={"src": DictSource([{"id": 0, "x": value}], tag_columns=["id"])}
+            sources={
+                "src": DictSource(
+                    [{"id": 0, "x": value}], tag_columns=["id"], tag_only_columns=True
+                )
+            }
         )
 
 
@@ -257,7 +276,12 @@ def test_zero_rows_have_the_types_of_rows(tmp_path: pathlib.Path) -> None:
     origin = PipelineJob(name="origin", database=InMemoryArrowDatabase())
     with origin:
         _ = same.pod(
-            DictSource([{"id": 0, "v": 1}], tag_columns=["id"], source_id="o"),
+            DictSource(
+                [{"id": 0, "v": 1}],
+                tag_columns=["id"],
+                tag_only_columns=True,
+                source_id="o",
+            ),
             label="same",
         )
     empty = origin.nodes["same"].as_source()  # pyright: ignore[reportAttributeAccessIssue]  # a function job node; as_source before a run has no rows
@@ -311,7 +335,10 @@ def _csv_job(tmp_path: pathlib.Path, text: str) -> str:
     job = PipelineJob(name="c", database=DeltaTableDatabase(str(tmp_path / "store")))
     with job:
         _ = MapData({"x": "y"})(
-            CSVSource(str(csv), tag_columns=["id"], source_id="csv"), label="renamed"
+            CSVSource(
+                str(csv), tag_columns=["id"], tag_only_columns=True, source_id="csv"
+            ),
+            label="renamed",
         )
     _ = job.run()
     path = tmp_path / "job.json"
@@ -345,7 +372,10 @@ def test_loaded_csv_of_another_type_is_left_unbound(
     job.bind(
         sources={
             "csv": CSVSource(
-                str(tmp_path / "fixed.csv"), tag_columns=["id"], source_id="csv"
+                str(tmp_path / "fixed.csv"),
+                tag_columns=["id"],
+                tag_only_columns=True,
+                source_id="csv",
             )
         }
     )
@@ -380,7 +410,9 @@ def test_system_tag_values_and_source_info_are_the_sources_own(
         [pa.field("id", pa.int64(), False), pa.field("x", pa.int64(), False)]
     )
     source = ArrowTableSource(
-        pa.table({"id": [0, 1], "x": [1, 2]}, schema=schema), tag_columns=["id"]
+        pa.table({"id": [0, 1], "x": [1, 2]}, schema=schema),
+        tag_columns=["id"],
+        tag_only_columns=True,
     )
     direct = source.as_table(all_info=True)
     slot = _bound_slot(tmp_path, source)
@@ -432,7 +464,9 @@ def test_columns_follow_the_declared_order(a_type: Any) -> None:
     job.bind(
         sources={
             "src": DictSource(
-                [{"id": 0, "c": 1.5, "b": "s", "a": 1}], tag_columns=["id"]
+                [{"id": 0, "c": 1.5, "b": "s", "a": 1}],
+                tag_columns=["id"],
+                tag_only_columns=True,
             )
         }
     )
@@ -458,7 +492,9 @@ def test_columns_follow_the_declared_order(a_type: Any) -> None:
 
 def _mapped_stream() -> Any:
     """Return a stream (not a root source): a DictSource with ``q`` renamed to ``x``."""
-    source = DictSource([{"id": 0, "q": 1}], tag_columns=["id"], source_id="m")
+    source = DictSource(
+        [{"id": 0, "q": 1}], tag_columns=["id"], tag_only_columns=True, source_id="m"
+    )
     return MapData({"q": "x"})(source)
 
 
@@ -487,7 +523,11 @@ def test_a_transformed_stream_gets_the_slots_system_tag_names(
 def _joined_stream(x_nullable: bool) -> Any:
     """Return a Join of two sources: two system-tag pairs, data ``x`` and ``w``."""
     left = _arrow_source([1, 2], x_nullable=x_nullable)
-    right = DictSource([{"id": 0, "w": "p"}, {"id": 1, "w": "q"}], tag_columns=["id"])
+    right = DictSource(
+        [{"id": 0, "w": "p"}, {"id": 1, "w": "q"}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+    )
     return Join()(left, right)
 
 
@@ -515,7 +555,12 @@ def test_meta_columns_of_a_narrower_stream_are_kept() -> None:
     origin = PipelineJob(name="origin", database=InMemoryArrowDatabase())
     with origin:
         _ = same.pod(
-            DictSource([{"id": 0, "v": 1}], tag_columns=["id"], source_id="o"),
+            DictSource(
+                [{"id": 0, "v": 1}],
+                tag_columns=["id"],
+                tag_only_columns=True,
+                source_id="o",
+            ),
             label="same",
         )
     _ = origin.run()
@@ -563,7 +608,11 @@ def _narrower_bind() -> PipelineJob:
 def _reordered_bind() -> PipelineJob:
     """Return the ``a, b, c`` job bound to a source whose data come as ``c, b, a``."""
     job = _abc_job(int)
-    source = DictSource([{"id": 0, "c": 1.5, "b": "s", "a": 1}], tag_columns=["id"])
+    source = DictSource(
+        [{"id": 0, "c": 1.5, "b": "s", "a": 1}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+    )
     job.bind(sources={"src": source})
     return job
 
@@ -696,7 +745,9 @@ def test_a_stream_without_exactly_one_system_tag_pair_is_refused(
 def test_a_refused_joined_stream_keeps_the_previous_binding() -> None:
     """After the refusal the slot keeps the source it had."""
     job = _xw_job()
-    before = DictSource([{"id": 0, "x": 1, "w": "p"}], tag_columns=["id"])
+    before = DictSource(
+        [{"id": 0, "x": 1, "w": "p"}], tag_columns=["id"], tag_only_columns=True
+    )
     job.bind(sources={"src": before})
     with pytest.raises(SourceSpecMismatchError):
         job.bind(sources={"src": _joined_stream(x_nullable=True)})
@@ -726,7 +777,8 @@ def test_a_raw_streams_table_wrapped_as_the_error_advises_runs() -> None:
     job = PipelineJob(name="j", database=InMemoryArrowDatabase())
     with job:
         _ = MapData({"x": "y"})(
-            ArrowTableSource(raw.as_table(), tag_columns=["id"]), label="renamed"
+            ArrowTableSource(raw.as_table(), tag_columns=["id"], tag_only_columns=True),
+            label="renamed",
         )
     _ = job.run()
     table = job.nodes["renamed"].as_table()
@@ -759,7 +811,11 @@ def _abc_bound(order: str) -> Callable[[], PipelineJob]:
         job = _abc_job(int)
         values = {"a": 1, "b": "s", "c": 1.5}
         row = {"id": 0, **{name: values[name] for name in order}}
-        job.bind(sources={"src": DictSource([row], tag_columns=["id"])})
+        job.bind(
+            sources={
+                "src": DictSource([row], tag_columns=["id"], tag_only_columns=True)
+            }
+        )
         return job
 
     return make
@@ -892,6 +948,7 @@ def test_a_structural_class_of_the_same_identity_is_accepted(
     source = DictSource(
         _rows({"id": 0, "p": _PointB(1, 2)}),
         tag_columns=["id"],
+        tag_only_columns=True,
         data_schema={"id": int, "p": _PointB},
         source_id="b",
     )
@@ -921,6 +978,7 @@ def test_an_exact_class_with_the_same_fields_is_refused(
     source = DictSource(
         _rows({"id": 0, "p": _ExactB(1, 2)}),
         tag_columns=["id"],
+        tag_only_columns=True,
         data_schema={"id": int, "p": _ExactB},
     )
     with pytest.raises(SourceSpecMismatchError, match="data column 'p'"):

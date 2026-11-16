@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
 
+from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.reload import same_rows
 from orcapod.core.sources.stream_builder import (
@@ -38,6 +39,11 @@ class DeltaTableSource(RootSource):
     version that only compacted files or
     changed metadata changes nothing), holds the new rows and moves its modified time.
     Record ids keep their rule: the ``record_id_column`` value, or the row's position.
+
+    Plain tags: ``tag_only_columns`` (keyword-only) is ``True``, the default, and keeps
+    every tag column a tag only, not data, as every source does in v0.3. Any other value
+    is refused: referential tags arrive in v0.4, where tags become referential by default
+    and ``tag_only_columns`` names the tags kept plain.
     """
 
     def __init__(
@@ -47,8 +53,11 @@ class DeltaTableSource(RootSource):
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
+        *,
+        tag_only_columns: TagOnlyColumns = True,
         **kwargs: Any,
     ) -> None:
+        check_tag_only_columns(tag_only_columns)
         resolved = Path(delta_table_path).resolve()
 
         if source_id is None:
@@ -156,6 +165,7 @@ class DeltaTableSource(RootSource):
         return cls(
             delta_table_path=config["delta_table_path"],
             tag_columns=config.get("tag_columns", ()),
+            tag_only_columns=config.get("tag_only_columns", True),
             system_tag_columns=config.get("system_tag_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),

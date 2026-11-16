@@ -117,6 +117,7 @@ JOB_SCRIPT = textwrap.dedent(
         source = DictSource(
             data=[{"k": i, "x": i} for i in range(%d)],
             tag_columns=["k"],
+            tag_only_columns=True,
             source_id="src",
         )
         double.pod(source, label="dbl")

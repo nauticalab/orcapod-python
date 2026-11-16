@@ -176,7 +176,9 @@ def _make_source_job_node(table, tag_col="key"):
     schema inference so that `SourceJobNode(name=..., bound_source=src)` works
     without explicit tag_schema/data_schema.
     """
-    src = ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    src = ArrowTableSource(
+        table, tag_columns=[tag_col], tag_only_columns=True, infer_nullable=True
+    )
     tag_schema, data_schema = src.output_schema()
     return SourceJobNode(
         name="test_source",
@@ -299,7 +301,9 @@ class TestFunctionNodeExecute:
                 "value": pa.array([1, 2], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         return FunctionJobNode(pod, src)
@@ -365,7 +369,9 @@ class TestFunctionNodeAsyncExecute:
                 "value": pa.array([1, 2], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionJobNode(pod, src)
@@ -391,7 +397,9 @@ class TestFunctionNodeAsyncExecute:
                 "value": pa.array([1], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionJobNode(pod, src)
@@ -452,8 +460,12 @@ class TestOperatorNodeExecute:
                 "score": pa.array([100, 200], type=pa.int64()),
             }
         )
-        src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
-        src_b = ArrowTableSource(table_b, tag_columns=["key"], infer_nullable=True)
+        src_a = ArrowTableSource(
+            table_a, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
+        src_b = ArrowTableSource(
+            table_b, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
         return OperatorNode(Join(), input_streams=[src_a, src_b])
 
     def test_execute_with_observer(self):
@@ -501,7 +513,9 @@ class TestOperatorNodeAsyncExecute:
                 "value": pa.array([10, 20], type=pa.int64()),
             }
         )
-        src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
+        src_a = ArrowTableSource(
+            table_a, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
         op = SelectDataColumns(columns=["value"])
         op_node = OperatorNode(op, input_streams=[src_a])
 

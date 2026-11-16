@@ -59,7 +59,9 @@ def _reset() -> None:
 
 def _source(data: list[dict[str, int]]) -> DictSource:
     """An in-memory source of ``data`` with tags ``g`` and ``k``."""
-    return DictSource(data, tag_columns=["g", "k"], source_id="s")
+    return DictSource(
+        data, tag_columns=["g", "k"], source_id="s", tag_only_columns=True
+    )
 
 
 def _build(data: list[dict[str, int]], db: Any) -> PipelineJob:

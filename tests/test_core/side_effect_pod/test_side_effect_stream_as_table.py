@@ -44,7 +44,10 @@ def double(x: int) -> int:
 
 def _source() -> DictSource:
     return DictSource(
-        [{"k": f"r{i}", "x": i} for i in ORDER], tag_columns=["k"], source_id="src"
+        [{"k": f"r{i}", "x": i} for i in ORDER],
+        tag_columns=["k"],
+        source_id="src",
+        tag_only_columns=True,
     )
 
 

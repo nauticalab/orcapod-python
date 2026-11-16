@@ -76,7 +76,9 @@ def _source(order: list[int]) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="nums", label="nums")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id="nums", label="nums", tag_only_columns=True
+    )
 
 
 def _store(kind: str, tmp_path: Path) -> ArrowDatabaseProtocol:
@@ -208,7 +210,9 @@ def _tie_source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id="ties", label="ties")
+    return ArrowTableSource(
+        table, tag_columns=["k"], source_id="ties", label="ties", tag_only_columns=True
+    )
 
 
 def _tie_run(kind: str) -> Any:

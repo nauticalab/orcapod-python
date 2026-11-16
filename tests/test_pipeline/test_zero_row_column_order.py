@@ -98,7 +98,10 @@ def _source(
 ) -> StreamProtocol:
     """A source of ``data`` behind a filter keeping group ``g1``."""
     source = ArrowTableSource(
-        _table(groups, data), tag_columns=["g", "id"], source_id=name
+        _table(groups, data),
+        tag_columns=["g", "id"],
+        source_id=name,
+        tag_only_columns=True,
     )
     return PolarsFilter(constraints={"g": "g1"})(source)
 
@@ -325,7 +328,9 @@ def _join_job(ids: list[int]) -> PipelineJob:
         table = pa.table(
             {"id": pa.array(ids, pa.int64()), column: pa.array(ids, pa.int64())}
         )
-        return ArrowTableSource(table, tag_columns=["id"], source_id=name)
+        return ArrowTableSource(
+            table, tag_columns=["id"], tag_only_columns=True, source_id=name
+        )
 
     job = PipelineJob(name="itl1133", database=InMemoryArrowDatabase())
     with job:

@@ -63,6 +63,7 @@ class TestSourceNodeFromDescriptor:
         source = DictSource(
             data=[{"a": 1, "b": 2}, {"a": 3, "b": 4}],
             tag_columns=["a"],
+            tag_only_columns=True,
             source_id="test",
         )
         job_node = SourceJobNode(
@@ -113,6 +114,7 @@ class TestFunctionNodeFromDescriptor:
         source = DictSource(
             data=[{"a": 1, "b": 2}],
             tag_columns=["a"],
+            tag_only_columns=True,
             source_id="test",
         )
         pf = PythonDataFunction(function=_sample_func, output_keys=["result"])
@@ -147,6 +149,7 @@ class TestFunctionNodeFromDescriptor:
         source = DictSource(
             data=[{"a": 1, "b": 2}],
             tag_columns=["a"],
+            tag_only_columns=True,
             source_id="test",
         )
         pf = PythonDataFunction(function=_sample_func, output_keys=["result"])
@@ -237,8 +240,18 @@ class TestOperatorNodeFromDescriptor:
     def test_from_descriptor_full_mode(self):
         db = InMemoryArrowDatabase()
         scoped_db = db.at("test")
-        source1 = DictSource(data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="s1")
-        source2 = DictSource(data=[{"a": 1, "c": 3}], tag_columns=["a"], source_id="s2")
+        source1 = DictSource(
+            data=[{"a": 1, "b": 2}],
+            tag_columns=["a"],
+            tag_only_columns=True,
+            source_id="s1",
+        )
+        source2 = DictSource(
+            data=[{"a": 1, "c": 3}],
+            tag_columns=["a"],
+            tag_only_columns=True,
+            source_id="s2",
+        )
         op = Join()
         node = OperatorJobNode(
             operator=op,

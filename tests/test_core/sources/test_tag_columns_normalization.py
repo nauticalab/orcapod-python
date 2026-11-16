@@ -111,10 +111,16 @@ class TestArrowTableSourceTagColumns:
 
         t = _make_table()
         src_str = ArrowTableSource(
-            table=t, tag_columns="session_id", infer_nullable=True
+            table=t,
+            tag_columns="session_id",
+            infer_nullable=True,
+            tag_only_columns=True,
         )
         src_list = ArrowTableSource(
-            table=t, tag_columns=["session_id"], infer_nullable=True
+            table=t,
+            tag_columns=["session_id"],
+            infer_nullable=True,
+            tag_only_columns=True,
         )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
@@ -125,7 +131,10 @@ class TestArrowTableSourceTagColumns:
 
         t = _make_table()
         src = ArrowTableSource(
-            table=t, tag_columns=("session_id",), infer_nullable=True
+            table=t,
+            tag_columns=("session_id",),
+            infer_nullable=True,
+            tag_only_columns=True,
         )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
@@ -134,7 +143,12 @@ class TestArrowTableSourceTagColumns:
         from orcapod.core.sources import ArrowTableSource
 
         with pytest.raises(TypeError):
-            ArrowTableSource(table=_make_table(), tag_columns=42, infer_nullable=True)
+            ArrowTableSource(
+                table=_make_table(),
+                tag_columns=42,  # pyright: ignore[reportArgumentType]  # an invalid type on purpose
+                infer_nullable=True,
+                tag_only_columns=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +161,12 @@ class TestDataFrameSourceTagColumns:
         from orcapod.core.sources import DataFrameSource
 
         data = {"session_id": ["s1", "s2"], "value": [10, 20]}
-        src_str = DataFrameSource(data=data, tag_columns="session_id")
-        src_list = DataFrameSource(data=data, tag_columns=["session_id"])
+        src_str = DataFrameSource(
+            data=data, tag_columns="session_id", tag_only_columns=True
+        )
+        src_list = DataFrameSource(
+            data=data, tag_columns=["session_id"], tag_only_columns=True
+        )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
@@ -159,6 +177,7 @@ class TestDataFrameSourceTagColumns:
         src = DataFrameSource(
             data={"session_id": ["s1"], "value": [10]},
             tag_columns=("session_id",),
+            tag_only_columns=True,
         )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
@@ -167,7 +186,11 @@ class TestDataFrameSourceTagColumns:
         from orcapod.core.sources import DataFrameSource
 
         with pytest.raises(TypeError):
-            DataFrameSource(data={"session_id": ["s1"], "value": [1]}, tag_columns=42)
+            DataFrameSource(
+                data={"session_id": ["s1"], "value": [1]},
+                tag_columns=42,  # pyright: ignore[reportArgumentType]  # an invalid type on purpose
+                tag_only_columns=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +204,12 @@ class TestCSVSourceTagColumns:
 
         p = tmp_path / "data.csv"
         p.write_text("session_id,value\ns1,10\ns2,20\n")
-        src_str = CSVSource(file_path=str(p), tag_columns="session_id")
-        src_list = CSVSource(file_path=str(p), tag_columns=["session_id"])
+        src_str = CSVSource(
+            file_path=str(p), tag_columns="session_id", tag_only_columns=True
+        )
+        src_list = CSVSource(
+            file_path=str(p), tag_columns=["session_id"], tag_only_columns=True
+        )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
@@ -192,7 +219,9 @@ class TestCSVSourceTagColumns:
 
         p = tmp_path / "data.csv"
         p.write_text("session_id,value\ns1,10\n")
-        src = CSVSource(file_path=str(p), tag_columns=("session_id",))
+        src = CSVSource(
+            file_path=str(p), tag_columns=("session_id",), tag_only_columns=True
+        )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
 
@@ -202,7 +231,7 @@ class TestCSVSourceTagColumns:
         p = tmp_path / "data.csv"
         p.write_text("session_id,value\ns1,10\n")
         with pytest.raises(TypeError):
-            CSVSource(file_path=str(p), tag_columns=42)
+            CSVSource(file_path=str(p), tag_columns=42, tag_only_columns=True)
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +245,12 @@ class TestDictSourceTagColumns:
     def test_bare_string_same_as_list(self):
         from orcapod.core.sources import DictSource
 
-        src_str = DictSource(data=self._DATA, tag_columns="session_id")
-        src_list = DictSource(data=self._DATA, tag_columns=["session_id"])
+        src_str = DictSource(
+            data=self._DATA, tag_columns="session_id", tag_only_columns=True
+        )
+        src_list = DictSource(
+            data=self._DATA, tag_columns=["session_id"], tag_only_columns=True
+        )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
         assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
@@ -225,7 +258,9 @@ class TestDictSourceTagColumns:
     def test_tuple_accepted(self):
         from orcapod.core.sources import DictSource
 
-        src = DictSource(data=self._DATA, tag_columns=("session_id",))
+        src = DictSource(
+            data=self._DATA, tag_columns=("session_id",), tag_only_columns=True
+        )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
 
@@ -233,7 +268,7 @@ class TestDictSourceTagColumns:
         from orcapod.core.sources import DictSource
 
         with pytest.raises(TypeError):
-            DictSource(data=self._DATA, tag_columns=42)
+            DictSource(data=self._DATA, tag_columns=42, tag_only_columns=True)
 
 
 # ---------------------------------------------------------------------------
@@ -259,10 +294,12 @@ class TestDeltaTableSourceTagColumns:
         from orcapod.core.sources import DeltaTableSource
 
         src_str = DeltaTableSource(
-            delta_table_path=delta_path, tag_columns="session_id"
+            delta_table_path=delta_path, tag_columns="session_id", tag_only_columns=True
         )
         src_list = DeltaTableSource(
-            delta_table_path=delta_path, tag_columns=["session_id"]
+            delta_table_path=delta_path,
+            tag_columns=["session_id"],
+            tag_only_columns=True,
         )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
@@ -272,7 +309,11 @@ class TestDeltaTableSourceTagColumns:
         from orcapod.core.sources import DeltaTableSource
 
         with pytest.raises(TypeError):
-            DeltaTableSource(delta_table_path=delta_path, tag_columns=42)
+            DeltaTableSource(
+                delta_table_path=delta_path,
+                tag_columns=42,  # pyright: ignore[reportArgumentType]  # an invalid type on purpose
+                tag_only_columns=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -349,10 +390,16 @@ class TestDBTableSourceTagColumns:
         from orcapod.core.sources import DBTableSource
 
         src_str = DBTableSource(
-            connector=_MockConnector(), table_name="events", tag_columns="session_id"
+            connector=_MockConnector(),
+            table_name="events",
+            tag_columns="session_id",
+            tag_only_columns=True,
         )
         src_list = DBTableSource(
-            connector=_MockConnector(), table_name="events", tag_columns=["session_id"]
+            connector=_MockConnector(),
+            table_name="events",
+            tag_columns=["session_id"],
+            tag_only_columns=True,
         )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
@@ -362,7 +409,10 @@ class TestDBTableSourceTagColumns:
         from orcapod.core.sources import DBTableSource
 
         src = DBTableSource(
-            connector=_MockConnector(), table_name="events", tag_columns=("session_id",)
+            connector=_MockConnector(),
+            table_name="events",
+            tag_columns=("session_id",),
+            tag_only_columns=True,
         )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
@@ -372,7 +422,10 @@ class TestDBTableSourceTagColumns:
 
         with pytest.raises(TypeError):
             DBTableSource(
-                connector=_MockConnector(), table_name="events", tag_columns=42
+                connector=_MockConnector(),
+                table_name="events",
+                tag_columns=42,  # pyright: ignore[reportArgumentType]  # an invalid type on purpose
+                tag_only_columns=True,
             )
 
 
@@ -400,10 +453,16 @@ class TestSQLiteTableSourceTagColumns:
         from orcapod.core.sources import SQLiteTableSource
 
         src_str = SQLiteTableSource(
-            db_path=sqlite_db_path, table_name="events", tag_columns="session_id"
+            db_path=sqlite_db_path,
+            table_name="events",
+            tag_columns="session_id",
+            tag_only_columns=True,
         )
         src_list = SQLiteTableSource(
-            db_path=sqlite_db_path, table_name="events", tag_columns=["session_id"]
+            db_path=sqlite_db_path,
+            table_name="events",
+            tag_columns=["session_id"],
+            tag_only_columns=True,
         )
         tag_keys_str, _ = src_str.keys()
         tag_keys_list, _ = src_list.keys()
@@ -413,7 +472,10 @@ class TestSQLiteTableSourceTagColumns:
         from orcapod.core.sources import SQLiteTableSource
 
         src = SQLiteTableSource(
-            db_path=sqlite_db_path, table_name="events", tag_columns=("session_id",)
+            db_path=sqlite_db_path,
+            table_name="events",
+            tag_columns=("session_id",),
+            tag_only_columns=True,
         )
         tag_keys, _ = src.keys()
         assert "session_id" in tag_keys
@@ -423,7 +485,10 @@ class TestSQLiteTableSourceTagColumns:
 
         with pytest.raises(TypeError):
             SQLiteTableSource(
-                db_path=sqlite_db_path, table_name="events", tag_columns=42
+                db_path=sqlite_db_path,
+                table_name="events",
+                tag_columns=42,  # pyright: ignore[reportArgumentType]  # an invalid type on purpose
+                tag_only_columns=True,
             )
 
 

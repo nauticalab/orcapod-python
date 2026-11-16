@@ -102,7 +102,9 @@ def xs_failing_at(position: int) -> list[int]:
 def source_of(xs: list[int]) -> DictSource:
     """A source of rows ``k = r<i>``, ``x = xs[i]``."""
     rows = [{"k": f"r{i}", "x": x} for i, x in enumerate(xs)]
-    return DictSource(data=rows, tag_columns=["k"], source_id="rows")
+    return DictSource(
+        data=rows, tag_columns=["k"], tag_only_columns=True, source_id="rows"
+    )
 
 
 def function_job(

@@ -72,7 +72,10 @@ def main(root: pathlib.Path) -> None:
     )
 
     dict_source = DictSource(
-        [{"id": 0, "x": 5}, {"id": 1, "x": 10}], tag_columns=["id"], source_id="dsrc"
+        [{"id": 0, "x": 5}, {"id": 1, "x": 10}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="dsrc",
     )
     arrow_source = ArrowTableSource(
         pa.table(
@@ -85,11 +88,14 @@ def main(root: pathlib.Path) -> None:
             ),
         ),
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id="asrc",
     )
-    csv_source = CSVSource(str(root / "c.csv"), tag_columns=["id"], source_id="csrc")
+    csv_source = CSVSource(
+        str(root / "c.csv"), tag_columns=["id"], tag_only_columns=True, source_id="csrc"
+    )
     delta_source = DeltaTableSource(
-        str(root / "dt"), tag_columns=["id"], source_id="tsrc"
+        str(root / "dt"), tag_columns=["id"], tag_only_columns=True, source_id="tsrc"
     )
     list_source = ListSource("z", [1, 2], source_id="lsrc")
 

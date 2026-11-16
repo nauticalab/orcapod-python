@@ -91,11 +91,15 @@ def delta_path(tmp_path: Path) -> Path:
 
 class TestCSVSource:
     def test_construction_reads_rows(self, csv_path):
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
+        src = CSVSource(
+            file_path=csv_path, tag_columns=["user_id"], tag_only_columns=True
+        )
         assert len(list(src.iter_data())) == 3
 
     def test_tag_and_data_keys(self, csv_path):
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
+        src = CSVSource(
+            file_path=csv_path, tag_columns=["user_id"], tag_only_columns=True
+        )
         tag_keys, data_keys = src.keys()
         assert "user_id" in tag_keys
         assert "score" in data_keys
@@ -119,7 +123,9 @@ class TestCSVSource:
         assert isinstance(CSVSource(file_path=csv_path), RootSource)
 
     def test_output_schema_returns_two_schemas(self, csv_path):
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
+        src = CSVSource(
+            file_path=csv_path, tag_columns=["user_id"], tag_only_columns=True
+        )
         tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
         assert isinstance(data_schema, Schema)
@@ -145,11 +151,13 @@ class TestCSVSource:
             file_path=str(csv_a),
             tag_columns=["user_id"],
             source_id="shared_name",
+            tag_only_columns=True,
         )
         src_b = CSVSource(
             file_path=str(csv_b),
             tag_columns=["user_id"],
             source_id="shared_name",
+            tag_only_columns=True,
         )
 
         table_a = src_a.as_table(all_info=True)
@@ -176,11 +184,15 @@ class TestCSVSource:
 
 class TestDeltaTableSource:
     def test_construction_reads_rows(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(
+            delta_table_path=delta_path, tag_columns=["id"], tag_only_columns=True
+        )
         assert len(list(src.iter_data())) == 3
 
     def test_tag_and_data_keys(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(
+            delta_table_path=delta_path, tag_columns=["id"], tag_only_columns=True
+        )
         tag_keys, data_keys = src.keys()
         assert "id" in tag_keys
         assert "value" in data_keys
@@ -204,7 +216,9 @@ class TestDeltaTableSource:
         assert isinstance(DeltaTableSource(delta_table_path=delta_path), RootSource)
 
     def test_output_schema_returns_two_schemas(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(
+            delta_table_path=delta_path, tag_columns=["id"], tag_only_columns=True
+        )
         tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
         assert isinstance(data_schema, Schema)
@@ -246,7 +260,9 @@ class TestDeltaTableSourceNullability:
         self, delta_mixed_nullable_path: Path
     ) -> None:
         """Columns declared NOT NULL in the Delta schema must map to T, not T | None."""
-        source = DeltaTableSource(delta_mixed_nullable_path, tag_columns=["id"])
+        source = DeltaTableSource(
+            delta_mixed_nullable_path, tag_columns=["id"], tag_only_columns=True
+        )
         _, data_schema = source.output_schema()
         # score is nullable=False in the Delta schema → must be float, not float | None
         assert data_schema["score"] is float
@@ -255,7 +271,9 @@ class TestDeltaTableSourceNullability:
         self, delta_mixed_nullable_path: Path
     ) -> None:
         """Columns declared nullable in the Delta schema must map to T | None."""
-        source = DeltaTableSource(delta_mixed_nullable_path, tag_columns=["id"])
+        source = DeltaTableSource(
+            delta_mixed_nullable_path, tag_columns=["id"], tag_only_columns=True
+        )
         _, data_schema = source.output_schema()
         # label is nullable=True in the Delta schema → must be str | None
 
@@ -271,7 +289,7 @@ class TestDataFrameSourceAdditional:
     def test_string_tag_columns_accepted(self):
         """tag_columns as a plain string (not a list) should work."""
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-        src = DataFrameSource(data=df, tag_columns="id")
+        src = DataFrameSource(data=df, tag_columns="id", tag_only_columns=True)
         tag_keys, data_keys = src.keys()
         assert "id" in tag_keys
         assert "value" in data_keys
@@ -291,7 +309,9 @@ class TestDataFrameSourceAdditional:
 
     def test_source_id_in_provenance_tokens(self):
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-        src = DataFrameSource(data=df, tag_columns="id", source_id="df_source")
+        src = DataFrameSource(
+            data=df, tag_columns="id", source_id="df_source", tag_only_columns=True
+        )
         table = src.as_table(all_info=True)
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert source_cols
@@ -300,7 +320,7 @@ class TestDataFrameSourceAdditional:
 
     def test_multiple_tag_columns(self):
         df = pl.DataFrame({"a": [1, 2], "b": [3, 4], "val": ["x", "y"]})
-        src = DataFrameSource(data=df, tag_columns=["a", "b"])
+        src = DataFrameSource(data=df, tag_columns=["a", "b"], tag_only_columns=True)
         tag_keys, data_keys = src.keys()
         assert set(tag_keys) == {"a", "b"}
         assert "val" in data_keys
@@ -331,6 +351,7 @@ class TestDictSourceAdditional:
             data=data,
             tag_columns=["id"],
             data_schema={"id": int, "value": str},
+            tag_only_columns=True,
         )
         tag_schema, data_schema = src.output_schema()
         assert "id" in tag_schema
@@ -339,11 +360,16 @@ class TestDictSourceAdditional:
     def test_empty_data_raises(self):
         """An empty DictSource cannot build a valid ArrowTableStream."""
         with pytest.raises(Exception):
-            DictSource(data=[], tag_columns=["id"])
+            DictSource(data=[], tag_columns=["id"], tag_only_columns=True)
 
     def test_source_id_in_provenance_tokens(self):
         data = [{"id": 1, "val": "a"}, {"id": 2, "val": "b"}]
-        src = DictSource(data=data, tag_columns=["id"], source_id="dict_src_name")
+        src = DictSource(
+            data=data,
+            tag_columns=["id"],
+            source_id="dict_src_name",
+            tag_only_columns=True,
+        )
         table = src.as_table(all_info=True)
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert source_cols
@@ -352,7 +378,9 @@ class TestDictSourceAdditional:
 
     def test_source_id_explicit(self):
         data = [{"id": 1, "val": "x"}]
-        src = DictSource(data=data, tag_columns=["id"], source_id="my_dict")
+        src = DictSource(
+            data=data, tag_columns=["id"], source_id="my_dict", tag_only_columns=True
+        )
         assert src.source_id == "my_dict"
 
 
@@ -502,6 +530,7 @@ class TestArrowTableSourceAdditional:
             tag_columns=["user_id"],
             source_id="my_source",
             infer_nullable=True,
+            tag_only_columns=True,
         )
         assert src.source_id == "my_source"
         t = src.as_table(all_info=True)
@@ -543,7 +572,10 @@ class TestArrowTableSourceAdditional:
         )
         with pytest.raises(ValueError, match="tag_columns not found in table"):
             ArrowTableSource(
-                table=table, tag_columns=["nonexistent", "id"], infer_nullable=True
+                table=table,
+                tag_columns=["nonexistent", "id"],
+                infer_nullable=True,
+                tag_only_columns=True,
             )
 
     def test_tag_columns_all_missing_raises(self):
@@ -556,7 +588,10 @@ class TestArrowTableSourceAdditional:
         )
         with pytest.raises(ValueError, match="tag_columns not found in table"):
             ArrowTableSource(
-                table=table, tag_columns=["foo", "bar"], infer_nullable=True
+                table=table,
+                tag_columns=["foo", "bar"],
+                infer_nullable=True,
+                tag_only_columns=True,
             )
 
     def test_tag_columns_all_valid_succeeds(self):
@@ -567,7 +602,9 @@ class TestArrowTableSourceAdditional:
                 "val": pa.array([42], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+        src = ArrowTableSource(
+            table=table, tag_columns=["id"], infer_nullable=True, tag_only_columns=True
+        )
         tag_keys, data_keys = src.keys()
         assert "id" in tag_keys
         assert "val" in data_keys

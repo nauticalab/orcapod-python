@@ -57,7 +57,11 @@ def _table(rows: int, offset: int = 0) -> pa.Table:
 def _source(rows: int = 25, label: str = "readings") -> ArrowTableSource:
     """An ``ArrowTableSource`` over ``_table(rows)``, labelled ``label``."""
     return ArrowTableSource(
-        _table(rows), tag_columns=["id"], source_id="readings", label=label
+        _table(rows),
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="readings",
+        label=label,
     )
 
 
@@ -119,7 +123,10 @@ def test_head_of_zero_rows_keeps_the_columns() -> None:
     "make",
     [
         lambda: DictSource(
-            [{"id": i, "x": i} for i in range(12)], tag_columns=["id"], label="d"
+            [{"id": i, "x": i} for i in range(12)],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            label="d",
         ),
         lambda: ListSource(
             name="v", data=list(range(12)), tag_function=lambda e, i: {"i": i}
@@ -238,7 +245,9 @@ def _other_source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="other")
+    return ArrowTableSource(
+        table, tag_columns=["id"], tag_only_columns=True, source_id="other"
+    )
 
 
 def _grouped_source() -> ArrowTableSource:
@@ -257,7 +266,9 @@ def _grouped_source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id", "grp"], source_id="grouped")
+    return ArrowTableSource(
+        table, tag_columns=["id", "grp"], tag_only_columns=True, source_id="grouped"
+    )
 
 
 def _calls_over_rows(spy: mock.MagicMock) -> int:
@@ -530,6 +541,7 @@ def test_preview_summarises_large_cells_and_head_keeps_them() -> None:
             }
         ],
         tag_columns=["id"],
+        tag_only_columns=True,
         label="cells",
     )
     head = source.head()
@@ -628,7 +640,9 @@ def test_preview_reads_an_npy_cell_header_only() -> None:
 def test_preview_keeps_both_ends_of_a_long_key() -> None:
     """A long hash key keeps its start and its distinguishing end in the preview."""
     key = "derived:arrow_v1:" + "ab" * 61 + "XYZ"
-    source = DictSource([{"key": key, "x": 1}], tag_columns=["key"], label="keys")
+    source = DictSource(
+        [{"key": key, "x": 1}], tag_columns=["key"], tag_only_columns=True, label="keys"
+    )
     html = source._repr_html_()
     assert "derived:arrow_v1:abab" in html
     assert "XYZ" in html
@@ -639,7 +653,10 @@ def test_preview_keeps_both_ends_of_a_long_key() -> None:
 def test_an_unlabelled_source_is_shown_by_its_source_id() -> None:
     """A source given no label is named by its source id in the header; its label is kept."""
     source = DictSource(
-        [{"id": 1, "x": 2}], tag_columns=["id"], source_id="spike_event"
+        [{"id": 1, "x": 2}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="spike_event",
     )
     assert source.head().header() == "DictSource[spike_event] — all 1 row"
     assert source.label == "DictSource"

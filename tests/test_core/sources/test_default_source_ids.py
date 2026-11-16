@@ -53,11 +53,13 @@ def _arrow_table() -> pa.Table:
 
 
 def _arrow_table_source(**kwargs) -> RootSource:
-    return ArrowTableSource(_arrow_table(), tag_columns=["id"], **kwargs)
+    return ArrowTableSource(
+        _arrow_table(), tag_columns=["id"], tag_only_columns=True, **kwargs
+    )
 
 
 def _dict_source(**kwargs) -> RootSource:
-    return DictSource(ROWS, tag_columns=["id"], **kwargs)
+    return DictSource(ROWS, tag_columns=["id"], tag_only_columns=True, **kwargs)
 
 
 def _list_source(**kwargs) -> RootSource:
@@ -65,7 +67,9 @@ def _list_source(**kwargs) -> RootSource:
 
 
 def _data_frame_source(**kwargs) -> RootSource:
-    return DataFrameSource(pl.DataFrame(ROWS), tag_columns=["id"], **kwargs)
+    return DataFrameSource(
+        pl.DataFrame(ROWS), tag_columns=["id"], tag_only_columns=True, **kwargs
+    )
 
 
 # (source class, expected kind, factory, name of a data column)
@@ -182,7 +186,10 @@ class TestKindsTellSourcesApart:
         # ArrowTableSource is given, so only the kind differs.
         arrow = _arrow_table_source()
         frame = DataFrameSource(
-            pl.DataFrame(ROWS), tag_columns=["id"], schema=_arrow_table().schema
+            pl.DataFrame(ROWS),
+            tag_columns=["id"],
+            schema=_arrow_table().schema,
+            tag_only_columns=True,
         )
         assert arrow.source_id.split(":")[1:] == frame.source_id.split(":")[1:]
         assert arrow.source_id != frame.source_id

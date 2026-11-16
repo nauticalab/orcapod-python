@@ -28,7 +28,9 @@ from tests.test_torch.tensor_cases import (  # noqa: E402
 
 def _source(value: Any) -> DictSource:
     """A one-row source with ``value`` in column ``x``."""
-    return DictSource(data=[{"k": "r", "x": value}], tag_columns=["k"])
+    return DictSource(
+        data=[{"k": "r", "x": value}], tag_columns=["k"], tag_only_columns=True
+    )
 
 
 def stored_cell(value: Any) -> bytes:
@@ -52,7 +54,7 @@ def read_cell(cell: bytes) -> Any:
         [table.column("k"), pa.ExtensionArray.from_storage(column_type, storage)],
         names=["k", "x"],
     )
-    source = ArrowTableSource(forged, tag_columns=["k"])
+    source = ArrowTableSource(forged, tag_columns=["k"], tag_only_columns=True)
     return next(iter(source.iter_data()))[1].as_dict()["x"]
 
 
@@ -279,7 +281,11 @@ def test_a_subclass_the_restricted_loader_cannot_read_is_refused_at_write() -> N
     """Only ``torch.Tensor`` and ``nn.Parameter`` are stored; another subclass is refused."""
     value = torch.ones(2).as_subclass(_Wrapped)
     with pytest.raises(UnsupportedValueError, match="'payload'.*_Wrapped"):
-        DictSource(data=[{"k": "r", "payload": value}], tag_columns=["k"]).as_table()
+        DictSource(
+            data=[{"k": "r", "payload": value}],
+            tag_columns=["k"],
+            tag_only_columns=True,
+        ).as_table()
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +362,9 @@ def test_a_tensor_that_requires_grad_reads_back_for_every_dtype(name: str) -> No
     assert value_bytes(got) == value_bytes(value)
     row = next(iter(_source(value).iter_data()))[1]
     stored = ArrowTableSource(
-        _source(value).as_table().select(["k", "x"]), tag_columns=["k"]
+        _source(value).as_table().select(["k", "x"]),
+        tag_columns=["k"],
+        tag_only_columns=True,
     )
     assert next(iter(stored.iter_data()))[1].content_hash() == row.content_hash()
 

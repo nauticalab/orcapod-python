@@ -42,6 +42,7 @@ def _store_bytes_per_row(
             data=[{"k": i, "x": i} for i in range(n_rows)],
             tag_columns=["k"],
             source_id="src",
+            tag_only_columns=True,
         )
         double.pod(src, label="dbl")
     job.run(

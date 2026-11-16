@@ -71,7 +71,10 @@ def make_pod(
 def make_source(xs: tuple[int, ...] = (1,)) -> DictSource:
     """A source with one row per ``x`` (tag ``k``, data ``x: int``)."""
     return DictSource(
-        data=[{"k": f"r{x}", "x": x} for x in xs], tag_columns=["k"], source_id="src"
+        data=[{"k": f"r{x}", "x": x} for x in xs],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="src",
     )
 
 
@@ -873,6 +876,7 @@ def test_inferred_source_uses_value_class() -> None:
     source = DictSource(
         data=[{"y": cast(Any, ExtendedReading(3, 9))}],
         tag_columns=[],
+        tag_only_columns=True,
         source_id="subclass_source",
     )
     table = source.as_table()

@@ -81,7 +81,9 @@ def _source(extra: bool) -> ArrowTableSource:
         fields.append(pa.field("e", pa.int64(), nullable=False))
         arrays.append(pa.array([-i for i in IDS], pa.int64()))
     table = pa.Table.from_arrays(arrays, schema=pa.schema(fields))
-    return ArrowTableSource(table, tag_columns=["id"], source_id="src")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id="src", tag_only_columns=True
+    )
 
 
 def _other() -> ArrowTableSource:
@@ -97,7 +99,9 @@ def _other() -> ArrowTableSource:
         [pa.array(ids, pa.int64()), pa.array([7 * i for i in ids], pa.int64())],
         schema=schema,
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="other")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id="other", tag_only_columns=True
+    )
 
 
 def _pod(

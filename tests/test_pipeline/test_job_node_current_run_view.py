@@ -56,7 +56,7 @@ def _build(
     cache_mode: CacheMode | None = None,
 ) -> PipelineJob:
     """``rowwise`` (function) -> ``grouped`` (GroupBy operator) -> ``summed`` (function)."""
-    src = DictSource(data, tag_columns=["g", "k"], source_id="s")
+    src = DictSource(data, tag_columns=["g", "k"], tag_only_columns=True, source_id="s")
     job = PipelineJob(name="j", database=db)
     with job:
         rowwise: Any = inc.pod(src, label="rowwise")
@@ -182,7 +182,9 @@ class TestAfterARun:
         source_name = next(iter(job.sources))  # the one source slot
         job.bind(
             sources={
-                source_name: DictSource(ROWS, tag_columns=["g", "k"], source_id="s")
+                source_name: DictSource(
+                    ROWS, tag_columns=["g", "k"], tag_only_columns=True, source_id="s"
+                )
             }
         )
         for label in JOB_NODES:

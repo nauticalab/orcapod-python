@@ -29,7 +29,9 @@ def _make_source(n: int = 3) -> ArrowTableSource:
             "value": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+    )
 
 
 def double_no_db(value: int) -> int:

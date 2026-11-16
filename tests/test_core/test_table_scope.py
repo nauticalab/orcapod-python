@@ -41,7 +41,9 @@ def _make_pod() -> FunctionPod:
 
 def _make_source(data: list[dict], source_id: str = "src") -> DictSource:
     """Source with tag column 'x' and data column 'y'."""
-    return DictSource(data=data, tag_columns=["x"], source_id=source_id)
+    return DictSource(
+        data=data, tag_columns=["x"], tag_only_columns=True, source_id=source_id
+    )
 
 
 def _make_join_streams(
@@ -67,12 +69,14 @@ def _make_join_streams(
     src_a = ArrowTableSource(
         table_a,
         tag_columns=["key"],
+        tag_only_columns=True,
         source_id=f"src_a_{source_id_suffix}",
         infer_nullable=True,
     )
     src_b = ArrowTableSource(
         table_b,
         tag_columns=["key"],
+        tag_only_columns=True,
         source_id=f"src_b_{source_id_suffix}",
         infer_nullable=True,
     )

@@ -37,7 +37,7 @@ from orcapod.core.operators import Join, MergeJoin
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
 def source(columns, tags, source_id):
-    return ArrowTableSource(pa.table(columns), tag_columns=tags, source_id=source_id)
+    return ArrowTableSource(pa.table(columns), tag_columns=tags, tag_only_columns=True, source_id=source_id)
 
 def describe(operator, first, second):
     stream = operator(first, second)
@@ -180,7 +180,10 @@ def _source(
     columns: dict[str, list[int]], tag: str, source_id: str
 ) -> ArrowTableSource:
     return ArrowTableSource(
-        pa.Table.from_pydict(columns), tag_columns=[tag], source_id=source_id
+        pa.Table.from_pydict(columns),
+        tag_columns=[tag],
+        tag_only_columns=True,
+        source_id=source_id,
     )
 
 

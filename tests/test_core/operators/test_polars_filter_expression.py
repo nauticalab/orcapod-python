@@ -32,6 +32,7 @@ def _readings() -> DictSource:
         ],
         tag_columns=["id"],
         label="readings",
+        tag_only_columns=True,
     )
 
 
@@ -44,6 +45,7 @@ def _names() -> DictSource:
         ],
         tag_columns=["id"],
         label="names",
+        tag_only_columns=True,
     )
 
 
@@ -196,6 +198,7 @@ _JOB_SCRIPT = textwrap.dedent("""\
             {"id": "c", "x": 3, "y": 30},
         ],
         tag_columns=["id"],
+        tag_only_columns=True,
         label="readings",
     )
     names = DictSource(
@@ -205,6 +208,7 @@ _JOB_SCRIPT = textwrap.dedent("""\
             {"id": "c", "name": "gamma"},
         ],
         tag_columns=["id"],
+        tag_only_columns=True,
         label="names",
     )
 

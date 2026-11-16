@@ -160,7 +160,7 @@ class TestArrowTableSourceUsesBuilder:
     def test_arrow_table_source_works(self):
         """ArrowTableSource should use SourceStreamBuilder internally."""
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
-        src = ArrowTableSource(table=table, tag_columns=["id"])
+        src = ArrowTableSource(table=table, tag_columns=["id"], tag_only_columns=True)
         assert src.as_table().num_rows == 2
         tag_schema, data_schema = src.output_schema()
         assert "id" in tag_schema
@@ -168,12 +168,12 @@ class TestArrowTableSourceUsesBuilder:
 
     def test_arrow_table_source_has_stream_attr(self):
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
-        src = ArrowTableSource(table=table, tag_columns=["id"])
+        src = ArrowTableSource(table=table, tag_columns=["id"], tag_only_columns=True)
         assert hasattr(src, "_stream")
 
     def test_arrow_table_source_identity_uses_class_name(self):
         table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
-        src = ArrowTableSource(table=table, tag_columns=["id"])
+        src = ArrowTableSource(table=table, tag_columns=["id"], tag_only_columns=True)
         identity = src.identity_structure()
         assert identity[0] == "ArrowTableSource"
 
@@ -241,7 +241,11 @@ class TestProvenanceTokensMatchRowValues:
         table = self._table()
         tag = column or "k_str"
         source = ArrowTableSource(
-            table, tag_columns=[tag], record_id_column=column, source_id="s"
+            table,
+            tag_columns=[tag],
+            record_id_column=column,
+            source_id="s",
+            tag_only_columns=True,
         )
         tokens = (
             source.as_table(columns={"source": True}).column("_source_v").to_pylist()
@@ -271,13 +275,13 @@ class TestUnhashableColumnTypes:
     def test_fixed_size_list_column_is_hashed(self):
         """A source accepts a ``fixed_size_list`` column and keeps its type."""
         table = self._table(rgb=pa.array([[1, 2, 3], [4, 5, 6]], self._FSL))
-        source = ArrowTableSource(table, tag_columns=["k"])
+        source = ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
         assert source.as_table().schema.field("rgb").type == self._FSL
 
     def test_map_column_is_named(self):
         table = self._table(tags=pa.array([[("x", 1)], []], self._MAP))
         with pytest.raises(ValueError) as info:
-            ArrowTableSource(table, tag_columns=["k"])
+            ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
         message = str(info.value)
         assert message.startswith("cannot hash column 'tags' of type ")
         assert str(self._MAP) in message
@@ -292,7 +296,7 @@ class TestUnhashableColumnTypes:
             attrs=pa.array([[], [("y", 2)]], self._MAP),
         )
         with pytest.raises(ValueError) as info:
-            ArrowTableSource(table, tag_columns=["k"])
+            ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
         message = str(info.value)
         assert message.startswith("cannot hash columns ")
         assert "'tags'" in message
@@ -313,5 +317,5 @@ class TestUnhashableColumnTypes:
             return original(*args, **kwargs)
 
         monkeypatch.setattr(hasher, "hash_table", counting)
-        ArrowTableSource(self._table(), tag_columns=["k"])
+        ArrowTableSource(self._table(), tag_columns=["k"], tag_only_columns=True)
         assert len(calls) == 1

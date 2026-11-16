@@ -114,7 +114,9 @@ def test_user_arrow_table_keeps_width_and_nullability() -> None:
         ]
     )
     table = pa.Table.from_pylist([{"t": "a", "l": [1], "s": None}], schema=schema)
-    out = ArrowTableSource(table, tag_columns=["t"], source_id="u").as_table()
+    out = ArrowTableSource(
+        table, tag_columns=["t"], source_id="u", tag_only_columns=True
+    ).as_table()
     assert out.schema.field("t") == pa.field("t", pa.large_string(), nullable=False)
     assert out.schema.field("l") == pa.field(
         "l", pa.large_list(pa.field("item", pa.int8(), nullable=False)), nullable=False
@@ -136,7 +138,9 @@ def test_list_view_is_not_supported_today() -> None:
         }
     )
     with pytest.raises(ValueError, match="list_view"):
-        _ = ArrowTableSource(table, tag_columns=["t"], source_id="lv")
+        _ = ArrowTableSource(
+            table, tag_columns=["t"], source_id="lv", tag_only_columns=True
+        )
     stream = ArrowTableStream(table, tag_columns=["t"])
     assert stream.as_table().schema.field("lv").type == pa.list_view(pa.string())
     with pytest.raises(ValueError, match="list_view"):
@@ -242,7 +246,7 @@ def test_spiraldb_table_source_is_large(tmp_path: Path) -> None:
                 }
             )
         )
-        source = SpiralDBTableSource("p", "r", tag_columns=["t"])
+        source = SpiralDBTableSource("p", "r", tag_columns=["t"], tag_only_columns=True)
         assert non_large_columns(source.as_table(columns=ALL_COLUMNS)) == []
 
 
@@ -266,11 +270,13 @@ def test_string_and_large_string_sources_hash_alike(source_id: str | None) -> No
         pa.Table.from_pylist(ROWS, schema=FULL_SCHEMA),
         tag_columns=TAGS,
         source_id=source_id,
+        tag_only_columns=True,
     )
     large = ArrowTableSource(
         pa.Table.from_pylist(ROWS, schema=LARGE_SCHEMA),
         tag_columns=TAGS,
         source_id=source_id,
+        tag_only_columns=True,
     )
     assert small.source_id == large.source_id
     assert small.content_hash() == large.content_hash()
@@ -283,8 +289,12 @@ def test_string_and_large_string_sources_hash_alike(source_id: str | None) -> No
 
 def test_dict_source_arrow_schema_hashes_alike() -> None:
     """A ``DictSource`` given ``string`` or ``large_string`` in its Arrow schema."""
-    small = DictSource(ROWS, tag_columns=TAGS, data_schema=FULL_SCHEMA)
-    large = DictSource(ROWS, tag_columns=TAGS, data_schema=LARGE_SCHEMA)
+    small = DictSource(
+        ROWS, tag_columns=TAGS, data_schema=FULL_SCHEMA, tag_only_columns=True
+    )
+    large = DictSource(
+        ROWS, tag_columns=TAGS, data_schema=LARGE_SCHEMA, tag_only_columns=True
+    )
     assert small.source_id == large.source_id
     assert small.content_hash() == large.content_hash()
     assert small.pipeline_hash() == large.pipeline_hash()
@@ -302,6 +312,7 @@ def _user_source(n_rows: int) -> ArrowTableSource:
         pa.Table.from_pylist(ROWS[:n_rows], schema=FULL_SCHEMA),
         tag_columns=TAGS,
         source_id="user",
+        tag_only_columns=True,
     )
 
 

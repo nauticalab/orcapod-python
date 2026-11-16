@@ -41,7 +41,10 @@ def _source(value: Any, value_type: Any = None) -> DictSource:
     """Return a one-row ``DictSource`` whose ``m`` column holds ``value``."""
     schema = None if value_type is None else {"k": str, "m": value_type}
     return DictSource(
-        data=[{"k": "r", "m": value}], tag_columns=["k"], data_schema=schema
+        data=[{"k": "r", "m": value}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        data_schema=schema,
     )
 
 
@@ -71,7 +74,9 @@ def _arrow_source(entries: list[dict[str, Any]]) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id="itl905")
+    return ArrowTableSource(
+        table, tag_columns=["k"], tag_only_columns=True, source_id="itl905"
+    )
 
 
 def _arrow_row_hash(entries: list[dict[str, Any]]) -> str:
@@ -298,7 +303,9 @@ class TestArrowNativeKeyValueLists:
                     "m": pa.array([entries], pair_type),
                 }
             )
-            src = ArrowTableSource(table, tag_columns=["k"], source_id="pairs")
+            src = ArrowTableSource(
+                table, tag_columns=["k"], tag_only_columns=True, source_id="pairs"
+            )
             _, data = next(iter(src.iter_data()))
             return data.content_hash().to_string()
 
@@ -527,6 +534,7 @@ class TestV020Store:
                 {"k": "sorted", "m": {"a": 1, "c": 3}},
             ],
             tag_columns=["k"],
+            tag_only_columns=True,
             data_schema={"k": str, "m": dict[str, int]},
             source_id="itl905_v020",
         )
@@ -581,6 +589,7 @@ class TestV020Store:
         inputs = DictSource(
             data=[{"k": "r", "n": 5}],
             tag_columns=["k"],
+            tag_only_columns=True,
             data_schema={"k": str, "n": int},
             source_id="itl905_v020_int",
         )

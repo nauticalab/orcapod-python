@@ -32,13 +32,22 @@ def _source(rows: int = ROWS) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="r", label="readings")
+    return ArrowTableSource(
+        table,
+        tag_columns=["id"],
+        source_id="r",
+        label="readings",
+        tag_only_columns=True,
+    )
 
 
 def _unordered() -> DictSource:
     """Three rows whose tags are not in order."""
     return DictSource(
-        [{"id": i, "x": 10 * i} for i in (3, 1, 2)], tag_columns=["id"], label="u"
+        [{"id": i, "x": 10 * i} for i in (3, 1, 2)],
+        tag_columns=["id"],
+        label="u",
+        tag_only_columns=True,
     )
 
 
@@ -160,6 +169,7 @@ def test_large_cells_of_a_long_view_are_summarised_where_shown() -> None:
         [{"id": i, "text": f"{i:04d}" + "a" * 200} for i in range(50)],
         tag_columns=["id"],
         label="long",
+        tag_only_columns=True,
     )
     view = source.run()
     text = str(view)
@@ -207,7 +217,10 @@ def _cells(view: Any) -> list[list[tuple[str, str]]]:
 
 def _two_tags() -> DictSource:
     return DictSource(
-        [{"a": 1, "b": 2, "x": 3, "y": 4}], tag_columns=["a", "b"], label="two"
+        [{"a": 1, "b": 2, "x": 3, "y": 4}],
+        tag_columns=["a", "b"],
+        label="two",
+        tag_only_columns=True,
     )
 
 
@@ -228,7 +241,10 @@ def test_html_display_marks_exactly_the_tag_columns() -> None:
 def test_html_display_of_odd_names_is_safe() -> None:
     """Names with ``<``, ``&`` or ``*`` are escaped and marked by position."""
     source = DictSource(
-        [{"a<b": 1, "c&d": 2, "*e": 3}], tag_columns=["a<b"], label="odd"
+        [{"a<b": 1, "c&d": 2, "*e": 3}],
+        tag_columns=["a<b"],
+        label="odd",
+        tag_only_columns=True,
     )
     html_text = source.run()._repr_html_()
     assert "<b" not in html_text.replace("<br", "")

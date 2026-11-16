@@ -37,7 +37,7 @@ def _row_hashes(column: pa.Array[Any]) -> list[str]:
             "x": column,
         }
     )
-    source = ArrowTableSource(table, tag_columns=["k"])
+    source = ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
     return [data.content_hash().to_string() for _, data in source.iter_data()]
 
 
@@ -168,14 +168,18 @@ class TestFixedSizeList:
 
     def test_source_with_fixed_size_list_column_keeps_its_type(self):
         """A source keeps the ``fixed_size_list`` type; its rows hash distinctly."""
-        source = ArrowTableSource(_fsl_table(), tag_columns=["k"])
+        source = ArrowTableSource(
+            _fsl_table(), tag_columns=["k"], tag_only_columns=True
+        )
         assert source.as_table().schema.field("v").type == pa.list_(pa.float32(), 2)
         hashes = [data.content_hash() for _, data in source.iter_data()]
         assert len(set(hashes)) == 2
 
     def test_fixed_size_list_column_runs_through_a_join(self):
         """``Join`` keeps a ``fixed_size_list`` column's type, values and row hashes."""
-        source = ArrowTableSource(_fsl_table(), tag_columns=["k"], infer_nullable=True)
+        source = ArrowTableSource(
+            _fsl_table(), tag_columns=["k"], infer_nullable=True, tag_only_columns=True
+        )
         other = ArrowTableSource(
             pa.table(
                 {
@@ -185,6 +189,7 @@ class TestFixedSizeList:
             ),
             tag_columns=["k"],
             infer_nullable=True,
+            tag_only_columns=True,
         )
         joined = Join()(source, other)
         table = joined.as_table()
@@ -251,7 +256,7 @@ class TestRejections:
             ),
         )
         with pytest.raises(ValueError, match="Non-nullable field 'x'"):
-            ArrowTableSource(table, tag_columns=["k"])
+            ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
 
     def test_duplicate_column_names_are_rejected(self):
         """Hashing a table with two columns named ``x`` raises an ambiguity error."""
@@ -269,7 +274,7 @@ class TestRejections:
             }
         )
         with pytest.raises(ValueError, match="Ambiguous node path 'a/b'"):
-            ArrowTableSource(table, tag_columns=["k"])
+            ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
 
     def test_slash_name_aliasing_nothing_is_accepted(self):
         """A column name with a slash that matches no struct child is accepted."""
@@ -279,4 +284,4 @@ class TestRejections:
                 "km/h": pa.array([1], pa.int64()),
             }
         )
-        ArrowTableSource(table, tag_columns=["k"])
+        ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)

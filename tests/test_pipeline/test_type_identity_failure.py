@@ -74,6 +74,7 @@ def build_job(database_path: Path) -> PipelineJob:
         pa.table({"k": ["a", "b", "c"], "x": [1, 2, 3]}),
         tag_columns=["k"],
         infer_nullable=True,
+        tag_only_columns=True,
     )
     job = PipelineJob(
         name="itl881", database=DeltaTableDatabase(base_path=database_path)

@@ -17,7 +17,9 @@ def _make_source(tag_col: str, data_col: str) -> ArrowTableSource:
             data_col: pa.array([1, 2], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=[tag_col], tag_only_columns=True, infer_nullable=True
+    )
 
 
 def _make_function_pod() -> FunctionPod:

@@ -91,7 +91,9 @@ class TestSchema:
 
     def test_nullable_spiral_columns_are_optional(self, spiral_root):
         """Nullable Spiral columns arrive as ``T | None`` tags and data."""
-        tag, data = SpiralDBTableSource(_PROJECT, "session").output_schema()
+        tag, data = SpiralDBTableSource(
+            _PROJECT, "session", tag_only_columns=True
+        ).output_schema()
         assert dict(tag) == {
             "subject_id": str | None,
             "session_start_datetime": dt.datetime | None,
@@ -100,7 +102,9 @@ class TestSchema:
 
     def test_arrow_types_are_kept(self, spiral_root):
         """Arrow types are kept, only normalized to their large variants."""
-        table = SpiralDBTableSource(_PROJECT, "experiment").as_table()
+        table = SpiralDBTableSource(
+            _PROJECT, "experiment", tag_only_columns=True
+        ).as_table()
         assert {f.name: f.type for f in table.schema} == {
             "subject_id": pa.large_string(),
             "session_start_datetime": _TS,
@@ -113,7 +117,7 @@ class TestSchema:
 
     def test_dataframe_view_has_tags_and_data_only(self, spiral_root):
         """``as_df`` holds the tag and data columns only."""
-        frame = SpiralDBTableSource(_PROJECT, "session").as_df()
+        frame = SpiralDBTableSource(_PROJECT, "session", tag_only_columns=True).as_df()
         assert frame.columns == [
             "subject_id",
             "session_start_datetime",
@@ -129,7 +133,7 @@ class TestSchema:
             """Return ``total_trials`` unchanged."""
             return total_trials
 
-        source = SpiralDBTableSource(_PROJECT, "experiment")
+        source = SpiralDBTableSource(_PROJECT, "experiment", tag_only_columns=True)
         selected = SelectDataColumns(["total_trials"])(source)
         with pytest.raises(ValueError, match="int \\| None"):
             plain.pod(selected)
@@ -141,7 +145,9 @@ class TestErrors:
     def test_missing_table_names_project_and_dataset(self, spiral_root):
         """A missing table is refused, naming the table, project and dataset."""
         with pytest.raises(ValueError) as info:
-            SpiralDBTableSource(_PROJECT, "no_such_table", dataset="default")
+            SpiralDBTableSource(
+                _PROJECT, "no_such_table", dataset="default", tag_only_columns=True
+            )
         message = str(info.value)
         assert "no_such_table" in message
         assert _PROJECT in message
@@ -167,8 +173,8 @@ class TestWorkshopPath:
         job = PipelineJob(name="workshop", database=DeltaTableDatabase(store))
         with job:
             joined = Join()(
-                SpiralDBTableSource(_PROJECT, "session"),
-                SpiralDBTableSource(_PROJECT, "experiment"),
+                SpiralDBTableSource(_PROJECT, "session", tag_only_columns=True),
+                SpiralDBTableSource(_PROJECT, "experiment", tag_only_columns=True),
                 label="joined",
             )
             trials = SelectDataColumns(["correct_trials", "total_trials"])(
@@ -213,13 +219,13 @@ class TestWorkshopPath:
 
 def test_hashes_are_stable_across_processes(spiral_root):
     """A second Python process computes the same content and pipeline hashes."""
-    source = SpiralDBTableSource(_PROJECT, "experiment")
+    source = SpiralDBTableSource(_PROJECT, "experiment", tag_only_columns=True)
     script = (
         "import json\n"
         "from tests.test_databases import fake_pyspiral\n"
         "from orcapod.sources import SpiralDBTableSource\n"
         f"with fake_pyspiral.install({str(spiral_root)!r}):\n"
-        f"    s = SpiralDBTableSource({_PROJECT!r}, 'experiment')\n"
+        f"    s = SpiralDBTableSource({_PROJECT!r}, 'experiment', tag_only_columns=True)\n"
         "print(json.dumps([s.content_hash().to_string(), s.pipeline_hash().to_string()]))\n"
     )
     result = subprocess.run(
@@ -285,15 +291,15 @@ class TestSourceId:
         self, two_projects
     ):
         """The default source id is the project, dataset, table and table id."""
-        source = SpiralDBTableSource("edi-sample-a", "subject")
+        source = SpiralDBTableSource("edi-sample-a", "subject", tag_only_columns=True)
         expected = f"edi-sample-a/default.subject@{source.table_id}"
         assert source.source_id == expected
         assert self._identity(source)[2] == f"{expected}::{self._M1}::sex"
 
     def test_same_table_in_two_projects_does_not_collide(self, two_projects):
         """One table in two projects shares the pipeline hash only."""
-        a = SpiralDBTableSource("edi-sample-a", "subject")
-        b = SpiralDBTableSource("edi-sample-b", "subject")
+        a = SpiralDBTableSource("edi-sample-a", "subject", tag_only_columns=True)
+        b = SpiralDBTableSource("edi-sample-b", "subject", tag_only_columns=True)
         assert a.pipeline_hash() == b.pipeline_hash()  # schema only
         identity_a, identity_b = self._identity(a), self._identity(b)
         assert all(x != y for x, y in zip(identity_a, identity_b, strict=True))
@@ -307,7 +313,9 @@ class TestSourceId:
         # the hash of its primary key); the token is the same with and without a
         # nullability record, because key fields are hashed as non-nullable.
         """An unrecorded table reads all-optional, with its pinned hashes."""
-        source = SpiralDBTableSource("edi-sample-a", "unrecorded", source_id="subject")
+        source = SpiralDBTableSource(
+            "edi-sample-a", "unrecorded", source_id="subject", tag_only_columns=True
+        )
         assert source.output_schema() == (
             Schema({"subject_id": str | None}),
             Schema({"sex": str | None}),
@@ -333,7 +341,9 @@ class TestSourceId:
         # written non-null; with the nullability record it reads back non-null, so the
         # hashes are those of the table as written.
         """A recorded table with a given source id keeps its pinned hashes."""
-        source = SpiralDBTableSource("edi-sample-a", "subject", source_id="subject")
+        source = SpiralDBTableSource(
+            "edi-sample-a", "subject", source_id="subject", tag_only_columns=True
+        )
         assert self._identity(source) == (
             "semantic_v1:a06a417294cabb0625e47a9357ebf9cc8183576b17498282901bd68d0f02e820",
             "1493a9f4caa95b7ca33dcf61e15d5eca",
@@ -363,7 +373,7 @@ class TestNullabilityErrors:
             header["version"] = 99
             table.set_metadata({"__orcapod_nullability__": json.dumps(header).encode()})
             with pytest.raises(NullabilityRecordError) as info:
-                SpiralDBTableSource(_PROJECT, "subject")
+                SpiralDBTableSource(_PROJECT, "subject", tag_only_columns=True)
             assert info.value.table == f"{_PROJECT}/default/subject"
 
 
@@ -443,13 +453,17 @@ class TestNonNullableColumns:
 
     def test_schema_keeps_declared_nullability(self, strict_root):
         """A recorded table's non-null columns arrive as T."""
-        tag, data = SpiralDBTableSource(_PROJECT, "session").output_schema()
+        tag, data = SpiralDBTableSource(
+            _PROJECT, "session", tag_only_columns=True
+        ).output_schema()
         assert dict(tag) == {"subject_id": str, "session_start_datetime": dt.datetime}
         assert dict(data) == {"total_trials": int, "weight": float, "booth": str | None}
 
     def test_unrecorded_table_is_all_optional(self, strict_root):
         """The same rows without a record arrive as T | None."""
-        tag, data = SpiralDBTableSource(_PROJECT, "session_unrecorded").output_schema()
+        tag, data = SpiralDBTableSource(
+            _PROJECT, "session_unrecorded", tag_only_columns=True
+        ).output_schema()
         assert dict(tag) == {
             "subject_id": str | None,
             "session_start_datetime": dt.datetime | None,
@@ -462,7 +476,11 @@ class TestNonNullableColumns:
 
     def test_arrow_fields_keep_nullability_at_every_depth(self, strict_root):
         """Struct fields and list items keep their recorded nullability."""
-        schema = SpiralDBTableSource(_PROJECT, "unit").as_table().schema
+        schema = (
+            SpiralDBTableSource(_PROJECT, "unit", tag_only_columns=True)
+            .as_table()
+            .schema
+        )
         assert not schema.field("subject_id").nullable
         assert not schema.field("spikes").nullable
         assert schema.field("spikes").type == pa.large_list(self._ITEM)
@@ -480,7 +498,9 @@ class TestNonNullableColumns:
             """Return half of ``weight``."""
             return weight / 2
 
-        source = SpiralDBTableSource(_PROJECT, "session_unrecorded")
+        source = SpiralDBTableSource(
+            _PROJECT, "session_unrecorded", tag_only_columns=True
+        )
         with pytest.raises(ValueError, match="float \\| None"):
             halve.pod(SelectDataColumns(["weight"])(source))
 
@@ -491,8 +511,10 @@ class TestNonNullableColumns:
 
         A null key matches nothing, so no joined row can hold a null there.
         """
-        unit = SpiralDBTableSource(_PROJECT, "unit")
-        unrecorded = SpiralDBTableSource(_PROJECT, "session_unrecorded")
+        unit = SpiralDBTableSource(_PROJECT, "unit", tag_only_columns=True)
+        unrecorded = SpiralDBTableSource(
+            _PROJECT, "session_unrecorded", tag_only_columns=True
+        )
         assert unrecorded.output_schema()[0]["subject_id"] == str | None
         joined = Join()(unit, unrecorded)
         tag_schema, _ = joined.output_schema()
@@ -513,8 +535,8 @@ class TestNonNullableColumns:
         job = PipelineJob(name="strict", database=DeltaTableDatabase(store))
         with job:
             joined = Join()(
-                SpiralDBTableSource(_PROJECT, "session"),
-                SpiralDBTableSource(_PROJECT, "unit"),
+                SpiralDBTableSource(_PROJECT, "session", tag_only_columns=True),
+                SpiralDBTableSource(_PROJECT, "unit", tag_only_columns=True),
                 label="joined",
             )
             trials = SelectDataColumns(["total_trials", "weight"])(

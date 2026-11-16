@@ -132,7 +132,9 @@ def _run(job: PipelineJob, mode: str) -> None:
 def _build(store, table: pa.Table, *, chained: bool = False) -> PipelineJob:
     """A job: source -> ``double`` (-> ``increment`` when chained)."""
     with PipelineJob(name="types", database=store) as job:
-        src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
+        src = ArrowTableSource(
+            table, tag_columns=["k"], source_id="src", tag_only_columns=True
+        )
         out = double.pod(src, label="double")
         if chained:
             increment.pod(out, label="increment")
@@ -164,7 +166,12 @@ def test_as_table_after_run_keeps_tag_type(
 def test_pod_stream_outside_a_job_keeps_tag_type(name: str) -> None:
     """The same pod outside a job: its stream's table keeps the tag type too."""
     stream = double.pod(
-        ArrowTableSource(_source_table(name), tag_columns=["k"], source_id="src")
+        ArrowTableSource(
+            _source_table(name),
+            tag_columns=["k"],
+            source_id="src",
+            tag_only_columns=True,
+        )
     )
 
     table = stream.as_table()
@@ -178,7 +185,9 @@ def test_as_table_all_info_matches_the_pod_outside_a_job(name: str) -> None:
     """With every column group, the node's table equals the pod's stream outside a job."""
     table = _source_table(name)
     outside = double.pod(
-        ArrowTableSource(table, tag_columns=["k"], source_id="src")
+        ArrowTableSource(
+            table, tag_columns=["k"], source_id="src", tag_only_columns=True
+        )
     ).as_table(all_info=True)
     job = _build(InMemoryArrowDatabase(), table)
     job.run()
@@ -197,7 +206,12 @@ def test_join_after_a_function_node_on_a_typed_tag(name: str) -> None:
     """The ITL-990 case: join a function node's output with another source on the tag."""
     job = _build(InMemoryArrowDatabase(), _source_table(name))
     job.run()
-    other = ArrowTableSource(_source_table(name, "w"), tag_columns=["k"], source_id="o")
+    other = ArrowTableSource(
+        _source_table(name, "w"),
+        tag_columns=["k"],
+        source_id="o",
+        tag_only_columns=True,
+    )
 
     joined = job.nodes["double"].join(other).as_table()
 

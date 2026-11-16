@@ -29,7 +29,9 @@ def _make_job() -> PipelineJob:
             "x": pa.array([10, 20], type=pa.int64()),
         }
     )
-    source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    source = ArrowTableSource(
+        table, tag_columns=["id"], infer_nullable=True, tag_only_columns=True
+    )
     job = PipelineJob(name="test_job", database=db)
     with job:
         out1 = pod1(source)

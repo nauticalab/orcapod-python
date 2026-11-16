@@ -24,7 +24,9 @@ def function_node_with_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(
+        table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+    )
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
@@ -46,7 +48,9 @@ class TestGetCachedResults:
                 "value": pa.array([1], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+        )
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionJobNode(pod, src)

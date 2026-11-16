@@ -144,7 +144,9 @@ class TestStructHashesUnchanged:
         """Stream, source and per-row data hashes equal the values pinned on main."""
         table = _tables()[name]
         stream = ArrowTableStream(table, tag_columns=["k"])
-        source = ArrowTableSource(table, tag_columns=["k"], source_id="fixed")
+        source = ArrowTableSource(
+            table, tag_columns=["k"], tag_only_columns=True, source_id="fixed"
+        )
         expected = MAIN_HASHES[name]
         assert stream.content_hash().to_hex() == expected["stream_content"]
         assert stream.pipeline_hash().to_hex() == expected["stream_pipeline"]

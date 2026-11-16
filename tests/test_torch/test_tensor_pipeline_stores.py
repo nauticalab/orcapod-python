@@ -60,6 +60,7 @@ def _numeric_sources() -> tuple[DictSource, DictSource]:
     numeric = DictSource(
         data=[{"k": k, "x": TENSORS[k]} for k in NUMERIC],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="numeric",
     )
     shifted = DictSource(
@@ -68,6 +69,7 @@ def _numeric_sources() -> tuple[DictSource, DictSource]:
             for i, k in enumerate(NUMERIC)
         ],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="shifted",
     )
     return numeric, shifted
@@ -82,6 +84,7 @@ def _build(store: Any) -> PipelineJob:
             for i, (k, v) in enumerate(TENSORS.items())
         ],
         tag_columns=["k", "g"],
+        tag_only_columns=True,
         source_id="every",
     )
     job = PipelineJob(name="tensors", database=store)

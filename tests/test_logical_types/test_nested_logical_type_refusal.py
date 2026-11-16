@@ -131,13 +131,19 @@ class TestRefused:
                 tag_columns=["k"],
                 data_schema={"k": int, "v": declared},
                 source_id="one_row",
+                tag_only_columns=True,
             )
 
 
 def test_a_source_schema_inferred_from_rows_is_refused() -> None:
     """Rows holding a dict of sets infer ``dict[str, set[int]]``, which is refused."""
     with pytest.raises(ValueError, match=_refusal("'v'", dict[str, set[int]])):
-        DictSource([{"k": 0, "v": {"a": {1, 2}}}], tag_columns=["k"], source_id="x")
+        DictSource(
+            [{"k": 0, "v": {"a": {1, 2}}}],
+            tag_columns=["k"],
+            source_id="x",
+            tag_only_columns=True,
+        )
 
 
 @pytest.mark.parametrize("cls", [HoldsDictOfSets, ModelHoldsDictOfSets])
@@ -227,7 +233,12 @@ def test_an_accepted_type_reads_back_as_declared(case: str) -> None:
         return 1
 
     consume.__annotations__["got"] = declared
-    source = DictSource([{"k": 0, "i": 0}], tag_columns=["k"], source_id="one_row")
+    source = DictSource(
+        [{"k": 0, "i": 0}],
+        tag_columns=["k"],
+        source_id="one_row",
+        tag_only_columns=True,
+    )
     job = op.PipelineJob(name="accepted", database=InMemoryArrowDatabase())
     with job:
         produced = _producer(declared, value).pod(source, label="produce")
@@ -328,7 +339,7 @@ _SCRIPT = textwrap.dedent(
 
 
     if mode == "save":
-        source = DictSource([{"k": 0, "i": 0}], tag_columns=["k"], source_id="one_row")
+        source = DictSource([{"k": 0, "i": 0}], tag_columns=["k"], tag_only_columns=True, source_id="one_row")
         job = PipelineJob(name="fields", database=DeltaTableDatabase(work + "/store"))
         with job:
             produce.pod(source, label="produce")

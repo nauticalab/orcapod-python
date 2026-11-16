@@ -528,9 +528,12 @@ class TestDisagreeingInputs:
             _table({"id": (pa.int64(), [1, 2]), "label": (pa.string(), ["a", "b"])}),
             tag_columns=["id"],
             source_id="user",
+            tag_only_columns=True,
         )
         dict_source = DictSource(
-            [{"id": 1, "label": "x"}, {"id": 2, "label": "y"}], tag_columns=["id"]
+            [{"id": 1, "label": "x"}, {"id": 2, "label": "y"}],
+            tag_columns=["id"],
+            tag_only_columns=True,
         )
         assert user_source.as_table().schema.field("label").type == pa.large_string()
         assert dict_source.as_table().schema.field("label").type == pa.large_string()
@@ -560,6 +563,7 @@ def _sources(rows: int) -> tuple[StreamProtocol, StreamProtocol]:
             }
         ),
         tag_columns=["probe"],
+        tag_only_columns=True,
     )
     right = ArrowTableSource(
         _table(
@@ -570,6 +574,7 @@ def _sources(rows: int) -> tuple[StreamProtocol, StreamProtocol]:
             }
         ),
         tag_columns=["probe"],
+        tag_only_columns=True,
     )
     if rows:
         return left, right

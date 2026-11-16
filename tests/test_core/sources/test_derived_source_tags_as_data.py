@@ -91,14 +91,20 @@ def _session_table() -> pa.Table:
 def _experiment(source_id: str = "experiment", **kwargs) -> ArrowTableSource:
     """Return the ``experiment`` table as a source with its keys as tags."""
     return ArrowTableSource(
-        _experiment_table(**kwargs), tag_columns=EXPERIMENT_KEYS, source_id=source_id
+        _experiment_table(**kwargs),
+        tag_columns=EXPERIMENT_KEYS,
+        tag_only_columns=True,
+        source_id=source_id,
     )
 
 
 def _session() -> ArrowTableSource:
     """Return the ``session`` table as a source with its keys as tags."""
     return ArrowTableSource(
-        _session_table(), tag_columns=SESSION_KEYS, source_id="session"
+        _session_table(),
+        tag_columns=SESSION_KEYS,
+        tag_only_columns=True,
+        source_id="session",
     )
 
 
@@ -212,6 +218,7 @@ class TestArrowTypesPreserved:
                 {"file": Path("/data/b.bin"), "size": 2},
             ],
             tag_columns=["file"],
+            tag_only_columns=True,
             source_id="files",
         )
         derived = DerivedSource(origin, tags_as_data={"file": "file_path"})
@@ -236,6 +243,7 @@ class TestArrowTypesPreserved:
         origin = ArrowTableSource(
             pa.table({"k": [1, 2], "x": [10, 20]}, schema=schema),
             tag_columns=["k"],
+            tag_only_columns=True,
             source_id="meta",
         )
         table = DerivedSource(origin, tags_as_data={"k": "k_copy"}).as_table()
@@ -373,7 +381,9 @@ class TestProvenance:
             raw.schema.field("session_start_datetime").with_name("session_start"),
             raw["session_start_datetime"],
         )
-        recipe = ArrowTableSource(raw, tag_columns=EXPERIMENT_KEYS, source_id="exp")
+        recipe = ArrowTableSource(
+            raw, tag_columns=EXPERIMENT_KEYS, tag_only_columns=True, source_id="exp"
+        )
         derived = DerivedSource(_experiment(), tags_as_data=COPY, source_id="exp")
         r_table = recipe.as_table(columns={"source": True, "system_tags": True})
         d_table = derived.as_table(columns={"source": True, "system_tags": True})
@@ -425,7 +435,9 @@ class TestIdentity:
                 "x": pa.array([0.5, 1.5], pa.float64()),
             }
         )
-        base = ArrowTableSource(table, tag_columns=["a", "b"], source_id="two_tags")
+        base = ArrowTableSource(
+            table, tag_columns=["a", "b"], tag_only_columns=True, source_id="two_tags"
+        )
         from_a = DerivedSource(base, source_id="same", tags_as_data={"a": "k"})
         from_b = DerivedSource(base, source_id="same", tags_as_data={"b": "k"})
         assert from_a.output_schema() == from_b.output_schema()
@@ -588,7 +600,8 @@ def _probe_job(db_path: str, name: str = "probes") -> PipelineJob:
     job = PipelineJob(name=name, database=InMemoryArrowDatabase())
     with job:
         derived = DerivedSource(
-            SQLiteTableSource(db_path, "probe"), tags_as_data={"name": "name_copy"}
+            SQLiteTableSource(db_path, "probe", tag_only_columns=True),
+            tags_as_data={"name": "name_copy"},
         )
         name_length.pod(derived.select_data_columns(["name_copy"]), label="len")
     return job
@@ -608,7 +621,7 @@ class TestPipelineJob:
         db_path = _make_probe_db(tmp_path / "edi.db")
         job = PipelineJob(name="both", database=InMemoryArrowDatabase())
         with job:
-            probe = SQLiteTableSource(db_path, "probe")
+            probe = SQLiteTableSource(db_path, "probe", tag_only_columns=True)
             derived = DerivedSource(probe, tags_as_data={"name": "name_copy"})
             lengths = name_length.pod(
                 derived.select_data_columns(["name_copy"]), label="len"
@@ -642,7 +655,7 @@ class TestPipelineJob:
     def test_config_round_trip_keeps_an_explicit_source_id(self, tmp_path):
         db_path = _make_probe_db(tmp_path / "edi.db")
         derived = DerivedSource(
-            SQLiteTableSource(db_path, "probe"),
+            SQLiteTableSource(db_path, "probe", tag_only_columns=True),
             tags_as_data={"name": "name_copy"},
             source_id="probe_named",
             record_id_column="name",
@@ -786,7 +799,11 @@ class TestZeroRowOrigin:
             ]
         )
         origin = DictSource(
-            data=[], tag_columns=["k"], data_schema=schema, source_id="empty"
+            data=[],
+            tag_columns=["k"],
+            tag_only_columns=True,
+            data_schema=schema,
+            source_id="empty",
         )
         derived = DerivedSource(origin, tags_as_data={"k": "k_copy"})
         assert derived.keys() == (("k",), ("x", "k_copy"))

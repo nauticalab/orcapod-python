@@ -84,6 +84,7 @@ def session_source_factory():
         return ArrowTableSource(
             table,
             tag_columns=["subject", "date", "probe"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -339,11 +340,13 @@ class TestMergeJoinRegression:
         left = ArrowTableSource(
             pa.table({"id": ["a", "b"], "v": ["l1", "l2"]}),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         right = ArrowTableSource(
             pa.table({"id": ["a", "b"], "v": ["r1", "r2"]}),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -398,6 +401,7 @@ class TestFileContentHashingThroughReduction:
                 for i, p in enumerate(cfg_paths)
             ],
             tag_columns=["date", "probe"],
+            tag_only_columns=True,
             data_schema={"date": str, "probe": int, "cfg": File},
             source_id="cfgsrc",
         )

@@ -65,7 +65,7 @@ def _build(
 
     With ``with_tap``, a side-effect node ``tap`` sits between ``rowwise`` and the group.
     """
-    src = DictSource(data, tag_columns=["g", "k"], source_id="s")
+    src = DictSource(data, tag_columns=["g", "k"], tag_only_columns=True, source_id="s")
     job = PipelineJob(name="j", database=db)
     with job:
         rows: Any = inc.pod(src, label="rowwise")

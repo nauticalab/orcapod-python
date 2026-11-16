@@ -153,7 +153,7 @@ def run_job(point_cls, pod_and_calls=None, rows=None):
     db_root = os.environ["WS_DB"]
     job = PipelineJob(name="ws", database=DeltaTableDatabase(Path(db_root)))
     with job:
-        pod.pod(DictSource(data=data, tag_columns=["k"], source_id="s"), label="shift")
+        pod.pod(DictSource(data=data, tag_columns=["k"], tag_only_columns=True, source_id="s"), label="shift")
     job.run()
     node = job.nodes["shift"]
     values = [d.as_dict()["q"] for _, d in node.iter_data()]

@@ -76,7 +76,7 @@ class TestNoRowIsReadUntilAsked:
 
     def test_construction_and_identity_read_no_rows(self, project):
         """Building a source and reading its schema, hashes and config scan nothing."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         source.output_schema(all_info=True)
         source.keys(all_info=True)
         source.content_hash()
@@ -88,7 +88,7 @@ class TestNoRowIsReadUntilAsked:
 
     def test_iter_data_reads_batches_only_as_rows_are_consumed(self, project):
         """``iter_data`` takes a batch from the scan only as its rows are consumed."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         rows = iter(source.iter_data())
 
         next(rows)
@@ -100,7 +100,9 @@ class TestNoRowIsReadUntilAsked:
     def test_batches_handed_on_hold_at_most_batch_rows(self, project, monkeypatch):
         """Batches handed on hold at most ``batch_rows`` rows, whatever is scanned."""
         monkeypatch.setattr(fake_pyspiral, "scan_batch_rows", 4)
-        source = SpiralDBTableSource(_PROJECT, "event", batch_rows=3)
+        source = SpiralDBTableSource(
+            _PROJECT, "event", batch_rows=3, tag_only_columns=True
+        )
 
         # About the non-public batching: no public method shows the batch sizes.
         sizes = [s.as_table().num_rows for s in source._batch_streams()]  # pyright: ignore[reportPrivateUsage]
@@ -109,8 +111,10 @@ class TestNoRowIsReadUntilAsked:
 
     def test_a_read_that_matches_nothing_has_the_schema_of_one_that_does(self, project):
         """A read matching no row yields nothing, with the schema of a full read."""
-        nothing = SpiralDBTableSource(_PROJECT, "event", where={"subject_id": "nobody"})
-        rows = SpiralDBTableSource(_PROJECT, "event")
+        nothing = SpiralDBTableSource(
+            _PROJECT, "event", where={"subject_id": "nobody"}, tag_only_columns=True
+        )
+        rows = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
 
         assert list(nothing.iter_data()) == []
         empty = nothing.as_table(all_info=True)
@@ -119,7 +123,7 @@ class TestNoRowIsReadUntilAsked:
 
     def test_a_metadata_change_after_construction_is_refused(self, project):
         """Field metadata changed after construction fails the read: rebuild needed."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         marked = _rows([1]).cast(
             pa.schema(
                 [
@@ -145,11 +149,11 @@ class TestNoRowIsReadUntilAsked:
         project.create_table("default.never_written", key_schema=_KEYS)
 
         with pytest.raises(ValueError, match="never_written.*data column"):
-            SpiralDBTableSource(_PROJECT, "never_written")
+            SpiralDBTableSource(_PROJECT, "never_written", tag_only_columns=True)
 
     def test_schema_is_the_tables(self, project):
         """Keys are the tags and other columns data, all optional, in table order."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
 
         assert source.keys() == (("subject_id", "timestamp"), ("amplitude",))
         tag_schema, data_schema = source.output_schema()
@@ -167,7 +171,7 @@ class TestRows:
 
     def test_streamed_rows_equal_as_table_rows(self, project):
         """``iter_data`` rows equal ``as_table`` rows, system columns included."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
 
         streamed = [
             {**tag.as_dict(all_info=True), **data.as_dict(all_info=True)}
@@ -192,7 +196,9 @@ class TestRows:
         project.create_table("default.groups", key_schema=keys).write(
             pa.table({"k": [1, 2, 3, 4, 5], "g": [5, 4, 3, 2, 1], "v": [0.0] * 5})
         )
-        source = SpiralDBTableSource(_PROJECT, "groups", tag_columns="g")
+        source = SpiralDBTableSource(
+            _PROJECT, "groups", tag_columns="g", tag_only_columns=True
+        )
 
         table = source.as_table(columns={"sort_by_tags": True})
 
@@ -201,7 +207,7 @@ class TestRows:
 
     def test_async_iteration_yields_the_same_rows(self, project):
         """``async_iter_data`` yields exactly the rows ``iter_data`` yields."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
 
         async def collect() -> list[dict[str, object]]:
             """Return every row ``async_iter_data`` yields, tags and data merged."""
@@ -218,7 +224,7 @@ class TestRows:
 
     def test_dataframe_methods_return_the_rows(self, project):
         """``as_df``, ``as_lazy_frame`` and ``as_pandas_df`` return the rows read."""
-        source = SpiralDBTableSource(_PROJECT, "event", limit=2)
+        source = SpiralDBTableSource(_PROJECT, "event", limit=2, tag_only_columns=True)
 
         assert source.as_df().get_column("timestamp").to_list() == [1, 2]
         assert source.as_lazy_frame().collect().height == 2
@@ -230,7 +236,7 @@ class TestRestrictions:
 
     def test_limit_reads_the_first_rows_in_key_order(self, project):
         """``limit`` reads the first rows in key order and is passed to the scan."""
-        source = SpiralDBTableSource(_PROJECT, "event", limit=2)
+        source = SpiralDBTableSource(_PROJECT, "event", limit=2, tag_only_columns=True)
 
         assert _timestamps(source) == [1, 2]
         assert fake_pyspiral.scan_log[-1].kwargs["limit"] == 2
@@ -238,7 +244,9 @@ class TestRestrictions:
     def test_where_reads_only_matching_rows(self, project):
         """``where`` reads only the rows whose columns equal the given values."""
         project.table("default.event").write(_rows([7, 8], subject="m2"))
-        source = SpiralDBTableSource(_PROJECT, "event", where={"subject_id": "m2"})
+        source = SpiralDBTableSource(
+            _PROJECT, "event", where={"subject_id": "m2"}, tag_only_columns=True
+        )
 
         assert _timestamps(source) == [7, 8]
 
@@ -246,7 +254,11 @@ class TestRestrictions:
         """``where`` with ``limit`` reads the first matching rows."""
         project.table("default.event").write(_rows([7, 8], subject="m2"))
         source = SpiralDBTableSource(
-            _PROJECT, "event", where={"subject_id": "m2"}, limit=1
+            _PROJECT,
+            "event",
+            where={"subject_id": "m2"},
+            limit=1,
+            tag_only_columns=True,
         )
 
         assert _timestamps(source) == [7]
@@ -254,16 +266,18 @@ class TestRestrictions:
     def test_where_on_an_unknown_column_is_refused(self, project):
         """A ``where`` on a column the table lacks is refused at construction."""
         with pytest.raises(ValueError, match="nope"):
-            SpiralDBTableSource(_PROJECT, "event", where={"nope": 1})
+            SpiralDBTableSource(
+                _PROJECT, "event", where={"nope": 1}, tag_only_columns=True
+            )
 
     def test_sizes_must_be_positive(self, project):
         """A zero ``limit``, ``max_rows`` or ``batch_rows`` is refused."""
         with pytest.raises(ValueError, match="limit"):
-            SpiralDBTableSource(_PROJECT, "event", limit=0)
+            SpiralDBTableSource(_PROJECT, "event", limit=0, tag_only_columns=True)
         with pytest.raises(ValueError, match="max_rows"):
-            SpiralDBTableSource(_PROJECT, "event", max_rows=0)
+            SpiralDBTableSource(_PROJECT, "event", max_rows=0, tag_only_columns=True)
         with pytest.raises(ValueError, match="batch_rows"):
-            SpiralDBTableSource(_PROJECT, "event", batch_rows=0)
+            SpiralDBTableSource(_PROJECT, "event", batch_rows=0, tag_only_columns=True)
 
     @pytest.mark.parametrize("name", ["limit", "max_rows", "batch_rows"])
     def test_a_bool_is_not_a_size(self, project, name):
@@ -271,13 +285,13 @@ class TestRestrictions:
         with pytest.raises(ValueError, match=name):
             # A bool where an int is declared: the call a type checker would refuse.
             sizes: dict[str, Any] = {name: True}
-            SpiralDBTableSource(_PROJECT, "event", **sizes)
+            SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True, **sizes)
 
     def test_every_read_of_one_source_uses_the_version_it_was_built_at(self, project):
         """Every read scans the version current at construction, not a later write."""
         table = project.table("default.event")
         version = table.last_modified_at()
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         table.write(_rows([9]))
 
         source.as_table()
@@ -287,7 +301,7 @@ class TestRestrictions:
 
     def test_a_given_version_is_used(self, project):
         """A given ``asof`` is passed to the scan and kept in the config."""
-        source = SpiralDBTableSource(_PROJECT, "event", asof=1)
+        source = SpiralDBTableSource(_PROJECT, "event", asof=1, tag_only_columns=True)
 
         source.as_table()
 
@@ -296,7 +310,7 @@ class TestRestrictions:
 
     def test_a_given_version_zero_is_used(self, project):
         """An ``asof`` of ``0`` is passed to the scan and saved, not taken as unset."""
-        source = SpiralDBTableSource(_PROJECT, "event", asof=0)
+        source = SpiralDBTableSource(_PROJECT, "event", asof=0, tag_only_columns=True)
 
         source.as_table()
 
@@ -309,7 +323,9 @@ class TestRowCap:
 
     def test_a_read_over_the_cap_is_refused_before_scanning(self, project):
         """A read over ``max_rows`` fails before any scan, saying how to narrow it."""
-        source = SpiralDBTableSource(_PROJECT, "event", max_rows=3)
+        source = SpiralDBTableSource(
+            _PROJECT, "event", max_rows=3, tag_only_columns=True
+        )
 
         with pytest.raises(SourceTooLargeError) as raised:
             source.as_table()
@@ -325,13 +341,17 @@ class TestRowCap:
 
     def test_a_limit_within_the_cap_is_read(self, project):
         """A ``limit`` within ``max_rows`` lets a larger table be read."""
-        source = SpiralDBTableSource(_PROJECT, "event", max_rows=3, limit=3)
+        source = SpiralDBTableSource(
+            _PROJECT, "event", max_rows=3, limit=3, tag_only_columns=True
+        )
 
         assert _timestamps(source) == [1, 2, 3]
 
     def test_a_limit_over_the_cap_is_refused(self, project):
         """A ``limit`` above ``max_rows`` is refused, naming the limit."""
-        source = SpiralDBTableSource(_PROJECT, "event", max_rows=3, limit=4)
+        source = SpiralDBTableSource(
+            _PROJECT, "event", max_rows=3, limit=4, tag_only_columns=True
+        )
 
         with pytest.raises(SourceTooLargeError, match="4 rows"):
             source.as_table()
@@ -339,7 +359,11 @@ class TestRowCap:
     def test_a_filtered_read_over_the_cap_stops_while_reading(self, project):
         """A ``where`` read that turns out over ``max_rows`` fails while reading."""
         source = SpiralDBTableSource(
-            _PROJECT, "event", max_rows=3, where={"subject_id": "m1"}
+            _PROJECT,
+            "event",
+            max_rows=3,
+            where={"subject_id": "m1"},
+            tag_only_columns=True,
         )
 
         with pytest.raises(SourceTooLargeError, match="max_rows=3"):
@@ -349,14 +373,20 @@ class TestRowCap:
         """A ``where`` read matching no more than ``max_rows`` rows is read."""
         project.table("default.event").write(_rows([7, 8], subject="m2"))
         source = SpiralDBTableSource(
-            _PROJECT, "event", max_rows=3, where={"subject_id": "m2"}
+            _PROJECT,
+            "event",
+            max_rows=3,
+            where={"subject_id": "m2"},
+            tag_only_columns=True,
         )
 
         assert _timestamps(source) == [7, 8]
 
     def test_no_cap(self, project):
         """``max_rows=None`` reads the whole table."""
-        source = SpiralDBTableSource(_PROJECT, "event", max_rows=None)
+        source = SpiralDBTableSource(
+            _PROJECT, "event", max_rows=None, tag_only_columns=True
+        )
 
         assert len(_timestamps(source)) == _ROWS
 
@@ -366,7 +396,7 @@ class TestIdentity:
 
     def test_default_source_id_names_the_table_and_carries_its_spiral_id(self, project):
         """The default source id is ``<project>/<dataset>.<table>@<table id>``."""
-        source = SpiralDBTableSource(_PROJECT, "event")
+        source = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         table_id = project.table("default.event").table_id
 
         assert source.table_id == table_id
@@ -374,18 +404,18 @@ class TestIdentity:
 
     def test_a_given_source_id_is_used_as_it_is(self, project):
         """A ``source_id`` given by the user is used unchanged."""
-        assert SpiralDBTableSource(_PROJECT, "event", source_id="mine").source_id == (
-            "mine"
-        )
+        assert SpiralDBTableSource(
+            _PROJECT, "event", source_id="mine", tag_only_columns=True
+        ).source_id == ("mine")
 
     def test_a_recreated_table_is_a_different_source(self, project):
         """A recreated table is a new source; only its pipeline hash is unchanged."""
-        before = SpiralDBTableSource(_PROJECT, "event")
+        before = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         project.drop_table("default.event")
         project.create_table("default.event", key_schema=_KEYS).write(
             _rows([1, 2, 3, 4, 5])
         )
-        after = SpiralDBTableSource(_PROJECT, "event")
+        after = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
 
         assert after.source_id != before.source_id
         assert after.content_hash() != before.content_hash()
@@ -394,9 +424,15 @@ class TestIdentity:
 
     def test_restrictions_do_not_change_identity(self, project):
         """Restrictions on the read leave the source id and both hashes unchanged."""
-        whole = SpiralDBTableSource(_PROJECT, "event")
+        whole = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
         part = SpiralDBTableSource(
-            _PROJECT, "event", where={"subject_id": "m1"}, limit=2, asof=1, max_rows=9
+            _PROJECT,
+            "event",
+            where={"subject_id": "m1"},
+            limit=2,
+            asof=1,
+            max_rows=9,
+            tag_only_columns=True,
         )
 
         assert part.source_id == whole.source_id
@@ -409,7 +445,7 @@ class TestRecordIdentity:
 
     def test_the_row_token_is_the_labelled_hash_of_the_primary_key(self, project):
         """The source-info row token is the labelled Arrow hash of the primary key."""
-        source = SpiralDBTableSource(_PROJECT, "event", limit=1)
+        source = SpiralDBTableSource(_PROJECT, "event", limit=1, tag_only_columns=True)
         key = pa.table(
             {
                 "subject_id": pa.array(["m1"], pa.large_string()),
@@ -431,10 +467,16 @@ class TestRecordIdentity:
 
     def test_a_row_has_the_same_record_id_in_every_read(self, project):
         """A row has the same record id in a whole, a limited and a filtered read."""
-        whole = _record_ids(SpiralDBTableSource(_PROJECT, "event"))
-        limited = _record_ids(SpiralDBTableSource(_PROJECT, "event", limit=2))
+        whole = _record_ids(
+            SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
+        )
+        limited = _record_ids(
+            SpiralDBTableSource(_PROJECT, "event", limit=2, tag_only_columns=True)
+        )
         filtered = _record_ids(
-            SpiralDBTableSource(_PROJECT, "event", where={"timestamp": 4})
+            SpiralDBTableSource(
+                _PROJECT, "event", where={"timestamp": 4}, tag_only_columns=True
+            )
         )
 
         assert len(set(whole.values())) == _ROWS
@@ -443,19 +485,27 @@ class TestRecordIdentity:
 
     def test_a_row_keeps_its_record_id_when_an_earlier_key_is_added(self, project):
         """Adding a row with an earlier key leaves the other record ids unchanged."""
-        before = _record_ids(SpiralDBTableSource(_PROJECT, "event"))
+        before = _record_ids(
+            SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
+        )
         project.table("default.event").write(_rows([0]))
 
-        after = _record_ids(SpiralDBTableSource(_PROJECT, "event", max_rows=None))
+        after = _record_ids(
+            SpiralDBTableSource(_PROJECT, "event", max_rows=None, tag_only_columns=True)
+        )
 
         assert list(after) == [0, 1, 2, 3, 4, 5]
         assert {t: after[t] for t in before} == before
 
     def test_record_ids_do_not_depend_on_tag_columns(self, project):
         """Choosing other tag columns leaves the record ids unchanged."""
-        by_key = _record_ids(SpiralDBTableSource(_PROJECT, "event"))
+        by_key = _record_ids(
+            SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True)
+        )
         by_subject = _record_ids(
-            SpiralDBTableSource(_PROJECT, "event", tag_columns="subject_id")
+            SpiralDBTableSource(
+                _PROJECT, "event", tag_columns="subject_id", tag_only_columns=True
+            )
         )
 
         assert by_subject == by_key
@@ -473,6 +523,7 @@ class TestSaveAndLoad:
             limit=3,
             max_rows=50,
             batch_rows=7,
+            tag_only_columns=True,
         )
         config = source.to_config()
 
@@ -492,7 +543,9 @@ class TestSaveAndLoad:
         project.create_table("default.session", key_schema=keys).write(
             pa.table({"start": pa.array([start], pa.timestamp("us")), "n": [1]})
         )
-        source = SpiralDBTableSource(_PROJECT, "session", where={"start": start})
+        source = SpiralDBTableSource(
+            _PROJECT, "session", where={"start": start}, tag_only_columns=True
+        )
 
         loaded = SpiralDBTableSource.from_config(source.to_config())
 
@@ -504,7 +557,9 @@ class TestSaveAndLoad:
         project.create_table("default.blobs", key_schema=keys).write(
             pa.table({"blob": pa.array([b"\x00\xff", b"\x01"]), "n": [1, 2]})
         )
-        source = SpiralDBTableSource(_PROJECT, "blobs", where={"blob": b"\x00\xff"})
+        source = SpiralDBTableSource(
+            _PROJECT, "blobs", where={"blob": b"\x00\xff"}, tag_only_columns=True
+        )
 
         saved = json.loads(json.dumps(source.to_config()))
         loaded = SpiralDBTableSource.from_config(saved)
@@ -514,7 +569,9 @@ class TestSaveAndLoad:
 
     def test_loading_refuses_a_name_that_now_leads_to_another_table(self, project):
         """Loading refuses a name that now opens a recreated table, naming both ids."""
-        config = SpiralDBTableSource(_PROJECT, "event").to_config()
+        config = SpiralDBTableSource(
+            _PROJECT, "event", tag_only_columns=True
+        ).to_config()
         project.drop_table("default.event")
         project.create_table("default.event", key_schema=_KEYS).write(_rows([1]))
         new_id = project.table("default.event").table_id
@@ -549,7 +606,9 @@ class TestInAJob:
         job = PipelineJob(name="events", database=DeltaTableDatabase(store))
         with job:
             double.pod(
-                SpiralDBTableSource(_PROJECT, "event", max_rows=max_rows),
+                SpiralDBTableSource(
+                    _PROJECT, "event", max_rows=max_rows, tag_only_columns=True
+                ),
                 label="double",
             )
         return job
@@ -609,7 +668,9 @@ class TestNotebookPreview:
 
     def test_display_reads_one_head_of_ten_rows(self, big):
         """The notebook display is ``head()``: one 10-row scan, headed with the size."""
-        source = SpiralDBTableSource(_PROJECT, "big", label="big")
+        source = SpiralDBTableSource(
+            _PROJECT, "big", label="big", tag_only_columns=True
+        )
 
         html = source._repr_html_()
 
@@ -625,7 +686,9 @@ class TestNotebookPreview:
 
     def test_head_reads_one_bounded_scan(self, big):
         """``head()`` reads one scan of at most 10 rows and says the table's size."""
-        source = SpiralDBTableSource(_PROJECT, "big", label="big")
+        source = SpiralDBTableSource(
+            _PROJECT, "big", label="big", tag_only_columns=True
+        )
 
         head = source.head()
 
@@ -645,7 +708,11 @@ class TestNotebookPreview:
         table.write(_rows([1, 2, 3, 4, 5, 6], subject="m2"))
         fake_pyspiral.scan_log.clear()
         source = SpiralDBTableSource(
-            _PROJECT, "mixed", tag_columns=["timestamp"], label="mixed"
+            _PROJECT,
+            "mixed",
+            tag_columns=["timestamp"],
+            label="mixed",
+            tag_only_columns=True,
         )
 
         unsorted_head = source.head()
@@ -659,14 +726,16 @@ class TestNotebookPreview:
 
     def test_an_unlabelled_source_is_shown_by_its_table_name(self, big):
         """With no label, the header names the table; the label itself is unchanged."""
-        source = SpiralDBTableSource(_PROJECT, "big")
+        source = SpiralDBTableSource(_PROJECT, "big", tag_only_columns=True)
 
         assert source.head().header().startswith("SpiralDBTableSource[big] — ")
         assert source.label == "SpiralDBTableSource"
 
     def test_a_table_above_the_cap_previews_without_raising(self, big):
         """A source refused by its cap still previews a 10-row head."""
-        source = SpiralDBTableSource(_PROJECT, "big", max_rows=20)
+        source = SpiralDBTableSource(
+            _PROJECT, "big", max_rows=20, tag_only_columns=True
+        )
         with pytest.raises(SourceTooLargeError):
             source.as_table()
         fake_pyspiral.scan_log.clear()
@@ -678,7 +747,7 @@ class TestNotebookPreview:
 
     def test_a_small_table_shows_all_its_rows(self, project):
         """A table of fewer than 10 rows is shown whole, saying so."""
-        head = SpiralDBTableSource(_PROJECT, "event").head()
+        head = SpiralDBTableSource(_PROJECT, "event", tag_only_columns=True).head()
 
         assert self._scan_limits() == [10]
         assert head.header().endswith(" — all 5 rows")
@@ -686,21 +755,27 @@ class TestNotebookPreview:
 
     def test_the_sources_own_limit_bounds_the_head(self, big):
         """A ``limit`` below 10 bounds the head, shown as all rows."""
-        head = SpiralDBTableSource(_PROJECT, "big", limit=3).head()
+        head = SpiralDBTableSource(
+            _PROJECT, "big", limit=3, tag_only_columns=True
+        ).head()
 
         assert self._scan_limits() == [3]
         assert head.header().endswith(" — all 3 rows")
 
     def test_a_limit_above_the_head_is_the_row_count_shown(self, big):
         """A ``limit`` above 10 reads 10 rows and is shown as the row count."""
-        head = SpiralDBTableSource(_PROJECT, "big", limit=15).head()
+        head = SpiralDBTableSource(
+            _PROJECT, "big", limit=15, tag_only_columns=True
+        ).head()
 
         assert self._scan_limits() == [10]
         assert head.header().endswith(" — first 10 rows of about 15")
 
     def test_where_is_applied_and_named(self, big):
         """A ``where`` restricts the head and is named in the header."""
-        head = SpiralDBTableSource(_PROJECT, "big", where={"subject_id": "m1"}).head()
+        head = SpiralDBTableSource(
+            _PROJECT, "big", where={"subject_id": "m1"}, tag_only_columns=True
+        ).head()
 
         assert self._scan_limits() == [10]
         assert head.header().endswith(
@@ -713,7 +788,9 @@ class TestNotebookPreview:
         project.create_table("default.marked", key_schema=_KEYS).write(
             _rows(list(range(1, 26)), subject="<b>")
         )
-        source = SpiralDBTableSource(_PROJECT, "marked", where={"subject_id": "<b>"})
+        source = SpiralDBTableSource(
+            _PROJECT, "marked", where={"subject_id": "<b>"}, tag_only_columns=True
+        )
 
         html = source._repr_html_()
 
@@ -725,14 +802,16 @@ class TestNotebookPreview:
 
     def test_head_with_all_info_shows_system_columns(self, big):
         """``head(all_info=True)`` shows the system tag columns, from the same scan."""
-        head = SpiralDBTableSource(_PROJECT, "big").head(all_info=True)
+        head = SpiralDBTableSource(_PROJECT, "big", tag_only_columns=True).head(
+            all_info=True
+        )
 
         assert self._scan_limits() == [10]
         assert any(c.startswith("_tag_record_id::") for c in head.table.column_names)
 
     def test_repr_reads_nothing(self, big):
         """``repr`` is the class name and scans nothing."""
-        source = SpiralDBTableSource(_PROJECT, "big")
+        source = SpiralDBTableSource(_PROJECT, "big", tag_only_columns=True)
 
         assert repr(source) == "SpiralDBTableSource"
         assert fake_pyspiral.scan_log == []
@@ -743,7 +822,9 @@ class TestNotebookPreview:
         # About the non-public switch: the fallback kept for the ITL-991 ruling.
         """With the preview off, ``head()`` shows the empty schema, unscanned."""
         monkeypatch.setattr(SpiralDBTableSource, "_preview_reads_rows", False)
-        source = SpiralDBTableSource(_PROJECT, "big", label="big")
+        source = SpiralDBTableSource(
+            _PROJECT, "big", label="big", tag_only_columns=True
+        )
 
         head = source.head()
         html = source._repr_html_()

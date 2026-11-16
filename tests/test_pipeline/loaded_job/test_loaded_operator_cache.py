@@ -64,7 +64,9 @@ def _source(column: str, tag_nullable: bool, data_nullable: bool) -> ArrowTableS
         ]
     )
     table = pa.table({"id": [0, 1], column: [1, 2]}, schema=schema)
-    return ArrowTableSource(table, tag_columns=["id"], source_id=f"src_{column}")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id=f"src_{column}", tag_only_columns=True
+    )
 
 
 def _sources(nullability: str) -> dict[str, StreamProtocol]:
@@ -374,6 +376,7 @@ def test_a_store_holding_only_other_runs_rows_gives_an_empty_result(
             ),
             tag_columns=["id"],
             source_id="other_a",
+            tag_only_columns=True,
         )
         _ = Join()(
             inc.pod(other_a, label="inc"),
@@ -439,7 +442,9 @@ def _run_empty_join(store: ArrowDatabaseProtocol) -> PipelineJob:
             ]
         )
         table = pa.table({"id": ids, column: [1] * len(ids)}, schema=schema)
-        return ArrowTableSource(table, tag_columns=["id"], source_id=source_id)
+        return ArrowTableSource(
+            table, tag_columns=["id"], source_id=source_id, tag_only_columns=True
+        )
 
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
@@ -584,6 +589,7 @@ def _store_the_fixture_join(store: ArrowDatabaseProtocol) -> Any:
             tag_columns=["key"],
             infer_nullable=True,
             source_id=f"fixture_{column}",
+            tag_only_columns=True,
         )
 
     name = json.loads(FORMAT_0_1_0.read_text())["pipeline"]["pipeline"]["name"]

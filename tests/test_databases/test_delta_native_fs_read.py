@@ -83,10 +83,12 @@ def test_pipeline_store_reads_match_default_reader_for_logical_types(
         f.write_text(f"content {i}")
         files.append(f)
     paths = op.sources.DictSource(
-        [{"id": i, "f": files[i]} for i in range(3)], tag_columns=["id"]
+        [{"id": i, "f": files[i]} for i in range(3)],
+        tag_columns=["id"],
+        tag_only_columns=True,
     )
     numbers = op.sources.DictSource(
-        [{"id": i, "x": i} for i in range(3)], tag_columns=["id"]
+        [{"id": i, "x": i} for i in range(3)], tag_columns=["id"], tag_only_columns=True
     )
 
     @op.function_pod(output_keys=["path"])
@@ -217,7 +219,9 @@ def test_delta_table_source_matches_default_reader(
         str(table_dir), _typed_table(1), mode="append", partition_by=partition_by
     )
 
-    source = op.sources.DeltaTableSource(table_dir, tag_columns=["id"])
+    source = op.sources.DeltaTableSource(
+        table_dir, tag_columns=["id"], tag_only_columns=True
+    )
     reference = _default_reader(table_dir)
 
     actual = source.as_table()
@@ -307,7 +311,9 @@ def test_delta_table_source_reads_a_table_under_a_special_character_root(
     table_dir = tmp_path / root_name / "table"
     _write_or_skip(table_dir, _typed_table(0))
 
-    source = op.sources.DeltaTableSource(table_dir, tag_columns=["id"])
+    source = op.sources.DeltaTableSource(
+        table_dir, tag_columns=["id"], tag_only_columns=True
+    )
     reference = _default_reader(table_dir)
 
     stored = source.as_table().select(reference.column_names)

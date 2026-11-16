@@ -47,6 +47,7 @@ def _source() -> DictSource:
             {"cohort": "b", "subject": "m3", "age": 15, "weight": 27.8, "name": "z"},
         ],
         tag_columns=["cohort", "subject"],
+        tag_only_columns=True,
         source_id="subjects",
     )
 

@@ -15,7 +15,9 @@ def _make_node() -> FunctionJobNode:
     pf = PythonDataFunction(double, output_keys="result")
     pod = FunctionPod(pf)
     table = pa.table({"id": [1], "x": [10]})
-    source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    source = ArrowTableSource(
+        table, tag_columns=["id"], tag_only_columns=True, infer_nullable=True
+    )
     db = InMemoryArrowDatabase()
     return FunctionJobNode(pod, source, pipeline_database=db)
 

@@ -45,7 +45,10 @@ def _build(store: Path, pod: Any, n: int) -> PipelineJob:
     job = PipelineJob(name="j", database=DeltaTableDatabase(base_path=store))
     with job:
         src = op.sources.DictSource(
-            [{"id": i, "x": i} for i in range(n)], tag_columns=["id"], source_id="s"
+            [{"id": i, "x": i} for i in range(n)],
+            tag_columns=["id"],
+            source_id="s",
+            tag_only_columns=True,
         )
         pod.pod(src, label="node")
     return job

@@ -31,7 +31,9 @@ def function_node_with_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(
+        table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+    )
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
@@ -53,7 +55,9 @@ def function_node_no_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(
+        table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+    )
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     return FunctionJobNode(pod, src)
@@ -129,7 +133,7 @@ def operator_with_db():
             "value": pa.array([10, 20], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"])
+    src = ArrowTableSource(table, tag_columns=["key"], tag_only_columns=True)
     op = SelectDataColumns(columns=["value"])
     db = InMemoryArrowDatabase()
     node = OperatorNode(
@@ -149,7 +153,7 @@ def operator_no_db():
             "value": pa.array([10, 20], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"])
+    src = ArrowTableSource(table, tag_columns=["key"], tag_only_columns=True)
     op = SelectDataColumns(columns=["value"])
     node = OperatorNode(op, input_streams=[src])
     return node, src

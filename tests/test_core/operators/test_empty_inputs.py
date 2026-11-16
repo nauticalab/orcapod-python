@@ -102,7 +102,7 @@ def _filtered_empty(tags: list[str], data: list[str]) -> StreamProtocol:
     source-info columns, which the join operators rename and reorder.
     """
     table = pa.table({name: pa.array([1, 2], type=INT) for name in [*tags, *data]})
-    source = ArrowTableSource(table, tag_columns=tags)
+    source = ArrowTableSource(table, tag_columns=tags, tag_only_columns=True)
     empty = PolarsFilter(predicates=[pl.lit(False)]).static_process(source)
     assert len(empty.as_table()) == 0
     return empty

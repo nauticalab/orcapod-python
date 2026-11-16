@@ -51,7 +51,10 @@ def run_job(pod: Any, rows: list[dict[str, Any]], orchestrator: Any) -> Any:
     job = PipelineJob(name="row_hashes", database=InMemoryArrowDatabase())
     with job:
         pod.pod(
-            DictSource(data=rows, tag_columns=["k"], source_id="rows"), label="node"
+            DictSource(
+                data=rows, tag_columns=["k"], source_id="rows", tag_only_columns=True
+            ),
+            label="node",
         )
     job.run(orchestrator=orchestrator)
     return job.nodes["node"]

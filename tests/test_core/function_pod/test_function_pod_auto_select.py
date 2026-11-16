@@ -94,6 +94,7 @@ def _wide(extra: int = 9, source_id: str = "wide") -> DictSource:
             {"k": 2, "x": 4, "y": 5, "extra": extra},
         ],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id=source_id,
     )
 
@@ -111,6 +112,7 @@ def _xs(source_id: str = "xs", **more: int) -> DictSource:
     return DictSource(
         [{"k": 1, "x": 2, **more}, {"k": 2, "x": 4, **more}],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id=source_id,
     )
 
@@ -128,6 +130,7 @@ def _ys(source_id: str = "ys", **more: int) -> DictSource:
     return DictSource(
         [{"k": 1, "y": 3, **more}, {"k": 2, "y": 5, **more}],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id=source_id,
     )
 
@@ -223,6 +226,7 @@ def test_tags_are_untouched() -> None:
     source = DictSource(
         [{"k": 1, "session": "a", "x": 2, "y": 3, "extra": 9}],
         tag_columns=["k", "session"],
+        tag_only_columns=True,
         source_id="two_tags",
     )
 
@@ -237,9 +241,15 @@ def test_stream_passed_for_its_tags_restricts_the_rows() -> None:
     full = DictSource(
         [{"k": 1, "x": 2, "y": 3}, {"k": 2, "x": 4, "y": 5}],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="full",
     )
-    chosen = DictSource([{"k": 2, "note": 0}], tag_columns=["k"], source_id="chosen")
+    chosen = DictSource(
+        [{"k": 2, "note": 0}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="chosen",
+    )
 
     result = add.pod(full, chosen)
 
@@ -295,7 +305,10 @@ def test_matching_input_adds_no_select_node_to_a_job() -> None:
     job = PipelineJob(name="narrow", database=InMemoryArrowDatabase())
     with job:
         narrow = DictSource(
-            [{"k": 1, "x": 2, "y": 3}], tag_columns=["k"], source_id="narrow"
+            [{"k": 1, "x": 2, "y": 3}],
+            tag_columns=["k"],
+            tag_only_columns=True,
+            source_id="narrow",
         )
         add.pod(narrow, label="add")
 
@@ -358,7 +371,10 @@ def test_missing_required_column_adds_no_step_to_a_job() -> None:
 def test_input_with_no_parameter_column_is_rejected() -> None:
     """A stream cannot be left without data columns: the exact error is raised."""
     only_extra = DictSource(
-        [{"k": 1, "extra": 9}], tag_columns=["k"], source_id="only_extra"
+        [{"k": 1, "extra": 9}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="only_extra",
     )
 
     with pytest.raises(ValueError, match="column 'extra' is not a parameter"):
@@ -373,10 +389,16 @@ def test_data_column_shared_by_two_inputs_fails_at_the_join(shared: str) -> None
         shared: The data column both inputs carry.
     """
     left = DictSource(
-        [{"k": 1, "x": 2, "extra": 1}], tag_columns=["k"], source_id="left"
+        [{"k": 1, "x": 2, "extra": 1}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="left",
     )
     right = DictSource(
-        [{"k": 1, "y": 3, shared: 7}], tag_columns=["k"], source_id="right"
+        [{"k": 1, "y": 3, shared: 7}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="right",
     )
 
     with pytest.raises(InputValidationError, match="overlapping"):
@@ -415,7 +437,10 @@ def test_misspelt_column_for_a_defaulted_parameter_is_dropped_and_logged(
 ) -> None:
     """A misspelt column is dropped and the default used; the INFO record is the trace."""
     misspelt = DictSource(
-        [{"k": 1, "x": 2, "Y": 3}], tag_columns=["k"], source_id="misspelt"
+        [{"k": 1, "x": 2, "Y": 3}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="misspelt",
     )
 
     with caplog.at_level(logging.DEBUG):

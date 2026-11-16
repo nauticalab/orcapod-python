@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # only test membership (``Pipeline.load``).
 #   0.1.0: first format (v0.2.0).
 #   0.2.0: adds ``orcapod_version`` (v0.3.0); a 0.1.0 file loads unchanged.
+# Plain tags are decided by this version, never by a missing key (ITL-1159): every
+# source in a file at 0.1.0 or 0.2.0 has all its tags plain, and its config never
+# writes ``tag_only_columns`` (v0.3 accepts only ``tag_only_columns=True``). The
+# format that brings referential tags (v0.4) writes ``tag_only_columns`` for every
+# source; a reader of that format refuses a source config without it.
 PIPELINE_FORMAT_VERSION = "0.2.0"
 SUPPORTED_FORMAT_VERSIONS = frozenset({"0.1.0", "0.2.0"})
 
@@ -1289,6 +1294,7 @@ _BUILTIN_TYPE_MAP: dict[str, type] = {
 # ---------------------------------------------------------------------------
 
 # Same scheme as ``PIPELINE_FORMAT_VERSION``: the written version, and the set a
-# load accepts (``PipelineJob.load``).
+# load accepts (``PipelineJob.load``). The plain-tags rule stated there holds for a
+# job file too: at 0.1.0 and 0.2.0 every source's tags are plain (ITL-1159).
 PIPELINE_JOB_FORMAT_VERSION = "0.2.0"
 SUPPORTED_JOB_FORMAT_VERSIONS = frozenset({"0.1.0", "0.2.0"})

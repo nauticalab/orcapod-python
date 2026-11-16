@@ -29,7 +29,9 @@ def source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id="src")
+    return ArrowTableSource(
+        table, tag_columns=["k"], source_id="src", tag_only_columns=True
+    )
 
 
 def build(store: InMemoryArrowDatabase) -> PipelineJob:

@@ -114,7 +114,7 @@ class TestLargeTypeNormalization:
         assert info == _EXPECTED
 
     def test_source_exposes_normalized_types(self, spiral_root):
-        source = SpiralDBTableSource("p", "hashable")
+        source = SpiralDBTableSource("p", "hashable", tag_only_columns=True)
         schema = source.as_table().schema
         expected = {k: v for k, v in _EXPECTED.items() if k != "tags"}
         assert {name: schema.field(name).type for name in expected} == expected
@@ -122,13 +122,16 @@ class TestLargeTypeNormalization:
     def test_normalization_leaves_hashes_unchanged(self, spiral_root):
         # Large and non-large layouts hash identically, so the Spiral source's per-row
         # content hashes equal those of the same rows given in their original layout.
-        spiral = SpiralDBTableSource("p", "hashable", source_id="nested")
+        spiral = SpiralDBTableSource(
+            "p", "hashable", source_id="nested", tag_only_columns=True
+        )
         # The nullability record restores the written nullability, so the rows as written
         # (non-large layouts) are the reference.
         direct = ArrowTableSource(
             _nested_table().drop_columns(["tags"]),
             tag_columns=["id"],
             source_id="nested",
+            tag_only_columns=True,
         )
 
         def hashes(source) -> list[str]:

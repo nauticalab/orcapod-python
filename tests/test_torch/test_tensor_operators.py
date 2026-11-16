@@ -54,6 +54,7 @@ def tensors_source(source_id: str = "tensors", shift: int = 0) -> DictSource:
             for i, name in enumerate(NAMES)
         ],
         tag_columns=["k", "g"],
+        tag_only_columns=True,
         source_id=source_id,
     )
 
@@ -81,6 +82,7 @@ def other_source() -> DictSource:
     return DictSource(
         data=[{"k": name, "y": i} for i, name in enumerate(NAMES)],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="other",
     )
 
@@ -97,7 +99,10 @@ def test_semijoin() -> None:
     """SemiJoin keeps the matching rows' tensors exact."""
     keep = NAMES[::2]
     right = DictSource(
-        data=[{"k": name, "y": 0} for name in keep], tag_columns=["k"], source_id="r"
+        data=[{"k": name, "y": 0} for name in keep],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="r",
     )
     got = rows(SemiJoin()(tensors_source(), right))
     assert sorted(got) == keep

@@ -22,7 +22,10 @@ def double(x: int) -> int:
 
 def _source() -> DictSource:
     return DictSource(
-        data=[{"k": 1, "x": 2}, {"k": 2, "x": 3}], tag_columns=["k"], source_id="s"
+        data=[{"k": 1, "x": 2}, {"k": 2, "x": 3}],
+        tag_columns=["k"],
+        source_id="s",
+        tag_only_columns=True,
     )
 
 

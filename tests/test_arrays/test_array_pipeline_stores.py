@@ -36,11 +36,13 @@ def _build(store: Any) -> PipelineJob:
     numeric = DictSource(
         data=[{"k": k, "x": ARRAYS[k]} for k in NUMERIC],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="numeric",
     )
     every = DictSource(
         data=[{"k": k, "x": v} for k, v in ARRAYS.items()],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="every",
     )
     job = PipelineJob(name="arrays", database=store)
@@ -116,6 +118,7 @@ def test_pod_output_list_of_arrays(tmp_path: Path, store: str, runner: str) -> N
     source = DictSource(
         data=[{"k": k, "x": ARRAYS[k]} for k in NUMERIC],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="numeric",
     )
     job = PipelineJob(name="array_lists", database=STORES[store](tmp_path))
@@ -149,6 +152,7 @@ def test_batch_and_group_by_over_an_array_column(
             for i in range(4)
         ],
         tag_columns=["g", "k"],
+        tag_only_columns=True,
         source_id="grouped",
     )
     job = PipelineJob(name="array_groups", database=STORES[store](tmp_path))

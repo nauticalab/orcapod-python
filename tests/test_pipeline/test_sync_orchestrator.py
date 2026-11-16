@@ -23,7 +23,9 @@ def _make_source(tag_col, data_col, data):
             data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=[tag_col], tag_only_columns=True, infer_nullable=True
+    )
 
 
 def double_value(value: int) -> int:

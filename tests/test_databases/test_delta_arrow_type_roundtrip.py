@@ -184,7 +184,9 @@ TAGS = {
 def _chained_job(root: pathlib.Path, table: pa.Table) -> PipelineJob:
     """A job on a Delta database at ``root``: source -> ``double`` -> ``increment``."""
     with PipelineJob(name="j", database=DeltaTableDatabase(root)) as job:
-        src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
+        src = ArrowTableSource(
+            table, tag_columns=["k"], tag_only_columns=True, source_id="src"
+        )
         increment.pod(double.pod(src, label="double"), label="increment")
     return job
 
@@ -296,7 +298,9 @@ def test_an_operator_replay_reads_the_tag_type(
         """A job with operator node ``sel`` in the given cache mode."""
         store = DeltaTableDatabase(tmp_path)
         with PipelineJob(name="o", database=store) as job:
-            src = ArrowTableSource(table, tag_columns=["k"], source_id="src")
+            src = ArrowTableSource(
+                table, tag_columns=["k"], tag_only_columns=True, source_id="src"
+            )
             SelectDataColumns(["x"])(src, label="sel")
         # OperatorNode.attach_databases is the public way to turn on LOG / REPLAY mode.
         job.nodes["sel"].attach_databases(
@@ -321,7 +325,9 @@ def test_a_cached_source_reads_the_tag_type(name: str, tmp_path: pathlib.Path) -
     def cached() -> CachedSource:
         """A ``CachedSource`` of the table, cached in a new Delta database object."""
         return CachedSource(
-            ArrowTableSource(table, tag_columns=["k"], source_id="src"),
+            ArrowTableSource(
+                table, tag_columns=["k"], tag_only_columns=True, source_id="src"
+            ),
             cache_database=DeltaTableDatabase(tmp_path),
         )
 

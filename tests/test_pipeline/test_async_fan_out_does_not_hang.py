@@ -51,7 +51,9 @@ BUFFER_SIZES = [1, 16, 64]
 def make_source(n_rows: int) -> DictSource:
     """``n_rows`` rows tagged ``(g, k)`` with one data column ``x``."""
     rows = [{"g": i % 4, "k": i, "x": i} for i in range(n_rows)]
-    return DictSource(rows, tag_columns=["g", "k"], source_id="src")
+    return DictSource(
+        rows, tag_columns=["g", "k"], tag_only_columns=True, source_id="src"
+    )
 
 
 def run_async_job(job: PipelineJob, buffer_size: int) -> None:

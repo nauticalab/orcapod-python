@@ -43,7 +43,9 @@ _MIN_ROWS = 1_000
 
 def _require_a_large_table() -> None:
     """Skip the calling test unless ``spike_event`` records more than ``_MIN_ROWS`` rows."""
-    recorded = SpiralDBTableSource(PROJECT, "spike_event").row_count_estimate
+    recorded = SpiralDBTableSource(
+        PROJECT, "spike_event", tag_only_columns=True
+    ).row_count_estimate
     if recorded <= _MIN_ROWS:
         pytest.skip(f"spike_event records {recorded} rows; these tests need more")
 
@@ -51,7 +53,7 @@ def _require_a_large_table() -> None:
 def test_building_a_source_is_quick_and_names_the_table():
     """Building a source takes under 10 seconds and names the table and its id."""
     start = time.monotonic()
-    source = SpiralDBTableSource(PROJECT, "spike_event")
+    source = SpiralDBTableSource(PROJECT, "spike_event", tag_only_columns=True)
     elapsed = time.monotonic() - start
 
     assert elapsed < 10
@@ -64,7 +66,9 @@ def test_building_a_source_is_quick_and_names_the_table():
 def test_limit_reads_the_first_rows():
     """``limit=1000`` reads 1,000 rows with distinct record ids."""
     _require_a_large_table()
-    source = SpiralDBTableSource(PROJECT, "spike_event", limit=1000)
+    source = SpiralDBTableSource(
+        PROJECT, "spike_event", limit=1000, tag_only_columns=True
+    )
 
     table = source.as_table(all_info=True)
 
@@ -79,10 +83,16 @@ def test_limit_reads_the_first_rows():
 
 def test_where_reads_only_matching_rows_with_the_same_record_ids():
     """``where`` reads only matching rows, each with its unfiltered record id."""
-    first = SpiralDBTableSource(PROJECT, "spike_event", limit=1).as_table(all_info=True)
+    first = SpiralDBTableSource(
+        PROJECT, "spike_event", limit=1, tag_only_columns=True
+    ).as_table(all_info=True)
     unit_id = first.column("unit_id")[0].as_py()
     source = SpiralDBTableSource(
-        PROJECT, "spike_event", where={"unit_id": unit_id}, max_rows=None
+        PROJECT,
+        "spike_event",
+        where={"unit_id": unit_id},
+        max_rows=None,
+        tag_only_columns=True,
     )
 
     table = source.as_table(all_info=True)
@@ -96,7 +106,9 @@ def test_where_reads_only_matching_rows_with_the_same_record_ids():
 def test_a_whole_table_over_the_cap_is_refused_without_reading():
     """A table over ``max_rows`` is refused within 10 seconds, without a read."""
     _require_a_large_table()
-    source = SpiralDBTableSource(PROJECT, "spike_event", max_rows=10)
+    source = SpiralDBTableSource(
+        PROJECT, "spike_event", max_rows=10, tag_only_columns=True
+    )
 
     start = time.monotonic()
     with pytest.raises(SourceTooLargeError, match="limit="):
@@ -119,7 +131,10 @@ def test_an_async_job_over_a_limited_read(tmp_path: Path):
         job = PipelineJob(name="live", database=DeltaTableDatabase(tmp_path / "store"))
         with job:
             double.pod(
-                SpiralDBTableSource(PROJECT, "spike_event", limit=500), label="double"
+                SpiralDBTableSource(
+                    PROJECT, "spike_event", limit=500, tag_only_columns=True
+                ),
+                label="double",
             )
         job.run(orchestrator=AsyncPipelineOrchestrator())
         return job
@@ -143,6 +158,7 @@ def test_tags_as_data_gives_each_unit_its_spike_times_in_time_order():
         "spike_event",
         tags_as_data={"timestamp": "spike_time_us"},
         limit=20_000,
+        tag_only_columns=True,
     )
     unit_key = [c for c in spikes.keys()[0] if c != "timestamp"]
 
@@ -181,7 +197,10 @@ def test_rows_appended_between_runs_are_the_only_ones_computed(tmp_path: Path):
         )
         with job:
             double.pod(
-                SpiralDBTableSource(PROJECT, name, dataset="scratch"), label="double"
+                SpiralDBTableSource(
+                    PROJECT, name, dataset="scratch", tag_only_columns=True
+                ),
+                label="double",
             )
         job.run()
 
@@ -214,15 +233,21 @@ def test_a_source_reads_the_version_it_was_built_at():
 
     try:
         table.write(pa.table({"k": [1, 2], "v": [10, 20]}))
-        before = SpiralDBTableSource(PROJECT, name, dataset="scratch")
+        before = SpiralDBTableSource(
+            PROJECT, name, dataset="scratch", tag_only_columns=True
+        )
         table.write(pa.table({"k": [3], "v": [30]}))
 
         assert keys(before) == [1, 2]
         assert [tag.as_dict()["k"] for tag, _ in before.iter_data()] == [1, 2]
-        assert keys(SpiralDBTableSource(PROJECT, name, dataset="scratch")) == [1, 2, 3]
+        assert keys(
+            SpiralDBTableSource(PROJECT, name, dataset="scratch", tag_only_columns=True)
+        ) == [1, 2, 3]
 
         # The cap counts the rows of the version the source reads, not the current one.
-        capped = SpiralDBTableSource(PROJECT, name, dataset="scratch", max_rows=3)
+        capped = SpiralDBTableSource(
+            PROJECT, name, dataset="scratch", max_rows=3, tag_only_columns=True
+        )
         table.write(pa.table({"k": [4], "v": [40]}))
         assert capped.row_count_estimate == 3
         assert keys(capped) == [1, 2, 3]

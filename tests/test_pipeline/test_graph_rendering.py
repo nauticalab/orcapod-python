@@ -50,7 +50,9 @@ def _make_source(tag_col: str, data_col: str, data: dict) -> ArrowTableSource:
             data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=[tag_col], infer_nullable=True, tag_only_columns=True
+    )
 
 
 def _make_two_sources() -> tuple[ArrowTableSource, ArrowTableSource]:

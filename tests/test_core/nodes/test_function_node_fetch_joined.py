@@ -30,7 +30,9 @@ def node_without_db():
             "value": pa.array([1], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(
+        table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+    )
     pod = FunctionPod(PythonDataFunction(double_value, output_keys="result"))
     return FunctionJobNode(pod, src)
 
@@ -44,7 +46,9 @@ def node_with_empty_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(
+        table, tag_columns=["key"], tag_only_columns=True, infer_nullable=True
+    )
     pod = FunctionPod(PythonDataFunction(double_value, output_keys="result"))
     return FunctionJobNode(
         pod,

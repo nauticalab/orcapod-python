@@ -55,7 +55,9 @@ def source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id="src")
+    return ArrowTableSource(
+        table, tag_columns=["k"], source_id="src", tag_only_columns=True
+    )
 
 
 def automatic_select(src: ArrowTableSource) -> Any:

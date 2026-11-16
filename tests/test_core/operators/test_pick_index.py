@@ -41,7 +41,7 @@ class _PickTestModel:
 
 
 @pytest.fixture
-def dict_stream() -> ArrowTableStream:
+def dict_stream() -> DictSource:
     """Stream with 1 tag and 1 dict[str, int] data column (with source info)."""
     return DictSource(
         [
@@ -51,6 +51,7 @@ def dict_stream() -> ArrowTableStream:
         ],
         tag_columns=["animal"],
         data_schema={"animal": str, "scores": dict[str, int]},
+        tag_only_columns=True,
     )
 
 
@@ -258,6 +259,7 @@ def test_index_list_default_out():
         ],
         tag_columns=["grp"],
         data_schema={"grp": str, "vals": list[int]},
+        tag_only_columns=True,
     )
     result = Index("vals", 1)(stream)
     tag_schema, data_schema = result.output_schema()
@@ -283,6 +285,7 @@ def test_index_list_explicit_out():
         ],
         tag_columns=["grp"],
         data_schema={"grp": str, "vals": list[int]},
+        tag_only_columns=True,
     )
     result = Index("vals", 0, out="first")(stream)
     tag_schema, data_schema = result.output_schema()
@@ -353,6 +356,7 @@ def test_chained_pick_then_index():
         ],
         tag_columns=["id"],
         data_schema={"id": int, "data": dict[str, list[int]]},
+        tag_only_columns=True,
     )
 
     result = stream.pick("data", "scores").index("data", 1)

@@ -105,6 +105,7 @@ def _source(arrays: dict[str, Any], column: str = "x") -> DictSource:
         data=[{"k": k, column: v} for k, v in arrays.items()],
         tag_columns=["k"],
         source_id="arrays",
+        tag_only_columns=True,
     )
 
 
@@ -351,7 +352,9 @@ def test_merge_join_of_two_ignore_lists_is_an_error(tmp_path: Path) -> None:
         table = context.type_converter.python_dicts_to_arrow_table(
             [{"k": "r1", "x": BASE}], python_schema={"k": str, "x": np.ndarray}
         )
-        return ArrowTableSource(table, tag_columns=["k"], source_id="s")
+        return ArrowTableSource(
+            table, tag_columns=["k"], source_id="s", tag_only_columns=True
+        )
 
     with pytest.raises(LogicalTypeIdentifierError, match="'x'") as raised:
         MergeJoin()(stream(get_default_context()), stream(lenient)).as_table()

@@ -191,6 +191,7 @@ class TestCtxArgDBBacked:
             source = DictSource(
                 [{"id": 0, "value": 10}, {"id": 1, "value": 20}],
                 tag_columns=["id"],
+                tag_only_columns=True,
             )
             pod.process(source)
 

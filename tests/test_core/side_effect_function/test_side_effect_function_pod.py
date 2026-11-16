@@ -270,6 +270,7 @@ class TestSideEffectFunctionPodPipelineIntegration:
             source = DictSource(
                 [{"id": 0, "value": 10}, {"id": 1, "value": 20}],
                 tag_columns=["id"],
+                tag_only_columns=True,
             )
             pod.process(source)
 
@@ -303,13 +304,13 @@ class TestSideEffectFunctionPodPipelineIntegration:
         source_data = [{"id": 0, "value": 10}, {"id": 1, "value": 20}]
 
         with PipelineJob(name="test_sef_cache", database=db) as job1:
-            source1 = DictSource(source_data, tag_columns=["id"])
+            source1 = DictSource(source_data, tag_columns=["id"], tag_only_columns=True)
             pod.process(source1)
         job1.run()
         assert call_count == 2
 
         with PipelineJob(name="test_sef_cache", database=db) as job2:
-            source2 = DictSource(source_data, tag_columns=["id"])
+            source2 = DictSource(source_data, tag_columns=["id"], tag_only_columns=True)
             pod.process(source2)
         job2.run()
         assert call_count == 2  # NOT called again — cache hit

@@ -88,7 +88,9 @@ def _reset() -> None:
 
 def _source(data: list[dict[str, int]] = ROWS) -> DictSource:
     """An in-memory source of ``data`` with tags ``g`` and ``k``."""
-    return DictSource(data, tag_columns=["g", "k"], source_id="s")
+    return DictSource(
+        data, tag_columns=["g", "k"], tag_only_columns=True, source_id="s"
+    )
 
 
 def _grouped_job(data: list[dict[str, int]], db: Any) -> PipelineJob:
@@ -343,7 +345,9 @@ def _source_table() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id="t")
+    return ArrowTableSource(
+        table, tag_columns=["k"], tag_only_columns=True, source_id="t"
+    )
 
 
 def test_a_standalone_log_run_commits_its_write(tmp_path: Path) -> None:
@@ -401,8 +405,18 @@ def test_an_unrun_loaded_operator_without_its_operator_keeps_its_columns(
     job = PipelineJob(name="l", database=db)
     with job:
         Join()(
-            DictSource([{"k": 0, "a": 1}], tag_columns=["k"], source_id="a"),
-            DictSource([{"k": 0, "b": 2}], tag_columns=["k"], source_id="b"),
+            DictSource(
+                [{"k": 0, "a": 1}],
+                tag_columns=["k"],
+                tag_only_columns=True,
+                source_id="a",
+            ),
+            DictSource(
+                [{"k": 0, "b": 2}],
+                tag_columns=["k"],
+                tag_only_columns=True,
+                source_id="b",
+            ),
             label="joined",
         )
     job.run()
@@ -426,7 +440,9 @@ def test_an_unrun_loaded_operator_without_its_operator_keeps_its_columns(
 def test_a_bound_source_with_no_modified_time_makes_its_slot_unknown() -> None:
     """A source slot bound to a stream with no modified time has none."""
     # A table wrapped as a source: a bound stream needs one system-tag pair (ITL-1126).
-    stream = ArrowTableSource(pa.table({"k": [0], "x": [1]}), tag_columns=["k"])
+    stream = ArrowTableSource(
+        pa.table({"k": [0], "x": [1]}), tag_columns=["k"], tag_only_columns=True
+    )
     slot = SourceJobNode(name="s", bound_source=stream)
     assert slot.last_modified is not None
     stream._set_modified_time(None)  # pyright: ignore[reportPrivateUsage]  # an unknown modified time is what this test is about
@@ -633,6 +649,7 @@ def test_a_load_only_run_reaches_an_operator_below_a_loaded_side_effect_node(
         return DictSource(
             [{"g": r["g"], "k": r["k"], "w": r["x"]} for r in ROWS],
             tag_columns=["g", "k"],
+            tag_only_columns=True,
             source_id="w",
         )
 
@@ -764,6 +781,7 @@ def test_a_loaded_job_runs_its_bound_branch_beside_a_broken_unbound_one(
                 DictSource(
                     [{"g": 0, "k": 9, "x": 5}],
                     tag_columns=["g", "k"],
+                    tag_only_columns=True,
                     source_id="other",
                 ),
                 label="up2",
@@ -782,7 +800,10 @@ def test_a_loaded_job_runs_its_bound_branch_beside_a_broken_unbound_one(
     loaded.bind(
         sources={
             "other": DictSource(
-                [{"g": 0, "k": 9, "x": 5}], tag_columns=["g", "k"], source_id="other"
+                [{"g": 0, "k": 9, "x": 5}],
+                tag_columns=["g", "k"],
+                tag_only_columns=True,
+                source_id="other",
             )
         }
     )

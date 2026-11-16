@@ -93,7 +93,9 @@ def _table(groups: tuple[str, ...]) -> pa.Table:
 
 def _source(groups: tuple[str, ...] = WITH_ROWS) -> ArrowTableSource:
     """The source every pipeline here reads; same schema whatever ``groups`` is."""
-    return ArrowTableSource(_table(groups), tag_columns=["id", "grp"], source_id="a")
+    return ArrowTableSource(
+        _table(groups), tag_columns=["id", "grp"], tag_only_columns=True, source_id="a"
+    )
 
 
 def _g1(stream: StreamProtocol) -> StreamProtocol:
@@ -202,7 +204,10 @@ def test_not_yet_run_table_reads_no_source_row() -> None:
     with job:
         _ = PIPELINES["select_after_filter"](
             _RowsMustNotBeRead(
-                _table(WITH_ROWS), tag_columns=["id", "grp"], source_id="a"
+                _table(WITH_ROWS),
+                tag_columns=["id", "grp"],
+                tag_only_columns=True,
+                source_id="a",
             )
         )
 
@@ -317,14 +322,18 @@ def _int8_table() -> pa.Table:
 def _arrow_table_source(tmp_path: Path) -> ArrowTableSource:
     """An in-memory source; ``tmp_path`` is unused (every maker takes it)."""
     del tmp_path
-    return ArrowTableSource(_int8_table(), tag_columns=["id"], source_id="kinds")
+    return ArrowTableSource(
+        _int8_table(), tag_columns=["id"], tag_only_columns=True, source_id="kinds"
+    )
 
 
 def _cached_source(tmp_path: Path) -> StreamProtocol:
     """A cached source over an in-memory source; its cache is never read here."""
     del tmp_path
     return CachedSource(
-        ArrowTableSource(_int8_table(), tag_columns=["id"], source_id="kinds"),
+        ArrowTableSource(
+            _int8_table(), tag_columns=["id"], tag_only_columns=True, source_id="kinds"
+        ),
         cache_database=InMemoryArrowDatabase(),
     )
 
@@ -334,7 +343,9 @@ def _delta_source(tmp_path: Path) -> StreamProtocol:
     from deltalake import write_deltalake
 
     write_deltalake(tmp_path / "delta", _int8_table(), mode="overwrite")
-    return DeltaTableSource(tmp_path / "delta", tag_columns=["id"], source_id="kinds")
+    return DeltaTableSource(
+        tmp_path / "delta", tag_columns=["id"], tag_only_columns=True, source_id="kinds"
+    )
 
 
 @pytest.mark.parametrize(
@@ -588,7 +599,10 @@ def test_head_of_a_join_whose_keys_disagree_raises_as_its_run_does() -> None:
         }
     )
     joined = Join()(
-        _source(), ArrowTableSource(wide, tag_columns=["id", "grp"], source_id="b")
+        _source(),
+        ArrowTableSource(
+            wide, tag_columns=["id", "grp"], tag_only_columns=True, source_id="b"
+        ),
     )
 
     with pytest.raises(InputValidationError, match="'id'") as at_head:

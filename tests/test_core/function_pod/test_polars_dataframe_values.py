@@ -92,6 +92,7 @@ def _int_source() -> DictSource:
     return DictSource(
         [{"k": "a", "n": 1}, {"k": "b", "n": 3}],
         tag_columns=["k"],
+        tag_only_columns=True,
     )
 
 
@@ -105,6 +106,7 @@ def _frame_source() -> DictSource:
     return DictSource(
         rows,
         tag_columns=["g", "k"],
+        tag_only_columns=True,
         data_schema={"g": str, "k": str, "df": pl.DataFrame},
     )
 
@@ -259,6 +261,7 @@ class TestOperators:
         weights = DictSource(
             [{"g": "a", "k": "1", "w": 10}, {"g": "b", "k": "3", "w": 30}],
             tag_columns=["g", "k"],
+            tag_only_columns=True,
         )
         stream = Join()(_frame_source(), weights)
         got = {
@@ -274,6 +277,7 @@ class TestOperators:
         keys = DictSource(
             [{"g": "a", "k": "2", "w": 1}, {"g": "b", "k": "3", "w": 2}],
             tag_columns=["g", "k"],
+            tag_only_columns=True,
         )
         stream = SemiJoin()(_frame_source(), keys)
         got = {str(tag["k"]): data["df"] for tag, data in stream.iter_data()}
@@ -328,6 +332,7 @@ def _order_source() -> DictSource:
             for k, (columns, fields) in _ORDERS.items()
         ],
         tag_columns=["k"],
+        tag_only_columns=True,
     )
 
 
@@ -360,6 +365,7 @@ def _null_struct_source() -> DictSource:
             {"k": "struct_of_nulls", "whole_struct_null": False},
         ],
         tag_columns=["k"],
+        tag_only_columns=True,
     )
 
 
@@ -534,7 +540,9 @@ _CROSS_PROCESS_SCRIPT = textwrap.dedent(
             fh.write("height\\n")
         return df.height
 
-    source = DictSource([{"k": "a", "n": 1}, {"k": "b", "n": 3}], tag_columns=["k"])
+    source = DictSource(
+        [{"k": "a", "n": 1}, {"k": "b", "n": 3}], tag_columns=["k"], tag_only_columns=True
+    )
     job = PipelineJob(name="frames", database=DeltaTableDatabase(database_path))
     with job:
         frames = make_frame.pod(source, label="make")

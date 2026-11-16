@@ -111,7 +111,9 @@ def _make_source(n: int = 3) -> ArrowTableSource:
     A raw ``ArrowTableStream`` carries no system-tag columns, and a source node refuses
     it (ITL-1126).
     """
-    return ArrowTableSource(_make_stream(n).as_table(), tag_columns=["id"])
+    return ArrowTableSource(
+        _make_stream(n).as_table(), tag_columns=["id"], tag_only_columns=True
+    )
 
 
 def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
@@ -971,6 +973,7 @@ class TestBMIPipelineEndToEnd:
             tag_columns=["person_id"],
             source_id="heights",
             infer_nullable=True,
+            tag_only_columns=True,
         )
         weights = ArrowTableSource(
             pa.table(
@@ -982,6 +985,7 @@ class TestBMIPipelineEndToEnd:
             tag_columns=["person_id"],
             source_id="weights",
             infer_nullable=True,
+            tag_only_columns=True,
         )
         return heights, weights
 

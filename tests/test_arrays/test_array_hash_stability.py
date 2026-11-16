@@ -21,6 +21,7 @@ SCRIPT = textwrap.dedent(
     src = DictSource(
         data=[{"k": k, "x": v} for k, v in ARRAYS.items()],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="every",
     )
     out = {

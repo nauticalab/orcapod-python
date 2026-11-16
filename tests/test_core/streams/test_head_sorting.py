@@ -68,7 +68,11 @@ def _table() -> pa.Table:
 
 def _source() -> ArrowTableSource:
     return ArrowTableSource(
-        _table(), tag_columns=["id"], source_id="nums", label="nums"
+        _table(),
+        tag_columns=["id"],
+        source_id="nums",
+        label="nums",
+        tag_only_columns=True,
     )
 
 
@@ -210,7 +214,10 @@ def test_a_filter_stream_after_a_run_sorts_like_as_table() -> None:
 def test_a_dict_source_head_sorts() -> None:
     """Every source that wraps an ArrowTableSource sorts the same way."""
     source = DictSource(
-        [{"id": i, "x": i} for i in ORDER], tag_columns=["id"], source_id="d"
+        [{"id": i, "x": i} for i in ORDER],
+        tag_columns=["id"],
+        source_id="d",
+        tag_only_columns=True,
     )
     assert source.head(3, all_info=True).table.equals(
         source.as_table(all_info=True).slice(0, 3)
@@ -281,7 +288,11 @@ def test_the_preview_of_a_stream_with_no_computed_rows_has_no_sorting_caption() 
 def test_the_preview_of_a_stream_without_tag_columns_keeps_stream_order() -> None:
     """With no tag column there is nothing to sort by; the rows keep their order."""
     source = ArrowTableSource(
-        _table().select(["x"]), tag_columns=[], source_id="untagged", label="untagged"
+        _table().select(["x"]),
+        tag_columns=[],
+        source_id="untagged",
+        label="untagged",
+        tag_only_columns=True,
     )
     html = source._repr_html_()
     assert "sorted by tags" not in html
@@ -313,7 +324,11 @@ def test_a_tagless_source_head_follows_as_table_with_and_without_system_tags() -
     stream's identity depends on that); the head is that table cut to ``n`` rows.
     """
     source = ArrowTableSource(
-        _table().select(["x"]), tag_columns=[], source_id="untagged", label="untagged"
+        _table().select(["x"]),
+        tag_columns=[],
+        source_id="untagged",
+        label="untagged",
+        tag_only_columns=True,
     )
     plain = source.head(8, columns={"sort_by_tags": True}).table
     assert plain.column("x").to_pylist() == ORDER

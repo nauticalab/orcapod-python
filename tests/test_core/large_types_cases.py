@@ -128,7 +128,9 @@ SourceFactory = Callable[[int, Path], StreamProtocol]
 
 
 def _arrow_table_source(n_rows: int, tmp: Path) -> StreamProtocol:
-    return ArrowTableSource(_table(n_rows), tag_columns=TAGS, source_id="arrow")
+    return ArrowTableSource(
+        _table(n_rows), tag_columns=TAGS, tag_only_columns=True, source_id="arrow"
+    )
 
 
 def _arrow_table_stream(n_rows: int, tmp: Path) -> StreamProtocol:
@@ -141,6 +143,7 @@ def _dict_source_python(n_rows: int, tmp: Path) -> StreamProtocol:
         return DictSource(
             [],
             tag_columns=TAGS,
+            tag_only_columns=True,
             data_schema={
                 "t": str,
                 "k": int,
@@ -151,13 +154,19 @@ def _dict_source_python(n_rows: int, tmp: Path) -> StreamProtocol:
             },
             source_id="dict",
         )
-    return DictSource(_rows(n_rows, columns), tag_columns=TAGS, source_id="dict")
+    return DictSource(
+        _rows(n_rows, columns),
+        tag_columns=TAGS,
+        tag_only_columns=True,
+        source_id="dict",
+    )
 
 
 def _dict_source_arrow_schema(n_rows: int, tmp: Path) -> StreamProtocol:
     return DictSource(
         _rows(n_rows, FULL_SCHEMA.names),
         tag_columns=TAGS,
+        tag_only_columns=True,
         data_schema=FULL_SCHEMA,
         source_id="dict_schema",
     )
@@ -170,13 +179,19 @@ def _csv_path(n_rows: int, tmp: Path) -> Path:
 
 
 def _csv_source(n_rows: int, tmp: Path) -> StreamProtocol:
-    return CSVSource(str(_csv_path(n_rows, tmp)), tag_columns=TAGS, source_id="csv")
+    return CSVSource(
+        str(_csv_path(n_rows, tmp)),
+        tag_columns=TAGS,
+        tag_only_columns=True,
+        source_id="csv",
+    )
 
 
 def _csv_source_arrow_schema(n_rows: int, tmp: Path) -> StreamProtocol:
     return CSVSource(
         str(_csv_path(n_rows, tmp)),
         tag_columns=TAGS,
+        tag_only_columns=True,
         source_id="csv_schema",
         schema=pa.schema([FULL_SCHEMA.field(name) for name in ["t", "k", "s", "u"]]),
     )
@@ -184,7 +199,10 @@ def _csv_source_arrow_schema(n_rows: int, tmp: Path) -> StreamProtocol:
 
 def _data_frame_source_polars(n_rows: int, tmp: Path) -> StreamProtocol:
     return DataFrameSource(
-        pl.from_arrow(_table(n_rows)), tag_columns=TAGS, source_id="polars"
+        pl.from_arrow(_table(n_rows)),
+        tag_columns=TAGS,
+        tag_only_columns=True,
+        source_id="polars",
     )
 
 
@@ -194,18 +212,22 @@ def _data_frame_source_pandas(n_rows: int, tmp: Path) -> StreamProtocol:
     return DataFrameSource(
         _table(n_rows, ["t", "k", "s", "u"]).to_pandas(),
         tag_columns=TAGS,
+        tag_only_columns=True,
         source_id="pandas",
     )
 
 
 def _data_frame_source_arrow_table(n_rows: int, tmp: Path) -> StreamProtocol:
-    return DataFrameSource(_table(n_rows), tag_columns=TAGS, source_id="df_arrow")
+    return DataFrameSource(
+        _table(n_rows), tag_columns=TAGS, tag_only_columns=True, source_id="df_arrow"
+    )
 
 
 def _data_frame_source_arrow_schema(n_rows: int, tmp: Path) -> StreamProtocol:
     return DataFrameSource(
         pl.from_arrow(_table(n_rows)),
         tag_columns=TAGS,
+        tag_only_columns=True,
         source_id="df_schema",
         schema=FULL_SCHEMA,
     )
@@ -215,7 +237,9 @@ def _delta_table_source(n_rows: int, tmp: Path) -> StreamProtocol:
     path = tmp / f"delta{n_rows}"
     if not path.exists():
         deltalake.write_deltalake(str(path), _table(n_rows))
-    return DeltaTableSource(path, tag_columns=TAGS, source_id="delta")
+    return DeltaTableSource(
+        path, tag_columns=TAGS, tag_only_columns=True, source_id="delta"
+    )
 
 
 def _sqlite_table_source(n_rows: int, tmp: Path) -> StreamProtocol:
@@ -233,19 +257,31 @@ def _sqlite_table_source(n_rows: int, tmp: Path) -> StreamProtocol:
             )
         connection.commit()
         connection.close()
-    return SQLiteTableSource(path, "r", tag_columns=TAGS, source_id="sqlite")
+    return SQLiteTableSource(
+        path, "r", tag_columns=TAGS, tag_only_columns=True, source_id="sqlite"
+    )
 
 
 def _cached_source_in_memory(n_rows: int, tmp: Path) -> StreamProtocol:
     return CachedSource(
-        ArrowTableSource(_table(n_rows), tag_columns=TAGS, source_id="cached_mem"),
+        ArrowTableSource(
+            _table(n_rows),
+            tag_columns=TAGS,
+            tag_only_columns=True,
+            source_id="cached_mem",
+        ),
         cache_database=InMemoryArrowDatabase(),
     )
 
 
 def _cached_source_delta(n_rows: int, tmp: Path) -> StreamProtocol:
     return CachedSource(
-        ArrowTableSource(_table(n_rows), tag_columns=TAGS, source_id="cached_delta"),
+        ArrowTableSource(
+            _table(n_rows),
+            tag_columns=TAGS,
+            tag_only_columns=True,
+            source_id="cached_delta",
+        ),
         cache_database=DeltaTableDatabase(base_path=tmp / f"cache{n_rows}"),
     )
 

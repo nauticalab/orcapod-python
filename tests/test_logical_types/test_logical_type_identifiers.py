@@ -383,7 +383,10 @@ def test_stored_tables_of_a_logical_type_pod_carry_the_identifier(
         return p / "z"
 
     paths = DictSource(
-        [{"id": 0, "p": pathlib.Path("/a")}], tag_columns=["id"], source_id="paths"
+        [{"id": 0, "p": pathlib.Path("/a")}],
+        tag_columns=["id"],
+        source_id="paths",
+        tag_only_columns=True,
     )
     job = PipelineJob(name="job", database=DeltaTableDatabase(tmp_path))
     with job:

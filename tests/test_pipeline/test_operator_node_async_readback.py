@@ -70,7 +70,9 @@ def _source_a() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id", "grp"], source_id="a")
+    return ArrowTableSource(
+        table, tag_columns=["id", "grp"], tag_only_columns=True, source_id="a"
+    )
 
 
 def _source_b() -> ArrowTableSource:
@@ -87,7 +89,9 @@ def _source_b() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="b")
+    return ArrowTableSource(
+        table, tag_columns=["id"], tag_only_columns=True, source_id="b"
+    )
 
 
 def _source_c() -> ArrowTableSource:
@@ -106,7 +110,9 @@ def _source_c() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id", "grp"], source_id="c")
+    return ArrowTableSource(
+        table, tag_columns=["id", "grp"], tag_only_columns=True, source_id="c"
+    )
 
 
 @function_pod(output_keys="x2")
@@ -648,7 +654,9 @@ def _rerun_source(ids: list[int], groups: list[str]) -> ArrowTableSource:
             "x": pa.array([10 * i for i in ids], type=pa.int8()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id", "grp"], source_id="a")
+    return ArrowTableSource(
+        table, tag_columns=["id", "grp"], tag_only_columns=True, source_id="a"
+    )
 
 
 def _table_ids(node: OperatorJobNode) -> list[int]:

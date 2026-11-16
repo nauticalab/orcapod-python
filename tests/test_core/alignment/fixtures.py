@@ -217,6 +217,7 @@ def make_sources(scenario: str, input_order: str = "shuffled") -> Sources:
             tag_columns=list(TAG_COLUMNS),
             source_id=name,
             record_id_column=record_id_column,
+            tag_only_columns=True,
         )
         oracle.add_source(
             name,

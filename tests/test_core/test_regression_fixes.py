@@ -318,6 +318,7 @@ class TestMaterializePreservesSourceInfo:
                 {"id": 1, "x": 20},
             ],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         rows = list(source.iter_data())
@@ -347,6 +348,7 @@ class TestMaterializePreservesSourceInfo:
                 {"id": 0, "x": 10},
             ],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         rows = list(source.iter_data())
 

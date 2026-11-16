@@ -44,7 +44,9 @@ def _source(
     columns: dict[str, list[int]], tags: list[str], source_id: str
 ) -> ArrowTableSource:
     table = pa.table({name: pa.array(v, pa.int64()) for name, v in columns.items()})
-    return ArrowTableSource(table, tag_columns=tags, source_id=source_id)
+    return ArrowTableSource(
+        table, tag_columns=tags, tag_only_columns=True, source_id=source_id
+    )
 
 
 def _flatten(error: BaseException) -> list[BaseException]:
@@ -156,6 +158,7 @@ def test_index_and_pick_reject_out_equal_to_a_tag(
                 ),
             ),
             tag_columns=["x"],
+            tag_only_columns=True,
             source_id="idx",
         )
         op = Index("vals", 0, out="x")
@@ -171,6 +174,7 @@ def test_index_and_pick_reject_out_equal_to_a_tag(
                 ),
             ),
             tag_columns=["x"],
+            tag_only_columns=True,
             source_id="pk",
         )
         op = Pick("d", "a", out="x")

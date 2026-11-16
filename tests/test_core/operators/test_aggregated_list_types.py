@@ -60,7 +60,7 @@ def _source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["g", "i"])
+    return ArrowTableSource(table, tag_columns=["g", "i"], tag_only_columns=True)
 
 
 OPERATORS = {

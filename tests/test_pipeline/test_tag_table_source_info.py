@@ -85,7 +85,9 @@ def _source() -> ArrowTableSource:
         }
     )
     table = table.cast(pa.schema([f.with_nullable(False) for f in table.schema]))
-    return ArrowTableSource(table, tag_columns=["id"], source_id="S")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id="S", tag_only_columns=True
+    )
 
 
 def _pod(function: Callable[..., int], output_key: str) -> FunctionPod:

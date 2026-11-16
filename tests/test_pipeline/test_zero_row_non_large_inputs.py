@@ -59,6 +59,7 @@ def _source(source_id: str = "s", data_prefix: str = "") -> ArrowTableSource:
     return ArrowTableSource(
         pa.Table.from_pydict(rows, schema=schema),
         tag_columns=["k", "g", "tb"],
+        tag_only_columns=True,
         source_id=source_id,
     )
 
@@ -170,6 +171,7 @@ def test_cached_source_over_an_empty_source_equals_its_head() -> None:
     empty = ArrowTableSource(
         _source().as_table().slice(0, 0),
         tag_columns=["k", "g", "tb"],
+        tag_only_columns=True,
         source_id="empty",
     )
     cached = CachedSource(empty, cache_database=InMemoryArrowDatabase())

@@ -377,7 +377,9 @@ def test_string_vs_large_string_key_user_vs_dict() -> None:
         source_id="user",
     )
     dict_source = DictSource(
-        data=[{"id": "a", "y": 1}, {"id": "c", "y": 3}], tag_columns=["id"]
+        data=[{"id": "a", "y": 1}, {"id": "c", "y": 3}],
+        tag_columns=["id"],
+        tag_only_columns=True,
     )
     assert user_source.as_table().schema.field("id").type == pa.large_string()
     assert dict_source.as_table().schema.field("id").type == pa.large_string()

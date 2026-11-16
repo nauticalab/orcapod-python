@@ -676,6 +676,7 @@ def schema_derived_source_tags_as_data() -> dict[str, Any]:
     origin = ArrowTableSource(
         _builder_table(),
         tag_columns=["subject"],
+        tag_only_columns=True,
         source_id="golden_source",
         data_context=_ctx(),
     )
@@ -1006,7 +1007,10 @@ def _make_datagram_case(name: str) -> CaseFn:
         from orcapod.sources import DictSource
 
         source = DictSource(
-            data=_datagram_rows()[name], tag_columns=["k"], source_id=f"golden_{name}"
+            data=_datagram_rows()[name],
+            tag_columns=["k"],
+            tag_only_columns=True,
+            source_id=f"golden_{name}",
         )
         return stream_summary(source)
 
@@ -1029,7 +1033,9 @@ def _arrow_source(column: pa.Array[Any], nullable: bool = False) -> Any:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id="golden_arrow")
+    return ArrowTableSource(
+        table, tag_columns=["k"], tag_only_columns=True, source_id="golden_arrow"
+    )
 
 
 @case("datagram", "dict_order")
@@ -1053,6 +1059,7 @@ def datagram_dict_order() -> dict[str, Any]:
         source = DictSource(
             data=[{"k": f"r{i}", "m": v} for i, v in enumerate(values)],
             tag_columns=["k"],
+            tag_only_columns=True,
             data_schema={"k": str, "m": value_type},
             source_id=f"golden_dict_{name}",
         )
@@ -1118,20 +1125,33 @@ GROUPED_ROWS = [
 def _subjects() -> Any:
     from orcapod.sources import DictSource
 
-    return DictSource(data=SUBJECT_ROWS, tag_columns=["subject"], source_id="subjects")
+    return DictSource(
+        data=SUBJECT_ROWS,
+        tag_columns=["subject"],
+        tag_only_columns=True,
+        source_id="subjects",
+    )
 
 
 def _scans() -> Any:
     from orcapod.sources import DictSource
 
-    return DictSource(data=SCAN_ROWS, tag_columns=["subject"], source_id="scans")
+    return DictSource(
+        data=SCAN_ROWS,
+        tag_columns=["subject"],
+        tag_only_columns=True,
+        source_id="scans",
+    )
 
 
 def _grouped() -> Any:
     from orcapod.sources import DictSource
 
     return DictSource(
-        data=GROUPED_ROWS, tag_columns=["cohort", "subject"], source_id="cohorts"
+        data=GROUPED_ROWS,
+        tag_columns=["cohort", "subject"],
+        tag_only_columns=True,
+        source_id="cohorts",
     )
 
 
@@ -1188,6 +1208,7 @@ def pipeline_merge_join() -> dict[str, Any]:
     right = DictSource(
         data=[{"subject": "s1", "weight": 30.0}, {"subject": "s3", "weight": 31.5}],
         tag_columns=["subject"],
+        tag_only_columns=True,
         source_id="reweigh",
     )
     return stream_summary(MergeJoin()(left, right))
@@ -1217,7 +1238,9 @@ def _keyed(source_id: str, value: str, nullable_key: bool) -> Any:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["subject"], source_id=source_id)
+    return ArrowTableSource(
+        table, tag_columns=["subject"], tag_only_columns=True, source_id=source_id
+    )
 
 
 @case("pipeline", "join_key_nullability")
@@ -1277,6 +1300,7 @@ def pipeline_index_pick() -> dict[str, Any]:
             {"subject": "s2", "values": [4, 5], "meta": {"k": 20, "j": 21}},
         ],
         tag_columns=["subject"],
+        tag_only_columns=True,
         source_id="lists",
     )
     out = _prefixed("index", stream_summary(Index(column="values", i=0)(source)))
@@ -1355,6 +1379,7 @@ def pipeline_tag_and_data_columns() -> dict[str, Any]:
             {"cohort": "b", "subject": "s3", "age": 5, "weight": 19.0},
         ],
         tag_columns=["cohort", "subject"],
+        tag_only_columns=True,
         source_id="cohort_subjects",
     )
     streams = {
@@ -1516,6 +1541,7 @@ def datagram_polars_data_hash() -> dict[str, Any]:
         source = DictSource(
             [{"k": "a", "v": value}],
             tag_columns=["k"],
+            tag_only_columns=True,
             data_schema={"k": str, "v": type(value)},
         )
         ((_, data),) = list(source.iter_data())
@@ -1559,6 +1585,7 @@ def _make_polars_datagram_case(name: str) -> CaseFn:
         source = DictSource(
             data=_polars_rows()[name],
             tag_columns=["k"],
+            tag_only_columns=True,
             data_schema={"k": str, "c": column_type},
             source_id=f"golden_{name}",
         )
@@ -1744,7 +1771,10 @@ def _nullable_readings() -> Any:
         ),
     )
     return ArrowTableSource(
-        table, tag_columns=["k", "site"], source_id="golden_nullable"
+        table,
+        tag_columns=["k", "site"],
+        tag_only_columns=True,
+        source_id="golden_nullable",
     )
 
 
@@ -1840,11 +1870,15 @@ def pipeline_default_source_ids() -> dict[str, Any]:
     )
 
     sources: dict[str, Any] = {
-        "arrow_table": ArrowTableSource(_builder_table(), tag_columns=["subject"]),
-        "dict": DictSource(data=SUBJECT_ROWS, tag_columns=["subject"]),
+        "arrow_table": ArrowTableSource(
+            _builder_table(), tag_columns=["subject"], tag_only_columns=True
+        ),
+        "dict": DictSource(
+            data=SUBJECT_ROWS, tag_columns=["subject"], tag_only_columns=True
+        ),
         "list": ListSource("weight", [20.5, 22.25, 19.0]),
         "data_frame": DataFrameSource(
-            pl.DataFrame(SUBJECT_ROWS), tag_columns=["subject"]
+            pl.DataFrame(SUBJECT_ROWS), tag_columns=["subject"], tag_only_columns=True
         ),
     }
     out: dict[str, Any] = {}
@@ -2002,7 +2036,12 @@ def torch_datagram() -> dict[str, Any]:
         {"k": "r2", "c": torch.tensor([[0.5, 1.5]], dtype=torch.float64)},
     ]
     return stream_summary(
-        DictSource(data=rows, tag_columns=["k"], source_id="golden_torch_tensor")
+        DictSource(
+            data=rows,
+            tag_columns=["k"],
+            tag_only_columns=True,
+            source_id="golden_torch_tensor",
+        )
     )
 
 

@@ -35,6 +35,7 @@ def _ints(source_id: str = "ints", start: int = 1) -> DictSource:
     return DictSource(
         [{"id": 0, "x": start}, {"id": 1, "x": start + 1}],
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id=source_id,
     )
 
@@ -42,7 +43,10 @@ def _ints(source_id: str = "ints", start: int = 1) -> DictSource:
 def _strs() -> DictSource:
     """Return a source with tag ``id: int`` and data ``x: str``."""
     return DictSource(
-        [{"id": 0, "x": "a"}, {"id": 1, "x": "b"}], tag_columns=["id"], source_id="strs"
+        [{"id": 0, "x": "a"}, {"id": 1, "x": "b"}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="strs",
     )
 
 
@@ -51,6 +55,7 @@ def _str_tags() -> DictSource:
     return DictSource(
         [{"id": "a", "x": 1}, {"id": "b", "x": 2}],
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id="stags",
     )
 
@@ -204,7 +209,10 @@ def test_columns_match_by_name_within_each_group_whatever_their_order() -> None:
     2026): within the tag group and the data group, columns match by name."""
     job = _two_by_two_slot_job()
     reordered = DictSource(
-        [{"y": 2, "b": 1, "x": 3, "a": 0}], tag_columns=["b", "a"], source_id="r"
+        [{"y": 2, "b": 1, "x": 3, "a": 0}],
+        tag_columns=["b", "a"],
+        tag_only_columns=True,
+        source_id="r",
     )
     job.bind(sources={"src": reordered})
     assert job.run().ok
@@ -215,7 +223,10 @@ def test_a_column_in_the_other_role_is_refused() -> None:
     (tag or data) is part of the match, its position is not."""
     job = _two_by_two_slot_job()
     swapped = DictSource(
-        [{"a": 0, "b": 1, "x": 3, "y": 2}], tag_columns=["a", "x"], source_id="s"
+        [{"a": 0, "b": 1, "x": 3, "y": 2}],
+        tag_columns=["a", "x"],
+        tag_only_columns=True,
+        source_id="s",
     )
     with pytest.raises(SourceSpecMismatchError, match="tag columns"):
         job.bind(sources={"src": swapped})

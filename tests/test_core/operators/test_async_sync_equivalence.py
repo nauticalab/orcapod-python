@@ -105,7 +105,10 @@ def _source(
     table = pa.table(list(columns.values()), names=list(columns))
     schema = pa.schema([f.with_nullable(f.name in nullable) for f in table.schema])
     return ArrowTableSource(
-        table.cast(schema), tag_columns=list(tags), source_id=source_id
+        table.cast(schema),
+        tag_columns=list(tags),
+        source_id=source_id,
+        tag_only_columns=True,
     )
 
 
@@ -917,7 +920,9 @@ def _narrow_source(column: str, source_id: str) -> ArrowTableSource:
     table = pa.table(
         {"k": pa.array([1, 2], pa.int16()), column: pa.array([3, 4], pa.int8())}
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id=source_id)
+    return ArrowTableSource(
+        table, tag_columns=["k"], source_id=source_id, tag_only_columns=True
+    )
 
 
 # Recorded from the sync path on main (ab544982) before the ITL-837 fix. The sync
@@ -965,7 +970,9 @@ def _key_source(key: Column, column: str, source_id: str) -> ArrowTableSource:
     table = pa.Table.from_arrays(
         [key, pa.array([1, 2], pa.int8())], names=["k", column]
     )
-    return ArrowTableSource(table, tag_columns=["k"], source_id=source_id)
+    return ArrowTableSource(
+        table, tag_columns=["k"], source_id=source_id, tag_only_columns=True
+    )
 
 
 DISAGREEING_KEYS = [
@@ -1080,7 +1087,12 @@ def _tag_source(
         ],
         names=[id_name, "k", data_name],
     )
-    return ArrowTableSource(table, tag_columns=[id_name, "k"], source_id=source_id)
+    return ArrowTableSource(
+        table,
+        tag_columns=[id_name, "k"],
+        source_id=source_id,
+        tag_only_columns=True,
+    )
 
 
 _LIST_INT = pa.large_list(pa.int64())
@@ -1264,6 +1276,7 @@ def _merge_null_key_source(
         ),
         tag_columns=[f"z{source_id}", "g"],
         source_id=source_id,
+        tag_only_columns=True,
     )
 
 
@@ -1372,7 +1385,12 @@ def test_async_null_logical_key_matches_nothing_as_the_sync_path_does() -> None:
             names=["z" + name, "k", name],
         )
         sources.append(
-            ArrowTableSource(table, tag_columns=["z" + name, "k"], source_id=source_id)
+            ArrowTableSource(
+                table,
+                tag_columns=["z" + name, "k"],
+                source_id=source_id,
+                tag_only_columns=True,
+            )
         )
     left, right = sources
     for operator in (Join, SemiJoin):
@@ -1586,7 +1604,10 @@ def test_a_source_refuses_a_tag_named_with_the_meta_prefix() -> None:
     """Not "tag column not found": the source would drop the meta column first."""
     with pytest.raises(InputValidationError, match="'__g'.*reserved for meta"):
         _ = ArrowTableSource(
-            _table_with_meta_named_column(), tag_columns=["k", "__g"], source_id="s"
+            _table_with_meta_named_column(),
+            tag_columns=["k", "__g"],
+            source_id="s",
+            tag_only_columns=True,
         )
 
 

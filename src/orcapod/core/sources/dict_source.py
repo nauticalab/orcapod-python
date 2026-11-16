@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import DataValue, SchemaLike
@@ -23,6 +24,11 @@ class DictSource(RootSource):
     Each dict becomes one (tag, data) pair in the stream. The dicts are
     converted to an Arrow table via the data-context type converter, then
     enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
+
+    Plain tags: ``tag_only_columns`` (keyword-only) is ``True``, the default, and keeps
+    every tag column a tag only, not data, as every source does in v0.3. Any other value
+    is refused: referential tags arrive in v0.4, where tags become referential by default
+    and ``tag_only_columns`` names the tags kept plain.
     """
 
     # The config type key; also the kind prefix of the default source id.
@@ -35,8 +41,11 @@ class DictSource(RootSource):
         system_tag_columns: Collection[str] = (),
         data_schema: SchemaLike | pa.Schema | None = None,
         source_id: str | None = None,
+        *,
+        tag_only_columns: TagOnlyColumns = True,
         **kwargs: Any,
     ) -> None:
+        check_tag_only_columns(tag_only_columns)
         super().__init__(source_id=source_id, **kwargs)
         tag_columns = _normalize_column_list(tag_columns)
 

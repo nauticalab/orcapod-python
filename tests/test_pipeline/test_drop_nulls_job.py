@@ -58,7 +58,9 @@ def _recordings(timestamps: list[int | None]) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["session"], source_id="recordings")
+    return ArrowTableSource(
+        table, tag_columns=["session"], tag_only_columns=True, source_id="recordings"
+    )
 
 
 def _run(store: DeltaTableDatabase, timestamps: list[int | None]) -> PipelineJob:

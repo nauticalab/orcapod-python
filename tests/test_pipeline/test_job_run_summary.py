@@ -90,7 +90,9 @@ def make_job(store: Any, pod: Any, label: str, n_rows: int = 4) -> PipelineJob:
     rows = [{"k": f"r{i}", "x": i} for i in range(n_rows)]
     job = PipelineJob(name="summary_demo", database=store)
     with job:
-        source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
+        source = DictSource(
+            data=rows, tag_columns=["k"], tag_only_columns=True, source_id="rows"
+        )
         pod.pod(source, label=label)
     return job
 
@@ -223,7 +225,9 @@ def test_node_with_empty_input_counts_zero_rows(store: Any, orchestrator: Any) -
     rows = [{"k": f"r{i}", "x": i} for i in range(4)]
     job = PipelineJob(name="summary_chain", database=store)
     with job:
-        source = DictSource(data=rows, tag_columns=["k"], source_id="rows")
+        source = DictSource(
+            data=rows, tag_columns=["k"], tag_only_columns=True, source_id="rows"
+        )
         broken = always_fails.pod(source, label="broken")
         plus_one.pod(broken, label="after")
 

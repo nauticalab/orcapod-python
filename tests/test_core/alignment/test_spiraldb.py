@@ -75,7 +75,12 @@ def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
         project = fake_pyspiral.FakeSpiral().project(PROJECT)
         project.create_table("default.event", key_schema=KEYS).write(written_table())
         yield SpiralDBTableSource(
-            PROJECT, "event", tag_columns=["grp"], source_id=SOURCE_ID, batch_rows=2
+            PROJECT,
+            "event",
+            tag_columns=["grp"],
+            source_id=SOURCE_ID,
+            batch_rows=2,
+            tag_only_columns=True,
         )
 
 

@@ -53,10 +53,16 @@ def _dict_sources() -> tuple[DictSource, DictSource]:
     """Two sources on tag ``k`` with data columns ``a`` and ``b``."""
     return (
         DictSource(
-            data=[{"k": 1, "a": 1}, {"k": 2, "a": 2}], tag_columns=["k"], source_id="sa"
+            data=[{"k": 1, "a": 1}, {"k": 2, "a": 2}],
+            tag_columns=["k"],
+            source_id="sa",
+            tag_only_columns=True,
         ),
         DictSource(
-            data=[{"k": 1, "b": 1}, {"k": 2, "b": 2}], tag_columns=["k"], source_id="sb"
+            data=[{"k": 1, "b": 1}, {"k": 2, "b": 2}],
+            tag_columns=["k"],
+            source_id="sb",
+            tag_only_columns=True,
         ),
     )
 

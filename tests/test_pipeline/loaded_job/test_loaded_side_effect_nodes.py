@@ -34,7 +34,10 @@ SIDE_EFFECT_NODES = ("delivered", "tail")
 def _source() -> DictSource:
     """Three rows: tag ``k``, data ``x``."""
     return DictSource(
-        [{"k": i, "x": i} for i in range(ROWS)], tag_columns=["k"], source_id="s"
+        [{"k": i, "x": i} for i in range(ROWS)],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="s",
     )
 
 

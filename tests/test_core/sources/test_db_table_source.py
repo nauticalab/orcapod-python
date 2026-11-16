@@ -123,7 +123,7 @@ def connector(measurements_table) -> MockDBConnector:
 
 @pytest.fixture
 def source(connector) -> DBTableSource:
-    return DBTableSource(connector, "measurements")
+    return DBTableSource(connector, "measurements", tag_only_columns=True)
 
 
 # ===========================================================================
@@ -228,14 +228,19 @@ class TestConstruction:
         assert "response" in data_schema
 
     def test_explicit_tag_columns_override_pk(self, connector):
-        src = DBTableSource(connector, "measurements", tag_columns=["trial"])
+        src = DBTableSource(
+            connector, "measurements", tag_columns=["trial"], tag_only_columns=True
+        )
         tag_schema, data_schema = src.output_schema()
         assert "trial" in tag_schema
         assert "session_id" not in tag_schema
 
     def test_multiple_explicit_tag_columns(self, connector):
         src = DBTableSource(
-            connector, "measurements", tag_columns=["session_id", "trial"]
+            connector,
+            "measurements",
+            tag_columns=["session_id", "trial"],
+            tag_only_columns=True,
         )
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
@@ -245,7 +250,9 @@ class TestConstruction:
         assert source.source_id == "measurements"
 
     def test_explicit_source_id_overrides_default(self, connector):
-        src = DBTableSource(connector, "measurements", source_id="my_meas")
+        src = DBTableSource(
+            connector, "measurements", source_id="my_meas", tag_only_columns=True
+        )
         assert src.source_id == "my_meas"
 
     def test_table_with_multiple_pk_columns(self, measurements_table):
@@ -253,7 +260,7 @@ class TestConstruction:
             tables={"t": measurements_table},
             pk_columns={"t": ["session_id", "trial"]},
         )
-        src = DBTableSource(connector, "t")
+        src = DBTableSource(connector, "t", tag_only_columns=True)
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
         assert "trial" in tag_schema
@@ -267,7 +274,7 @@ class TestConstruction:
 class TestConstructionErrors:
     def test_missing_table_raises_value_error(self, connector):
         with pytest.raises(ValueError, match="not found in database"):
-            DBTableSource(connector, "nonexistent")
+            DBTableSource(connector, "nonexistent", tag_only_columns=True)
 
     def test_missing_table_error_not_confused_with_no_pk(self, measurements_table):
         """A missing table should raise 'not found', not 'no primary key'."""
@@ -276,7 +283,7 @@ class TestConstructionErrors:
             pk_columns={},  # no PKs registered
         )
         with pytest.raises(ValueError, match="not found in database"):
-            DBTableSource(connector, "completely_missing")
+            DBTableSource(connector, "completely_missing", tag_only_columns=True)
 
     def test_no_pk_and_no_explicit_tags_raises_value_error(self, measurements_table):
         connector = MockDBConnector(
@@ -284,7 +291,7 @@ class TestConstructionErrors:
             pk_columns={},  # table exists but has no PK
         )
         with pytest.raises(ValueError, match="no primary key"):
-            DBTableSource(connector, "t")
+            DBTableSource(connector, "t", tag_only_columns=True)
 
     def test_empty_table_raises_value_error(self, connector):
         connector._tables["empty"] = pa.table(
@@ -292,7 +299,7 @@ class TestConstructionErrors:
         )
         connector._pk_columns["empty"] = ["id"]
         with pytest.raises(ValueError, match="is empty"):
-            DBTableSource(connector, "empty")
+            DBTableSource(connector, "empty", tag_only_columns=True)
 
     def test_empty_table_error_distinguishable_from_missing_table(self, connector):
         """The two error messages must be distinct."""
@@ -303,11 +310,11 @@ class TestConstructionErrors:
         empty_err: ValueError | None = None
         missing_err: ValueError | None = None
         try:
-            DBTableSource(connector, "empty")
+            DBTableSource(connector, "empty", tag_only_columns=True)
         except ValueError as exc:
             empty_err = exc
         try:
-            DBTableSource(connector, "nonexistent")
+            DBTableSource(connector, "nonexistent", tag_only_columns=True)
         except ValueError as exc:
             missing_err = exc
         assert empty_err is not None
@@ -363,7 +370,9 @@ class TestStreamBehaviour:
         assert t.num_rows == measurements_table.num_rows
 
     def test_source_with_explicit_tags_yields_correct_keys(self, connector):
-        src = DBTableSource(connector, "measurements", tag_columns=["session_id"])
+        src = DBTableSource(
+            connector, "measurements", tag_columns=["session_id"], tag_only_columns=True
+        )
         for tags, _ in src.iter_data():
             assert "session_id" in tags
 
@@ -375,26 +384,34 @@ class TestStreamBehaviour:
 
 class TestDeterministicHashing:
     def test_pipeline_hash_is_deterministic(self, connector):
-        src1 = DBTableSource(connector, "measurements")
-        src2 = DBTableSource(connector, "measurements")
+        src1 = DBTableSource(connector, "measurements", tag_only_columns=True)
+        src2 = DBTableSource(connector, "measurements", tag_only_columns=True)
         assert src1.pipeline_hash() == src2.pipeline_hash()
 
     def test_content_hash_is_deterministic(self, connector):
-        src1 = DBTableSource(connector, "measurements")
-        src2 = DBTableSource(connector, "measurements")
+        src1 = DBTableSource(connector, "measurements", tag_only_columns=True)
+        src2 = DBTableSource(connector, "measurements", tag_only_columns=True)
         assert src1.content_hash() == src2.content_hash()
 
     def test_pipeline_hash_is_schema_only_not_source_id(self, connector):
         # pipeline_identity_structure() is (tag_schema, data_schema) by design —
         # source_id is intentionally excluded so sources with identical schemas
         # share the same pipeline hash and therefore the same pipeline DB table.
-        src1 = DBTableSource(connector, "measurements", source_id="a")
-        src2 = DBTableSource(connector, "measurements", source_id="b")
+        src1 = DBTableSource(
+            connector, "measurements", source_id="a", tag_only_columns=True
+        )
+        src2 = DBTableSource(
+            connector, "measurements", source_id="b", tag_only_columns=True
+        )
         assert src1.pipeline_hash() == src2.pipeline_hash()
 
     def test_different_tag_columns_yields_different_pipeline_hash(self, connector):
-        src1 = DBTableSource(connector, "measurements", tag_columns=["session_id"])
-        src2 = DBTableSource(connector, "measurements", tag_columns=["trial"])
+        src1 = DBTableSource(
+            connector, "measurements", tag_columns=["session_id"], tag_only_columns=True
+        )
+        src2 = DBTableSource(
+            connector, "measurements", tag_columns=["trial"], tag_only_columns=True
+        )
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
 
@@ -438,13 +455,18 @@ class TestConfig:
             DBTableSource.from_config(config)
 
     def test_to_config_explicit_source_id_preserved(self, connector):
-        src = DBTableSource(connector, "measurements", source_id="custom_id")
+        src = DBTableSource(
+            connector, "measurements", source_id="custom_id", tag_only_columns=True
+        )
         config = src.to_config()
         assert config["source_id"] == "custom_id"
 
     def test_to_config_system_tag_columns_preserved(self, connector):
         src = DBTableSource(
-            connector, "measurements", system_tag_columns=["session_id"]
+            connector,
+            "measurements",
+            system_tag_columns=["session_id"],
+            tag_only_columns=True,
         )
         config = src.to_config()
         assert "system_tag_columns" in config
@@ -480,5 +502,6 @@ class TestQueryOverride:
             connector,
             "measurements",
             _query='SELECT * FROM "measurements" WHERE trial > 1',
+            tag_only_columns=True,
         )
         assert src.as_table().num_rows == 2  # only s2, s3 have trial > 1

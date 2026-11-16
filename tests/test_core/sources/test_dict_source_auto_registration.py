@@ -50,6 +50,7 @@ class TestDictSourceAutoRegistration:
                 {"id": 2, "pt": _Point(x=3.0, y=4.0)},
             ],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         rows = list(src.iter_data())
         assert len(rows) == 2
@@ -62,6 +63,7 @@ class TestDictSourceAutoRegistration:
                 {"id": 2, "m": _Measurement(value=2.5, unit="cm")},
             ],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         rows = list(src.iter_data())
         assert len(rows) == 2
@@ -69,9 +71,9 @@ class TestDictSourceAutoRegistration:
     def test_pydantic_no_double_registration_error(self):
         """Creating a second DictSource with the same Pydantic model type does not raise."""
         data = [{"id": 1, "pt": _Point(x=0.0, y=0.0)}]
-        DictSource(data=data, tag_columns=["id"])
+        DictSource(data=data, tag_columns=["id"], tag_only_columns=True)
         # Second construction — type already in registry; must be idempotent.
-        src2 = DictSource(data=data, tag_columns=["id"])
+        src2 = DictSource(data=data, tag_columns=["id"], tag_only_columns=True)
         rows = list(src2.iter_data())
         assert len(rows) == 1
 
@@ -93,6 +95,7 @@ class TestDictSourceAutoRegistration:
         src = DictSource(
             data=[{"id": 1, "sensor": _Sensor(reading=42.0)}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         rows = list(src.iter_data())
         assert len(rows) == 1

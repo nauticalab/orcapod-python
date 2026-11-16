@@ -37,7 +37,9 @@ def semantic_hash(value: Any) -> Any:
 
 def _row(value: Any) -> Any:
     """The data of a one-row source holding ``value``."""
-    source = DictSource(data=[{"k": "r", "x": value}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "r", "x": value}], tag_columns=["k"], tag_only_columns=True
+    )
     return next(iter(source.iter_data()))[1]
 
 

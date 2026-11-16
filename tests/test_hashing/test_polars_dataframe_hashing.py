@@ -59,7 +59,10 @@ def _data_hash(value: pl.DataFrame | pl.Series) -> str:
     """Content hash of the ``Data`` holding ``value`` in its only data column."""
     rows: list[dict[str, Any]] = [{"k": "a", "v": value}]
     source = DictSource(
-        rows, tag_columns=["k"], data_schema={"k": str, "v": type(value)}
+        rows,
+        tag_columns=["k"],
+        tag_only_columns=True,
+        data_schema={"k": str, "v": type(value)},
     )
     ((_, data),) = list(source.iter_data())
     return data.content_hash().to_hex()
@@ -130,7 +133,12 @@ class TestEqualFramesHashEqual:
 
         job = PipelineJob(name="h", database=DeltaTableDatabase(tmp_path / "store"))
         with job:
-            make.pod(DictSource([{"k": "a", "n": 2}], tag_columns=["k"]), label="m")
+            make.pod(
+                DictSource(
+                    [{"k": "a", "n": 2}], tag_columns=["k"], tag_only_columns=True
+                ),
+                label="m",
+            )
         job.run()
         ((_, data),) = list(job.nodes["m"].iter_data())
         assert data.content_hash().to_hex() == _data_hash(expected)
@@ -781,7 +789,7 @@ _CROSS_PROCESS_SCRIPT = textwrap.dedent(
         "t": pl.Series([dt.datetime(2020, 1, 1)] * 3, dtype=pl.Datetime("ms", "UTC")),
         "c": pl.Series(["y", None, "x"], dtype=pl.Categorical),
     })
-    source = DictSource([{"k": "a", "v": df}], tag_columns=["k"],
+    source = DictSource([{"k": "a", "v": df}], tag_columns=["k"], tag_only_columns=True,
                         data_schema={"k": str, "v": pl.DataFrame})
     ((_, data),) = list(source.iter_data())
     print(json.dumps({"hash": data.content_hash().to_hex()}))

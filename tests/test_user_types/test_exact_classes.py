@@ -57,12 +57,22 @@ def _define(source: str) -> type:
 
 def _numbers() -> DictSource:
     """Return a one-row source holding ``1`` in data column ``x``."""
-    return DictSource(data=[{"k": "a", "x": 1}], tag_columns=["k"], source_id="n")
+    return DictSource(
+        data=[{"k": "a", "x": 1}],
+        tag_columns=["k"],
+        source_id="n",
+        tag_only_columns=True,
+    )
 
 
 def _source(value: Any) -> DictSource:
     """Return a one-row source holding ``value`` in data column ``p``."""
-    return DictSource(data=[{"k": "a", "p": value}], tag_columns=["k"], source_id="s")
+    return DictSource(
+        data=[{"k": "a", "p": value}],
+        tag_columns=["k"],
+        source_id="s",
+        tag_only_columns=True,
+    )
 
 
 def _sum_pod(cls: type) -> Any:

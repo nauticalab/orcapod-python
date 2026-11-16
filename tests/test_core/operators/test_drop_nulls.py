@@ -41,7 +41,10 @@ def _source(
     table = pa.table(list(columns.values()), names=list(columns))
     schema = pa.schema([f.with_nullable(f.name in nullable) for f in table.schema])
     return ArrowTableSource(
-        table.cast(schema), tag_columns=list(tags), source_id=source_id
+        table.cast(schema),
+        tag_columns=list(tags),
+        tag_only_columns=True,
+        source_id=source_id,
     )
 
 
@@ -347,6 +350,7 @@ def logical() -> DictSource:
             {"k": "c", "p": Path("/c"), "arr": None},
         ],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="logical",
     )
 

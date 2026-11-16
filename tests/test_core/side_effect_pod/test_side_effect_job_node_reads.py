@@ -42,7 +42,10 @@ Orchestrator = Literal["sync", "async"]
 def _source() -> DictSource:
     """Six rows: tag ``k``, data ``x``."""
     return DictSource(
-        [{"k": i, "x": i} for i in range(ROWS)], tag_columns=["k"], source_id="s"
+        [{"k": i, "x": i} for i in range(ROWS)],
+        tag_columns=["k"],
+        source_id="s",
+        tag_only_columns=True,
     )
 
 

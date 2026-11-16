@@ -32,7 +32,9 @@ def _source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="s")
+    return ArrowTableSource(
+        table, tag_columns=["id"], tag_only_columns=True, source_id="s"
+    )
 
 
 def test_operator_stream_reruns_after_upstream_is_modified() -> None:

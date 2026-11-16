@@ -70,6 +70,7 @@ def _register_by_building_a_source(data_type: Any, value: Any) -> DictSource:
     return DictSource(
         [{"id": 1, "p": value}],
         tag_columns=["id"],
+        tag_only_columns=True,
         data_schema={"id": int, "p": data_type},
         source_id="s",
     )
@@ -391,6 +392,7 @@ _RUN_SCRIPT = textwrap.dedent(
         return DictSource(
             [{"id": 1, "r": Reading(3, "mV"), "n": 3}],
             tag_columns=["id"],
+            tag_only_columns=True,
             data_schema={"id": int, "r": Reading, "n": int},
             source_id="readings",
         )
@@ -485,6 +487,7 @@ _SAVE_LOAD_SCRIPT = textwrap.dedent(
     source = DictSource(
         [{"id": 1, "r": Reading(3, "mV"), "n": 3}, {"id": 2, "r": Reading(4, "V"), "n": 4}],
         tag_columns=["id"],
+        tag_only_columns=True,
         data_schema={"id": int, "r": Reading, "n": int},
         source_id="readings",
     )

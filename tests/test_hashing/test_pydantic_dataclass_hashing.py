@@ -283,6 +283,7 @@ class TestEndToEndPipelineWithModelColumns:
             ],
             tag_columns=["run_id"],
             data_schema={"run_id": int, "cfg": _Cfg},
+            tag_only_columns=True,
         )
         # DictSource IS the stream — content_hash() is called directly on it.
         result = src.content_hash()
@@ -300,6 +301,7 @@ class TestEndToEndPipelineWithModelColumns:
             ],
             tag_columns=["run_id"],
             data_schema={"run_id": int, "run": _Run},
+            tag_only_columns=True,
         )
         result = src.content_hash()
         assert isinstance(result, ContentHash)
@@ -314,6 +316,7 @@ class TestEndToEndPipelineWithModelColumns:
                 data=[{"run_id": 1, "cfg": _Cfg(lr=lr, epochs=10)}],
                 tag_columns=["run_id"],
                 data_schema={"run_id": int, "cfg": _Cfg},
+                tag_only_columns=True,
             )
 
         assert _src(0.01).content_hash() != _src(0.1).content_hash()

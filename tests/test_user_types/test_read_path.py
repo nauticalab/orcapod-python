@@ -32,7 +32,9 @@ class StoredPoint:
 def _extension_field_metadata() -> dict[bytes | str, bytes | str]:
     """Return Arrow field metadata marking a column as a ``StoredPoint`` column."""
     value: Any = StoredPoint(1, 2)
-    source = DictSource(data=[{"k": "a", "p": value}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "p": value}], tag_columns=["k"], tag_only_columns=True
+    )
     ext = source.as_table().schema.field("p").type
     return {
         b"ARROW:extension:name": ext.extension_name.encode(),
@@ -77,7 +79,12 @@ def _run_labelled(db_root: Path) -> tuple[int, list[Labelled]]:
     rows: list[Any] = [{"k": f"r{i}", "p": Labelled(f"x{i}", i)} for i in (1, 2)]
     job = PipelineJob(name="compact", database=DeltaTableDatabase(db_root))
     with job:
-        echo.pod(DictSource(data=rows, tag_columns=["k"], source_id="s"), label="echo")
+        echo.pod(
+            DictSource(
+                data=rows, tag_columns=["k"], source_id="s", tag_only_columns=True
+            ),
+            label="echo",
+        )
     # One commit per row, so the result table has one file per row to compact.
     job.run(commit_every_rows=1)
     values = [data.as_dict()["q"] for _, data in job.nodes["echo"].iter_data()]
@@ -121,7 +128,9 @@ def test_ipc_read_of_non_large_nested_storage_is_valid() -> None:
     narrow = pa.struct([pa.field("label", pa.string()), pa.field("n", pa.int64())])
     value: Any = Labelled("x1", 1)
     ext = (
-        DictSource(data=[{"k": "a", "p": value}], tag_columns=["k"])
+        DictSource(
+            data=[{"k": "a", "p": value}], tag_columns=["k"], tag_only_columns=True
+        )
         .as_table()
         .schema.field("p")
         .type

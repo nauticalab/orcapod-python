@@ -27,6 +27,7 @@ def _source(tensors: dict[str, Any], source_id: str = "tensors") -> DictSource:
         data=[{"k": k, "x": v} for k, v in tensors.items()],
         tag_columns=["k"],
         source_id=source_id,
+        tag_only_columns=True,
     )
 
 
@@ -91,7 +92,9 @@ def _stored_outputs(stream: Any, column: str) -> dict[str, Any]:
     returned; the canonical CPU form is what is stored and read back from a database.
     """
     table = stream.as_table().select(["k", column])
-    return _read(ArrowTableSource(table, tag_columns=["k"]), column)
+    return _read(
+        ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True), column
+    )
 
 
 def test_pod_returning_a_grad_tensor_stores_its_value() -> None:
@@ -181,7 +184,9 @@ def test_ndarray_column_into_tensor_parameter_is_refused() -> None:
         """Return the input unchanged."""
         return x
 
-    arrays = DictSource(data=[{"k": "a", "x": np.arange(3.0)}], tag_columns=["k"])
+    arrays = DictSource(
+        data=[{"k": "a", "x": np.arange(3.0)}], tag_columns=["k"], tag_only_columns=True
+    )
     with pytest.raises(ValueError, match="not compatible") as info:
         identity.pod(arrays)
     assert "ndarray" in str(info.value) and "Tensor" in str(info.value)

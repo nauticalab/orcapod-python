@@ -25,6 +25,7 @@ SCRIPT = textwrap.dedent(
     src = DictSource(
         data=[{"k": k, "x": v} for k, v in TENSORS.items()],
         tag_columns=["k"],
+        tag_only_columns=True,
         source_id="every",
     )
     out = {

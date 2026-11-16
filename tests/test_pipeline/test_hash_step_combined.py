@@ -55,7 +55,9 @@ def _operator_job(store: InMemoryArrowDatabase) -> PipelineJob:
     """A job with function node ``dbl`` and a stored (``LOG``) operator node ``sel``."""
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
-        source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
+        source = DictSource(
+            data=ROWS, tag_columns=["k"], tag_only_columns=True, source_id="src"
+        )
         out = double.pod(source, label="dbl")
         SelectDataColumns(["double"])(out, label="sel")
     # OperatorNode.attach_databases is the public way to turn on LOG / REPLAY mode.
@@ -76,7 +78,9 @@ def _notify_job(store: InMemoryArrowDatabase) -> PipelineJob:
     """A job whose only stored node is a function pod that takes the invocation context."""
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
-        source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
+        source = DictSource(
+            data=ROWS, tag_columns=["k"], tag_only_columns=True, source_id="src"
+        )
         notify.pod(source, label="notify")
     return job
 
@@ -101,7 +105,9 @@ def _sink_job(store: InMemoryArrowDatabase) -> PipelineJob:
     """A job whose only stored node is a sink reading the source directly."""
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
-        source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
+        source = DictSource(
+            data=ROWS, tag_columns=["k"], tag_only_columns=True, source_id="src"
+        )
         sink = sink_pod(_deliver)
         assert isinstance(sink, SideEffectPod)
         sink.process(source, label="sink")
@@ -283,7 +289,7 @@ class TestTablesOfNodesTheRunLeavesOut:
 
         store = InMemoryArrowDatabase()
         tag_schema, data_schema = DictSource(
-            data=ROWS, tag_columns=["k"], source_id="src"
+            data=ROWS, tag_columns=["k"], tag_only_columns=True, source_id="src"
         ).output_schema()
         job = PipelineJob(name=JOB_NAME, database=store)
         with job:

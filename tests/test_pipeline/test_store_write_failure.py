@@ -168,7 +168,9 @@ def build_job(
     """Build a job with one function node ``dbl`` and optionally an operator ``sel``."""
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
-        source = DictSource(data=rows, tag_columns=["k"], source_id="src")
+        source = DictSource(
+            data=rows, tag_columns=["k"], tag_only_columns=True, source_id="src"
+        )
         out = pod.pod(source, label="dbl")
         if with_operator:
             SelectDataColumns(["double"])(out, label="sel")
@@ -507,7 +509,9 @@ def make_outer(inner: Any):
     @function_pod(output_keys="double")
     def via_inner(x: int) -> int:
         """Run ``inner`` on ``x`` through a one-row stream and return ``3x - x``."""
-        stream = DictSource(data=[{"i": "i", "x": x}], tag_columns=["i"])
+        stream = DictSource(
+            data=[{"i": "i", "x": x}], tag_columns=["i"], tag_only_columns=True
+        )
         return inner.pod(stream).as_table()["tripled"][0].as_py() - x
 
     return via_inner
@@ -551,7 +555,7 @@ class TestCallbackFailureKeepsStoreError:
         """A standalone cached pod raises its database error, not the hook's."""
         faults = Faults(write_marker="")
         triple = make_hooked_triple(FaultyStore(InMemoryArrowDatabase(), faults))
-        stream = DictSource(data=ROWS, tag_columns=["k"])
+        stream = DictSource(data=ROWS, tag_columns=["k"], tag_only_columns=True)
 
         with pytest.raises(OrcapodDatabaseWriteError) as exc_info:
             triple.pod(stream).as_table()
@@ -562,7 +566,7 @@ class TestCallbackFailureKeepsStoreError:
         """The async path raises the database error too, rather than skipping the row."""
         faults = Faults(write_marker="")
         triple = make_hooked_triple(FaultyStore(InMemoryArrowDatabase(), faults))
-        stream = DictSource(data=ROWS, tag_columns=["k"])
+        stream = DictSource(data=ROWS, tag_columns=["k"], tag_only_columns=True)
         input_ch: Channel[Any] = Channel(buffer_size=16)
         output_ch: Channel[Any] = Channel(buffer_size=16)
 
@@ -656,7 +660,9 @@ def build_siblings(store: Any, other_pod: Any):
     """Two function nodes reading the same source: ``dbl`` and ``other``."""
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
-        source = DictSource(data=ROWS, tag_columns=["k"], source_id="src")
+        source = DictSource(
+            data=ROWS, tag_columns=["k"], tag_only_columns=True, source_id="src"
+        )
         double_async.pod(source, label="dbl")
         other_pod.pod(source, label="other")
     return job

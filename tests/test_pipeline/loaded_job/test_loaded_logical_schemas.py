@@ -84,12 +84,18 @@ def _save_logical_job(tmp_path: Path, function: Any, *, with_join: bool = True) 
         name="logical", database=DeltaTableDatabase(tmp_path / "store")
     )
     with job:
-        source = DictSource([{"id": 1, "x": str(source_file)}], tag_columns=["id"])
+        source = DictSource(
+            [{"id": 1, "x": str(source_file)}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+        )
         result = op.function_pod(output_keys="value")(function).pod(
             source, label="value"
         )
         if with_join:
-            other = DictSource([{"id": 1, "other": 2}], tag_columns=["id"])
+            other = DictSource(
+                [{"id": 1, "other": 2}], tag_columns=["id"], tag_only_columns=True
+            )
             Join()(result, other, label="joined")
     job.run()
     path = tmp_path / "job.json"
@@ -199,9 +205,9 @@ def make_payload(x: int) -> WriterOnly:
 root = Path(sys.argv[1])
 job = PipelineJob(name="unknown", database=DeltaTableDatabase(root / "store"))
 with job:
-    source = DictSource([{"id": 1, "x": 2}], tag_columns=["id"])
+    source = DictSource([{"id": 1, "x": 2}], tag_columns=["id"], tag_only_columns=True)
     result = make_payload.pod(source, label="producer")
-    other = DictSource([{"id": 1, "other": 3}], tag_columns=["id"])
+    other = DictSource([{"id": 1, "other": 3}], tag_columns=["id"], tag_only_columns=True)
     Join()(result, other, label="joined")
 job.run()
 job.save(root / "job.json")

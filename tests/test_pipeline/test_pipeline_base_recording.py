@@ -23,7 +23,9 @@ def _src(tag_col: str, data_col: str) -> ArrowTableSource:
             data_col: pa.array([1, 2], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=[tag_col], tag_only_columns=True, infer_nullable=True
+    )
 
 
 def _fn(name: str = "double") -> FunctionPod:
@@ -126,6 +128,7 @@ class TestSourceNodeNaming:
                 }
             ),
             tag_columns=["key"],
+            tag_only_columns=True,
             source_id="my_dataset",
             infer_nullable=True,
         )
@@ -177,6 +180,7 @@ class TestSourceNodeNaming:
                 }
             ),
             tag_columns=["key"],
+            tag_only_columns=True,
             source_id="left_input",
             infer_nullable=True,
         )
@@ -188,6 +192,7 @@ class TestSourceNodeNaming:
                 }
             ),
             tag_columns=["key"],
+            tag_only_columns=True,
             source_id="right_input",
             infer_nullable=True,
         )
@@ -215,6 +220,7 @@ class TestSourceNodeNaming:
                 }
             ),
             tag_columns=["key"],
+            tag_only_columns=True,
             source_id="shared_id",
             infer_nullable=True,
         )
@@ -228,6 +234,7 @@ class TestSourceNodeNaming:
                 }
             ),
             tag_columns=["key"],
+            tag_only_columns=True,
             source_id="shared_id",
             infer_nullable=True,
         )

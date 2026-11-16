@@ -65,6 +65,7 @@ def _source() -> DictSource:
     return DictSource(
         data=[{"id": "a", "x": 1}, {"id": "b", "x": 2}],
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id="label_rule_source",
     )
 
@@ -74,6 +75,7 @@ def _other_source() -> DictSource:
     return DictSource(
         data=[{"id": "a", "y": 10}, {"id": "b", "y": 20}],
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id="label_rule_other",
     )
 

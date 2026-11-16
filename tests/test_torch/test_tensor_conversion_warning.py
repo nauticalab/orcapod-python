@@ -47,7 +47,7 @@ def run(pod: Any, source: Any) -> list[dict[str, Any]]:
     The values are read back from the stream's table, which holds what is stored.
     """
     table = pod.pod(source).as_table()
-    stored = ArrowTableSource(table, tag_columns=["k"])
+    stored = ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
     return [data.as_dict() for _, data in stored.iter_data()]
 
 
@@ -56,6 +56,7 @@ def source_of(values: list[Any]) -> DictSource:
     return DictSource(
         data=[{"k": f"r{i:05d}", "x": v} for i, v in enumerate(values)],
         tag_columns=["k"],
+        tag_only_columns=True,
     )
 
 
@@ -205,6 +206,7 @@ def test_a_source_column_warns_once_with_the_count() -> None:
             data=[{"k": f"r{i}", "x": v} for i, v in enumerate(values)],
             tag_columns=["k"],
             source_id="weights",
+            tag_only_columns=True,
         )
     (message,) = conversion_warnings(caught)
     assert "Source 'weights' column 'x'" in message

@@ -63,7 +63,9 @@ def _make_source(n: int = _N_DATA) -> ArrowTableSource:
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=["id"], infer_nullable=True, tag_only_columns=True
+    )
 
 
 def _build_pipeline(

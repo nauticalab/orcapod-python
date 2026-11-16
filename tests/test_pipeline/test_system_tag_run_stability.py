@@ -104,12 +104,14 @@ def _run_once(
             tag_columns=["probe"],
             source_id="probes",
             record_id_column="probe",
+            tag_only_columns=True,
         )
         method_source = ArrowTableSource(
             _table(methods),
             tag_columns=method_tags,
             source_id="methods",
             record_id_column="w",
+            tag_only_columns=True,
         )
         sink = sink_pod(deliver)
         assert isinstance(sink, SideEffectPod)

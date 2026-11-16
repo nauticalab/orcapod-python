@@ -75,6 +75,7 @@ def left_source() -> ArrowTableSource:
             }
         ),
         tag_columns=["id"],
+        tag_only_columns=True,
         infer_nullable=True,
     )
 
@@ -91,6 +92,7 @@ def right_source() -> ArrowTableSource:
             }
         ),
         tag_columns=["id", "group"],
+        tag_only_columns=True,
         infer_nullable=True,
     )
 
@@ -261,6 +263,7 @@ class TestMergeJoinSourceColumns:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             source_id="east",
             infer_nullable=True,
         )
@@ -273,6 +276,7 @@ class TestMergeJoinSourceColumns:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             source_id="west",
             infer_nullable=True,
         )
@@ -360,6 +364,7 @@ class TestMergeJoinCommutativity:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -370,6 +375,7 @@ class TestMergeJoinCommutativity:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -502,6 +508,7 @@ class TestMergeJoinOutputSchema:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -512,6 +519,7 @@ class TestMergeJoinOutputSchema:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -684,6 +692,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -694,6 +703,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -763,6 +773,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -773,6 +784,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -807,6 +819,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             source_id="zzz_source",
             infer_nullable=True,
         )
@@ -818,6 +831,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             source_id="aaa_source",
             infer_nullable=True,
         )

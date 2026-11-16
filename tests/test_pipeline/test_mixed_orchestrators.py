@@ -51,7 +51,9 @@ def _source(name: str, x: list[int]) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id", "grp"], source_id=name)
+    return ArrowTableSource(
+        table, tag_columns=["id", "grp"], source_id=name, tag_only_columns=True
+    )
 
 
 @function_pod(output_keys="y")

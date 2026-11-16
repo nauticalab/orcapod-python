@@ -64,7 +64,9 @@ def _source(
         [pa.field(name, t, nullable=False) for name, (t, _) in columns.items()]
     )
     return ArrowTableSource(
-        pa.Table.from_arrays(arrays, schema=schema), tag_columns=list(tags)
+        pa.Table.from_arrays(arrays, schema=schema),
+        tag_columns=list(tags),
+        tag_only_columns=True,
     )
 
 

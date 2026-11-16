@@ -39,6 +39,7 @@ class TestFunctionNodeGetAllRecordsNullability:
         source = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         @op.function_pod(output_keys=["result"])
@@ -74,6 +75,7 @@ class TestFunctionNodeGetAllRecordsNullability:
         source = op.sources.DictSource(
             [{"id": 1, "x": 5}, {"id": 2, "x": 15}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         @op.function_pod(output_keys=["result"])
@@ -116,6 +118,7 @@ class TestFunctionNodeIterDatasNullability:
         source = op.sources.DictSource(
             [{"id": 1, "x": 7}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         @op.function_pod(output_keys=["result"])
@@ -163,10 +166,12 @@ class TestJoinOperatorNullability:
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "y": 100}, {"id": 2, "y": 200}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         joined_stream = source1.join(source2)
@@ -184,10 +189,12 @@ class TestJoinOperatorNullability:
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "y": 100}, {"id": 2, "y": 200}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         joined_stream = source1.join(source2)
@@ -224,10 +231,12 @@ class TestJoinOperatorNullability:
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
             data_schema=schema1,
+            tag_only_columns=True,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "y": 100}, {"id": 2, "y": 200}],
             tag_columns=["id"],
+            tag_only_columns=True,
         )
 
         joined_stream = source1.join(source2)
@@ -283,11 +292,13 @@ class TestJoinTagColumnNullability:
             [{"id": 1, "group": "a", "x": 10}, {"id": 2, "group": "b", "x": 20}],
             tag_columns=["id", "group"],
             data_schema=schema1,
+            tag_only_columns=True,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "group": "a", "y": 100}, {"id": 2, "group": "b", "y": 200}],
             tag_columns=["id", "group"],
             data_schema=schema2,
+            tag_only_columns=True,
         )
 
         table = source1.join(source2).as_table()
@@ -330,11 +341,13 @@ class TestJoinTagColumnNullability:
             [{"id": 1, "x": 10}],
             tag_columns=["id"],
             data_schema=schema1,
+            tag_only_columns=True,
         )
         source2 = op.sources.DictSource(
             [{"category": "alpha", "y": 100}],
             tag_columns=["category"],
             data_schema=schema2,
+            tag_only_columns=True,
         )
 
         table = source1.join(source2).as_table()
@@ -375,16 +388,19 @@ class TestJoinTagColumnNullability:
             [{"id": 1, "group": "x", "a": 1}],
             tag_columns=["id", "group"],
             data_schema=schema1,
+            tag_only_columns=True,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "group": "x", "b": 2}],
             tag_columns=["id", "group"],
             data_schema=schema2,
+            tag_only_columns=True,
         )
         source3 = op.sources.DictSource(
             [{"id": 1, "group": "x", "c": 3}],
             tag_columns=["id", "group"],
             data_schema=schema3,
+            tag_only_columns=True,
         )
 
         table = source1.join(source2).join(source3).as_table()

@@ -60,8 +60,8 @@ _SCRIPT = textwrap.dedent(
     for _ in range(2):
         job = PipelineJob(name="w", database=database)
         with job:
-            u = DictSource(data=units, tag_columns=["s", "p", "u"], source_id="units")
-            s = DictSource(data=sessions, tag_columns=["s"], source_id="sessions")
+            u = DictSource(data=units, tag_columns=["s", "p", "u"], tag_only_columns=True, source_id="units")
+            s = DictSource(data=sessions, tag_columns=["s"], tag_only_columns=True, source_id="sessions")
             rates = rate.pod(u.select_data_columns(["n"]), s, label="rate")
             mean.pod(rates.group_by(["s"]).select_data_columns(["rate"]), label="mean")
         job.run()

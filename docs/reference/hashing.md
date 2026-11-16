@@ -689,6 +689,12 @@ sequence before the stream is returned:
 3. **Site 5 — Per-row `record_id`:** a UUID v5 computed from `(source_id, row_provenance_token)` and stored per row.
 4. Two system tag columns, `_tag_source_id::{schema_hash}` and `_tag_record_id::{schema_hash}`, are appended to every row.
 
+`tag_only_columns=True` (every tag plain; the default and the only value v0.3 accepts) enters
+none of these sites: a source built with it has the schema hash, `source_id`, record ids and
+saved config of the same source built without it. Every golden fixture that builds a source
+with tag columns passes `tag_only_columns=True`, so the golden values of data context `v1` pin
+plain tags, and stay pinned when v0.4 makes tags referential by default.
+
 At Join time (site 6), all existing system tag columns are **renamed** by appending a
 topology suffix, encoding the full join lineage into each column name.
 

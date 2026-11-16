@@ -234,7 +234,7 @@ class TestRootSourcePipelineHash:
             }
         )
         src_with_tag = ArrowTableSource(
-            table=table, tag_columns=["id"], infer_nullable=True
+            table=table, tag_columns=["id"], infer_nullable=True, tag_only_columns=True
         )
         src_no_tag = ArrowTableSource(table=table, infer_nullable=True)
         assert src_with_tag.pipeline_hash() != src_no_tag.pipeline_hash()

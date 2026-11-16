@@ -39,7 +39,10 @@ def _save(tmp_path: Path, function: Any) -> Path:
     )
     with job:
         source = DictSource(
-            [{"id": 1, "n": 3}, {"id": 2, "n": 4}], tag_columns=["id"], source_id="n"
+            [{"id": 1, "n": 3}, {"id": 2, "n": 4}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="n",
         )
         result = op.function_pod(output_keys="value")(function).pod(
             source, label="value"
@@ -47,6 +50,7 @@ def _save(tmp_path: Path, function: Any) -> Path:
         other = DictSource(
             [{"id": 1, "other": 2}, {"id": 2, "other": 3}],
             tag_columns=["id"],
+            tag_only_columns=True,
             source_id="other",
         )
         Join()(result, other, label="joined")

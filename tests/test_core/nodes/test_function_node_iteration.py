@@ -33,7 +33,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"])
+    return ArrowTableSource(table, tag_columns=["id"], tag_only_columns=True)
 
 
 def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionJobNode:

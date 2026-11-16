@@ -51,7 +51,11 @@ def test_completion_lookup_failure_names_the_node_and_row() -> None:
     store = UnreadableCompletions(InMemoryArrowDatabase())
     job = PipelineJob(name="effects", database=store)  # pyright: ignore[reportArgumentType]  # failing wrapper of a real store
     with job:
-        pod.process(DictSource([{"id": 0, "value": 10}], tag_columns=["id"]))
+        pod.process(
+            DictSource(
+                [{"id": 0, "value": 10}], tag_columns=["id"], tag_only_columns=True
+            )
+        )
 
     with pytest.raises(OrcapodDatabaseReadError) as info:
         job.run()

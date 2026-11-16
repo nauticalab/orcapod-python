@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from typing_extensions import override
 
+from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.derived_source import validate_tags_as_data
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
@@ -221,6 +222,11 @@ class SpiralDBTableSource(RootSource):
         config: OrcaPod configuration.
         overrides: Optional pyspiral client config overrides passed through to
             ``SpiralDBConnector``, e.g. ``{"server.url": "https://api.spiraldb.dev"}``.
+        tag_only_columns: Tag columns kept as tags only, not data, exactly as in
+            v0.3; ``True`` for all of them. Keyword-only. ``True`` is the default and
+            the only value v0.3 accepts: any other value is refused, because
+            referential tags arrive in v0.4 (tags then become referential by default
+            and ``tag_only_columns`` keeps a tag plain).
         tags_as_data: Maps a key column that is a tag column of this source to the
             name of a data column that receives a copy of it, as in
             ``DerivedSource``. ``None`` (default) or an empty mapping copies nothing.
@@ -257,7 +263,10 @@ class SpiralDBTableSource(RootSource):
         config: "OrcapodConfig | None" = None,
         overrides: dict[str, str] | None = None,
         tags_as_data: Mapping[str, str] | None = None,
+        *,
+        tag_only_columns: TagOnlyColumns = True,
     ) -> None:
+        check_tag_only_columns(tag_only_columns)
         for name, value in (("limit", limit), ("max_rows", max_rows)):
             if value is not None and not _is_positive_int(value):
                 raise ValueError(
@@ -847,6 +856,7 @@ class SpiralDBTableSource(RootSource):
             table_name=config["table_name"],
             dataset=config.get("dataset", "default"),
             tag_columns=config.get("tag_columns"),
+            tag_only_columns=config.get("tag_only_columns", True),
             system_tag_columns=config.get("system_tag_columns", ()),
             where=_locationfrom_config(config.get("where") or {}),
             limit=config.get("limit"),

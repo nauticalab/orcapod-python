@@ -63,7 +63,7 @@ SCRIPT = textwrap.dedent(
     def double(x: np.ndarray) -> np.ndarray:
         return x * 2
 
-    source = DictSource(data=[{"k": "a", "x": np.arange(3.0)}], tag_columns=["k"])
+    source = DictSource(data=[{"k": "a", "x": np.arange(3.0)}], tag_columns=["k"], tag_only_columns=True)
     for _, data in double.pod(source).iter_data():
         data.content_hash()
     get_default_context().semantic_hasher.hash_object([1, "a", np.arange(2)])
@@ -113,7 +113,7 @@ READ_TENSOR_COLUMN = textwrap.dedent(
         }
     )
     try:
-        source = ArrowTableSource(table, tag_columns=["k"])
+        source = ArrowTableSource(table, tag_columns=["k"], tag_only_columns=True)
         for _, data in source.iter_data():
             data.as_dict()
     except MissingOptionalDependencyError as exc:

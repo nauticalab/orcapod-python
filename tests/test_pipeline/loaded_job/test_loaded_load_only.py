@@ -40,7 +40,10 @@ def increment(c: int) -> int:
 
 def _dict_source() -> DictSource:
     return DictSource(
-        [{"id": 0, "x": 5}, {"id": 1, "x": 10}], tag_columns=["id"], source_id="dsrc"
+        [{"id": 0, "x": 5}, {"id": 1, "x": 10}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="dsrc",
     )
 
 
@@ -54,7 +57,9 @@ def _arrow_source() -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="asrc")
+    return ArrowTableSource(
+        table, tag_columns=["id"], tag_only_columns=True, source_id="asrc"
+    )
 
 
 def _save(tmp_path: Path, db: Any, cache_mode: CacheMode | None = None) -> Path:
@@ -66,7 +71,10 @@ def _save(tmp_path: Path, db: Any, cache_mode: CacheMode | None = None) -> Path:
     with job:
         Join()(double.pod(_dict_source(), label="dbl"), _arrow_source(), label="joined")
         increment.pod(
-            CSVSource(str(csv), tag_columns=["id"], source_id="csrc"), label="inc"
+            CSVSource(
+                str(csv), tag_columns=["id"], tag_only_columns=True, source_id="csrc"
+            ),
+            label="inc",
         )
     if cache_mode is not None:
         job.nodes["joined"].attach_databases(

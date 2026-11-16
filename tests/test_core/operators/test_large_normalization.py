@@ -70,7 +70,12 @@ def _other(n_rows: int, data_column: str) -> ArrowTableSource:
     table = table.cast(
         pa.schema([pa.field(field.name, field.type, False) for field in table.schema])
     )
-    return ArrowTableSource(table, tag_columns=["t"], source_id=f"other_{data_column}")
+    return ArrowTableSource(
+        table,
+        tag_columns=["t"],
+        tag_only_columns=True,
+        source_id=f"other_{data_column}",
+    )
 
 
 Apply = Callable[[StreamProtocol, int, str | None], StreamProtocol]
@@ -184,7 +189,9 @@ def test_row_hashes_equal_for_large_and_non_large_input(
     """A ``string`` source and a ``large_string`` source of the same values give equal
     row, content and pipeline hashes after every operator."""
     small = ArrowTableSource(
-        pa.Table.from_pylist(ROWS, schema=FULL_SCHEMA), tag_columns=TAGS
+        pa.Table.from_pylist(ROWS, schema=FULL_SCHEMA),
+        tag_columns=TAGS,
+        tag_only_columns=True,
     )
     large_schema = pa.schema(
         [
@@ -208,7 +215,9 @@ def test_row_hashes_equal_for_large_and_non_large_input(
         ]
     )
     large = ArrowTableSource(
-        pa.Table.from_pylist(ROWS, schema=large_schema), tag_columns=TAGS
+        pa.Table.from_pylist(ROWS, schema=large_schema),
+        tag_columns=TAGS,
+        tag_only_columns=True,
     )
     small_out = OPERATORS[operator](small, 2, None)
     large_out = OPERATORS[operator](large, 2, None)
@@ -242,6 +251,7 @@ class TestJoinNeverPicksASide:
                 {"t": pa.array(["a", "b"][:n_rows], pa.large_string())}
             ).append_column("w", pa.array([1, 2][:n_rows], pa.int64())),
             tag_columns=["t"],
+            tag_only_columns=True,
             source_id="large",
         )
         small = _other(n_rows, "z")

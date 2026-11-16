@@ -25,7 +25,9 @@ from tests.test_user_types.child_harness import run_child
 
 def _source(key: str, value: Any) -> DictSource:
     """Return a one-row ``DictSource`` holding ``value`` in data column ``key``."""
-    return DictSource(data=[{"k": "a", key: value}], tag_columns=["k"])
+    return DictSource(
+        data=[{"k": "a", key: value}], tag_columns=["k"], tag_only_columns=True
+    )
 
 
 def _read(source: Any, key: str) -> Any:
@@ -63,7 +65,9 @@ def test_list_schema_names_the_rebound_class() -> None:
     assert _read(second, "ps") == [PointV2(1)]
 
     # A table written before the rebind reads back as the new class as well.
-    reread = ArrowTableSource(stored.select(["k", "ps"]), tag_columns=["k"])
+    reread = ArrowTableSource(
+        stored.select(["k", "ps"]), tag_columns=["k"], tag_only_columns=True
+    )
     assert reread.output_schema()[1]["ps"] == list[PointV2]
     assert type(_read(reread, "ps")[0]) is PointV2
 
@@ -130,14 +134,18 @@ def read_int_or_str(p: int | str) -> int:
 
 def test_old_class_output_feeds_a_union_parameter_of_the_new_class() -> None:
     """A pod output typed as the old class is accepted by ``New | None``."""
-    source = DictSource(data=[{"k": "a", "n": 3}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "n": 3}], tag_columns=["k"], tag_only_columns=True
+    )
     out = read_optional.pod(make_old.pod(source))
     assert _read(out, "y") == 3
 
 
 def test_union_parameter_still_rejects_another_type() -> None:
     """A union parameter with no member matching the column is still refused."""
-    source = DictSource(data=[{"k": "a", "n": 3}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "n": 3}], tag_columns=["k"], tag_only_columns=True
+    )
     with pytest.raises(ValueError, match="column 'p' has type"):
         read_int_or_str.pod(make_old.pod(source))
 

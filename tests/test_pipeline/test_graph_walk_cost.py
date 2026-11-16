@@ -215,7 +215,10 @@ def _budget(shape: str, stages: int = STAGES) -> int:
 def _source() -> DictSource:
     """Return the three-row source every graph starts from."""
     return DictSource(
-        [{"id": i, "x": i} for i in range(3)], tag_columns=["id"], source_id="src"
+        [{"id": i, "x": i} for i in range(3)],
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="src",
     )
 
 
@@ -498,7 +501,12 @@ class TestPipelineJob:
 
 def _one_row_source(value: int | float | str) -> DictSource:
     """Return a one-row source named ``src`` whose data column ``x`` holds ``value``."""
-    return DictSource([{"id": 1, "x": value}], tag_columns=["id"], source_id="src")
+    return DictSource(
+        [{"id": 1, "x": value}],
+        tag_columns=["id"],
+        tag_only_columns=True,
+        source_id="src",
+    )
 
 
 def _rename_job() -> PipelineJob:
@@ -574,7 +582,10 @@ class TestMemoInvalidation:
         node = job.nodes["plus_one"]
         assert node.output_schema()[0]["id"] is int
         other = DictSource(
-            [{"id": "one", "x": 1}], tag_columns=["id"], source_id="other"
+            [{"id": "one", "x": 1}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="other",
         )
 
         node.upstreams = (other,)

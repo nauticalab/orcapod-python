@@ -94,6 +94,7 @@ def test_function_node_store_failure_raises(tmp_path: Path, store: str) -> None:
             data=[{"k": i, "x": i} for i in range(N_ROWS)],
             tag_columns=["k"],
             source_id="src",
+            tag_only_columns=True,
         )
         double.pod(source, label="dbl")
     error = run_in_thread(job)
@@ -117,6 +118,7 @@ def test_operator_node_failure_raises(tmp_path: Path, store: str) -> None:
             ),
             tag_columns=["k"],
             source_id="left",
+            tag_only_columns=True,
         )
         right = ArrowTableSource(
             pa.table(
@@ -127,6 +129,7 @@ def test_operator_node_failure_raises(tmp_path: Path, store: str) -> None:
             ),
             tag_columns=["k"],
             source_id="right",
+            tag_only_columns=True,
         )
         Join()(left, right, label="join")
     error = run_in_thread(job)

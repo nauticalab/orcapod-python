@@ -43,7 +43,9 @@ def arrow_src():
             "value": pa.array(["a", "b", "c"], type=pa.large_string()),
         }
     )
-    return ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(
+        table=table, tag_columns=["id"], tag_only_columns=True, infer_nullable=True
+    )
 
 
 @pytest.fixture
@@ -57,6 +59,7 @@ def arrow_src_with_record_id():
     return ArrowTableSource(
         table=table,
         tag_columns=["id"],
+        tag_only_columns=True,
         record_id_column="id",
         source_id="arrow_with_rid",
         infer_nullable=True,
@@ -72,6 +75,7 @@ def dict_src():
             {"id": 3, "value": "c"},
         ],
         tag_columns=["id"],
+        tag_only_columns=True,
     )
 
 
@@ -83,7 +87,7 @@ def list_src():
 @pytest.fixture
 def df_src():
     df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-    return DataFrameSource(data=df, tag_columns="id")
+    return DataFrameSource(data=df, tag_columns="id", tag_only_columns=True)
 
 
 ALL_SOURCE_FIXTURES = ["arrow_src", "dict_src", "list_src", "df_src"]
@@ -428,7 +432,7 @@ class TestEdgeCases:
             {"a": 1, "b": 2, "val": "x"},
             {"a": 3, "b": 4, "val": "y"},
         ]
-        src = DictSource(data=data, tag_columns=["a", "b"])
+        src = DictSource(data=data, tag_columns=["a", "b"], tag_only_columns=True)
         tag_keys, data_keys = src.keys()
         assert set(tag_keys) == {"a", "b"}
         assert "val" in data_keys
@@ -453,7 +457,7 @@ class TestEdgeCases:
     def test_df_source_missing_tag_column_raises(self):
         df = pl.DataFrame({"x": [1, 2, 3]})
         with pytest.raises(ValueError, match="not found"):
-            DataFrameSource(data=df, tag_columns="nonexistent")
+            DataFrameSource(data=df, tag_columns="nonexistent", tag_only_columns=True)
 
     def test_arrow_source_strips_system_columns_from_input(self):
         """System columns in the input table are silently dropped."""

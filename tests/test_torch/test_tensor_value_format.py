@@ -43,7 +43,9 @@ def semantic_hash(value: Any) -> Any:
 
 def data_hash(value: Any) -> Any:
     """The content hash of a one-row data holding ``value``."""
-    source = DictSource(data=[{"k": "r", "x": value}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "r", "x": value}], tag_columns=["k"], tag_only_columns=True
+    )
     return next(iter(source.iter_data()))[1].content_hash()
 
 
@@ -59,7 +61,9 @@ def test_table_token_carries_identifier_and_digest() -> None:
     hasher = get_default_context().arrow_hasher
     assert isinstance(hasher, StarfixArrowHasher)
     t = torch.arange(3.0)
-    table = DictSource(data=[{"k": "r", "x": t}], tag_columns=["k"]).as_table()
+    table = DictSource(
+        data=[{"k": "r", "x": t}], tag_columns=["k"], tag_only_columns=True
+    ).as_table()
     # Non-public helper: this test is about the token the hasher builds for a cell.
     processed = hasher._process_table_columns(table.select(["x"]))  # pyright: ignore[reportPrivateUsage]
     token = processed.column("x")[0].as_py()
@@ -149,7 +153,11 @@ def test_unsupported_tensors_are_refused_naming_column_and_reason(
 ) -> None:
     """Storing an unsupported tensor raises naming the column and the reason."""
     with pytest.raises(UnsupportedValueError, match="'payload'") as info:
-        DictSource(data=[{"k": "r", "payload": value}], tag_columns=["k"]).as_table()
+        DictSource(
+            data=[{"k": "r", "payload": value}],
+            tag_columns=["k"],
+            tag_only_columns=True,
+        ).as_table()
     assert reason.lower() in str(info.value).lower()
 
 
@@ -183,7 +191,9 @@ def test_non_tensor_returned_for_declared_tensor_is_refused_at_the_pod(
         """Return the value under test instead of a tensor."""
         return returned
 
-    source = DictSource(data=[{"k": "a", "x": torch.zeros(2)}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "x": torch.zeros(2)}], tag_columns=["k"], tag_only_columns=True
+    )
     with pytest.raises(
         OutputTypeError,
         match=f"'bad' returned .*{type_name} for output 'y'.*declared torch.Tensor",
@@ -202,6 +212,7 @@ def test_none_returned_for_optional_tensor_is_accepted() -> None:
     source = DictSource(
         data=[{"k": "a", "x": torch.zeros(0)}, {"k": "b", "x": torch.ones(2)}],
         tag_columns=["k"],
+        tag_only_columns=True,
     )
     got = {t.as_dict()["k"]: d.as_dict()["y"] for t, d in maybe.pod(source).iter_data()}
     assert got["a"] is None
@@ -216,7 +227,9 @@ def test_declared_tensor_subclass_refuses_a_plain_tensor() -> None:
         """Return a plain tensor where ``nn.Parameter`` is declared."""
         return x * 2  # pyright: ignore[reportReturnType]  # deliberately the base class
 
-    source = DictSource(data=[{"k": "a", "x": torch.ones(2)}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "x": torch.ones(2)}], tag_columns=["k"], tag_only_columns=True
+    )
     with pytest.raises(
         OutputTypeError,
         match="returned torch.Tensor for output 'y'.*declared torch.nn.parameter.Parameter",
@@ -241,13 +254,17 @@ def test_subclass_instance_is_accepted_for_declared_tensor() -> None:
         """Return a plain tensor with the same elements."""
         return x * 2
 
-    source = DictSource(data=[{"k": "a", "x": torch.ones(2)}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "x": torch.ones(2)}], tag_columns=["k"], tag_only_columns=True
+    )
     stream = as_parameter.pod(source)
     y_type = stream.as_table().schema.field("y").type
     assert isinstance(y_type, pa.ExtensionType)
     assert y_type.extension_name == EXTENSION_NAME
     # Decode the stored cell: the stream's own rows hold the returned object.
-    stored = ArrowTableSource(stream.as_table().select(["k", "y"]), tag_columns=["k"])
+    stored = ArrowTableSource(
+        stream.as_table().select(["k", "y"]), tag_columns=["k"], tag_only_columns=True
+    )
     got = [d.as_dict()["y"] for _, d in stored.iter_data()]
     assert type(got[0]) is torch.nn.Parameter
     assert not got[0].requires_grad
@@ -316,7 +333,10 @@ def test_declared_subclass_with_its_own_logical_type_requires_that_subclass() ->
         return (x * 2).as_subclass(LabeledTensor)
 
     source = DictSource(
-        data=[{"k": "a", "x": torch.ones(2)}], tag_columns=["k"], data_context=ctx
+        data=[{"k": "a", "x": torch.ones(2)}],
+        tag_columns=["k"],
+        data_context=ctx,
+        tag_only_columns=True,
     )
     with pytest.raises(
         OutputTypeError,

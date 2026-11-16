@@ -73,7 +73,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def _source(**kwargs: Any) -> SpiralDBTableSource:
     """Return a source over the ``spike`` table."""
-    return SpiralDBTableSource(_PROJECT, "spike", **kwargs)
+    return SpiralDBTableSource(_PROJECT, "spike", tag_only_columns=True, **kwargs)
 
 
 def _column(name: str, table: pa.Table) -> list[Any]:

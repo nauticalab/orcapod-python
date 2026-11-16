@@ -66,12 +66,17 @@ def test_enable_file_hash_caching_is_exported_at_top_level() -> None:
 def test_dict_source_with_no_rows_and_no_schema_says_table_is_empty() -> None:
     """A ``DictSource`` over no rows and no schema raises "Table is empty"."""
     with pytest.raises(ValueError, match="Table is empty"):
-        DictSource(data=[], tag_columns=["a"])
+        DictSource(data=[], tag_columns=["a"], tag_only_columns=True)
 
 
 def test_dict_source_with_no_rows_and_a_schema_still_builds() -> None:
     """A zero-row ``DictSource`` with ``data_schema`` still builds an empty source."""
-    source = DictSource(data=[], tag_columns=["a"], data_schema={"a": int, "x": int})
+    source = DictSource(
+        data=[],
+        tag_columns=["a"],
+        tag_only_columns=True,
+        data_schema={"a": int, "x": int},
+    )
     assert source.as_table().num_rows == 0
 
 
@@ -89,6 +94,7 @@ def _wide_source() -> DictSource:
     return DictSource(
         data=[{"subject": "s1", "weight": 70.0, "height": 1.8, "age": 30}],
         tag_columns=["subject"],
+        tag_only_columns=True,
     )
 
 
@@ -129,6 +135,7 @@ def test_type_mismatch_error_names_the_column_and_both_types(
     source = DictSource(
         data=[{"subject": "s1", "weight": "heavy", "height": 1.8}],
         tag_columns=["subject"],
+        tag_only_columns=True,
     )
     with caplog.at_level(logging.DEBUG), pytest.raises(ValueError) as excinfo:
         compute_bmi.pod(source)
@@ -148,7 +155,9 @@ def test_missing_parameter_error_names_the_parameter(
         caplog: Captures Orcapod's log records.
     """
     source = DictSource(
-        data=[{"subject": "s1", "weight": 70.0}], tag_columns=["subject"]
+        data=[{"subject": "s1", "weight": 70.0}],
+        tag_columns=["subject"],
+        tag_only_columns=True,
     )
     with caplog.at_level(logging.DEBUG), pytest.raises(ValueError) as excinfo:
         compute_bmi.pod(source)

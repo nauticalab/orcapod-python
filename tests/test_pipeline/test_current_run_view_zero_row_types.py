@@ -53,7 +53,9 @@ def _source(data: str, source_id: str) -> ArrowTableSource:
     table = pa.table(
         {"g": [0, 1, 0, 1], "id": [0, 1, 2, 3], data: [10, 20, 30, 40]}, schema=schema
     )
-    return ArrowTableSource(table, tag_columns=["g", "id"], source_id=source_id)
+    return ArrowTableSource(
+        table, tag_columns=["g", "id"], source_id=source_id, tag_only_columns=True
+    )
 
 
 def _job(db: InMemoryArrowDatabase | None = None) -> PipelineJob:

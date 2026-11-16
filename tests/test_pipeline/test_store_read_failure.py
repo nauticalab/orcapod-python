@@ -76,6 +76,7 @@ def build_job(database_path: Path, keys: str = "abc") -> PipelineJob:
         pa.table({"k": list(keys), "x": list(range(1, len(keys) + 1))}),
         tag_columns=["k"],
         infer_nullable=True,
+        tag_only_columns=True,
     )
     job = PipelineJob(
         name="itl884", database=DeltaTableDatabase(base_path=database_path)
@@ -250,6 +251,7 @@ def test_unrelated_concurrent_failure_does_not_hide_store_read_error(tmp_path):
         pa.table({"k": ["a", "b", "c"], "x": [1, 2, 3]}),
         tag_columns=["k"],
         infer_nullable=True,
+        tag_only_columns=True,
     )
     job = PipelineJob(name="itl884", database=DeltaTableDatabase(base_path=stored))
     with job:

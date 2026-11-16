@@ -86,7 +86,9 @@ def _source() -> ArrowTableSource:
         [pa.array(IDS, type=pa.int64()), pa.array(IDS, type=pa.int64())],
         schema=schema,
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="src")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id="src", tag_only_columns=True
+    )
 
 
 def _unrelated() -> ArrowTableSource:
@@ -101,7 +103,9 @@ def _unrelated() -> ArrowTableSource:
         [pa.array([0, 1], type=pa.int64()), pa.array([5, 6], type=pa.int64())],
         schema=schema,
     )
-    return ArrowTableSource(table, tag_columns=["j"], source_id="unrelated")
+    return ArrowTableSource(
+        table, tag_columns=["j"], source_id="unrelated", tag_only_columns=True
+    )
 
 
 def _partner() -> ArrowTableSource:
@@ -116,7 +120,9 @@ def _partner() -> ArrowTableSource:
         [pa.array(IDS, type=pa.int64()), pa.array(IDS, type=pa.int64())],
         schema=schema,
     )
-    return ArrowTableSource(table, tag_columns=["id"], source_id="partner")
+    return ArrowTableSource(
+        table, tag_columns=["id"], source_id="partner", tag_only_columns=True
+    )
 
 
 def _stamped_pod() -> FunctionPod:
@@ -255,7 +261,10 @@ def test_the_reported_reproduction() -> None:
         return x + 1
 
     source = DictSource(
-        [{"k": i, "x": i} for i in range(3)], tag_columns=["k"], source_id="s"
+        [{"k": i, "x": i} for i in range(3)],
+        tag_columns=["k"],
+        source_id="s",
+        tag_only_columns=True,
     )
     selected = SelectDataColumns(["y"])(plus_one.pod(source))
     assert selected.as_table().num_rows == 3

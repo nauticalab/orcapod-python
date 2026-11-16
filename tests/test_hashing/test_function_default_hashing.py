@@ -418,6 +418,7 @@ class TestPodIdentityIgnoresDefaults:
             data=[{"k": "a", "x": 1}, {"k": "b", "x": 2}],
             tag_columns=["k"],
             source_id="defaults_source",
+            tag_only_columns=True,
         )
         return pod, pod(source)
 

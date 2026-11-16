@@ -64,7 +64,7 @@ _SOURCE_READ = """
         str(path),
         pa.table({"id": pa.array([1, 2, 3]), "x": pa.array([1.0, 2.0, 3.0])}),
     )
-    source = op.sources.DeltaTableSource(path, tag_columns=["id"])
+    source = op.sources.DeltaTableSource(path, tag_columns=["id"], tag_only_columns=True)
     assert source.as_table().num_rows == 3
     print("read", flush=True)
 """

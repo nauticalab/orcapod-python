@@ -73,10 +73,16 @@ _SCRIPT = textwrap.dedent(
         s1 = DictSource(
             [{"id": 1, "p": cls(u=1, v="a")}, {"id": 2, "p": cls(u=2, v="b")}],
             tag_columns=["id"],
+            tag_only_columns=True,
             data_schema={"id": int, "p": cls},
             source_id="s1",
         )
-        s2 = DictSource([{"id": 1, "r": 5}, {"id": 2, "r": 6}], tag_columns=["id"], source_id="s2")
+        s2 = DictSource(
+            [{"id": 1, "r": 5}, {"id": 2, "r": 6}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="s2",
+        )
         return s1, s2
 
 
@@ -268,6 +274,7 @@ _NULLABLE_SCRIPT = textwrap.dedent(
         return DictSource(
             [{"id": 1, "p": cls(u=1, v="a")}, {"id": 2, "p": None}],
             tag_columns=["id"],
+            tag_only_columns=True,
             data_schema={"id": int, "p": cls | None},
             source_id="s",
         )

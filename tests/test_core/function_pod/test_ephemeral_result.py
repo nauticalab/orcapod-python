@@ -57,7 +57,11 @@ def _make_source_stream(
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in rows[0]}
     )
     source = ArrowTableSource(
-        table, tag_columns=tag_columns, source_id="test_src", infer_nullable=True
+        table,
+        tag_columns=tag_columns,
+        source_id="test_src",
+        infer_nullable=True,
+        tag_only_columns=True,
     )
     return source
 
@@ -655,6 +659,7 @@ class TestPipelineInjectsStore:
         stream = ArrowTableSource(
             _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}]).as_table(),
             tag_columns=["id"],
+            tag_only_columns=True,
         )
         pod = _make_pod()
 
@@ -677,7 +682,9 @@ class TestPipelineInjectsStore:
 
         # A job's input must be a source (ITL-1126: a raw stream has no system tags).
         stream = ArrowTableSource(
-            _make_stream([{"id": 0, "x": 10}]).as_table(), tag_columns=["id"]
+            _make_stream([{"id": 0, "x": 10}]).as_table(),
+            tag_columns=["id"],
+            tag_only_columns=True,
         )
         pod = _make_pod()
 

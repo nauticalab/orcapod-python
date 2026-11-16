@@ -143,7 +143,7 @@ child = getattr(wsfamily, os.environ["WS_CHILD"])
 
 def use_base():
     '''Return the Arrow extension name the base class is stored under.'''
-    source = DictSource(data=[{"k": "a", "p": base(x=1)}], tag_columns=["k"])
+    source = DictSource(data=[{"k": "a", "p": base(x=1)}], tag_columns=["k"], tag_only_columns=True)
     return source.as_table().schema.field("p").type.extension_name
 
 

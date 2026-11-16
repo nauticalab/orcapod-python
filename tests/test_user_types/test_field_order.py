@@ -83,7 +83,12 @@ PAIRS: dict[str, tuple[Any, Any]] = {
 
 def _source(value: Any) -> DictSource:
     """Return a one-row ``DictSource`` holding ``value`` in data column ``p``."""
-    return DictSource(data=[{"k": "a", "p": value}], tag_columns=["k"], source_id="s")
+    return DictSource(
+        data=[{"k": "a", "p": value}],
+        tag_columns=["k"],
+        source_id="s",
+        tag_only_columns=True,
+    )
 
 
 def _column_type(value: Any) -> pa.ExtensionType:

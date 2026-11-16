@@ -31,7 +31,7 @@ def _make_source_with_required_field(
         {"subject": subjects, "value": values},
         schema=schema,
     )
-    return ArrowTableSource(table, tag_columns=["subject"])
+    return ArrowTableSource(table, tag_columns=["subject"], tag_only_columns=True)
 
 
 def test_failed_function_with_join_does_not_abort_pipeline():

@@ -92,6 +92,7 @@ def build_job(database_path: Path, keys: str, *, reader_first: bool) -> Pipeline
     source = ArrowTableSource(
         pa.table({"k": list(keys), "x": list(range(1, len(keys) + 1))}),
         tag_columns=["k"],
+        tag_only_columns=True,
         infer_nullable=True,
     )
     job = PipelineJob(

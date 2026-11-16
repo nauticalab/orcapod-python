@@ -146,6 +146,7 @@ def _source(context: DataContext, value: Any) -> DictSource:
         tag_columns=["k"],
         source_id="s",
         data_context=context,
+        tag_only_columns=True,
     )
 
 
@@ -235,7 +236,11 @@ def test_a_column_stored_under_another_list_is_refused_on_read(tmp_path: Path) -
     table = _source(lenient, _transposed()).as_table().select(["k", "x"])
     with pytest.raises(LogicalTypeIdentifierError) as raised:
         source = ArrowTableSource(
-            table, tag_columns=["k"], source_id="stored", data_context=strict
+            table,
+            tag_columns=["k"],
+            source_id="stored",
+            data_context=strict,
+            tag_only_columns=True,
         )
         for _, data in source.iter_data():
             data.as_dict()

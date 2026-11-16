@@ -57,7 +57,11 @@ class ConcurrentLocalExecutor(LocalPythonFunctionExecutor):
 
 def source() -> DictSource:
     """Six rows: tag ``k`` and data ``x``, both ``0..5``."""
-    return DictSource([{"k": i, "x": i} for i in range(ROWS)], tag_columns=["k"])
+    return DictSource(
+        [{"k": i, "x": i} for i in range(ROWS)],
+        tag_columns=["k"],
+        tag_only_columns=True,
+    )
 
 
 def stream(kind: str) -> Any:

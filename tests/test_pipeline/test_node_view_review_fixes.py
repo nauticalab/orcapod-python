@@ -38,7 +38,10 @@ def _tap(fn: Any) -> SideEffectPod:
 def _source() -> DictSource:
     """Three rows, tag ``k``, data ``x``."""
     return DictSource(
-        [{"k": i, "x": i} for i in range(3)], tag_columns=["k"], source_id="s"
+        [{"k": i, "x": i} for i in range(3)],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="s",
     )
 
 
@@ -129,6 +132,7 @@ def _base_stream() -> Any:
     return ArrowTableSource(
         pa.table({"id": [1, 2], "x": [1, 2]}, schema=schema),
         tag_columns=["id"],
+        tag_only_columns=True,
         source_id="base",
     )
 
@@ -418,7 +422,10 @@ def _job_over_source_bound_to_a_delivering_stream() -> PipelineJob:
     job = PipelineJob(name="j", database=InMemoryArrowDatabase())
     with job:
         source = DictSource(
-            [{"id": 1, "x": 1}, {"id": 2, "x": 2}], tag_columns=["id"], source_id="s"
+            [{"id": 1, "x": 1}, {"id": 2, "x": 2}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="s",
         )
         _twice_pod(source, label="tw")
     job.run()
@@ -577,7 +584,10 @@ def test_a_load_only_run_refuses_a_source_slot_bound_to_a_computing_stream(
     job = PipelineJob(name="j", database=InMemoryArrowDatabase())
     with job:
         source = DictSource(
-            [{"id": 1, "x": 1}, {"id": 2, "x": 2}], tag_columns=["id"], source_id="s"
+            [{"id": 1, "x": 1}, {"id": 2, "x": 2}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="s",
         )
         _twice_pod(source, label="tw")
     job.run()
@@ -665,7 +675,10 @@ def test_a_load_only_run_refuses_a_source_slot_bound_to_a_side_effect_node(
     job = PipelineJob(name="j", database=InMemoryArrowDatabase())
     with job:
         source = DictSource(
-            [{"id": 1, "x": 1}, {"id": 2, "x": 2}], tag_columns=["id"], source_id="s"
+            [{"id": 1, "x": 1}, {"id": 2, "x": 2}],
+            tag_columns=["id"],
+            tag_only_columns=True,
+            source_id="s",
         )
         _twice_pod(source, label="tw")
     job.run()

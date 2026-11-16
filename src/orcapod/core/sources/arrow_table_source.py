@@ -4,6 +4,7 @@ import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import arrow_utils
@@ -67,6 +68,11 @@ class ArrowTableSource(RootSource):
     table hash, which changes with row order.
     Whenever row order can vary between runs, pass an explicit ``source_id``
     and set ``record_id_column`` to a column that is unique per row.
+
+    Plain tags: ``tag_only_columns`` (keyword-only) is ``True``, the default, and keeps
+    every tag column a tag only, not data, as every source does in v0.3. Any other value
+    is refused: referential tags arrive in v0.4, where tags become referential by default
+    and ``tag_only_columns`` names the tags kept plain.
     """
 
     # The config type key; also the kind prefix of the default source id.
@@ -79,8 +85,11 @@ class ArrowTableSource(RootSource):
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         infer_nullable: bool = False,
+        *,
+        tag_only_columns: TagOnlyColumns = True,
         **kwargs: Any,
     ) -> None:
+        check_tag_only_columns(tag_only_columns)
         super().__init__(**kwargs)
         tag_columns = _normalize_column_list(tag_columns)
 

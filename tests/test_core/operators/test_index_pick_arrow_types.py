@@ -103,7 +103,7 @@ def _source(**targets: Column) -> ArrowTableSource:
     columns = {**_base_columns(), **targets}
     table = pa.table(list(columns.values()), names=list(columns))
     table = table.cast(pa.schema([f.with_nullable(False) for f in table.schema]))
-    return ArrowTableSource(table, tag_columns=list(TAGS))
+    return ArrowTableSource(table, tag_columns=list(TAGS), tag_only_columns=True)
 
 
 def _index_source(hit: bool = True) -> ArrowTableSource:

@@ -398,7 +398,7 @@ def test_pipeline_stores_nothing_for_a_refused_frame(
         if store_name == "in_memory"
         else DeltaTableDatabase(tmp_path / "delta")
     )
-    source = DictSource([{"k": "x", "n": 1}], tag_columns=["k"])
+    source = DictSource([{"k": "x", "n": 1}], tag_columns=["k"], tag_only_columns=True)
     job = PipelineJob(name="refused", database=store)
     with job:
         pod.pod(source, label="make")

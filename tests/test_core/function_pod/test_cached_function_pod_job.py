@@ -35,7 +35,9 @@ ROWS = [{"k": 1, "x": 2, "y": 3}, {"k": 2, "x": 5, "y": 5}]
 
 
 def make_source(rows: list[dict[str, int]] | None = None) -> DictSource:
-    return DictSource(rows or ROWS, tag_columns=["k"], source_id="s")
+    return DictSource(
+        rows or ROWS, tag_columns=["k"], tag_only_columns=True, source_id="s"
+    )
 
 
 class Counter:
@@ -185,8 +187,12 @@ def test_inputs_are_joined_once() -> None:
     cached_pod = CachedFunctionPod(
         function_pod=counter.pod(), result_database=InMemoryArrowDatabase()
     )
-    left = DictSource([{"k": 1, "x": 2}], tag_columns=["k"], source_id="l")
-    right = DictSource([{"k": 1, "y": 3}], tag_columns=["k"], source_id="r")
+    left = DictSource(
+        [{"k": 1, "x": 2}], tag_columns=["k"], tag_only_columns=True, source_id="l"
+    )
+    right = DictSource(
+        [{"k": 1, "y": 3}], tag_columns=["k"], tag_only_columns=True, source_id="r"
+    )
     joins: list[int] = []
     original = Join.process
 

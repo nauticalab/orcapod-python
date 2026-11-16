@@ -27,7 +27,9 @@ def test_node_returns_every_row_right_after_first_run(
     n_rows: int,
 ) -> None:
     source = op.sources.DictSource(
-        [{"id": i, "x": 10 * i} for i in range(n_rows)], tag_columns=["id"]
+        [{"id": i, "x": 10 * i} for i in range(n_rows)],
+        tag_columns=["id"],
+        tag_only_columns=True,
     )
 
     @op.function_pod(output_keys=["result"])

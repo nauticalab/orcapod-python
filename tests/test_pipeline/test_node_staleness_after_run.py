@@ -159,12 +159,14 @@ def _job(store: ArrowDatabaseProtocol) -> PipelineJob:
         tag_columns=["id", "g"],
         source_id="a",
         label="A",
+        tag_only_columns=True,
     )
     b = ArrowTableSource(
         _table({"id": [2, 0, 4, 1, 3], "z": [20, 0, 40, 10, 30]}),
         tag_columns=["id"],
         source_id="b",
         label="B",
+        tag_only_columns=True,
     )
     job = PipelineJob(name="itl1042", database=store)
     with job:
@@ -315,6 +317,7 @@ def test_a_function_node_is_stamped_before_its_output_closes(with_store: bool) -
         tag_columns=["id"],
         source_id="a",
         label="A",
+        tag_only_columns=True,
     )
     store = InMemoryArrowDatabase() if with_store else None
     pod = scale.pod

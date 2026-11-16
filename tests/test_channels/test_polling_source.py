@@ -246,7 +246,9 @@ class TestAsyncIterDataDefault:
         from orcapod.types import Schema
 
         # A bound source needs one system-tag pair (ITL-1126); a raw stream has none.
-        stream = ArrowTableSource(_make_arrow_stream(2).as_table(), tag_columns=["id"])
+        stream = ArrowTableSource(
+            _make_arrow_stream(2).as_table(), tag_columns=["id"], tag_only_columns=True
+        )
         node = SourceJobNode(
             name="test",
             tag_schema=Schema({"id": int}),
@@ -265,7 +267,9 @@ class TestAsyncIterDataDefault:
         from orcapod.types import Schema
 
         # A bound source needs one system-tag pair (ITL-1126); a raw stream has none.
-        stream = ArrowTableSource(_make_arrow_stream(1).as_table(), tag_columns=["id"])
+        stream = ArrowTableSource(
+            _make_arrow_stream(1).as_table(), tag_columns=["id"], tag_only_columns=True
+        )
         node = SourceJobNode(
             name="test",
             tag_schema=Schema({"id": int}),

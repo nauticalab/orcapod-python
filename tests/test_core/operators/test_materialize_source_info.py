@@ -71,7 +71,9 @@ def _source(n: int = 4, offset: int = 0) -> ArrowTableSource:
             "y": pa.array([offset + i * 10 + 1 for i in range(n)], pa.int64()),
         }
     )
-    return ArrowTableSource(_non_null(table), tag_columns=["id", "g"])
+    return ArrowTableSource(
+        _non_null(table), tag_columns=["id", "g"], tag_only_columns=True
+    )
 
 
 def _list_source(n: int = 3) -> ArrowTableSource:
@@ -82,7 +84,7 @@ def _list_source(n: int = 3) -> ArrowTableSource:
             "x": pa.array([[i, i + 1] for i in range(n)], pa.large_list(pa.int64())),
         }
     )
-    return ArrowTableSource(_non_null(table), tag_columns=["id"])
+    return ArrowTableSource(_non_null(table), tag_columns=["id"], tag_only_columns=True)
 
 
 def _source_info_tokens(rows: Sequence[Row], column: str = "x") -> list[Any]:
@@ -426,6 +428,7 @@ class TestIndexPickKeepPerRowSourceInfo:
                 {"animal": "bird", "scores": {"speed": 10}},
             ],
             tag_columns=["animal"],
+            tag_only_columns=True,
             data_schema={"animal": str, "scores": dict[str, int]},
         )
         inputs = {
@@ -549,7 +552,7 @@ def _pin_source() -> ArrowTableSource:
             "y": pa.array([4, 5, 6], pa.int64()),
         }
     )
-    return ArrowTableSource(_non_null(table), tag_columns=["id"])
+    return ArrowTableSource(_non_null(table), tag_columns=["id"], tag_only_columns=True)
 
 
 def _record_ids(node: OperatorJobNode) -> dict[str, bytes]:

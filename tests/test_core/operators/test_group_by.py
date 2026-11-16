@@ -37,6 +37,7 @@ def session_source(session_table) -> ArrowTableSource:
         session_table,
         tag_columns=["subject", "date", "probe"],
         infer_nullable=True,
+        tag_only_columns=True,
     )
 
 
@@ -184,7 +185,9 @@ class TestGroupByKeepsOnlyKeyTags:
                 "v": pa.array([1, 2, 3], pa.int64()),
             }
         )
-        source = ArrowTableSource(table, tag_columns=["a", "c"], infer_nullable=True)
+        source = ArrowTableSource(
+            table, tag_columns=["a", "c"], infer_nullable=True, tag_only_columns=True
+        )
         out = GroupBy(by=["a"])(source)
         assert out.keys() == (("a",), ("v",))
         assert out.as_table().to_pylist() == [{"a": "x", "v": [3, 2, 1]}]
@@ -232,7 +235,10 @@ class TestGroupByOrdering:
             }
         )
         source = ArrowTableSource(
-            table, tag_columns=["g", "n", "s"], infer_nullable=True
+            table,
+            tag_columns=["g", "n", "s"],
+            infer_nullable=True,
+            tag_only_columns=True,
         )
         # Members by (n, s): (1, "a"), (1, None), (2, "c"), (3, "b"), (None, "a").
         assert GroupBy(by=["g"])(source).as_table().to_pylist() == [
@@ -245,7 +251,10 @@ class TestGroupByOrdering:
 
         def run(tbl):
             src = ArrowTableSource(
-                tbl, tag_columns=["subject", "date", "probe"], infer_nullable=True
+                tbl,
+                tag_columns=["subject", "date", "probe"],
+                infer_nullable=True,
+                tag_only_columns=True,
             )
             return GroupBy(by=["subject", "date"]).process(src).as_table()
 
@@ -262,7 +271,9 @@ class TestGroupByOrdering:
         when the default became ``arrow_table:<label>:<hex>`` (ITL-957).
         """
         table = pa.table({"subject": ["G", "G"], "path": ["b", "a"]})
-        src = ArrowTableSource(table, tag_columns=["subject"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["subject"], infer_nullable=True, tag_only_columns=True
+        )
         out = GroupBy(by=["subject"]).process(src)
         assert len(out.as_table()) == 1
         assert out.as_table().column("path").to_pylist()[0] == ["a", "b"]
@@ -270,7 +281,9 @@ class TestGroupByOrdering:
     def test_record_id_breaks_ties_between_duplicate_tags(self):
         """Duplicate tag tuples must not fall back to raw emission order."""
         table = pa.table({"s": ["G", "G"], "p": [1, 1], "path": ["z", "a"]})
-        src = ArrowTableSource(table, tag_columns=["s", "p"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["s", "p"], infer_nullable=True, tag_only_columns=True
+        )
         out = GroupBy(by=["s"]).process(src)
         # Emission order would give ["z", "a"]; record_id imposes ["a", "z"].
         assert out.as_table().column("path").to_pylist()[0] == ["a", "z"]
@@ -296,11 +309,13 @@ class TestGroupByOrdering:
             pa.table({"k": ["t", "t"], "a": [10, 20]}),
             tag_columns=["k"],
             infer_nullable=True,
+            tag_only_columns=True,
         )
         right = ArrowTableSource(
             pa.table({"k": ["t"], "b": [1]}),
             tag_columns=["k"],
             infer_nullable=True,
+            tag_only_columns=True,
         )
         joined = Join().process(left, right)
         out = GroupBy(by=["k"]).process(joined).as_table()
@@ -336,7 +351,9 @@ class TestGroupByValidation:
         ``TypeError: unhashable type: 'list'`` naming neither operator nor column.
         """
         table = pa.table({"s": ["G", "G"], "v": [1, 2]})
-        src = ArrowTableSource(table, tag_columns=["s"], infer_nullable=True)
+        src = ArrowTableSource(
+            table, tag_columns=["s"], infer_nullable=True, tag_only_columns=True
+        )
         batched = Batch(batch_size=2).process(src)
 
         with pytest.raises(InputValidationError, match="list-valued"):
@@ -504,6 +521,7 @@ def _path_stream() -> StreamProtocol:
         ),
         tag_columns=["date", "probe"],
         infer_nullable=True,
+        tag_only_columns=True,
     )
     return FunctionPod(PythonDataFunction(_make_path, output_keys="result_path"))(
         source

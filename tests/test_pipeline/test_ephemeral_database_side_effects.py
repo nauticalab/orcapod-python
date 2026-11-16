@@ -31,7 +31,10 @@ def _job(root: pathlib.Path) -> PipelineJob:
         """Receive ``x``."""
 
     source = DictSource(
-        [{"k": i, "x": i} for i in range(3)], tag_columns=["k"], source_id="s"
+        [{"k": i, "x": i} for i in range(3)],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="s",
     )
     job = PipelineJob(name="eph", database=DeltaTableDatabase(root / "db"))
     tap = SideEffectPod(deliver, config=SideEffectPodConfig(track_completion=False))

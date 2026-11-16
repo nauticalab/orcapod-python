@@ -29,7 +29,9 @@ def _source() -> StreamProtocol:
             "x": pa.array([30, 10, 20, 50, 40], pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["k", "id"], source_id=SRC)
+    return ArrowTableSource(
+        table, tag_columns=["k", "id"], source_id=SRC, tag_only_columns=True
+    )
 
 
 def _tokens(stream: StreamProtocol, column: str) -> list[Any]:
@@ -117,7 +119,9 @@ def test_scalar_token_keeps_the_indexed_form() -> None:
             ]
         ),
     )
-    source = ArrowTableSource(table, tag_columns=["id"], source_id=SRC)
+    source = ArrowTableSource(
+        table, tag_columns=["id"], source_id=SRC, tag_only_columns=True
+    )
     before = _tokens(source, "v")
     result = Index("v", 1, out="second")(source)
     assert _tokens(result, "second") == [f"{t}[1]" for t in before]

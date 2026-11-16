@@ -18,6 +18,7 @@ def _source(arrays: dict[str, Any]) -> DictSource:
         data=[{"k": k, "x": v} for k, v in arrays.items()],
         tag_columns=["k"],
         source_id="arrays",
+        tag_only_columns=True,
     )
 
 

@@ -54,6 +54,11 @@ Every column of a source is either a tag column or a data column.
   uses tags to match rows when it combines tables.
 - **Data columns** are everything else: the values that were measured or recorded.
 
+A tag column is a tag only, never also a data column. `CSVSource`, like every source built
+from a table, accepts `tag_only_columns=True`, which says exactly that and is the default in
+this version. From Orcapod v0.4 tags become referential by default (a tag that is also the
+data column of the same name), and `tag_only_columns=True` keeps them plain as they are here.
+
 You choose the tag columns; all remaining columns become data columns. `output_schema()`
 returns both groups, with their types:
 

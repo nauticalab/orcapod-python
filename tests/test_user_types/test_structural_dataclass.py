@@ -24,7 +24,12 @@ from tests.test_user_types.child_harness import WSJOB, run_child, write_files
 
 def _source(value: Any, key: str = "p") -> DictSource:
     """Return a one-row source holding ``value`` in data column ``key``."""
-    return DictSource(data=[{"k": "a", key: value}], tag_columns=["k"], source_id="s")
+    return DictSource(
+        data=[{"k": "a", key: value}],
+        tag_columns=["k"],
+        source_id="s",
+        tag_only_columns=True,
+    )
 
 
 def _extension_name(source: DictSource, key: str = "p") -> str:
@@ -599,6 +604,7 @@ def test_pod_parameter_in_a_container_is_compatible_and_passed_as_is() -> None:
         data=[row],
         tag_columns=["k"],
         source_id="s",
+        tag_only_columns=True,
     )
     assert _read(look.pod(source), "seen") == "9"
 
@@ -647,7 +653,7 @@ def make(x: int) -> Sample:
 
 job = PipelineJob(name="w", database=DeltaTableDatabase(Path(os.environ["WS_DB"])))
 with job:
-    make.pod(DictSource(data=[{"k": "a", "x": 1}], tag_columns=["k"], source_id="s"), label="make")
+    make.pod(DictSource(data=[{"k": "a", "x": 1}], tag_columns=["k"], tag_only_columns=True, source_id="s"), label="make")
 job.run()
 report({"rows": job.nodes["make"].as_table().num_rows})
 """

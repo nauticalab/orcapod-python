@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
 
+from orcapod.core.referential_tags import TagOnlyColumns, check_tag_only_columns
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.reload import keep_nullable_columns, same_rows
 from orcapod.core.sources.stream_builder import (
@@ -63,6 +64,11 @@ class DBTableSource(RootSource):
         label: Human-readable label for this source node.
         data_context: Data context governing type conversion and hashing.
         config: Orcapod configuration (controls hash character counts, etc.).
+        tag_only_columns: Tag columns kept as tags only, not data, exactly as in
+            v0.3; ``True`` for all of them. Keyword-only. ``True`` is the default and
+            the only value v0.3 accepts: any other value is refused, because
+            referential tags arrive in v0.4 (tags then become referential by default
+            and ``tag_only_columns`` keeps a tag plain).
 
     Raises:
         ValueError: If the table is not found, has no PK columns and none are
@@ -81,8 +87,10 @@ class DBTableSource(RootSource):
         data_context: str | contexts.DataContext | None = None,
         config: OrcapodConfig | None = None,
         *,
+        tag_only_columns: TagOnlyColumns = True,
         _query: str | None = None,
     ) -> None:
+        check_tag_only_columns(tag_only_columns)
         if source_id is None:
             source_id = table_name
         super().__init__(

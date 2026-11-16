@@ -80,6 +80,7 @@ def _source(value: Any, annotation: Any) -> DictSource:
         tag_columns=["id"],
         data_schema={"id": int, "v": annotation},
         source_id="v",
+        tag_only_columns=True,
     )
 
 
@@ -168,7 +169,9 @@ class TestRaisedAtRead:
                 "v": pa.array([[None, [1]]], pa.large_list(pa.large_list(pa.int64()))),
             }
         )
-        source = ArrowTableSource(table, tag_columns=["id"], source_id="v")
+        source = ArrowTableSource(
+            table, tag_columns=["id"], source_id="v", tag_only_columns=True
+        )
         with pytest.raises(ValueError, match=r"(?s)Column 'v'.*ITL-1144"):
             _read_v(source)
 
@@ -180,6 +183,7 @@ def _members(annotation: Any, first: Any, second: Any) -> DictSource:
         tag_columns=["g", "k"],
         data_schema={"g": int, "k": int, "m": annotation},
         source_id="m",
+        tag_only_columns=True,
     )
 
 
@@ -264,7 +268,9 @@ class TestNoneWhereTheTypeDoesNotAllowOne:
 
     def test_a_data_frame_source_raises_at_read(self) -> None:
         # Polars keeps the null inner list; reading it to Python raises.
-        source = DataFrameSource({"id": [1], "v": [[None, [1]]]}, tag_columns=["id"])
+        source = DataFrameSource(
+            {"id": [1], "v": [[None, [1]]]}, tag_columns=["id"], tag_only_columns=True
+        )
         with pytest.raises(ValueError, match=r"(?s)Column 'v'.*ITL-1144"):
             _read_v(source)
 
@@ -273,7 +279,14 @@ class TestNoneWhereTheTypeDoesNotAllowOne:
             return [None, [1]]  # pyright: ignore[reportReturnType]  # the wrong value is the case under test
 
         pod = op.function_pod(output_keys="v")(produce).pod
-        stream = pod(DictSource([{"id": 1, "n": 1}], tag_columns=["id"], source_id="n"))
+        stream = pod(
+            DictSource(
+                [{"id": 1, "n": 1}],
+                tag_columns=["id"],
+                source_id="n",
+                tag_only_columns=True,
+            )
+        )
         with pytest.raises(OutputTypeError):
             list(stream.iter_data())
 
@@ -354,7 +367,9 @@ def test_a_null_dict_entry_raises_at_read() -> None:
             "v": pa.array([[None, {"key": "a", "value": 1}]], entries),
         }
     )
-    source = ArrowTableSource(table, tag_columns=["id"], source_id="v")
+    source = ArrowTableSource(
+        table, tag_columns=["id"], source_id="v", tag_only_columns=True
+    )
     with pytest.raises(ValueError, match=r"(?s)Column 'v'.*ITL-1144"):
         _read_v(source)
 

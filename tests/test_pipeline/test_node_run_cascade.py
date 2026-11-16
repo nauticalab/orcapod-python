@@ -84,7 +84,9 @@ def _reset() -> None:
 
 
 def _source(data: list[dict[str, int]]) -> DictSource:
-    return DictSource(data, tag_columns=["g", "k"], source_id="s")
+    return DictSource(
+        data, tag_columns=["g", "k"], tag_only_columns=True, source_id="s"
+    )
 
 
 def _build(

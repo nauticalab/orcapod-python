@@ -163,6 +163,7 @@ def test_a_source_column_of_the_type_warns_once(name: str) -> None:
         source = DictSource(
             data=[{"k": i, "x": _value(name)} for i in range(3)],
             tag_columns=["k"],
+            tag_only_columns=True,
             source_id="values",
         )
         source.as_table()
@@ -171,7 +172,10 @@ def test_a_source_column_of_the_type_warns_once(name: str) -> None:
 
     with recorded() as again:
         DictSource(
-            data=[{"k": 9, "x": _value(name)}], tag_columns=["k"], source_id="more"
+            data=[{"k": 9, "x": _value(name)}],
+            tag_columns=["k"],
+            tag_only_columns=True,
+            source_id="more",
         ).as_table()
     assert again == []
 
@@ -188,7 +192,10 @@ def _producer(name: str) -> Any:
 
 def _numbers() -> DictSource:
     return DictSource(
-        data=[{"k": i, "n": i} for i in range(3)], tag_columns=["k"], source_id="n"
+        data=[{"k": i, "n": i} for i in range(3)],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="n",
     )
 
 
@@ -244,6 +251,7 @@ def test_each_type_warns_once_in_one_pipeline() -> None:
         source = DictSource(
             data=[{"k": i, **{n: _value(n) for n in NAMES}} for i in range(4)],
             tag_columns=["k"],
+            tag_only_columns=True,
             source_id="everything",
         )
         source.as_table()
@@ -319,6 +327,7 @@ def test_a_pipeline_without_these_types_does_not_warn(tmp_path: Path) -> None:
         source = DictSource(
             data=[{"k": i, "x": i, "p": tmp_path} for i in range(3)],
             tag_columns=["k"],
+            tag_only_columns=True,
             source_id="plain",
         )
         scale.pod(source).as_table()

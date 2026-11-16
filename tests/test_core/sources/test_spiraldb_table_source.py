@@ -118,14 +118,20 @@ class TestProtocolConformance:
         from orcapod.protocols.core_protocols import SourceProtocol
 
         _make_table()
-        assert isinstance(SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), SourceProtocol)
+        assert isinstance(
+            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True),
+            SourceProtocol,
+        )
 
     def test_is_stream_protocol(self):
         """The source satisfies ``StreamProtocol``."""
         from orcapod.protocols.core_protocols import StreamProtocol
 
         _make_table()
-        assert isinstance(SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), StreamProtocol)
+        assert isinstance(
+            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True),
+            StreamProtocol,
+        )
 
     def test_is_pipeline_element_protocol(self):
         """The source satisfies ``PipelineElementProtocol``."""
@@ -133,7 +139,8 @@ class TestProtocolConformance:
 
         _make_table()
         assert isinstance(
-            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), PipelineElementProtocol
+            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True),
+            PipelineElementProtocol,
         )
 
 
@@ -149,7 +156,7 @@ class TestPKAsDefaultTags:
         """A one-column primary key is the only tag; the other column is data."""
         _make_table()
         tag_schema, data_schema = SpiralDBTableSource(
-            _PROJECT_ID, _TABLE_NAME
+            _PROJECT_ID, _TABLE_NAME, tag_only_columns=True
         ).output_schema()
         assert list(tag_schema) == ["session_id"]
         assert list(data_schema) == ["firing_rate"]
@@ -158,7 +165,7 @@ class TestPKAsDefaultTags:
         """Every column of a composite primary key is a tag."""
         _make_composite_pk_table()
         tag_schema, data_schema = SpiralDBTableSource(
-            _PROJECT_ID, _TABLE_NAME
+            _PROJECT_ID, _TABLE_NAME, tag_only_columns=True
         ).output_schema()
         assert list(tag_schema) == ["session_id", "probe_id"]
         assert list(data_schema) == ["neuron_count"]
@@ -175,7 +182,9 @@ class TestExplicitTagOverride:
     def test_explicit_tag_columns_override_pk(self):
         """Given ``tag_columns`` are the tags; key columns left out become data."""
         _make_composite_pk_table()
-        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=["probe_id"])
+        src = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, tag_columns=["probe_id"], tag_only_columns=True
+        )
         tag_schema, data_schema = src.output_schema()
         assert list(tag_schema) == ["probe_id"]
         assert set(data_schema) == {"session_id", "neuron_count"}
@@ -183,14 +192,18 @@ class TestExplicitTagOverride:
     def test_a_bare_string_names_one_tag_column(self):
         """A bare string names a single tag column."""
         _make_composite_pk_table()
-        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns="session_id")
+        src = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, tag_columns="session_id", tag_only_columns=True
+        )
         assert list(src.output_schema()[0]) == ["session_id"]
 
     def test_unknown_tag_column_raises(self):
         """A ``tag_columns`` name the table lacks is refused."""
         _make_table()
         with pytest.raises(ValueError, match="tag_columns not found"):
-            SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=["nope"])
+            SpiralDBTableSource(
+                _PROJECT_ID, _TABLE_NAME, tag_columns=["nope"], tag_only_columns=True
+            )
 
 
 # ===========================================================================
@@ -205,7 +218,9 @@ class TestErrorCases:
         """A missing table is refused, naming the project and dataset."""
         _make_table()
         with pytest.raises(ValueError, match="not found in database") as raised:
-            SpiralDBTableSource(_PROJECT_ID, "no_such_table", dataset="default")
+            SpiralDBTableSource(
+                _PROJECT_ID, "no_such_table", dataset="default", tag_only_columns=True
+            )
         assert _PROJECT_ID in str(raised.value)
         assert "default" in str(raised.value)
 
@@ -215,7 +230,12 @@ class TestErrorCases:
         _make_table()
         with patch.object(SpiralDBConnector, "get_pk_columns", return_value=[]):
             with pytest.raises(ValueError, match="no primary key"):
-                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=tag_columns)
+                SpiralDBTableSource(
+                    _PROJECT_ID,
+                    _TABLE_NAME,
+                    tag_columns=tag_columns,
+                    tag_only_columns=True,
+                )
 
 
 # ===========================================================================
@@ -232,7 +252,11 @@ class TestConnector:
         _make_table(dataset="prod")
         with patch(_CONNECTOR, wraps=SpiralDBConnector) as connector_class:
             SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, dataset="prod", overrides=overrides
+                _PROJECT_ID,
+                _TABLE_NAME,
+                dataset="prod",
+                overrides=overrides,
+                tag_only_columns=True,
             )
         connector_class.assert_called_once_with(
             project_id=_PROJECT_ID, dataset="prod", overrides=overrides
@@ -249,14 +273,14 @@ class TestConnector:
             return opened[-1]
 
         with patch(_CONNECTOR, side_effect=connect):
-            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
             src.as_table()
             # iter_data is a generator function, so the read can be closed.
             unfinished = cast("Generator[Any, None, None]", src.iter_data())
             next(unfinished)  # a read that is not finished
             unfinished.close()
             with pytest.raises(ValueError):
-                SpiralDBTableSource(_PROJECT_ID, "no_such_table")
+                SpiralDBTableSource(_PROJECT_ID, "no_such_table", tag_only_columns=True)
         assert len(opened) == 4
         # About the connector's own closed flag: nothing public reports it.
         assert [c._closed for c in opened] == [True] * 4  # pyright: ignore[reportPrivateUsage]
@@ -273,14 +297,18 @@ class TestStreamBehaviour:
     def test_producer_is_none_and_upstreams_empty(self):
         """A source has no producer and no upstreams."""
         _make_table()
-        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
         assert src.producer is None
         assert src.upstreams == ()
 
     def test_iter_data_yields_one_pair_per_row(self):
         """``iter_data`` yields one tag and data pair per row, in key order."""
         _make_table()
-        pairs = list(SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).iter_data())
+        pairs = list(
+            SpiralDBTableSource(
+                _PROJECT_ID, _TABLE_NAME, tag_only_columns=True
+            ).iter_data()
+        )
         assert [tag.as_dict()["session_id"] for tag, _ in pairs] == ["s1", "s2", "s3"]
         assert [data.as_dict()["firing_rate"] for _, data in pairs] == pytest.approx(
             [0.1, 0.2, 0.3]
@@ -289,7 +317,9 @@ class TestStreamBehaviour:
     def test_as_table_returns_the_rows(self):
         """``as_table`` returns the table's rows as a ``pa.Table``."""
         _make_table()
-        table = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).as_table()
+        table = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, tag_only_columns=True
+        ).as_table()
         assert isinstance(table, pa.Table)
         assert table.to_pydict() == {
             "session_id": ["s1", "s2", "s3"],
@@ -308,16 +338,18 @@ class TestDeterministicHashing:
     def test_hashes_are_deterministic(self):
         """Two sources of one table have equal pipeline and content hashes."""
         _make_table()
-        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
+        src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
         assert src1.pipeline_hash() == src2.pipeline_hash()
         assert src1.content_hash() == src2.content_hash()
 
     def test_different_tag_columns_yield_different_pipeline_hash(self):
         """Other tag columns give another pipeline hash."""
         _make_composite_pk_table()
-        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_columns=["probe_id"])
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
+        src2 = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, tag_columns=["probe_id"], tag_only_columns=True
+        )
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
     def test_different_schemas_yield_different_pipeline_hash(self):
@@ -332,16 +364,16 @@ class TestDeterministicHashing:
                 }
             ),
         )
-        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        src2 = SpiralDBTableSource(_PROJECT_ID, "counts")
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
+        src2 = SpiralDBTableSource(_PROJECT_ID, "counts", tag_only_columns=True)
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
     def test_same_schema_in_two_tables_shares_the_pipeline_hash_only(self):
         """Two tables of one schema share the pipeline hash, not the content hash."""
         _make_table()
         _make_table(name="other")
-        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        src2 = SpiralDBTableSource(_PROJECT_ID, "other")
+        src1 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True)
+        src2 = SpiralDBTableSource(_PROJECT_ID, "other", tag_only_columns=True)
         assert src1.pipeline_hash() == src2.pipeline_hash()
         assert src1.content_hash() != src2.content_hash()
 
@@ -359,7 +391,11 @@ class TestConfigSerialization:
         _make_table(dataset="prod")
         overrides = {"server.url": "http://api.spiraldb.dev"}
         src = SpiralDBTableSource(
-            _PROJECT_ID, _TABLE_NAME, dataset="prod", overrides=overrides
+            _PROJECT_ID,
+            _TABLE_NAME,
+            dataset="prod",
+            overrides=overrides,
+            tag_only_columns=True,
         )
         cfg = src.to_config()
         assert cfg["source_type"] == "spiraldb_table"
@@ -377,7 +413,9 @@ class TestConfigSerialization:
     def test_to_config_defaults(self):
         """``to_config`` records the default restrictions, cap and batch size."""
         _make_table()
-        cfg = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).to_config()
+        cfg = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, tag_only_columns=True
+        ).to_config()
         assert cfg["overrides"] is None
         assert cfg["where"] == {}
         assert cfg["limit"] is None
@@ -388,7 +426,9 @@ class TestConfigSerialization:
     def test_from_config_hashes_match(self):
         """A source rebuilt by ``from_config`` keeps its hashes and reads the rows."""
         _make_table(dataset="prod")
-        src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, dataset="prod")
+        src = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, dataset="prod", tag_only_columns=True
+        )
         src2 = SpiralDBTableSource.from_config(src.to_config())
         assert src.pipeline_hash() == src2.pipeline_hash()
         assert src.content_hash() == src2.content_hash()
@@ -399,7 +439,9 @@ class TestConfigSerialization:
         from orcapod.pipeline.serialization import resolve_source_from_config
 
         _make_table()
-        cfg = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME).to_config()
+        cfg = SpiralDBTableSource(
+            _PROJECT_ID, _TABLE_NAME, tag_only_columns=True
+        ).to_config()
         assert isinstance(resolve_source_from_config(cfg), SpiralDBTableSource)
 
 
@@ -426,7 +468,8 @@ class TestPipelineIntegration:
         job = PipelineJob(name="spiraldb_integration", database=InMemoryArrowDatabase())
         with job:
             double_rate.pod(
-                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME), label="doubler"
+                SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME, tag_only_columns=True),
+                label="doubler",
             )
         job.run()
 

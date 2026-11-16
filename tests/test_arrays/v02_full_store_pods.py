@@ -81,7 +81,9 @@ def build_job(
 
     job = PipelineJob(name=JOB_NAME, database=store)
     with job:
-        ints = DictSource(data=ROWS, tag_columns=["k"], source_id="ints")
+        ints = DictSource(
+            data=ROWS, tag_columns=["k"], source_id="ints", tag_only_columns=True
+        )
         ones = plus_one.pod(ints, label="plus_one")
         plus_two.pod(ones, label="plus_two")
         if with_notify:
@@ -111,7 +113,9 @@ def build_cached_source(store: Any) -> Any:
         }
     )
     return CachedSource(
-        ArrowTableSource(table, tag_columns=["k"], source_id="fixed"),
+        ArrowTableSource(
+            table, tag_columns=["k"], source_id="fixed", tag_only_columns=True
+        ),
         cache_database=store,
         cache_path_prefix=(JOB_NAME,),
     )

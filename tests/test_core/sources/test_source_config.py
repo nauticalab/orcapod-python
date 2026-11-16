@@ -17,6 +17,7 @@ class TestCSVSourceConfig:
             file_path=str(csv_file),
             tag_columns=["a"],
             source_id="test_csv",
+            tag_only_columns=True,
         )
         config = source.to_config()
         assert config["source_type"] == "csv"
@@ -30,6 +31,7 @@ class TestCSVSourceConfig:
         source = CSVSource(
             file_path=str(csv_file),
             tag_columns=["a"],
+            tag_only_columns=True,
         )
         config = source.to_config()
         restored = CSVSource.from_config(config)
@@ -43,6 +45,7 @@ class TestDictSourceConfig:
             data=[{"a": 1, "b": 2}, {"a": 3, "b": 4}],
             tag_columns=["a"],
             source_id="test_dict",
+            tag_only_columns=True,
         )
         config = source.to_config()
         assert config["source_type"] == "dict"
@@ -85,6 +88,7 @@ class TestDeltaTableSourceConfig:
             delta_table_path=delta_path,
             tag_columns=["a"],
             source_id="test_delta",
+            tag_only_columns=True,
         )
         config = source.to_config()
         assert config["source_type"] == "delta_table"
@@ -100,6 +104,7 @@ class TestDeltaTableSourceConfig:
         source = DeltaTableSource(
             delta_table_path=delta_path,
             tag_columns=["a"],
+            tag_only_columns=True,
         )
         config = source.to_config()
         restored = DeltaTableSource.from_config(config)
@@ -112,7 +117,10 @@ class TestCachedSourceConfig:
         from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 
         inner = DictSource(
-            data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="inner"
+            data=[{"a": 1, "b": 2}],
+            tag_columns=["a"],
+            source_id="inner",
+            tag_only_columns=True,
         )
         cache_db = InMemoryArrowDatabase()
         source = CachedSource(source=inner, cache_database=cache_db)

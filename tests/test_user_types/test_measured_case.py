@@ -56,6 +56,7 @@ def _source() -> DictSource:
         data=[{"k": "a", "x": 1}, {"k": "b", "x": 2}],
         tag_columns=["k"],
         source_id="s",
+        tag_only_columns=True,
     )
 
 

@@ -523,7 +523,9 @@ class _StoredShape:
 def other_shape(base: Path) -> DeltaTableDatabase:
     """A readable table storing ``_StoredShape``'s type name over another struct."""
     value: Any = _StoredShape(1, 2)
-    source = DictSource(data=[{"k": "a", "p": value}], tag_columns=["k"])
+    source = DictSource(
+        data=[{"k": "a", "p": value}], tag_columns=["k"], tag_only_columns=True
+    )
     ext = source.as_table().schema.field("p").type
     wrong = pa.struct([pa.field("x", pa.float64()), pa.field("y", pa.int64())])
     field = pa.field("x", wrong).with_metadata(

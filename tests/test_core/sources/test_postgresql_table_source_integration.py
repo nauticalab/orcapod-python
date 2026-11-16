@@ -81,7 +81,7 @@ class TestSinglePKTable:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(schema_dsn, "measurements")
+        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_only_columns=True)
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
 
@@ -100,7 +100,7 @@ class TestSinglePKTable:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(schema_dsn, "measurements")
+        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_only_columns=True)
         _, data_schema = src.output_schema()
         assert "trial" in data_schema
         assert "response" in data_schema
@@ -120,7 +120,7 @@ class TestSinglePKTable:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(schema_dsn, "measurements")
+        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_only_columns=True)
         assert len(list(src.iter_data())) == 3
 
     def test_tag_values_are_correct(self, schema_dsn: str) -> None:
@@ -138,7 +138,7 @@ class TestSinglePKTable:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(schema_dsn, "measurements")
+        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_only_columns=True)
         tag_values = sorted([tags["session_id"] for tags, _ in src.iter_data()])
         assert tag_values == ["s1", "s2", "s3"]
 
@@ -163,7 +163,7 @@ class TestCompositePKTable:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(schema_dsn, "events")
+        src = PostgreSQLTableSource(schema_dsn, "events", tag_only_columns=True)
         tag_schema, _ = src.output_schema()
         assert "user_id" in tag_schema
         assert "event_id" in tag_schema
@@ -188,7 +188,9 @@ class TestExplicitTagOverride:
                 )
             conn.commit()
 
-        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_columns=["trial"])
+        src = PostgreSQLTableSource(
+            schema_dsn, "measurements", tag_columns=["trial"], tag_only_columns=True
+        )
         tag_schema, _ = src.output_schema()
         assert "trial" in tag_schema
         assert "session_id" not in tag_schema
@@ -222,7 +224,7 @@ class TestPipelineIntegration:
         def double_response(trial: int, response: float) -> float:
             return response * 2.0
 
-        src = PostgreSQLTableSource(schema_dsn, "measurements")
+        src = PostgreSQLTableSource(schema_dsn, "measurements", tag_only_columns=True)
         pf = PythonDataFunction(double_response, output_keys="doubled")
         pod = FunctionPod(pf)
 

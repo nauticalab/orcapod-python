@@ -444,7 +444,9 @@ class TestBatchBehavior:
                 "weight": [4.0, 12.0],
             }
         )
-        source = ArrowTableSource(table, tag_columns=["animal"], infer_nullable=True)
+        source = ArrowTableSource(
+            table, tag_columns=["animal"], tag_only_columns=True, infer_nullable=True
+        )
         out = Batch(batch_size=0).process(source)
         result = out.as_table(columns={"source": True, "system_tags": True})
 
@@ -467,7 +469,9 @@ class TestBatchBehavior:
                 "weight": [4.0, 12.0],
             }
         )
-        source = ArrowTableSource(table, tag_columns=["animal"], infer_nullable=True)
+        source = ArrowTableSource(
+            table, tag_columns=["animal"], tag_only_columns=True, infer_nullable=True
+        )
         out = Batch(batch_size=0).process(source)
         result = out.as_table(columns={"source": True, "system_tags": True})
 
@@ -622,6 +626,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -632,6 +637,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -654,6 +660,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -664,6 +671,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -688,6 +696,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -698,6 +707,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -733,6 +743,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -743,6 +754,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_c = ArrowTableSource(
@@ -753,6 +765,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -799,6 +812,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -809,6 +823,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -834,6 +849,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -844,6 +860,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -878,6 +895,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -888,6 +906,7 @@ class TestJoinOutputSchemaSystemTags:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -1241,6 +1260,7 @@ class TestJoinSystemTagNameExtension:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_left2 = ArrowTableSource(
@@ -1251,6 +1271,7 @@ class TestJoinSystemTagNameExtension:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_right = ArrowTableSource(
@@ -1261,6 +1282,7 @@ class TestJoinSystemTagNameExtension:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -1300,6 +1322,7 @@ class TestJoinSystemTagNameExtension:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_right_int = ArrowTableSource(
@@ -1310,6 +1333,7 @@ class TestJoinSystemTagNameExtension:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_right_str = ArrowTableSource(
@@ -1320,6 +1344,7 @@ class TestJoinSystemTagNameExtension:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 
@@ -1361,7 +1386,9 @@ class TestSourceSystemTagSchemaHash:
                 "x": pa.array([10, 20, 30], type=pa.int64()),
             }
         )
-        source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+        source = ArrowTableSource(
+            table, tag_columns=["id"], tag_only_columns=True, infer_nullable=True
+        )
         schema_hash = source._schema_hash
         pipeline_hash_hex = source.pipeline_hash().to_hex(char_count=len(schema_hash))
         assert schema_hash == pipeline_hash_hex
@@ -1385,6 +1412,7 @@ class TestJoinSystemTagCanonicalOrdering:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -1395,6 +1423,7 @@ class TestJoinSystemTagCanonicalOrdering:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_c = ArrowTableSource(
@@ -1405,6 +1434,7 @@ class TestJoinSystemTagCanonicalOrdering:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         return src_a, src_b, src_c
@@ -1576,6 +1606,7 @@ class TestJoinSystemTagCanonicalOrdering:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -1586,6 +1617,7 @@ class TestJoinSystemTagCanonicalOrdering:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
         src_c = ArrowTableSource(
@@ -1596,6 +1628,7 @@ class TestJoinSystemTagCanonicalOrdering:
                 }
             ),
             tag_columns=["id"],
+            tag_only_columns=True,
             infer_nullable=True,
         )
 

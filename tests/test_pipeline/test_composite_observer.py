@@ -37,7 +37,9 @@ def _make_source(n: int = 3) -> ArrowTableSource:
             "x": pa.array([10 * (i + 1) for i in range(n)], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(
+        table, tag_columns=["id"], infer_nullable=True, tag_only_columns=True
+    )
 
 
 # ---------------------------------------------------------------------------

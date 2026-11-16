@@ -84,7 +84,9 @@ def _make_source_stream(values: list[int]) -> ArrowTableSource:
             "x": pa.array(values, type=pa.int64()),
         }
     )
-    return ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(
+        table=table, tag_columns=["id"], tag_only_columns=True, infer_nullable=True
+    )
 
 
 def _all_base_entry_ids(node: FunctionJobNode, stream) -> set[bytes]:
@@ -349,7 +351,9 @@ class TestLockstepPropertyRandomized:
                 "x": pa.array(values, type=pa.int64()),
             }
         )
-        return ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+        return ArrowTableSource(
+            table=table, tag_columns=["id"], tag_only_columns=True, infer_nullable=True
+        )
 
     @staticmethod
     def _system_tags_key(source: ArrowTableSource) -> tuple:
@@ -551,7 +555,9 @@ class TestTdbVersioning:
         from orcapod.system_constants import TRACKING_DB_SCHEMA_VERSION
 
         table = pa.table({"x": pa.array([1], type=pa.int64())})
-        source = ArrowTableSource(table=table, tag_columns=[], infer_nullable=True)
+        source = ArrowTableSource(
+            table=table, tag_columns=[], tag_only_columns=True, infer_nullable=True
+        )
 
         def noop(x: int, ctx=None) -> None:
             pass
@@ -579,7 +585,9 @@ class TestTdbVersioning:
         from orcapod.side_effects import SideEffectJobNode, SideEffectPod
 
         table = pa.table({"x": pa.array([1], type=pa.int64())})
-        source = ArrowTableSource(table=table, tag_columns=[], infer_nullable=True)
+        source = ArrowTableSource(
+            table=table, tag_columns=[], tag_only_columns=True, infer_nullable=True
+        )
 
         def noop(x: int, ctx=None) -> None:
             pass

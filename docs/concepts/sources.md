@@ -44,6 +44,25 @@ Two construction rules apply to every source and are the most common first error
 - At least one column must be left over as a data column, otherwise it raises
   `ValueError: No data columns found in the table`.
 
+**Plain tags and `tag_only_columns`.** The sources built from a table (`ArrowTableSource`,
+`DictSource`, `DataFrameSource`, `CSVSource`, `DeltaTableSource` and the database sources) also
+take the keyword-only option `tag_only_columns`. In v0.3 every tag column is plain: it is a tag only,
+never also a data column. `tag_only_columns=True` says so explicitly; it is the default and
+the only value v0.3 accepts, and it changes no hash, source id, record id or saved config. Any
+other value is refused. In v0.4 tags become referential by default (a tag that is also the
+data column of the same name), and `tag_only_columns` keeps a tag plain, so code that must
+keep today's behaviour passes `tag_only_columns=True` now.
+
+```python
+from orcapod.sources import DictSource
+
+plain = DictSource(
+    data=[{"k": "a", "x": 1}], tag_columns=["k"], tag_only_columns=True
+)
+print(plain.keys())
+# (('k',), ('x',))
+```
+
 Data with no rows has no columns to read, so `DictSource(data=[], ...)` raises
 `ValueError: Table is empty`. To build a source with no rows, pass `data_schema=` so the
 columns are known.

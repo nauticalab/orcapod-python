@@ -47,7 +47,9 @@ def _arrow(
         [pa.field("id", pa.int64(), False), pa.field("x", pa.int64(), x_nullable)]
     )
     return ArrowTableSource(
-        pa.table({"id": ids, "x": xs}, schema=schema), tag_columns=["id"]
+        pa.table({"id": ids, "x": xs}, schema=schema),
+        tag_columns=["id"],
+        tag_only_columns=True,
     )
 
 
@@ -55,7 +57,9 @@ def _csv(tmp_path: pathlib.Path, name: str, text: str) -> CSVSource:
     """Return a CSV source over *text*, written to *name* in *tmp_path*."""
     path = tmp_path / name
     _ = path.write_text(text)
-    return CSVSource(str(path), tag_columns=["id"], source_id=name)
+    return CSVSource(
+        str(path), tag_columns=["id"], tag_only_columns=True, source_id=name
+    )
 
 
 def _record_id_first(source: ArrowTableSource) -> ArrowTableStream:
@@ -133,19 +137,33 @@ def test_no_accepted_bind_changes_a_path_or_a_table_schema(
         (
             "narrower dict",
             _assign,
-            DictSource([{"id": 4, "x": 4}], tag_columns=["id"], source_id="d"),
+            DictSource(
+                [{"id": 4, "x": 4}],
+                tag_columns=["id"],
+                tag_only_columns=True,
+                source_id="d",
+            ),
         ),
         (
             "dict with a null",
             _assign,
-            DictSource([{"id": 5, "x": None}, {"id": 6, "x": 6}], tag_columns=["id"]),
+            DictSource(
+                [{"id": 5, "x": None}, {"id": 6, "x": 6}],
+                tag_columns=["id"],
+                tag_only_columns=True,
+            ),
         ),
         ("csv with an empty cell", _bind, _csv(tmp_path, "a.csv", "id,x\n7,\n8,8\n")),
         (
             "stream over a source",
             _assign,
             MapData({"q": "x"})(
-                DictSource([{"id": 10, "q": 10}], tag_columns=["id"], source_id="m")
+                DictSource(
+                    [{"id": 10, "q": 10}],
+                    tag_columns=["id"],
+                    tag_only_columns=True,
+                    source_id="m",
+                )
             ),
         ),
         (
@@ -212,6 +230,7 @@ def test_a_structural_class_of_the_same_identity_changes_no_path_or_schema(
         DictSource(
             cast(list[dict[str, Any]], [{"id": 0, "p": point_type(1, 2)}]),
             tag_columns=["id"],
+            tag_only_columns=True,
             data_schema={"id": int, "p": point_type},
             source_id="points",
         )
