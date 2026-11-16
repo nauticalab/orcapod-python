@@ -1,0 +1,14 @@
+# CodeRabbit configuration (ITL-1161).
+#
+# CodeRabbit reads this file from the head branch of the pull request it reviews.
+# By default it reviews only pull requests that target the default branch (main).
+# base_branches adds other target branches; each entry is a regular expression.
+#
+# inheritance keeps the settings made in the CodeRabbit UI (organization and
+# repository) in force; this file only adds to them.
+inheritance: true
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - ".*"
