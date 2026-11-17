@@ -1,16 +1,17 @@
-# Orcapod Python
-Orcapod's Python library for developing reproducible scientific pipelines.
+# Orcapod
 
-User documentation lives in [`docs/`](https://github.com/nauticalab/orcapod-python/blob/main/docs/index.md) (start with
-[Getting Started](https://github.com/nauticalab/orcapod-python/blob/main/docs/getting-started.md)) and is built with `uv run mkdocs build --strict`.
-`tests/test_docs/` executes the Python samples in this README, `docs/index.md`,
-`docs/getting-started.md`, `docs/concepts/` and `docs/reference/`, except the two samples in
-`docs/concepts/file-hash-caching.md` that need a PostgreSQL server.
+Orcapod is a Python library for building reproducible scientific data pipelines. Data enters
+a pipeline through **sources** and flows through typed, immutable streams, in which every row
+is a tag (the keys that identify the row) and its data. **Function pods** compute new values
+from each row's data with plain Python functions; **operators** join, filter, group and
+reshape streams without computing new values. A **job** runs these steps against a database:
+every function result is stored, and a later run computes only what is not stored yet. Every
+row records which source and which source row it came from, and every value carries a
+provenance token.
 
 ## Installation
 
-Orcapod supports Python 3.11, 3.12 and 3.13 and is published on PyPI as `orcapod`, under the
-MIT License:
+Orcapod supports Python 3.11, 3.12 and 3.13 and is published on PyPI as `orcapod`:
 
 ```bash
 pip install orcapod
@@ -18,264 +19,146 @@ pip install orcapod
 uv add orcapod
 ```
 
-`0.3.0` is the first release on PyPI since `0.1.4`; `0.2.0` was never published to PyPI.
-Tables written by `0.2.0` or earlier are not read by `0.3.0`: see
-[`CHANGELOG.md`](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md#upgrading-from-020), *Upgrading from 0.2.0*
-(it also covers `0.1.4`).
+0.3.0 is the first release on PyPI since 0.1.4; 0.2.0 was never published to PyPI. Tables
+written by 0.2.0 or earlier are not read by 0.3.0: see
+[Upgrading from 0.2.0](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md#upgrading-from-020)
+(it also covers 0.1.4).
 
 Optional features are installed as extras:
 
 | Extra | Adds |
 |-------|------|
 | `orcapod[ray]` | Distributed execution with `RayExecutor` |
-| `orcapod[redis]` | Redis-backed caching |
-| `orcapod[postgresql]` | PostgreSQL connector and hash cache |
-| `orcapod[spiraldb]` | SpiralDB database backend |
+| `orcapod[redis]` | `RedisCacher`, a Redis-backed hash cache |
+| `orcapod[postgresql]` | The PostgreSQL connector, table source and file hash cache |
+| `orcapod[spiraldb]` | The SpiralDB connector and table source |
+| `orcapod[torch]` | PyTorch, for `torch.Tensor` values (any installed `torch` works) |
 | `orcapod[all]` | All of the above |
+
+Rendering pipeline graphs needs the [Graphviz](https://graphviz.org/download/) `dot` binary on
+your `PATH`. It is optional; everything else works without it.
+
+## A quick example
+
+A source of two rows, one function pod, and a job that stores its results in a database:
+
+```python
+from orcapod import PipelineJob, function_pod
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.sources import DictSource
+
+
+@function_pod(output_keys="temp_fahrenheit")
+def to_fahrenheit(temperature: float) -> float:
+    return temperature * 9.0 / 5.0 + 32.0
+
+
+rows = [
+    {"experiment": "exp_001", "temperature": 20.5},
+    {"experiment": "exp_002", "temperature": 22.3},
+]
+database = InMemoryArrowDatabase()
+
+
+def run_job(rows):
+    source = DictSource(data=rows, tag_columns=["experiment"], source_id="lab_results")
+    job = PipelineJob(name="lab", database=database)
+    with job:  # record the steps; nothing runs yet
+        to_fahrenheit.pod(source, label="fahrenheit")
+    print(job.run())
+    return job
+
+
+job = run_job(rows)
+# Run of job 'lab': all rows succeeded.
+#   fahrenheit: 2 rows: 2 computed, 0 from store, 0 failed
+print(job.nodes["fahrenheit"].as_table().sort_by("experiment").to_pylist())
+# [{'experiment': 'exp_001', 'temp_fahrenheit': 68.9}, {'experiment': 'exp_002', 'temp_fahrenheit': 72.14}]
+```
+
+Add a row and run a new job over the same database. The two stored results are found again
+by their input values, and only the new row is computed:
+
+```python
+rows.append({"experiment": "exp_003", "temperature": 19.8})
+job = run_job(rows)
+# Run of job 'lab': all rows succeeded.
+#   fahrenheit: 3 rows: 1 computed, 2 from store, 0 failed
+```
+
+`InMemoryArrowDatabase` keeps results for the life of the Python process;
+`DeltaTableDatabase("some/directory")` writes them to disk, so they are found again in a new
+session.
+
+## Documentation
+
+- [Getting Started](https://github.com/nauticalab/orcapod-python/blob/main/docs/getting-started.md):
+  sources, streams and function pods, step by step.
+- [Tutorial](https://github.com/nauticalab/orcapod-python/blob/main/docs/tutorial/index.md):
+  a self-paced course in eleven short parts, from a first stream to a stored, re-runnable
+  pipeline over files, with exercises.
+- [Concepts](https://github.com/nauticalab/orcapod-python/tree/main/docs/concepts): sources,
+  streams, function pods, operators, pipelines and jobs, identity and hashing, file types,
+  arrays and your own data types.
+- Reference: [Hashing](https://github.com/nauticalab/orcapod-python/blob/main/docs/reference/hashing.md)
+  and [Golden hashes](https://github.com/nauticalab/orcapod-python/blob/main/docs/reference/golden-hashes.md).
+- [Troubleshooting](https://github.com/nauticalab/orcapod-python/blob/main/docs/troubleshooting.md):
+  common errors, their causes and fixes.
+- [CHANGELOG](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md): what
+  changed in each release, with upgrade notes.
+
+## Status
+
+Orcapod is before version 1.0. In 0.3.0:
+
+- **Hash values are frozen for data context v1.** Hashes name stored tables and find stored
+  results again, so a hash value released in 0.3.0 does not change in a later release of the
+  same data context; CI checks this. See
+  [Golden hashes](https://github.com/nauticalab/orcapod-python/blob/main/docs/reference/golden-hashes.md).
+- **Library value types are provisional.** The hashes of `numpy.ndarray`, `torch.Tensor`, and
+  pandas and polars `DataFrame` and `Series` values may change in 0.4, and results computed
+  from them may then be computed again. Using one issues `ProvisionalHashWarning` once per
+  type per process.
+- **Stores from earlier versions are not read as current.** Tables written by 0.1.x or 0.2.0
+  are neither read as results nor modified, and results stored by a development build of 0.3
+  are not found again: 0.3.0 computes them again. Read
+  [Upgrading from 0.2.0](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md#upgrading-from-020)
+  before running a job over an old store, in particular one with side-effect nodes.
+- **Connector databases cannot hold function nodes yet.** A job over a SQLite, PostgreSQL or
+  SpiralDB database refuses every function node when it is built. Use `InMemoryArrowDatabase`
+  or `DeltaTableDatabase` for jobs.
+
+## Related packages
 
 SpikeInterface support lives in a separate package,
 [`orcapod-extension-spikeinterface`](https://github.com/nauticalab/orcapod-extension-spikeinterface).
 It is not published on PyPI; install it from its repository.
 
-See [CHANGELOG.md](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md)
-for release notes, including the migration steps for databases written by an earlier
-release.
+## Development
 
-## Releasing
+The project uses [uv](https://docs.astral.sh/uv/):
 
-Releases are cut by running the GitHub Actions **Release** workflow by hand. It runs the
-tests and the license check, creates and pushes the version tag, builds the wheel and
-sdist, and publishes them to TestPyPI and then PyPI through trusted publishing. The version
-comes from the tag via `hatch-vcs`, so there is no version number to bump in the source
-tree. See [RELEASING.md](https://github.com/nauticalab/orcapod-python/blob/main/RELEASING.md)
-for the full workflow.
+```bash
+uv sync --all-extras --dev
+```
+
+Every pull request must pass these checks (pytest on Python 3.11, 3.12 and 3.13):
+
+```bash
+uv run --with ruff ruff check .
+uv run --with ruff ruff format --check .
+uv run --with basedpyright basedpyright
+uv run pytest tests/
+```
+
+The PostgreSQL integration tests are skipped unless asked for
+(`uv run pytest -m postgres --postgres`) and need a running PostgreSQL server, reached
+through the standard `PG*` environment variables; see
+[the workflow that runs them](https://github.com/nauticalab/orcapod-python/blob/main/.github/workflows/run-postgres-tests.yml).
+Releases are cut by the GitHub Actions Release workflow; see
+[RELEASING.md](https://github.com/nauticalab/orcapod-python/blob/main/RELEASING.md).
 
 ## License
 
 Orcapod is released under the
 [MIT License](https://github.com/nauticalab/orcapod-python/blob/main/LICENSE).
-
-## Continuous Integration
-
-This project uses GitHub Actions for continuous integration:
-
-- **Run Tests**: Runs the full unit test suite on Ubuntu with Python 3.11, 3.12 and 3.13. PostgreSQL integration tests are excluded.
-- **Python — Required CI** (set by the organization): `ruff` lint and format, `basedpyright`, and `pytest` on Python 3.11, 3.12 and 3.13.
-- **Run PostgreSQL Tests**: Runs only the `@pytest.mark.postgres` integration tests against a PostgreSQL 16 service container.
-
-### Running Tests Locally
-
-This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
-
-```bash
-# Install all dependencies
-uv sync --all-extras --dev
-
-# Run the standard test suite (no PostgreSQL required)
-uv run pytest -m "not postgres"
-
-# Run with coverage
-uv run pytest -m "not postgres" --cov=src --cov-report=term-missing
-```
-
-No Graphviz development headers are needed. The Graphviz `dot` binary is an optional
-runtime requirement, used only to render pipeline graphs (e.g. `brew install graphviz` or
-`apt-get install graphviz`).
-
-### Running PostgreSQL Integration Tests Locally
-
-The PostgreSQL integration tests require a running PostgreSQL instance. The easiest way is Docker:
-
-```bash
-docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
-```
-
-Then in another terminal:
-
-```bash
-PGPASSWORD=postgres uv run pytest -m postgres -v
-```
-
-The tests connect via standard `PG*` environment variables — override any of these defaults as needed:
-
-| Variable     | Default     |
-|--------------|-------------|
-| `PGHOST`     | `localhost`  |
-| `PGPORT`     | `5432`       |
-| `PGDATABASE` | `testdb`     |
-| `PGUSER`     | `postgres`   |
-| `PGPASSWORD` | `postgres`   |
-
-## Lower-level details on pipeline workflow (tentative)
-
-While the following is subject to change based on future development, it represents a nice high-level overview of some of the lower-level details of how Orcapod pipelines work and how the various objects interact with one another.
-
-### Pipeline setup
-
-  Instantiate:
-
-  - OBSERVER with a log database
-    - Two kinds: NoOpObserver, LoggingObserver
-  - ORCHESTRATOR with this observer
-    - Two kinds: SyncPipelineOrchestrator, AsyncPipelineOrchestrator
-  - EXECUTOR
-    - Two kinds: LocalExecutor, RayExecutor
-    - Executors have a slim base protocol (DataFunctionExecutorProtocol — identity, compatibility, lifecycle) and a Python-specific subtype (PythonFunctionExecutorProtocol — adds
-   execute_callable / async_execute_callable). This leaves room for non-Python executor types in the future.
-  - PIPELINE (name, DB)
-
-### Construct PIPELINE using with pipeline
-
-  "Compile" PIPELINE
-  - auto_compile=True is the default (compile runs when the `with` block exits)
-  - Walk the DAG, wrap each element in a node that owns execution logic, fixates input stream, attaches caching
-  - Nodes (function, operator) are associated with storage/DB
-  - If a function node has no executor, Pipeline.compile() assigns LocalExecutor() by default — so capture/logging works out of the box without explicit executor setup
-
-  Run PIPELINE by passing several objects to pipeline.run():
-  - The EXECUTOR (optional) — node.executor = ray_executor.with_options(**opts) called on every function node, replacing the compile-time default
-    - Per-node override also possible: pipeline.transform_a.executor = RayExecutor(...) after compile
-  - The ORCHESTRATOR
-    - Calls obs.on_run_start(run_id)
-    - Walks nodes in topological order (or launches all concurrently for async)
-    - Wires nodes together (edges in DAG) with channels (async) or buffers (sync)
-    - For each node, calls node.execute(input_stream, observer=obs) or node.async_execute(input_channel, output_channel, observer=obs)
-    - on_run_end(run_id) is in a try/finally — always fires, even on failure
-  - Engine opts dict — forwarded to executor via with_options(**opts)
-
-### Function node processing
-
-  Capture happens at the bottom of the chain (inside the executor). A logger is injected DOWN the call chain — FunctionNode creates it from the observer and passes it through to
-  the executor. The executor captures I/O, calls logger.record(**captured_fields), and re-raises on failure. No CapturedLogs appears in any return type or protocol — it's an
-  internal convenience struct inside the executor.
-
-  The observer is contextualized per-node: FunctionNode.execute() calls observer.contextualize(node_hash, node_label) to get a lightweight wrapper stamped with node identity. If no
-   observer is provided, a NoOpObserver is used as default, eliminating all is not None checks.
-
-  The logger protocol is generic: DataExecutionLoggerProtocol.record(**kwargs) accepts arbitrary keyword arguments, so different executor types can log different fields without
-  the protocol being tied to any specific data structure.
-
-  If no executor is set and a logger is passed, a UserWarning is emitted: "A logger was passed but no executor is set — capture will not occur."
-
-  Down the chain (FunctionNode → user function)
-
-  FunctionNode.execute(input_stream, observer=obs)
-      │
-      │  obs = observer or NoOpObserver()
-      │  ctx_observer = obs.contextualize(node_hash, node_label)
-      │  ctx_observer.on_node_start(node_label, node_hash)
-      │
-      │  for each non-cached (tag, data):
-      │
-      │  ctx_observer.on_data_start(node_label, tag, data)
-      │
-      ├─► pkt_logger = ctx_observer.create_data_logger(tag, data, pipeline_path=...)
-      │       │
-      │       └─► _ContextualizedLoggingObserver creates a DataLogger bound to
-      │           (run_id, node_label, node_hash, tag_data, log_path)
-      │
-      ├─► FunctionNode._process_data_internal(tag, data, logger=pkt_logger)
-      │       │
-      │       ├─► CachedFunctionPod.process_data(tag, data, logger=pkt_logger)
-      │       │       │
-      │       │       │  checks pod-level cache (ResultCache.lookup)
-      │       │       │  cache hit? → return (tag, cached_data)
-      │       │       │  cache miss ↓
-      │       │       │
-      │       │       ├─► _FunctionPodBase.process_data(tag, data, logger=pkt_logger)
-      │       │       │       │
-      │       │       │       ├─► PythonDataFunction.call(data, logger=pkt_logger)
-      │       │       │       │       │
-      │       │       │       │       │  executor is set? (LocalExecutor from compile,
-      │       │       │       │       │  or RayExecutor from pipeline.run)
-      │       │       │       │       │
-      │       │       │       │       ├─► executor.execute_callable(fn, kwargs, logger=pkt_logger)
-      │       │       │       │       │       │
-      │       │       │       │       │       │  ── LocalExecutor path ──
-      │       │       │       │       │       │  ctx = LocalCaptureContext()
-      │       │       │       │       │       │  with ctx:
-      │       │       │       │       │       │    fn(**kwargs)               ← USER FUNCTION RUNS HERE
-      │       │       │       │       │       │  on success: logger.record(**captured.as_dict())
-      │       │       │       │       │       │  on exception: logger.record(**captured.as_dict())
-      │       │       │       │       │       │                then RE-RAISE the original exception
-      │       │       │       │       │       │
-      │       │       │       │       │       │  ── RayExecutor path ──
-      │       │       │       │       │       │  dispatches _make_capture_wrapper() to Ray
-      │       │       │       │       │       │  Ray worker runs the wrapper which:
-      │       │       │       │       │       │    - redirects fd 1/2 to temp files
-      │       │       │       │       │       │    - installs a logging handler
-      │       │       │       │       │       │    - calls fn(**kwargs)       ← USER FUNCTION RUNS HERE
-      │       │       │       │       │       │    - on success: returns (raw, stdout, stderr, python_logs)
-      │       │       │       │       │       │    - on failure: RAISES _CapturedTaskError(cause, stdout, ...)
-      │       │       │       │       │       │      → Ray propagates via RayTaskError (retries etc. work)
-      │       │       │       │       │       │  driver side:
-      │       │       │       │       │       │    success → logger.record(stdout=..., stderr=..., success=True, ...)
-      │       │       │       │       │       │    failure → logger.record(stdout=..., success=False, ...)
-      │       │       │       │       │       │              then RE-RAISE the original user exception
-      │       │       │       │       │       │
-      │       │       │       │       │       └─► returns raw_result (or raises)
-      │       │       │       │       │
-      │       │       │       │       │  no executor? warns if logger was passed, calls direct_call()
-      │       │       │       │       │
-      │       │       │       │       │  builds output Data from raw_result
-      │       │       │       │       │
-      │       │       │       │       └─► returns Data | None (or raises)
-      │       │       │       │
-      │       │       │       └─► returns (tag, Data | None)
-      │       │       │
-      │       │       │  stores result in pod-level cache (on success)
-      │       │       │
-      │       │       └─► returns (tag, Data | None)
-      │       │
-      │       │  writes pipeline provenance record (on success)
-      │       │  caches result internally
-      │       │
-      │       └─► returns (tag, Data | None)
-      │
-      │  ← back in FunctionNode.execute() with (tag_out, result)
-      │
-      │  (logger.record already called inside the executor — nothing to do here)
-      │
-      ├─► try/except around _process_data_internal:
-      │   on success:
-      │       ctx_observer.on_data_end(node_label, tag, data, result, cached=False)
-      │       emit (tag_out, result) downstream
-      │   on OrcapodDatabaseError (the database could not be read or written):
-      │       ctx_observer.on_data_crash(node_label, tag, data, exc)
-      │       raise, whatever error_policy is — the run stops (ITL-878, ITL-884)
-      │   on any other exception (the function failed):
-      │       ctx_observer.on_data_crash(node_label, tag, data, exc)
-      │       if error_policy == "fail_fast": raise
-      │       otherwise: skip this data, continue
-      │
-      ctx_observer.on_node_end(node_label, node_hash)
-
-  DataLogger.record(**kwargs)
-
-  DataLogger.record(**kwargs)
-      │
-      └─► builds a pyarrow table row:
-          Context columns (always present, prefixed with "__"):
-            `__log_id`, `__run_id`, `__node_label`, `__node_hash`, `__timestamp`
-          Execution output columns (from **kwargs, prefixed with "`__`"):
-            __stdout, __stderr, __python_logs, __traceback, __success
-            (or any other fields the executor passes — protocol is generic)
-          Tag columns (unprefixed, from tag_data baked in at creation):
-            e.g. "idx" → "0", "key" → "a"
-
-Writes the row to the database at the mirrored log path.
-
-### Key design points
-
-  - CapturedLogs never appears in any return type or protocol — it's an internal convenience struct inside executors. The protocol uses record(**kwargs) so different executor types
-   can log different fields.
-  - Exceptions propagate — direct_call() and executors re-raise user exceptions after recording logs. Error handling happens at the FunctionNode.execute() boundary via try/except.
-  - Ray exceptions propagate through Ray — the worker raises _CapturedTaskError (carrying captured I/O), Ray wraps it in RayTaskError (retries etc. work normally), the driver
-  extracts the captured data, records to logger, and re-raises the original user exception type.
-  - Observer is contextualized per-node — contextualize(node_hash, node_label) returns a lightweight wrapper. No GraphNode reference crosses the protocol boundary — only strings.
-  NoOpObserver is used as default when no observer is provided, eliminating null checks.
-  - pipeline_path is a storage detail — passed to create_data_logger() for routing log table location, but NOT stored as a column in log rows (only node_hash + node_label
-  identify the node).
-  - No auto-executor in the class — DataFunctionBase.__init__ does not assign a default executor. Pipeline.compile() assigns LocalExecutor to function nodes that have none. Users
-   can override per-node (pipeline.node.executor = ...) or globally via pipeline.run(execution_engine=...).
-  - Log columns use __ prefix — fixed columns (__log_id, __stdout, __success, etc.) are prefixed to avoid collision with user-defined tag column names.
