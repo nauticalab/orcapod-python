@@ -2,7 +2,7 @@
     "context_key": "std:v1:default",
     "version": "v1",
     "description": "Data context of Orcapod v0.3: the hashing generation H1. Frozen when v0.3.0 is released, except its golden history, which only grows; editable in place while that release is prepared.",
-    "released_in": null,
+    "released_in": "0.3.0",
     "previous": "std:v0.1:default",
     "file_hasher": {
         "_class": "orcapod.hashing.file_hashers.FileHasher",
@@ -242,6 +242,13 @@
                 },
                 "previous": null,
                 "digest": "0a789cf9e8d1df9fb762d6dc2fabffcd3383cd6a21ef147e8c6583f963280c2e"
+            },
+            {
+                "date": "2026-11-17",
+                "release": "0.3.0",
+                "added": {},
+                "previous": "0a789cf9e8d1df9fb762d6dc2fabffcd3383cd6a21ef147e8c6583f963280c2e",
+                "digest": "6cdd29cdc6fa98df322931e2ab0ff9df151fdb47d3381adecd9f58fd55d2fb22"
             }
         ]
     },

@@ -1,6 +1,8 @@
 {
     "v1": {
-        "manifest": null,
-        "releases": {}
+        "manifest": "18e7c15a446014b3e6a3178bb5daf331774f8a5214006bec40fc80442c08da09",
+        "releases": {
+            "0.3.0": "6cdd29cdc6fa98df322931e2ab0ff9df151fdb47d3381adecd9f58fd55d2fb22"
+        }
     }
 }
