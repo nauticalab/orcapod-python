@@ -188,7 +188,7 @@ def make_polars_extension_type(
     passing it here. Types produced by ``register_python_class`` and
     ``register_storage_type`` satisfy this invariant, but arbitrary
     ``pa.DataType`` values do not. This is tracked as design issue ET1 in
-    ``design_issues/``.
+    ``docs/dev/design_issues/``.
 
     Args:
         extension_name: The extension type name used for Polars registration.

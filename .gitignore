@@ -1,11 +1,5 @@
 # NFS cache files
 .nfs*
-# Ignore data files in notebooks folder
-notebooks/**/*.json
-notebooks/**/*.yaml
-notebooks/**/*.parquet
-notebooks/**/*.pkl
-notebooks/**/*.db
 
 # Ignore npy and npz data files by default
 *.np[yz]
@@ -24,10 +18,6 @@ notebooks/**/*.db
 
 # Ignore profiler output
 *.prof
-
-# Ignore any notebook that starts with an underscore or test
-notebooks/**/_*.ipynb
-notebooks/**/test*.ipynb
 
 # Ignore vscode settings
 .vscode/

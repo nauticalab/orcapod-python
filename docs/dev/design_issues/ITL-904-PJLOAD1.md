@@ -97,4 +97,4 @@ longer raises on a database without its run's records; it returns what the datab
 file's optional, advisory `run.expected_rows` makes a difference one `OrcapodDatabaseContentWarning`
 per node. Likewise, a loaded REPLAY operator whose job file records its run's content hash
 reads an absent cache table as no rows instead of raising. See
-`design_issues/ITL-1043-LJ1.md`.
+`docs/dev/design_issues/ITL-1043-LJ1.md`.

@@ -568,7 +568,7 @@ class TestAggregationLogicalTypes:
     A pod annotated ``-> Path`` emits an ``extension<orcapod.path>`` column.
     Naively wrapping that in ``pa.list_()`` raises ``ArrowNotImplementedError``:
     Arrow cannot embed an extension type inside a list value field
-    (design_issues/ ET1/ET2).  The list must be built over the element's
+    (docs/dev/design_issues/ ET1/ET2).  The list must be built over the element's
     *storage* type and wrapped in the ``list[orcapod.path]`` extension type at
     the outermost level, which is what ``ListLogicalType`` provides.
 

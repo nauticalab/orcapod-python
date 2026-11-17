@@ -390,7 +390,7 @@ class UniversalTypeConverter:
 
         # list[T] → large_list(T storage) when T is a plain type, or a top-level
         # ListLogicalType extension when T has a registered LogicalType.
-        # Arrow forbids extension types inside list value fields (ET1 in design_issues/).
+        # Arrow forbids extension types inside list value fields (ET1 in docs/dev/design_issues/).
         # Wrapping the whole list as an extension type (ET2 fix, ITL-173) preserves
         # element type information at the field-metadata level.
         if origin is list:

@@ -1263,7 +1263,7 @@ class TestInputOfAnotherDataContext:
     These tests construct the nodes and caches directly. They do not cover a
     ``PipelineJob``: a job wraps every input stream in a source node of the default
     data context, so an input of another data context is not seen as such there (a
-    known gap, ``design_issues/ITL-944-DC1.md``, ITL-951).
+    known gap, ``docs/dev/design_issues/ITL-944-DC1.md``, ITL-951).
     """
 
     def test_function_node_raises_and_writes_nothing(self, store: Store):

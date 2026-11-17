@@ -275,5 +275,5 @@ does not block or fail the release (no publish job depends on them). They call
 Because the Release workflow runs on `nauticalab`, these jobs do not run for a release at all
 today; completing the Linear release is a manual step until the developer decides otherwise
 (the issue ITL-1007 notes this "needs more thought"). Setup on `metamorphic-labs`: the
-`LINEAR_ACCESS_KEY` repo secret (the key `metamorphic-brain/axon` uses) and a Linear release
+`LINEAR_ACCESS_KEY` repo secret (the organisation's Linear access key) and a Linear release
 configured in the workspace.

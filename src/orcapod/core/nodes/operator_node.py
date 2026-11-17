@@ -1151,7 +1151,7 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
                 f"column {col_name!r} has type {col_type!r}, expected large_binary. "
                 "This table was written by an older version of the code that stored "
                 "this column as large_string. Drop and recreate the affected pipeline "
-                "DB tables (see design_issues/ ON1)."
+                "DB tables (see docs/dev/design_issues/ ON1)."
             )
         own_hash = self.content_hash().to_prefixed_digest()
         mask = pc.equal(table.column(col_name), own_hash)

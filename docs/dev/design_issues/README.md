@@ -4,6 +4,10 @@ The log of known design problems, bugs and code-quality issues: one file per ent
 (developer, November 11, 2026; ITL-968). It replaces the single file `DESIGN_ISSUES.md`, so
 two pull requests that add or update different entries never conflict.
 
+The log was the top-level `design_issues/` until ITL-1169 moved it here. A branch that adds or
+edits an entry at the old path fails `--check` after it merges `main`; move the file:
+`git mv design_issues/<file> docs/dev/design_issues/`.
+
 ## Reading the log
 
 ```
@@ -14,12 +18,12 @@ uv run python scripts/design_issues.py --full          # the text of every entry
 
 The index gives each entry's id, status, severity, Linear issue, file name and title under
 its area heading, and ends with a count by status. To find one entry, search this directory for its
-id: `ls design_issues/*-GB1.md`.
+id: `ls docs/dev/design_issues/*-GB1.md`.
 
 ## An entry file
 
-The file is `design_issues/<LINEAR-ISSUE-ID>-<ENTRY-ID>.md`, for example
-`design_issues/ITL-955-GB1.md`:
+The file is `docs/dev/design_issues/<LINEAR-ISSUE-ID>-<ENTRY-ID>.md`, for example
+`docs/dev/design_issues/ITL-955-GB1.md`:
 
 ```markdown
 ## `src/orcapod/core/operators/group_by.py` — tags entering the data group (ITL-955)
@@ -39,7 +43,7 @@ What is wrong, where, and what it causes.
   heading of an existing entry when yours belongs to the same area.
 - Then a blank line and `### <ENTRY-ID> — <title>` (an em dash). The entry id is a short
   tag in capital letters and digits, for example `GB1`; pick one that no other entry uses
-  (`ls design_issues/`). It is the id in the file name.
+  (`ls docs/dev/design_issues/`). It is the id in the file name.
 - Directly under the heading: `**Status:**`, `**Severity:**`, `**Issue:**`, in that order.
   - Status is `open`, `in progress` or `resolved`. A qualification may follow the word
     (`resolved (local stores); cloud stores remain exposed upstream`).
@@ -83,7 +87,7 @@ closed. `tests/test_design_issues.py` runs the same check, so CI rejects a malfo
 ## Entries older than this convention
 
 The entries that were in `DESIGN_ISSUES.md` were moved here with their text unchanged by
-`scripts/migrate_design_issues.py`. Three things in them are tolerated and are not for new
+a one-shot migration script (ITL-968; removed in ITL-1169). Three things in them are tolerated and are not for new
 entries:
 
 - **No Linear issue.** An entry with no `**Issue:**` line is named `NOISSUE-<ENTRY-ID>.md`.
@@ -96,12 +100,13 @@ entries:
 
 A branch that still edits an entry in `DESIGN_ISSUES.md` conflicts once when it merges
 `main` (the file is deleted there). While that merge is in progress, keep the branch's
-copy, then:
+copy, then take the migration script from a `main` commit that still has it and run it:
 
 ```
-uv run python scripts/migrate_design_issues.py --source DESIGN_ISSUES.md
+git show 37716c76:scripts/migrate_design_issues.py > /tmp/migrate_design_issues.py
+uv run python /tmp/migrate_design_issues.py --source DESIGN_ISSUES.md --out docs/dev/design_issues
 git rm -f DESIGN_ISSUES.md
-git diff MERGE_HEAD --stat -- design_issues/
+git diff MERGE_HEAD --stat -- docs/dev/design_issues/
 ```
 
 The script prints `created:` for each entry the branch added and `updated:` for each entry
@@ -111,5 +116,5 @@ the last command must list only the entries your branch added or edited. Put eve
 file back before committing the merge:
 
 ```
-git checkout MERGE_HEAD -- design_issues/<file>
+git checkout MERGE_HEAD -- docs/dev/design_issues/<file>
 ```

@@ -51,8 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     # Only run on push/manual trigger — not on PRs — to avoid consuming SpiralDB
     # resources on every review cycle.
-    # Requires SPIRAL_WORKLOAD_ID secret; fails loudly if absent so missing
-    # credentials don't silently drop coverage. Runs only on the development repository:
+    # Requires the SPIRAL_WORKLOAD_ID secret and the SPIRAL_PROJECT_ID repository variable;
+    # fails loudly if either is absent so missing settings don't silently drop coverage. Runs only on the development repository:
     # the public repository has no SpiralDB credentials, so the job is skipped there (ITL-1007).
     if: >-
       github.repository == 'metamorphic-labs/orcapod-python'
@@ -64,7 +64,7 @@ jobs:
     env:
       SPIRAL_WORKLOAD_ID: ${{ secrets.SPIRAL_WORKLOAD_ID }}
       SPIRAL_INTEGRATION_TESTS: "1"
-      SPIRAL_PROJECT_ID: ${{ vars.SPIRAL_PROJECT_ID || 'test-orcapod-362211' }}
+      SPIRAL_PROJECT_ID: ${{ vars.SPIRAL_PROJECT_ID }}
       SPIRAL_SERVER_URL: https://api.spiraldb.dev  # plain http no longer answers (ITL-1008); the repository variable of this name is not read
 
     steps:
@@ -72,6 +72,12 @@ jobs:
         if: env.SPIRAL_WORKLOAD_ID == ''
         run: |
           echo "::error::SPIRAL_WORKLOAD_ID secret is not set. SpiralDB integration tests cannot run. Configure the secret or investigate why it is missing."
+          exit 1
+
+      - name: Check for SPIRAL_PROJECT_ID
+        if: env.SPIRAL_PROJECT_ID == ''
+        run: |
+          echo "::error::SPIRAL_PROJECT_ID repository variable is not set. SpiralDB integration tests cannot run. Configure the variable or investigate why it is missing."
           exit 1
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0

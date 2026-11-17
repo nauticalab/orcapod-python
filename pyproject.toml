@@ -128,9 +128,6 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 [tool.ruff]
 target-version = "py311"
 line-length = 88
-# Tutorial notebooks are not linted or formatted: reformatting rewrites their JSON, and
-# the ones under old_tutorials/ target a package that no longer exists.
-extend-exclude = ["notebooks"]
 
 [tool.basedpyright]
 # Strictness stays at the basedpyright default. Existing errors and warnings are
@@ -149,7 +146,6 @@ exclude = [
     "build",
     "dist",
     "site",
-    "notebooks",
 ]
 
 [tool.coverage.run]

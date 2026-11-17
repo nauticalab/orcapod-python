@@ -1,6 +1,11 @@
 site_name: Orcapod
 site_description: Intuitive and powerful library for highly reproducible scientific data pipelines
 
+# docs/dev holds developer material (the design issues log, the design specification); it is
+# not part of the published site.
+exclude_docs: |
+  dev/
+
 theme:
   name: material
   features:

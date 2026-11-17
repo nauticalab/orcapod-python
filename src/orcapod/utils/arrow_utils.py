@@ -126,7 +126,7 @@ def normalize_to_large_types(
     if pa.types.is_string(arrow_type) or pa.types.is_string_view(arrow_type):
         # string_view has no comparison/sort kernels in PyArrow (>=23, <=24), so
         # normalizing it to large_string is required for filtering, not just for
-        # consistency. See design_issues/ D8 / ENG-601.
+        # consistency. See docs/dev/design_issues/ D8 / ENG-601.
         return pa.large_string()
     elif pa.types.is_binary(arrow_type) or pa.types.is_binary_view(arrow_type):
         return pa.large_binary()
@@ -385,7 +385,7 @@ def normalize_extension_columns(table: "pa.Table") -> "pa.Table":
 
     Note: only **top-level** extension columns are handled.  Extension types
     nested inside struct fields or list element types are not supported by the
-    orcapod type system (see ET1 in design_issues/) and are left unchanged.
+    orcapod type system (see ET1 in docs/dev/design_issues/) and are left unchanged.
 
     Args:
         table: Input Arrow table, may contain extension-typed columns.
@@ -1516,7 +1516,7 @@ def build_aggregated_table(
 
     Logical element types are preserved. Arrow cannot embed an extension type
     inside a list value field, so ``pa.list_(extension_type)`` raises
-    ``ArrowNotImplementedError`` (see ``design_issues/`` ET1/ET2). For such a
+    ``ArrowNotImplementedError`` (see ``docs/dev/design_issues/`` ET1/ET2). For such a
     column the list is built over the element's *storage* type and then wrapped
     in the outer ``list[<element>]`` extension type supplied by
     ``ListLogicalType``. A pod annotated ``-> Path`` therefore groups into

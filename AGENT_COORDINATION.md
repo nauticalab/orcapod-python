@@ -49,7 +49,7 @@ recorded.
    decisions the developer has already made. An issue that needs a design decision is not
    ready to dispatch until the decision is made, or the spec says to stop and ask.
 5. **Check for overlap.** Two workers must not edit the same file region. Where overlap is
-   unavoidable (`CLAUDE.md`, a shared operator base class, one `design_issues/` entry),
+   unavoidable (`CLAUDE.md`, a shared operator base class, one `docs/dev/design_issues/` entry),
    name the overlap in both specs and say who owns the shared part. Sequence the issues
    instead if the overlap is substantial.
 6. **Move the issues to In Progress** in Linear once the developer approves the wave.
@@ -104,7 +104,7 @@ developer.
 
 - **Decision routing.** Send every design or scope question to the coordinator with the
   orchestration `ask` command and wait. Never open a local question prompt. Wherever
-  `CLAUDE.md` says "ask the user" or "wait for user approval" (adding a `design_issues/`
+  `CLAUDE.md` says "ask the user" or "wait for user approval" (adding a `docs/dev/design_issues/`
   entry, creating a Linear issue, approving a PR-review revision plan), that means `ask`.
   If the developer types into the worker's terminal directly, that instruction wins; tell
   the coordinator with an escalation.

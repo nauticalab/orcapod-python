@@ -1,11 +1,12 @@
-"""The design issues log (``design_issues/``), one file per entry (ITL-968).
+"""The design issues log (``docs/dev/design_issues/``), one file per entry (ITL-968).
 
-Every test drives ``scripts/design_issues.py`` or ``scripts/migrate_design_issues.py`` as
-a command, the way a developer and CI use them.
+Every test drives ``scripts/design_issues.py`` as a command, the way a developer and CI
+use it.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,7 +15,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "design_issues.py"
-MIGRATE = REPO_ROOT / "scripts" / "migrate_design_issues.py"
 
 ENTRY = """\
 ## `src/x.py` — things
@@ -61,18 +61,57 @@ def _write(directory: Path, name: str, text: str) -> None:
 
 
 def test_repository_entries_are_well_formed() -> None:
-    """Every file in ``design_issues/`` except ``README.md`` is a valid entry."""
+    """Every file in ``docs/dev/design_issues/`` except ``README.md`` is a valid entry."""
     result = _run(SCRIPT, "--check")
     assert result.returncode == 0, result.stderr
 
 
 def test_repository_log_has_a_readme() -> None:
-    assert (REPO_ROOT / "design_issues" / "README.md").is_file()
+    assert (REPO_ROOT / "docs" / "dev" / "design_issues" / "README.md").is_file()
 
 
 def test_the_single_file_log_is_not_brought_back() -> None:
-    """Entries live in ``design_issues/``; ``DESIGN_ISSUES.md`` no longer exists."""
+    """Entries live in ``docs/dev/design_issues/``; ``DESIGN_ISSUES.md`` no longer exists."""
     assert not (REPO_ROOT / "DESIGN_ISSUES.md").exists()
+
+
+@pytest.fixture
+def repo_copy(tmp_path: Path) -> Path:
+    """A repository holding the script and an empty log at ``docs/dev/design_issues``."""
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(SCRIPT, tmp_path / "scripts" / SCRIPT.name)
+    log = tmp_path / "docs" / "dev" / "design_issues"
+    log.mkdir(parents=True)
+    (log / "README.md").write_text("# Design issues\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_check_refuses_entries_at_the_old_location(repo_copy: Path) -> None:
+    """An entry added at the top-level ``design_issues/`` (moved in ITL-1169) fails."""
+    old = repo_copy / "design_issues"
+    old.mkdir()
+    _write(old, "ITL-7-AB1.md", ENTRY)
+    result = _run(repo_copy / "scripts" / SCRIPT.name, "--check")
+    assert result.returncode == 1
+    assert "ITL-7-AB1.md" in result.stderr
+    assert "docs/dev/design_issues" in result.stderr
+
+
+def test_check_refuses_a_restored_single_file_log(repo_copy: Path) -> None:
+    """A ``DESIGN_ISSUES.md`` at the repository root fails beside a valid log."""
+    (repo_copy / "DESIGN_ISSUES.md").write_text("# Design issues\n", encoding="utf-8")
+    result = _run(repo_copy / "scripts" / SCRIPT.name, "--check")
+    assert result.returncode == 1
+    assert "DESIGN_ISSUES.md" in result.stderr
+    assert "docs/dev/design_issues" in result.stderr
+
+
+def test_check_ignores_an_old_location_holding_only_dotfiles(repo_copy: Path) -> None:
+    old = repo_copy / "design_issues"
+    old.mkdir()
+    (old / ".DS_Store").write_text("", encoding="utf-8")
+    result = _run(repo_copy / "scripts" / SCRIPT.name, "--check")
+    assert result.returncode == 0, result.stderr
 
 
 # --- --check ------------------------------------------------------------------------
@@ -322,162 +361,3 @@ def test_index_refuses_a_malformed_log(log: Path) -> None:
     result = _run(SCRIPT, "--dir", log)
     assert result.returncode == 1
     assert "wrong.md" in result.stderr
-
-
-# --- the migration from the single-file log -----------------------------------------
-
-LOG = """\
-# Design & Implementation Issues
-
-A running log.
-
----
-
-## Area one
-
-### A1 — First
-**Status:** open
-**Severity:** low
-
-Body one.
-
-```python
-# TODO: not a heading
----
-### Z9 — not an entry
-```
-
----
-
-### A2 — Second
-**Status:** resolved
-**Severity:** high
-**Issue:** ITL-5 (related: ITL-6)
-
-Body two.
-
----
-
-## `area/two.py`
-
-### A1 — Same id, other area
-**Status:** in progress
-**Severity:** medium
-
-Body three.
-
-
-"""
-
-
-@pytest.fixture
-def source(tmp_path: Path) -> Path:
-    """A single-file log holding ``LOG``."""
-    path = tmp_path / "DESIGN_ISSUES.md"
-    path.write_text(LOG, encoding="utf-8")
-    return path
-
-
-def _migrate(source: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run the migration from ``source`` into an ``out`` directory beside it."""
-    return _run(MIGRATE, "--source", source, "--out", source.parent / "out", *args)
-
-
-def test_migration_writes_one_file_per_entry(source: Path) -> None:
-    result = _migrate(source)
-
-    assert result.returncode == 0, result.stderr
-    out = source.parent / "out"
-    assert sorted(p.name for p in out.iterdir()) == [
-        "ITL-5-A2.md",
-        "NOISSUE-A1-2.md",
-        "NOISSUE-A1.md",
-    ]
-    assert (out / "ITL-5-A2.md").read_text(encoding="utf-8") == (
-        "## Area one\n\n### A2 — Second\n**Status:** resolved\n**Severity:** high\n"
-        "**Issue:** ITL-5 (related: ITL-6)\n\nBody two.\n"
-    )
-    assert (
-        (out / "NOISSUE-A1.md")
-        .read_text(encoding="utf-8")
-        .endswith("```python\n# TODO: not a heading\n---\n### Z9 — not an entry\n```\n")
-    )
-    assert (
-        (out / "NOISSUE-A1-2.md")
-        .read_text(encoding="utf-8")
-        .startswith("## `area/two.py`\n\n### A1 — Same id, other area\n")
-    )
-    assert source.read_text(encoding="utf-8") == LOG
-    # The files it writes are valid entries.
-    assert _check(out).returncode == 0
-
-
-def test_migration_verify_passes_on_its_own_output(source: Path) -> None:
-    assert _migrate(source).returncode == 0
-    result = _migrate(source, "--verify")
-    assert result.returncode == 0, result.stderr
-    assert "3 entry files reproduce the source byte for byte" in result.stdout
-
-
-def test_migration_verify_fails_when_an_entry_file_differs(source: Path) -> None:
-    assert _migrate(source).returncode == 0
-    path = source.parent / "out" / "ITL-5-A2.md"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("Body two.", "Body 2."),
-        encoding="utf-8",
-    )
-    result = _migrate(source, "--verify")
-    assert result.returncode == 1
-    assert "ITL-5-A2.md" in result.stderr
-
-
-def test_migration_verify_fails_when_an_entry_file_is_missing(source: Path) -> None:
-    assert _migrate(source).returncode == 0
-    (source.parent / "out" / "NOISSUE-A1-2.md").unlink()
-    result = _migrate(source, "--verify")
-    assert result.returncode == 1
-    assert "NOISSUE-A1-2.md" in result.stderr
-
-
-def test_migration_rerun_rewrites_only_the_entries_that_changed(source: Path) -> None:
-    assert _migrate(source).returncode == 0
-    source.write_text(
-        LOG.replace("**Status:** open", "**Status:** resolved"), encoding="utf-8"
-    )
-    result = _migrate(source)
-    assert result.returncode == 0, result.stderr
-    assert "0 created, 1 updated, 2 unchanged" in result.stdout
-    assert "**Status:** resolved" in (
-        source.parent / "out" / "NOISSUE-A1.md"
-    ).read_text(encoding="utf-8")
-
-
-def test_migration_refuses_text_outside_every_entry(source: Path) -> None:
-    source.write_text(
-        LOG.replace("## `area/two.py`\n", "## `area/two.py`\n\nStray prose.\n"),
-        encoding="utf-8",
-    )
-    result = _migrate(source)
-    assert result.returncode == 1
-    assert "Stray prose." in result.stderr
-    assert not (source.parent / "out").exists()
-
-
-def test_migration_refuses_a_source_with_no_entry(source: Path) -> None:
-    source.write_text("# Design issues\n\nNothing yet.\n", encoding="utf-8")
-    for extra in ([], ["--verify"]):
-        result = _migrate(source, *extra)
-        assert result.returncode == 1
-        assert "no '### ' entry" in result.stderr
-
-
-def test_migration_refuses_to_write_through_a_symbolic_link(source: Path) -> None:
-    out = source.parent / "out"
-    out.mkdir()
-    target = source.parent / "elsewhere.md"
-    target.write_text("keep\n", encoding="utf-8")
-    (out / "ITL-5-A2.md").symlink_to(target)
-    result = _migrate(source)
-    assert result.returncode == 1
-    assert "ITL-5-A2.md" in result.stderr
-    assert target.read_text(encoding="utf-8") == "keep\n"

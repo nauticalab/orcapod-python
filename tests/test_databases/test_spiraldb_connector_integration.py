@@ -1,6 +1,7 @@
 """Integration tests for SpiralDBConnector against the live dev project.
 
-These tests are skipped unless the ``SPIRAL_INTEGRATION_TESTS=1`` env var is set.
+These tests are skipped unless the ``SPIRAL_INTEGRATION_TESTS=1`` env var is set and
+``SPIRAL_PROJECT_ID`` names the project to test against.
 They require a valid auth mechanism, either:
 
 - Local dev: a saved ``spiral login`` (pyspiral keeps it in
@@ -15,7 +16,7 @@ integration tests.
 
 Project and server URL are configurable via env vars:
 
-- ``SPIRAL_PROJECT_ID`` (default: ``test-orcapod-362211``)
+- ``SPIRAL_PROJECT_ID`` (required; no default)
 - ``SPIRAL_SERVER_URL`` (default: ``https://api.spiraldb.dev``)
 
 Version compatibility note (PLT-1773)
@@ -46,14 +47,17 @@ from orcapod.databases import ConnectorArrowDatabase, SpiralDBConnector
 from orcapod.types import ColumnInfo
 
 INTEGRATION = os.environ.get("SPIRAL_INTEGRATION_TESTS") == "1"
-DEV_PROJECT = os.environ.get("SPIRAL_PROJECT_ID", "test-orcapod-362211")
+DEV_PROJECT = os.environ.get("SPIRAL_PROJECT_ID", "")
 DEV_OVERRIDES = {
     "server.url": os.environ.get("SPIRAL_SERVER_URL", "https://api.spiraldb.dev")
 }
 
 pytestmark = pytest.mark.skipif(
-    not INTEGRATION,
-    reason="Set SPIRAL_INTEGRATION_TESTS=1 to run SpiralDB integration tests",
+    not (INTEGRATION and DEV_PROJECT),
+    reason=(
+        "Set SPIRAL_INTEGRATION_TESTS=1 and SPIRAL_PROJECT_ID to run SpiralDB "
+        "integration tests"
+    ),
 )
 
 
