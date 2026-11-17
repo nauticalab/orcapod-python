@@ -227,6 +227,21 @@ class TableCommittingDatabaseProtocol(Protocol):
         ...
 
 
+class ColumnCheckingDatabaseProtocol(Protocol):
+    """A database that states which columns it can store (ITL-1162).
+
+    Such a database (``ConnectorArrowDatabase``) refuses a table with a column its
+    backend cannot store faithfully, before anything of it is written. A job node
+    asks it about its stored tables when the database is attached, so a pipeline
+    the database cannot hold is refused before anything runs. Check with
+    ``orcapod.contexts.stored.require_storable``.
+    """
+
+    def require_storable(self, schema: pa.Schema) -> None:
+        """Raise ``UnstorableColumnError`` for a column of ``schema`` it cannot store."""
+        ...
+
+
 @runtime_checkable
 class DatabaseRegistryProtocol(Protocol):
     """Protocol for a database config registry used during pipeline save/load.

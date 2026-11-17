@@ -50,8 +50,11 @@ from orcapod.errors import (
     PipelineJobRequiredError,
     OrcapodDatabaseReadError,
     OrcapodDatabaseWriteError,
+    UnstorableColumnError,
 )
 from orcapod.contexts.stored import (
+    data_context_field,
+    require_storable,
     keep_rows_of_data_context,
     require_same_data_context,
     account_for_stale_tables,
@@ -832,6 +835,41 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
     # attach_databases
     # ------------------------------------------------------------------
 
+    def require_storable_tables(
+        self,
+        pipeline_database: ArrowDatabaseProtocol,
+        cache_mode: CacheMode = CacheMode.OFF,
+    ) -> None:
+        """Refuse a database that cannot store this node's cache (ITL-1162).
+
+        With caching on, checks the cache's own columns (``__node_content_hash``,
+        ``__data_context``); the operator's output columns are checked when they
+        are written. Nothing is computed and nothing changes.
+
+        Args:
+            pipeline_database: The database for the cache.
+            cache_mode: The caching behaviour; ``OFF`` stores nothing.
+
+        Raises:
+            UnstorableColumnError: If the database cannot store a column, naming
+                this node.
+        """
+        if cache_mode == CacheMode.OFF:
+            return
+        try:
+            require_storable(
+                pipeline_database,
+                pa.schema(
+                    [
+                        pa.field(constants.NODE_CONTENT_HASH_COL, pa.large_binary()),
+                        data_context_field(),
+                    ]
+                ),
+            )
+        except UnstorableColumnError as exc:
+            exc.add_context(node_label=self.label)
+            raise
+
     def attach_databases(
         self,
         pipeline_database: ArrowDatabaseProtocol,
@@ -843,6 +881,9 @@ class OperatorJobNode(RunHoldingNode, OperatorNodeBase):
             pipeline_database: Database for pipeline records.
             cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
         """
+        # A database that cannot store the cache refuses it now, before anything
+        # runs or changes (ITL-1162).
+        self.require_storable_tables(pipeline_database, cache_mode)
         # Another database has its own tables of other generations to account for.
         self._stale_tables_checked = False
         self._skipped_rows_reported = False

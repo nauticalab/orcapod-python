@@ -1115,6 +1115,11 @@ class CachedDataFunction(DataFunctionWrapper):
             name_path=record_path_prefix + self.uri[:1],
         )
 
+    @property
+    def result_database(self) -> ArrowDatabaseProtocol:
+        """The database this function's results are cached in."""
+        return self._cache.result_database
+
     def _build_metadata_datagrams(self) -> tuple[Datagram, Datagram]:
         """Build variation and execution Datagrams for cache storage."""
         variation_datagram = Datagram(

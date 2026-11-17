@@ -108,9 +108,14 @@ def with_data_context(table: "pa.Table", context_key: str) -> "pa.Table":
         ``large_string`` holding ``context_key`` on every row.
     """
     return table.append_column(
-        pa.field(constants.DATA_CONTEXT_COL, pa.large_string(), nullable=False),
+        data_context_field(),
         pa.array([context_key] * table.num_rows, type=pa.large_string()),
     )
+
+
+def data_context_field() -> "pa.Field[pa.DataType]":
+    """The ``__data_context`` field every stored table ends with (``with_data_context``)."""
+    return pa.field(constants.DATA_CONTEXT_COL, pa.large_string(), nullable=False)
 
 
 def require_same_data_context(input_context_key: str, own_context_key: str) -> None:
@@ -681,3 +686,23 @@ def stored_data_contexts(
     keys = cast("list[str]", per_value.field(0).to_pylist())
     counts = cast("list[int]", per_value.field(1).to_pylist())
     return dict(zip(keys, counts))
+
+
+def require_storable(database: object, schema: pa.Schema) -> None:
+    """Refuse ``schema`` if ``database`` states it cannot store one of its columns.
+
+    The one check for ``ColumnCheckingDatabaseProtocol`` (ITL-1162): a job node asks
+    it about each table it stores when a database is attached, before anything runs.
+    A database that states no rule (in-memory, Delta) stores every column, and
+    nothing is checked.
+
+    Args:
+        database: Any database object.
+        schema: The Arrow schema of a table the database is to hold.
+
+    Raises:
+        UnstorableColumnError: If the database cannot store a column of ``schema``.
+    """
+    check = getattr(database, "require_storable", None)
+    if callable(check):
+        _ = check(schema)

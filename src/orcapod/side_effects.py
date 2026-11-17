@@ -37,12 +37,15 @@ from orcapod.errors import (
     OrcapodDatabaseError,
     OrcapodDatabaseReadError,
     OrcapodDatabaseWriteError,
+    UnstorableColumnError,
 )
 from orcapod.contexts.stored import (
     StaleTables,
     account_for_stale_tables,
+    data_context_field,
     find_stale_tables,
     require_same_data_context,
+    require_storable,
     with_data_context,
 )
 from orcapod.invocation import (
@@ -471,6 +474,22 @@ def _execute_side_effect_row(
         return (tag, data)
 
 
+def _invocation_log_schema() -> pa.Schema:
+    """The columns of an invocation log row, before ``__data_context`` is appended."""
+    return pa.schema(
+        [
+            pa.field("record_id_hash", pa.large_binary()),
+            pa.field("pipeline_run_id", pa.large_string()),
+            pa.field("executed_at", pa.timestamp("us", tz="UTC")),
+        ]
+    )
+
+
+def _stored_invocation_log_schema() -> pa.Schema:
+    """The columns of an invocation log row as stored, ``__data_context`` included."""
+    return _invocation_log_schema().append(data_context_field())
+
+
 def _write_invocation_row(
     *,
     pipeline_database: ArrowDatabaseProtocol,
@@ -498,15 +517,15 @@ def _write_invocation_row(
             ``record_id``; stored on the row as ``__data_context``.
     """
     executed_at = datetime.datetime.now(datetime.timezone.utc)
-    record = pa.table(
-        {
-            "record_id_hash": pa.array([record_id_hash_bytes], type=pa.large_binary()),
-            "pipeline_run_id": pa.array([run_id], type=pa.large_string()),
-            "executed_at": pa.array(
-                [executed_at],
-                type=pa.timestamp("us", tz="UTC"),
-            ),
-        }
+    record = pa.Table.from_pylist(
+        [
+            {
+                "record_id_hash": record_id_hash_bytes,
+                "pipeline_run_id": run_id,
+                "executed_at": executed_at,
+            }
+        ],
+        schema=_invocation_log_schema(),
     )
     try:
         pipeline_database.add_record(
@@ -1112,6 +1131,24 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
     # DB attachment
     # ------------------------------------------------------------------
 
+    def require_storable_tables(self, pipeline_database: ArrowDatabaseProtocol) -> None:
+        """Refuse a database that cannot store this node's invocation log (ITL-1162).
+
+        Nothing is delivered and nothing changes.
+
+        Args:
+            pipeline_database: The database for the invocation log.
+
+        Raises:
+            UnstorableColumnError: If the database cannot store a column, naming
+                this node.
+        """
+        try:
+            require_storable(pipeline_database, _stored_invocation_log_schema())
+        except UnstorableColumnError as exc:
+            exc.add_context(node_label=self.label)
+            raise
+
     def attach_databases(
         self,
         pipeline_database: ArrowDatabaseProtocol | None = None,
@@ -1126,6 +1163,10 @@ class SideEffectJobNode(RunHoldingNode, SideEffectNode):
             pipeline_database: Pre-scoped pipeline DB (at pipeline root),
                 or ``None`` to detach.
         """
+        if pipeline_database is not None:
+            # A database that cannot store the invocation log refuses it now,
+            # before anything is delivered or changes (ITL-1162).
+            self.require_storable_tables(pipeline_database)
         self._pipeline_database = pipeline_database
         self._unlisted_store_reported = False
         self._current_log_checked = False

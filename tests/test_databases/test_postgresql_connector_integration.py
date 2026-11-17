@@ -21,6 +21,7 @@ share a single database without interfering with each other.
 
 from __future__ import annotations
 
+import datetime
 import os
 import uuid
 from collections.abc import Iterator
@@ -475,3 +476,148 @@ class TestConnectorArrowDatabaseWithPostgreSQL:
         db.add_record(("fn", "mismatch"), record_id="r2", record=r2)
         with pytest.raises(ValueError, match="Schema mismatch"):
             db.flush()
+
+
+# ---------------------------------------------------------------------------
+# What the connector states it stores reads back as written (ITL-1162)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize(
+    "arrow_type, values",
+    [
+        pytest.param(pa.bool_(), [True, None], id="bool"),
+        pytest.param(pa.int32(), [1, None], id="int32"),
+        pytest.param(pa.int64(), [1, None], id="int64"),
+        pytest.param(pa.float32(), [1.5, None], id="float32"),
+        pytest.param(pa.float64(), [1.5, None], id="float64"),
+        pytest.param(pa.large_string(), ["a", None], id="large_string"),
+        pytest.param(pa.large_binary(), [b"a", None], id="large_binary"),
+        pytest.param(pa.date32(), [datetime.date(2026, 1, 1), None], id="date32"),
+        pytest.param(
+            pa.timestamp("us"),
+            [datetime.datetime(2026, 1, 1, 12), None],
+            id="timestamp",
+        ),
+        pytest.param(
+            pa.timestamp("us", tz="UTC"),
+            [datetime.datetime(2026, 1, 1, 12, tzinfo=datetime.timezone.utc), None],
+            id="timestamp_utc",
+        ),
+    ],
+)
+def test_storable_types_read_back_as_written(
+    connector: PostgreSQLConnector, arrow_type: pa.DataType, values: list[object]
+) -> None:
+    """Each type ``unstorable_column_reason`` accepts round-trips, twice (ITL-1162)."""
+    assert (
+        connector.unstorable_column_reason("v", arrow_type, primary_key=False) is None
+    )
+    db = ConnectorArrowDatabase(connector)
+    table = pa.table({"v": pa.array(values, type=arrow_type)})
+    db.add_record(("t",), b"1", table.slice(0, 1), flush=True)
+    db.add_record(("t",), b"2", table.slice(1, 1), flush=True)
+
+    stored = db.get_all_records(("t",))
+    assert stored is not None
+    assert stored.schema.field("v").type == arrow_type
+    assert sorted(stored["v"].to_pylist(), key=lambda v: v is None) == values
+
+
+@pytest.mark.postgres
+def test_function_node_job_refused(connector: PostgreSQLConnector) -> None:
+    """A function node's result table cannot be stored; the job refuses it (ITL-1162)."""
+    from orcapod import PipelineJob, function_pod
+    from orcapod.errors import UnstorableColumnError
+    from orcapod.sources import DictSource
+
+    @function_pod(output_keys="double")
+    def double(x: int) -> int:
+        return 2 * x
+
+    job = PipelineJob(name="p", database=ConnectorArrowDatabase(connector))
+    source = DictSource(
+        data=[{"k": "a", "x": 1}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="src",
+    )
+    with pytest.raises(UnstorableColumnError) as exc_info:
+        with job:
+            _ = double.pod(source, label="dbl")
+    assert exc_info.value.column == "__pf_exec_executor_info"
+    assert connector.get_table_names() == []
+
+
+@pytest.mark.postgres
+def test_long_column_name_refused_and_nothing_written(
+    connector: PostgreSQLConnector,
+) -> None:
+    """A name PostgreSQL would truncate is refused before the table exists (ITL-1162)."""
+    from orcapod.errors import UnstorableColumnError
+
+    db = ConnectorArrowDatabase(connector)
+    name = "_tag_source_id::" + "0" * 64
+    table = pa.table({name: pa.array(["s"], type=pa.large_string())})
+    with pytest.raises(UnstorableColumnError):
+        db.add_record(("t",), b"1", table)
+    db.flush()
+    assert connector.get_table_names() == []
+
+
+@pytest.mark.postgres
+def test_operator_cache_refused_at_write_and_nothing_written(
+    connector: PostgreSQLConnector,
+) -> None:
+    """An operator cache's system-tag column names exceed 63 bytes (ITL-1162)."""
+    from orcapod import PipelineJob
+    from orcapod.core.operators import SelectDataColumns
+    from orcapod.errors import UnstorableColumnError, UnstorableTableNameError
+    from orcapod.sources import DictSource
+    from orcapod.types import CacheMode
+
+    db = ConnectorArrowDatabase(connector)
+    job = PipelineJob(name="p", database=db)
+    source = DictSource(
+        data=[{"k": "a", "x": 1, "y": 2}],
+        tag_columns=["k"],
+        tag_only_columns=True,
+        source_id="src",
+    )
+    with job:
+        _ = SelectDataColumns(["x"])(source, label="sel")
+    job.nodes["sel"].attach_databases(
+        pipeline_database=db.at("p"), cache_mode=CacheMode.LOG
+    )
+    with pytest.raises(Exception) as exc_info:
+        _ = job.run()
+    # The cache's table name (over 63 bytes) or its system-tag column names are
+    # refused, whichever entry comes first; nothing reaches the server.
+    chain: list[BaseException] = []
+    err: BaseException | None = exc_info.value
+    while err is not None:
+        chain.append(err)
+        err = err.__cause__ or err.__context__
+    assert any(
+        isinstance(e, (UnstorableColumnError, UnstorableTableNameError)) for e in chain
+    ), chain
+    assert connector.get_table_names() == []
+
+
+@pytest.mark.postgres
+def test_long_table_name_refused_and_nothing_written(
+    connector: PostgreSQLConnector,
+) -> None:
+    """A table name PostgreSQL would truncate is never sent to it (ITL-1162)."""
+    from orcapod.errors import UnstorableTableNameError
+
+    db = ConnectorArrowDatabase(connector)
+    path = ("fn", "x" * 70)
+    table = pa.table({"v": pa.array([1], type=pa.int64())})
+    with pytest.raises(UnstorableTableNameError):
+        db.add_record(path, b"1", table)
+    with pytest.raises(UnstorableTableNameError):
+        db.get_all_records(path)
+    db.flush()
+    assert connector.get_table_names() == []

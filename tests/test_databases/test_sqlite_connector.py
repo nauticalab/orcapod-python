@@ -93,13 +93,15 @@ class TestArrowTypeToSqliteSql:
     def test_bool(self):
         assert _arrow_type_to_sqlite_sql(pa.bool_()) == "BOOLEAN"
 
-    def test_unsupported_type_logs_warning_and_returns_text(self, caplog):
-        import logging
-
-        with caplog.at_level(logging.WARNING):
-            result = _arrow_type_to_sqlite_sql(pa.list_(pa.int64()))
-        assert result == "TEXT"
-        assert "Unsupported Arrow type" in caplog.text
+    def test_unsupported_type_raises_instead_of_text(self):
+        """No silent TEXT fallback: such a value would fail to bind (ITL-1162)."""
+        for arrow_type in (
+            pa.list_(pa.int64()),
+            pa.timestamp("us", tz="UTC"),
+            pa.date32(),
+        ):
+            with pytest.raises(ValueError, match="no column type"):
+                _arrow_type_to_sqlite_sql(arrow_type)
 
 
 class TestSQLiteConnectorScaffold:

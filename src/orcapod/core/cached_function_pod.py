@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.data_function import CachedDataFunction
 from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import (
     FunctionPodStream,
@@ -17,8 +18,12 @@ from orcapod.core.function_pod import (
 from orcapod.core.streams.view import StreamView
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
-from orcapod.contexts.stored import StaleTables
-from orcapod.core.result_cache import ResultCache
+from orcapod.contexts.stored import (
+    StaleTables,
+    data_context_field,
+    require_storable,
+)
+from orcapod.core.result_cache import ResultCache, pod_timestamp_type
 from orcapod.hooks import InvocationStatus
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
@@ -70,6 +75,53 @@ class CachedFunctionPod(WrappedFunctionPod):
             # "side_effect_function" for a pod that takes the invocation context.
             name_path=self.uri[: 2 if function_pod.ctx_arg_name is not None else 1],
         )
+
+    def require_storable_results(self) -> None:
+        """Refuse a result database that cannot store this pod's result table (ITL-1162).
+
+        The result table holds the input data hash, the function's variation and
+        execution columns (``__pf_var_*``, ``__pf_exec_*``), its output columns,
+        the ``__pod_ts`` timestamp and ``__data_context``, typed from their declared
+        schemas; nothing is computed. (The source-info columns are text.) A
+        database that states which columns it stores (``ConnectorArrowDatabase``)
+        refuses here, before the function runs; any other database accepts.
+
+        Raises:
+            UnstorableColumnError: If the result database cannot store a column.
+        """
+        import pyarrow as pa
+
+        pf = self._function_pod.data_function
+        python_schema = {
+            **{
+                f"{constants.PF_VARIATION_PREFIX}{name}": hint
+                for name, hint in pf.get_function_variation_data_schema().items()
+            },
+            **{
+                f"{constants.PF_EXECUTION_PREFIX}{name}": hint
+                for name, hint in pf.get_execution_data_schema().items()
+            },
+            **pf.output_data_schema,
+        }
+        declared = self.data_context.type_converter.python_schema_to_arrow_schema(
+            python_schema
+        )
+        schema = pa.schema(
+            [
+                pa.field(constants.INPUT_DATA_HASH_COL, pa.large_binary()),
+                *declared,
+                pa.field(constants.POD_TIMESTAMP, pod_timestamp_type()),
+                data_context_field(),
+            ]
+        )
+        require_storable(self._cache.result_database, schema)
+        # A function with its own result database (``function_pod(result_database=)``)
+        # stores the same table there.
+        if isinstance(pf, CachedDataFunction):
+            require_storable(pf.result_database, schema)
+        # A pod with its own cache database (``pod_cache_database``) stores there too.
+        if isinstance(self._function_pod, CachedFunctionPod):
+            self._function_pod.require_storable_results()
 
     @property
     def result_database(self) -> ArrowDatabaseProtocol:

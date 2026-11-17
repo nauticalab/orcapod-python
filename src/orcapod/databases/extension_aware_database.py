@@ -187,6 +187,21 @@ class ExtensionAwareDatabase:
         """
         return getattr(self._db, "flush_batch")  # noqa: B009  # AttributeError when absent, by design
 
+    @property
+    def require_storable(self) -> Callable[[pa.Schema], None]:
+        """The wrapped database's ``require_storable`` (ITL-1162).
+
+        A job node asks it about its stored tables when the database is attached,
+        so a wrapped connector database refuses a table it cannot store before
+        anything runs. Extension-typed columns are checked as given: a connector
+        that cannot store their storage type with its metadata cannot store them.
+
+        Raises:
+            AttributeError: If the wrapped database has none, so this wrapper
+                checks columns only when the wrapped database does.
+        """
+        return getattr(self._db, "require_storable")  # noqa: B009  # AttributeError when absent, by design
+
     # ── Structural delegation ─────────────────────────────────────────────────
 
     @property

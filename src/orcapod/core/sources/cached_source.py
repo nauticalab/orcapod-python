@@ -11,6 +11,7 @@ from typing_extensions import override
 from orcapod import contexts
 from orcapod.config import OrcapodConfig
 from orcapod.core.sources.base import RootSource
+from orcapod.errors import UnstorableColumnError
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import (
     check_head_size,
@@ -23,6 +24,8 @@ from orcapod.core.streams.view import (
     head_of,
 )
 from orcapod.contexts.stored import (
+    data_context_field,
+    require_storable,
     keep_rows_of_data_context,
     require_same_data_context,
     account_for_stale_tables,
@@ -102,6 +105,14 @@ class CachedSource(RootSource):
             data_context=data_context,
             config=config,
         )
+        # A database that cannot store the cache's own columns refuses it now,
+        # before anything is read (ITL-1162). The source's columns are checked
+        # when they are written.
+        try:
+            require_storable(cache_database, pa.schema([data_context_field()]))
+        except UnstorableColumnError as exc:
+            exc.add_context(node_label=self.label)
+            raise
         self._source: SourceProtocol = source
         self._cache_database = cache_database
         self._cache_path_prefix = cache_path_prefix

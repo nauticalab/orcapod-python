@@ -419,6 +419,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             SourceSpecMismatchError: If any source's columns differ from its slot's
                 declared names, roles or types.
             ValueError: If a source key has no matching ``SourceJobNode`` slot.
+            UnstorableColumnError: If *database* cannot store a table of a node
+                (ITL-1162); the job is left as it was.
         """
         from orcapod.core.nodes.source_node import SourceNodeBase
 
@@ -440,6 +442,11 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             for node in (self._persistent_node_map or {}).values():
                 if isinstance(node, SourceNodeBase) and node.name in sources:
                     node.validate(sources[node.name])
+
+        # A database that cannot store a node's tables is refused before anything
+        # changes too (ITL-1162).
+        if database_changed and database is not None:
+            self._require_storable_tables(database)
 
         # Every source is validated before anything changes: a refused source leaves
         # the job as it was, its database included (ITL-1112).
@@ -476,6 +483,30 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
     # _distribute_databases()
     # ------------------------------------------------------------------
 
+    def _require_storable_tables(self, database: "ArrowDatabaseProtocol") -> None:
+        """Refuse ``database`` if it cannot store a table of one of the job's nodes.
+
+        The same views as ``_distribute_databases`` gives the nodes. Nothing
+        changes (ITL-1162).
+
+        Args:
+            database: The job database to check.
+
+        Raises:
+            UnstorableColumnError: For the first node whose table the database
+                cannot store, naming the node.
+        """
+        pipeline_db = database.at(*self._name)
+        result_db = pipeline_db.at("_result")
+        for node in (self._persistent_node_map or {}).values():
+            if isinstance(node, FunctionJobNode):
+                node.require_storable_tables(pipeline_db, result_db)
+            elif isinstance(node, OperatorJobNode):
+                op_cache_mode = getattr(node, "_cache_mode", None) or CacheMode.OFF
+                node.require_storable_tables(pipeline_db, op_cache_mode)
+            elif isinstance(node, SideEffectJobNode):
+                node.require_storable_tables(pipeline_db)
+
     def _distribute_databases(self) -> None:
         """Wire live DB references to all FunctionJobNode and OperatorJobNode objects.
 
@@ -491,6 +522,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 "Call bind(database=...) or from_pipeline(..., database=...) first."
             )
 
+        # Every node is checked before any is attached, so a refused database
+        # leaves every node as it was (ITL-1162).
+        self._require_storable_tables(self._database)
         pipeline_db = self._database.at(*self._name)
         result_db = pipeline_db.at("_result")
 

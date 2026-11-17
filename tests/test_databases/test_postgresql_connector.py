@@ -139,10 +139,15 @@ class TestArrowTypeToPgSql:
         with pytest.raises(ValueError, match="not supported"):
             _arrow_type_to_pg_sql(pa.large_list(pa.int32()))
 
-    def test_unknown_falls_back_to_text(self):
-        # pa.null() is an unusual type not in the mapping
-        result = _arrow_type_to_pg_sql(pa.null())
-        assert result == "TEXT"
+    def test_unknown_raises_instead_of_text(self):
+        """No silent TEXT fallback (ITL-1162)."""
+        for arrow_type in (pa.null(), pa.struct([("a", pa.int64())])):
+            with pytest.raises(ValueError, match="not supported"):
+                _arrow_type_to_pg_sql(arrow_type)
+
+    def test_boolean_information_schema_name(self):
+        """``information_schema`` names a bool column ``boolean``."""
+        assert _pg_type_to_arrow("boolean", "boolean") == pa.bool_()
 
 
 class TestCoercePgValue:

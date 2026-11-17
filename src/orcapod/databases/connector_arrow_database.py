@@ -24,6 +24,12 @@ from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.databases.utils import coerce_record_id
+from orcapod.errors import UnstorableColumnError, UnstorableTableNameError
+from orcapod.utils.arrow_utils import (
+    normalize_schema_to_large_types,
+    normalize_table_to_large_types,
+    normalize_to_large_types,
+)
 from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
 from orcapod.utils.lazy_module import LazyModule
 
@@ -185,6 +191,7 @@ class ConnectorArrowDatabase:
     def _get_committed_table(self, record_path: tuple[str, ...]) -> pa.Table | None:
         """Fetch all committed records for a path from the connector."""
         table_name = self._path_to_table_name(self._path_prefix + record_path)
+        self._require_table_name(table_name)
         if table_name not in self._connector.get_table_names():
             return None
         batches = list(self._connector.iter_batches(f'SELECT * FROM "{table_name}"'))
@@ -244,10 +251,61 @@ class ConnectorArrowDatabase:
             ``True`` if a table exists at the given path, ``False`` otherwise.
         """
         table_name = self._path_to_table_name(self._path_prefix + record_path)
+        self._require_table_name(table_name)
         record_key = self._get_record_key(record_path)
         if record_key in self._pending_batches:
             return True
         return table_name in self._connector.get_table_names()
+
+    # ── Storable columns ──────────────────────────────────────────────────────
+
+    def require_storable(self, schema: pa.Schema) -> None:
+        """Refuse a table schema with a column the connector cannot store (ITL-1162).
+
+        The connector states which columns it stores
+        (``DBConnectorProtocol.unstorable_column_reason``): a column it would read
+        back as another type, or could not write at all, is refused. Called by
+        ``add_records`` before anything of the table is buffered, and by a job node
+        when the database is attached to it, before anything runs.
+
+        Args:
+            schema: The Arrow schema of a table this database is to hold. The
+                ``__record_id`` column, when present, is checked as the key.
+
+        Raises:
+            UnstorableColumnError: For the first column the connector cannot
+                store, naming the connector, the column, its Arrow type and why.
+        """
+        for field in schema:
+            reason = self._connector.unstorable_column_reason(
+                field.name,
+                field.type,
+                primary_key=field.name == self.RECORD_ID_COLUMN,
+            )
+            if reason is not None:
+                raise UnstorableColumnError(
+                    database_kind=type(self._connector).__name__,
+                    column=field.name,
+                    arrow_type=field.type,
+                    reason=reason,
+                )
+
+    def _require_table_name(self, table_name: str) -> None:
+        """Refuse a table name the connector would not keep (ITL-1162).
+
+        Called at every entry that creates, writes, reads or checks a table, so a
+        name the backend would change (truncate) is never sent to it.
+
+        Raises:
+            UnstorableTableNameError: Naming the connector, the name and why.
+        """
+        reason = self._connector.unstorable_table_name_reason(table_name)
+        if reason is not None:
+            raise UnstorableTableNameError(
+                database_kind=type(self._connector).__name__,
+                table_name=table_name,
+                reason=reason,
+            )
 
     # ── Write methods ─────────────────────────────────────────────────────────
 
@@ -306,6 +364,16 @@ class ConnectorArrowDatabase:
                 f"got {rid_type}. Encode the column to bytes before calling add_records()."
             )
 
+        # Checked and buffered in the large variants every connector reads back
+        # (view types included), so a read that joins buffered and committed rows
+        # sees one layout (ITL-1122, ITL-1162).
+        self.require_storable(
+            normalize_schema_to_large_types(records.schema, keep_null=True)
+        )
+        self._require_table_name(
+            self._path_to_table_name(self._path_prefix + record_path)
+        )
+        records = normalize_table_to_large_types(records, keep_null=True)
         self._connector.validate_records(records)
 
         records = self._deduplicate_within_table(records)
@@ -402,6 +470,7 @@ class ConnectorArrowDatabase:
         for record_key in list(self._pending_batches.keys()):
             record_path = tuple(record_key.split("/"))
             table_name = self._path_to_table_name(record_path)
+            self._require_table_name(table_name)
             pending = self._pending_batches.pop(record_key)
             self._pending_record_ids.pop(record_key, None)
             skip_existing = self._pending_skip_existing.pop(record_key, False)
@@ -414,11 +483,16 @@ class ConnectorArrowDatabase:
             # cryptic DB-level error or a silent partial write.
             existing_table_names = self._connector.get_table_names()
             if table_name in existing_table_names:
+                # A connector reads text and binary back in their large variants,
+                # which are the same types (ITL-1162).
                 existing_cols = {
-                    c.name: c.arrow_type
+                    c.name: normalize_to_large_types(c.arrow_type, keep_null=True)
                     for c in self._connector.get_column_info(table_name)
                 }
-                pending_cols = {c.name: c.arrow_type for c in columns}
+                pending_cols = {
+                    c.name: normalize_to_large_types(c.arrow_type, keep_null=True)
+                    for c in columns
+                }
                 if existing_cols != pending_cols:
 
                     def _fmt(cols: dict) -> str:

@@ -120,6 +120,60 @@ run and computes nothing on a second `run()`.
 A job created without a database can be recorded but not run. Give it one later with
 `job.bind(database=...)`; `run()` without a database raises `ValueError`.
 
+### Connector databases
+
+A `ConnectorArrowDatabase` stores a column only when its connector can store it as written.
+Each connector states which columns those are, and anything else is refused with
+`UnstorableColumnError` before anything of the table is written.
+
+The SQL connectors store a column only when they read it back with the same Arrow type (text
+and binary columns come back as `large_string` and `large_binary`, the types Orcapod uses):
+
+| Connector | Column types it stores |
+|---|---|
+| `SQLiteConnector` | `bool`, `int64`, `double`, `large_string`, `large_binary` |
+| `PostgreSQLConnector` | `bool`, `int32`, `int64`, `float`, `double`, `large_string`, `large_binary`, `date32`, `timestamp[us]`, `timestamp[us, tz=UTC]` |
+
+Any other type (lists, structs, dates or timestamps on SQLite, narrower integers and floats,
+logical types) is refused. PostgreSQL also refuses a column name or a table name longer than
+63 bytes, which it would truncate (`UnstorableTableNameError` for a table). `SpiralDBConnector` stores other types as written, except a
+timestamp with a time zone (SpiralDB drops the zone), and SpiralDB reserves the `__` prefix on
+value columns (the `__record_id` key is allowed) and `.` in any column name.
+
+Orcapod's own stored tables hold such columns. A function node's result table holds
+list-valued executor columns and `__`-prefixed columns. A side-effect node's log holds a UTC
+timestamp and `__data_context`, and an operator cache and a cached source hold
+`__data_context` too. So a job refuses these nodes when it is built, before anything runs:
+
+- every function node, on all three connectors;
+- every side-effect node, on SQLite and SpiralDB;
+- every operator cache (an operator node with caching on) and cached source, on SpiralDB.
+
+An operator cache or cached source on a SQL connector is refused when it is written, before
+anything is stored, if one of its columns has a type or name the connector does not store. On
+PostgreSQL that is every operator cache with caching on: its system-tag column names
+(`_tag_source_id::` and a 64-character hash) are longer than 63 bytes.
+A table's name is its Orcapod path joined by `__`, and every node table and cached source path
+holds a 64-character hash, so on PostgreSQL only tables you write through `ConnectorArrowDatabase`
+yourself under short paths fit; reading an existing table with `PostgreSQLTableSource` is
+unaffected. Use
+`InMemoryArrowDatabase` or `DeltaTableDatabase` for such jobs. Storing these columns on
+connector databases is planned for a later release.
+
+```python
+from orcapod.databases import ConnectorArrowDatabase, SQLiteConnector
+from orcapod.errors import UnstorableColumnError
+
+sqlite_database = ConnectorArrowDatabase(SQLiteConnector(":memory:"))
+sql_job = PipelineJob(name="bmi", database=sqlite_database)
+try:
+    with sql_job:
+        compute_bmi.pod(mice(cohort_a), label="bmi")
+except UnstorableColumnError as exc:
+    print(exc)
+# node 'bmi': a SQLiteConnector database cannot store column '__pf_exec_executor_info' of Arrow type large_list<...>: SQLite has no column type for it. Use an InMemoryArrowDatabase or a DeltaTableDatabase instead.
+```
+
 ## What a re-run computes
 
 A stored result is reused when the function's identity (its name, its output schema and its

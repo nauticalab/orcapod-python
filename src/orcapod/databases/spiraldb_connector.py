@@ -377,6 +377,25 @@ def _about_table(table: str) -> Iterator[None]:
 # ---------------------------------------------------------------------------
 
 
+def _holds_zone_aware_timestamp(arrow_type: pa.DataType) -> bool:
+    """Whether ``arrow_type`` is or nests a timestamp with a time zone (ITL-1162).
+
+    Args:
+        arrow_type: The column's Arrow type.
+
+    Returns:
+        ``True`` for a zone-aware timestamp at any depth of lists, structs and maps.
+    """
+    if pa.types.is_timestamp(arrow_type):
+        return arrow_type.tz is not None
+    if isinstance(arrow_type, pa.ExtensionType):
+        return _holds_zone_aware_timestamp(arrow_type.storage_type)
+    return any(
+        _holds_zone_aware_timestamp(arrow_type.field(i).type)
+        for i in range(arrow_type.num_fields)
+    )
+
+
 class SpiralDBConnector:
     """DBConnectorProtocol implementation backed by SpiralDB (pyspiral).
 
@@ -946,6 +965,55 @@ class SpiralDBConnector:
         novel = records.filter(mask)
         if len(novel) > 0:
             write_rows(novel)
+
+    def unstorable_column_reason(
+        self, name: str, arrow_type: pa.DataType, *, primary_key: bool
+    ) -> str | None:
+        """Say why SpiralDB cannot store a column, or ``None`` when it can (ITL-1162).
+
+        SpiralDB stores Arrow tables natively, but not every column as written
+        (ITL-1164). It reserves ``.`` as its column-group separator in every name,
+        and the ``__`` prefix on value (column group) columns; a key column may
+        start with ``__`` (``__record_id``). It drops a timestamp's time zone, so a
+        time-zone-aware timestamp column (``timestamp[us, tz=UTC]``) would read
+        back as another type and is refused.
+
+        Args:
+            name: The column's name.
+            arrow_type: The column's Arrow type.
+            primary_key: Whether the column is the table's primary key.
+
+        Returns:
+            A short reason, or ``None`` when SpiralDB stores the column.
+        """
+        if "." in name:
+            return "SpiralDB reserves '.' in column names as its column-group separator"
+        if name.startswith("__") and not primary_key:
+            return "SpiralDB reserves the '__' prefix on value columns"
+        if pa.types.is_timestamp(arrow_type) and arrow_type.tz is not None:
+            return (
+                "SpiralDB drops a timestamp's time zone, so it reads back as "
+                f"timestamp[{arrow_type.unit}]"
+            )
+        if _holds_zone_aware_timestamp(arrow_type):
+            return (
+                "SpiralDB drops the time zone of a timestamp nested in it, so it "
+                "reads back as another type"
+            )
+        return None
+
+    def unstorable_table_name_reason(self, table_name: str) -> str | None:
+        """Say why SpiralDB cannot hold a table of this name: it holds every name.
+
+        The database's table names are letters, digits and ``_``.
+
+        Args:
+            table_name: The table name.
+
+        Returns:
+            Always ``None``.
+        """
+        return None
 
     def validate_records(self, records: pa.Table) -> None:
         """No-op: ``SpiralDBConnector`` preserves Arrow field metadata via the native KV store."""

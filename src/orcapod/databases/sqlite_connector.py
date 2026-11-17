@@ -65,17 +65,23 @@ def _sqlite_type_to_arrow(declared_type: str) -> pa.DataType:
     return pa.float64()
 
 
-def _arrow_type_to_sqlite_sql(arrow_type: pa.DataType) -> str:
-    """Map an Arrow DataType to a SQLite SQL type string for CREATE TABLE.
+def _sqlite_sql_type(arrow_type: pa.DataType) -> str | None:
+    """Return the SQLite column type for an Arrow type, or ``None`` when there is none.
 
     Args:
         arrow_type: The Arrow DataType to convert.
 
     Returns:
-        A SQLite SQL type string (e.g. "INTEGER", "TEXT").
+        A SQLite SQL type string (e.g. "INTEGER", "TEXT"), or ``None`` for a type
+        SQLite has no column type for (lists, structs, dates, timestamps, extension
+        types and the rest).
     """
     import pyarrow as _pa  # noqa: PLC0415 — needed at call time
 
+    from orcapod.utils.arrow_utils import normalize_to_large_types  # noqa: PLC0415
+
+    # View layouts map as their large variants, as the storability rule reads them.
+    arrow_type = normalize_to_large_types(arrow_type, keep_null=True)
     if arrow_type == _pa.bool_():
         return "BOOLEAN"
     if _pa.types.is_integer(arrow_type):
@@ -86,8 +92,52 @@ def _arrow_type_to_sqlite_sql(arrow_type: pa.DataType) -> str:
         return "TEXT"
     if _pa.types.is_binary(arrow_type) or _pa.types.is_large_binary(arrow_type):
         return "BLOB"
-    logger.warning("Unsupported Arrow type %r; mapping to TEXT", arrow_type)
-    return "TEXT"
+    return None
+
+
+def _arrow_type_to_sqlite_sql(arrow_type: pa.DataType) -> str:
+    """Map an Arrow DataType to a SQLite SQL type string for CREATE TABLE.
+
+    Args:
+        arrow_type: The Arrow DataType to convert.
+
+    Returns:
+        A SQLite SQL type string (e.g. "INTEGER", "TEXT").
+
+    Raises:
+        ValueError: If SQLite has no column type for ``arrow_type``. There is no
+            fallback to TEXT: a value of such a type would fail to bind or read
+            back as text (ITL-1162).
+    """
+    sql_type = _sqlite_sql_type(arrow_type)
+    if sql_type is None:
+        raise ValueError(f"SQLite has no column type for Arrow type {arrow_type}")
+    return sql_type
+
+
+def _sqlite_unstorable_reason(arrow_type: pa.DataType) -> str | None:
+    """Say why SQLite cannot store a column of ``arrow_type``, or ``None`` when it can.
+
+    A type is stored when the column type it is written as reads back as the same
+    type in its large variant: ``bool``, ``int64``, ``double``, ``large_string``
+    and ``large_binary`` (and ``string`` / ``binary``, read back large).
+
+    Args:
+        arrow_type: The column's Arrow type.
+
+    Returns:
+        A short reason, or ``None`` when SQLite stores the type.
+    """
+    from orcapod.utils.arrow_utils import normalize_to_large_types  # noqa: PLC0415
+
+    arrow_type = normalize_to_large_types(arrow_type, keep_null=True)
+    sql_type = _sqlite_sql_type(arrow_type)
+    if sql_type is None:
+        return "SQLite has no column type for it"
+    read_back = _sqlite_type_to_arrow(sql_type)
+    if read_back != arrow_type:
+        return f"SQLite stores it as {sql_type}, which reads back as {read_back}"
+    return None
 
 
 def _coerce_column(values: list[Any], arrow_type: pa.DataType) -> list[Any]:
@@ -390,6 +440,44 @@ class SQLiteConnector:
             sql = f'{verb} INTO "{table_name}" ({col_list}) VALUES ({placeholders})'
             rows = (tuple(row[c] for c in cols) for row in records.to_pylist())
             conn.executemany(sql, rows)
+
+    def unstorable_column_reason(
+        self, name: str, arrow_type: pa.DataType, *, primary_key: bool
+    ) -> str | None:
+        """Say why SQLite cannot store a column, or ``None`` when it can (ITL-1162).
+
+        SQLite stores a column only when it reads it back as written:
+        ``bool``, ``int64``, ``double``, ``large_string`` and ``large_binary``
+        (``string`` and ``binary`` read back in their large variants). Narrower
+        integers and floats read back widened, and lists, structs, dates,
+        timestamps and extension types have no SQLite column type. The name and
+        the key role do not matter to SQLite.
+
+        Args:
+            name: The column's name.
+            arrow_type: The column's Arrow type.
+            primary_key: Whether the column is the table's primary key.
+
+        Returns:
+            A short reason, or ``None`` when SQLite stores the column.
+        """
+        return _sqlite_unstorable_reason(arrow_type)
+
+    def unstorable_table_name_reason(self, table_name: str) -> str | None:
+        """Say why SQLite cannot hold a table of this name, or ``None`` (ITL-1162).
+
+        SQLite has no identifier length limit, but reserves table names that
+        start with ``sqlite_`` (in any case) for itself.
+
+        Args:
+            table_name: The table name.
+
+        Returns:
+            A short reason, or ``None`` when SQLite holds the name.
+        """
+        if table_name.lower().startswith("sqlite_"):
+            return "SQLite reserves table names that start with 'sqlite_'"
+        return None
 
     def validate_records(self, records: pa.Table) -> None:
         """Reject tables carrying any Arrow field or schema metadata.

@@ -85,6 +85,154 @@ class UnsupportedValueError(ValueError):
     """
 
 
+class UnstorableColumnError(ValueError):
+    """A database cannot store a column of a table it is asked to hold (ITL-1162).
+
+    Raised by a database whose backend states which columns it stores faithfully (a
+    ``ConnectorArrowDatabase``: column types on the SQLite and PostgreSQL connectors,
+    reserved column names on SpiralDB), before anything of the table is written. A
+    job raises it when the database is attached to a node whose stored tables hold
+    such a column, before anything runs, for the columns known from declared
+    schemas alone: a node's own columns and a function's outputs. The columns a
+    node carries from its input (tags, system tags, source info) and an operator's
+    output columns are refused when their table is first written, before anything
+    of it is stored.
+
+    Attributes:
+        database_kind: The kind of database that refused, e.g. ``"SQLiteConnector"``.
+        column: Name of the column.
+        arrow_type: The column's Arrow type.
+        reason: Why the database cannot store it.
+        node_label: Label of the node whose table holds the column, or ``None`` when
+            the refusal is not tied to one node.
+    """
+
+    def __init__(
+        self,
+        *,
+        database_kind: str,
+        column: str,
+        arrow_type: object,
+        reason: str,
+        node_label: str | None = None,
+    ) -> None:
+        """Create the error.
+
+        Args:
+            database_kind: The kind of database that refused.
+            column: Name of the column.
+            arrow_type: The column's Arrow type.
+            reason: Why the database cannot store it.
+            node_label: Label of the node whose table holds the column, if known.
+        """
+        self.database_kind = database_kind
+        self.column = column
+        self.arrow_type = arrow_type
+        self.reason = reason
+        self.node_label = node_label
+        super().__init__(database_kind, column, arrow_type, reason)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        """Rebuild from the keyword fields, so pickling and copying keep them."""
+        return (
+            _rebuild_unstorable_column_error,
+            (
+                self.database_kind,
+                self.column,
+                self.arrow_type,
+                self.reason,
+                self.node_label,
+            ),
+        )
+
+    def add_context(self, node_label: str | None = None) -> None:
+        """Fill in the node label where the raising site did not know it.
+
+        Args:
+            node_label: Label of the node whose table holds the column.
+        """
+        if self.node_label is None:
+            self.node_label = node_label
+
+    def __str__(self) -> str:
+        node = f"node {self.node_label!r}: " if self.node_label is not None else ""
+        return (
+            f"{node}a {self.database_kind} database cannot store column "
+            f"{self.column!r} of Arrow type {self.arrow_type}: {self.reason}. "
+            "Use an InMemoryArrowDatabase or a DeltaTableDatabase instead."
+        )
+
+
+class UnstorableTableNameError(ValueError):
+    """A database cannot hold a table under the name it is asked to use (ITL-1162).
+
+    PostgreSQL truncates a table name longer than 63 bytes, so two Orcapod tables
+    whose names share their first 63 bytes would silently become one. The
+    connector states which names it holds (``unstorable_table_name_reason``), and
+    a ``ConnectorArrowDatabase`` refuses any other name at every entry that
+    creates, writes, reads or checks a table, so a truncated name is never sent.
+
+    Attributes:
+        database_kind: The kind of database that refused, e.g.
+            ``"PostgreSQLConnector"``.
+        table_name: The table name the database was asked to use.
+        reason: Why the database cannot hold it.
+    """
+
+    def __init__(self, *, database_kind: str, table_name: str, reason: str) -> None:
+        """Create the error.
+
+        Args:
+            database_kind: The kind of database that refused.
+            table_name: The table name the database was asked to use.
+            reason: Why the database cannot hold it.
+        """
+        self.database_kind = database_kind
+        self.table_name = table_name
+        self.reason = reason
+        super().__init__(database_kind, table_name, reason)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        """Rebuild from the keyword fields, so pickling and copying keep them."""
+        return (
+            _rebuild_unstorable_table_name_error,
+            (self.database_kind, self.table_name, self.reason),
+        )
+
+    def __str__(self) -> str:
+        return (
+            f"a {self.database_kind} database cannot hold a table named "
+            f"{self.table_name!r}: {self.reason}. Use an InMemoryArrowDatabase or a "
+            "DeltaTableDatabase instead."
+        )
+
+
+def _rebuild_unstorable_table_name_error(
+    database_kind: str, table_name: str, reason: str
+) -> UnstorableTableNameError:
+    """Rebuild an ``UnstorableTableNameError`` from its fields (``__reduce__``)."""
+    return UnstorableTableNameError(
+        database_kind=database_kind, table_name=table_name, reason=reason
+    )
+
+
+def _rebuild_unstorable_column_error(
+    database_kind: str,
+    column: str,
+    arrow_type: object,
+    reason: str,
+    node_label: str | None,
+) -> UnstorableColumnError:
+    """Rebuild an ``UnstorableColumnError`` from its fields (``__reduce__``)."""
+    return UnstorableColumnError(
+        database_kind=database_kind,
+        column=column,
+        arrow_type=arrow_type,
+        reason=reason,
+        node_label=node_label,
+    )
+
+
 class MissingOptionalDependencyError(ImportError):
     """A stored value needs an optional dependency that is not installed.
 

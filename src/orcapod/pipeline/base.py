@@ -8,6 +8,7 @@ from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from orcapod.core.nodes.function_node import FunctionNodeBase
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.dag import OrcaDAG
 from orcapod.pipeline.pod_invocation import (
@@ -154,7 +155,17 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         Args:
             database: An ``ArrowDatabaseProtocol`` instance to attach, or ``None``
                 to detach.
+
+        Raises:
+            UnstorableColumnError: If ``database`` cannot store a function node's
+                result table (ITL-1162); no node is changed.
         """
+        if database is not None:
+            # Every function node is checked before any changes, so a database that
+            # cannot store a result table leaves every node as it was (ITL-1162).
+            for node in self._nodes.values():
+                if isinstance(node, FunctionNodeBase):
+                    node.require_storable_results(database)
         for node in self._nodes.values():
             if node.node_type not in ("source", "side_effect"):
                 node.set_ephemeral_database(database)

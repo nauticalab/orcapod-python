@@ -557,14 +557,25 @@ class FakeTable:
             **kwargs: Accepted for signature compatibility; unused.
 
         Raises:
-            ValueError: If a key column is missing, a struct value is null without
-                ``push_down_nulls``, or the column set differs from the stored table.
+            ValueError: If a key column is missing, a column name is one SpiralDB
+                reserves (a ``.`` anywhere, or a ``__`` prefix on a value column), a
+                struct value is null without ``push_down_nulls``, or the column set
+                differs from the stored table.
         """
         b = self._store.behaviour
         keys = self.key_schema
         missing = [k for k in keys.names if k not in table.column_names]
         if missing:
             raise ValueError(f"write is missing key columns {missing}")
+        for name in table.column_names:
+            # SpiralDB's own refusals, with its messages as observed live (ITL-1164).
+            if "." in name:
+                raise ValueError(f"Column '{name}' contains a reserved dot-separator")
+            if name.startswith("__") and name not in keys.names:
+                raise ValueError(
+                    f"Column name '{name}' has reserved prefix: column group columns "
+                    "must not start with '__'"
+                )
         if b.reject_struct_nulls and not push_down_nulls:
             for name in table.column_names:
                 if _has_struct_nulls(table.column(name)):

@@ -21,6 +21,7 @@ import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
+from orcapod.errors import UnstorableTableNameError
 from orcapod.types import ColumnInfo
 from orcapod.utils.lazy_module import LazyModule
 
@@ -64,7 +65,7 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
 
     t = udt_name.lower()
 
-    if t == "bool":
+    if t in ("bool", "boolean"):
         return _pa.bool_()
     if t in ("int2", "smallint"):
         return _pa.int32()
@@ -125,21 +126,32 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
     return _pa.large_string()
 
 
-def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
-    """Map an Arrow DataType to a PostgreSQL SQL type string for CREATE TABLE.
+# PostgreSQL truncates an identifier (a quoted one too) to NAMEDATALEN - 1 bytes, 63 on a
+# default build, so a longer column name reads back as another name (ITL-1162).
+_PG_MAX_IDENTIFIER_BYTES = 63
+
+# Every PostgreSQL table has these system columns; a user column of the same name is
+# refused by CREATE TABLE, quoted or not (ITL-1162).
+_PG_SYSTEM_COLUMNS = frozenset({"tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"})
+
+
+def _pg_sql_type(arrow_type: pa.DataType) -> str | None:
+    """Return the PostgreSQL column type for an Arrow type, or ``None`` when there is none.
 
     Args:
         arrow_type: The Arrow DataType to convert.
 
     Returns:
-        A PostgreSQL SQL type string (e.g. ``"TEXT"``, ``"BIGINT"``).
-
-    Raises:
-        ValueError: If ``arrow_type`` is ``pa.large_list(...)`` — array columns
-            are not supported in CREATE TABLE (they are read-only from existing tables).
+        A PostgreSQL SQL type string (e.g. ``"TEXT"``, ``"BIGINT"``), or ``None``
+        for a type with no column type here (lists, structs, extension types and
+        the rest).
     """
     import pyarrow as _pa
 
+    from orcapod.utils.arrow_utils import normalize_to_large_types
+
+    # View layouts map as their large variants, as the storability rule reads them.
+    arrow_type = normalize_to_large_types(arrow_type, keep_null=True)
     if arrow_type == _pa.bool_():
         return "BOOLEAN"
     if _pa.types.is_integer(arrow_type):
@@ -164,13 +176,64 @@ def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
         return "DATE"
     if _pa.types.is_timestamp(arrow_type):
         return "TIMESTAMPTZ" if arrow_type.tz is not None else "TIMESTAMP"
+    return None
+
+
+def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
+    """Map an Arrow DataType to a PostgreSQL SQL type string for CREATE TABLE.
+
+    Args:
+        arrow_type: The Arrow DataType to convert.
+
+    Returns:
+        A PostgreSQL SQL type string (e.g. ``"TEXT"``, ``"BIGINT"``).
+
+    Raises:
+        ValueError: If PostgreSQL has no column type here for ``arrow_type``:
+            array columns (``pa.large_list(...)``) are read-only from existing
+            tables, and there is no fallback to TEXT for any other type
+            (ITL-1162).
+    """
+    import pyarrow as _pa
+
+    sql_type = _pg_sql_type(arrow_type)
+    if sql_type is not None:
+        return sql_type
     if _pa.types.is_large_list(arrow_type) or _pa.types.is_list(arrow_type):
         raise ValueError(
             f"Arrow type {arrow_type!r} (list/array) is not supported for "
             "CREATE TABLE. Array columns can only be read from existing tables."
         )
-    logger.warning("Unsupported Arrow type %r; mapping to TEXT", arrow_type)
-    return "TEXT"
+    raise ValueError(
+        f"Arrow type {arrow_type!r} is not supported for CREATE TABLE: "
+        "PostgreSQL has no column type for it here."
+    )
+
+
+def _pg_unstorable_reason(arrow_type: pa.DataType) -> str | None:
+    """Say why PostgreSQL cannot store a column of ``arrow_type``, or ``None`` when it can.
+
+    A type is stored when the column type it is written as reads back as the same
+    type in its large variant (``_pg_type_to_arrow``): ``bool``, ``int32``,
+    ``int64``, ``float``, ``double``, ``large_string``, ``large_binary``,
+    ``date32``, ``timestamp[us]`` and ``timestamp[us, tz=UTC]``.
+
+    Args:
+        arrow_type: The column's Arrow type.
+
+    Returns:
+        A short reason, or ``None`` when PostgreSQL stores the type.
+    """
+    from orcapod.utils.arrow_utils import normalize_to_large_types
+
+    arrow_type = normalize_to_large_types(arrow_type, keep_null=True)
+    sql_type = _pg_sql_type(arrow_type)
+    if sql_type is None:
+        return "PostgreSQL has no column type for it here"
+    read_back = _pg_type_to_arrow(sql_type.lower(), sql_type.lower())
+    if read_back != arrow_type:
+        return f"PostgreSQL stores it as {sql_type}, which reads back as {read_back}"
+    return None
 
 
 def _coerce_pg_value(value: Any, arrow_type: "pa.DataType") -> Any:
@@ -360,6 +423,7 @@ class PostgreSQLConnector:
 
     def get_pk_columns(self, table_name: str) -> list[str]:
         """Return primary-key column names in key-sequence order."""
+        self._require_table_name(table_name)
         with self._lock:
             conn = self._require_open()
             self._validate_table_name(table_name)
@@ -383,6 +447,7 @@ class PostgreSQLConnector:
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
         """Return column metadata with Arrow-mapped types."""
+        self._require_table_name(table_name)
         with self._lock:
             conn = self._require_open()
             self._validate_table_name(table_name)
@@ -474,6 +539,7 @@ class PostgreSQLConnector:
         pk_column: str,
     ) -> None:
         """Create a table with the given columns if it does not already exist."""
+        self._require_table_name(table_name)
         col_names = [col.name for col in columns]
         if pk_column not in col_names:
             raise ValueError(
@@ -508,6 +574,7 @@ class PostgreSQLConnector:
         skip_existing: bool = False,
     ) -> None:
         """Write records to a table using upsert semantics."""
+        self._require_table_name(table_name)
         with self._lock:
             conn = self._require_open()
             self._validate_table_name(table_name)
@@ -544,6 +611,67 @@ class PostgreSQLConnector:
             except Exception:
                 conn.rollback()
                 raise
+
+    def unstorable_column_reason(
+        self, name: str, arrow_type: pa.DataType, *, primary_key: bool
+    ) -> str | None:
+        """Say why PostgreSQL cannot store a column, or ``None`` when it can (ITL-1162).
+
+        PostgreSQL stores a column only when it reads it back as written:
+        ``bool``, ``int32``, ``int64``, ``float``, ``double``, ``large_string``,
+        ``large_binary``, ``date32``, ``timestamp[us]`` and
+        ``timestamp[us, tz=UTC]`` (``string`` and ``binary`` read back in their
+        large variants). Other integer widths, and timestamps of another unit or
+        time zone, read back as another type, and lists, structs and extension types have no column type here.
+        A name longer than 63 bytes (UTF-8) is refused: PostgreSQL truncates it,
+        so it would read back as another name. So is a system column name
+        (``xmin``, ``ctid``, ...). The key role does not matter.
+
+        Args:
+            name: The column's name.
+            arrow_type: The column's Arrow type.
+            primary_key: Whether the column is the table's primary key.
+
+        Returns:
+            A short reason, or ``None`` when PostgreSQL stores the column.
+        """
+        if name in _PG_SYSTEM_COLUMNS:
+            return f"PostgreSQL reserves {name!r} as a system column name"
+        size = len(name.encode("utf-8"))
+        if size > _PG_MAX_IDENTIFIER_BYTES:
+            return (
+                f"PostgreSQL truncates a column name to {_PG_MAX_IDENTIFIER_BYTES} "
+                f"bytes, and this name has {size}"
+            )
+        return _pg_unstorable_reason(arrow_type)
+
+    def unstorable_table_name_reason(self, table_name: str) -> str | None:
+        """Say why PostgreSQL cannot hold a table of this name, or ``None`` (ITL-1162).
+
+        PostgreSQL truncates a name longer than 63 bytes (UTF-8), so two such
+        names with the same first 63 bytes would be one table.
+
+        Args:
+            table_name: The table name.
+
+        Returns:
+            A short reason, or ``None`` when PostgreSQL holds the name.
+        """
+        size = len(table_name.encode("utf-8"))
+        if size > _PG_MAX_IDENTIFIER_BYTES:
+            return (
+                f"PostgreSQL truncates a table name to {_PG_MAX_IDENTIFIER_BYTES} "
+                f"bytes, and this name has {size}"
+            )
+        return None
+
+    def _require_table_name(self, table_name: str) -> None:
+        """Refuse a table name PostgreSQL would truncate, before it is sent."""
+        reason = self.unstorable_table_name_reason(table_name)
+        if reason is not None:
+            raise UnstorableTableNameError(
+                database_kind=type(self).__name__, table_name=table_name, reason=reason
+            )
 
     def validate_records(self, records: pa.Table) -> None:
         """Reject tables carrying any Arrow field or schema metadata.
