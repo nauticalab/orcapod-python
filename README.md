@@ -1,8 +1,8 @@
 # Orcapod Python
 Orcapod's Python library for developing reproducible scientific pipelines.
 
-User documentation lives in [`docs/`](docs/index.md) (start with
-[Getting Started](docs/getting-started.md)) and is built with `uv run mkdocs build --strict`.
+User documentation lives in [`docs/`](https://github.com/nauticalab/orcapod-python/blob/main/docs/index.md) (start with
+[Getting Started](https://github.com/nauticalab/orcapod-python/blob/main/docs/getting-started.md)) and is built with `uv run mkdocs build --strict`.
 `tests/test_docs/` executes the Python samples in this README, `docs/index.md`,
 `docs/getting-started.md`, `docs/concepts/` and `docs/reference/`, except the two samples in
 `docs/concepts/file-hash-caching.md` that need a PostgreSQL server.
@@ -18,8 +18,10 @@ pip install orcapod
 uv add orcapod
 ```
 
-`0.2.0` is not on PyPI, where the latest release is `0.1.4`; `0.2.0` is the tag `v0.2.0` of
-the repository.
+`0.3.0` is the first release on PyPI since `0.1.4`; `0.2.0` was never published to PyPI.
+Tables written by `0.2.0` or earlier are not read by `0.3.0`: see
+[`CHANGELOG.md`](https://github.com/nauticalab/orcapod-python/blob/main/CHANGELOG.md#upgrading-from-020), *Upgrading from 0.2.0*
+(it also covers `0.1.4`).
 
 Optional features are installed as extras:
 
