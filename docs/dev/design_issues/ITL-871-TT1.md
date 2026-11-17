@@ -3,7 +3,7 @@
 ### TT1 — `torch.Tensor` could not be a data value
 **Status:** resolved
 **Severity:** medium
-**Issue:** ITL-871 (design: the module docstring of `logical_types/torch_type.py`; history: `superpowers/specs/2026-11-11-torch-tensor-v0.3.md`)
+**Issue:** ITL-871 (design: the module docstring of `logical_types/torch_type.py`; history: `docs/dev/specs/2026-11-11-torch-tensor-v0.3.md`)
 
 A pod annotated with `torch.Tensor` could not be defined, and the semantic hasher refused
 tensors. Users converted at every pod boundary by hand.

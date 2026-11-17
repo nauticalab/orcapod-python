@@ -9,7 +9,7 @@ Re-verified against the EDI sample project (`edi-sample-v1-855632`, read-only) a
 disk-backed pyspiral fake (`tests/test_databases/fake_pyspiral.py`). The workshop path works:
 a `SpiralDBTableSource` with a composite key, a `Join` of two Spiral sources, a function pod,
 a Delta database, a re-run with no function calls, save and load, and the same hashes in a fresh
-process. Findings, with repro scripts, are in `superpowers/specs/itl-926-live/FINDINGS.md`.
+process. Findings, with repro scripts, are in `docs/dev/specs/itl-926-live/FINDINGS.md`.
 
 **Fixed:**
 
@@ -32,7 +32,7 @@ process. Findings, with repro scripts, are in `superpowers/specs/itl-926-live/FI
   source raises `ValueError` naming every refused column (none in the EDI tables).
 * The whole table is read at construction, which rules out tables such as `spike_event`
   (8.1M rows); the streaming design is in
-  `superpowers/specs/2026-11-11-itl-186-spiral-streaming-source-design.md`.
+  `docs/dev/specs/2026-11-11-itl-186-spiral-streaming-source-design.md`.
 * Record IDs are positional; key-based IDs are approved for the streaming source work
   (ITL-186).
 * `unit` (100 rows) takes about 35 s to build live, and the Spiral scan itself is slow

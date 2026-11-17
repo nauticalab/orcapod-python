@@ -3,7 +3,7 @@
 The job node view (ITL-1095): a job node shows its current run; a run that raises leaves the
 nodes it ran empty and stale; a node that holds a current run is not run again; a load-only
 run computes, delivers and writes nothing. Each test reproduces one review comment through the
-public interface (``superpowers/scripts/itl_1121`` holds the scripts).
+public interface (``docs/dev/scripts/itl_1121`` holds the scripts).
 """
 
 from __future__ import annotations

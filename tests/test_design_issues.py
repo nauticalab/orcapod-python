@@ -106,10 +106,23 @@ def test_check_refuses_a_restored_single_file_log(repo_copy: Path) -> None:
     assert "docs/dev/design_issues" in result.stderr
 
 
+def test_check_refuses_a_top_level_superpowers_directory(repo_copy: Path) -> None:
+    """Development documents live under ``docs/dev/`` (ITL-1169): a file left in a
+    top-level ``superpowers/`` fails, naming where it belongs."""
+    plans = repo_copy / "superpowers" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "2026-11-16-a-plan.md").write_text("# A plan\n", encoding="utf-8")
+    result = _run(repo_copy / "scripts" / SCRIPT.name, "--check")
+    assert result.returncode == 1
+    assert "2026-11-16-a-plan.md" in result.stderr
+    assert "docs/dev/plans/2026-11-16-a-plan.md" in result.stderr
+
+
 def test_check_ignores_an_old_location_holding_only_dotfiles(repo_copy: Path) -> None:
-    old = repo_copy / "design_issues"
-    old.mkdir()
-    (old / ".DS_Store").write_text("", encoding="utf-8")
+    for name in ("design_issues", "superpowers"):
+        old = repo_copy / name
+        old.mkdir()
+        (old / ".DS_Store").write_text("", encoding="utf-8")
     result = _run(repo_copy / "scripts" / SCRIPT.name, "--check")
     assert result.returncode == 0, result.stderr
 

@@ -28,7 +28,7 @@ which lets `DataProtocol` and `ArrowTableStream` reference it without inverting 
 `protocols/` → `core/` layering. No pipeline-DB schema bump: a node's source-column type is
 fixed by its own output schema, so existing nodes keep `large_string`. Job-level regression
 coverage is in `tests/test_pipeline/test_aggregation_job.py`. See
-`superpowers/specs/2026-08-07-npipe-204-batch-group-by-design.md`.
+`docs/dev/specs/2026-08-07-npipe-204-batch-group-by-design.md`.
 
 A third site, `polars_data_utils.add_source_info` (line 119), forces `dtype=pl.String()`. It is
 dead code — nothing in `src/` calls it, and the tests importing `add_source_info` import it from

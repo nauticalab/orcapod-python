@@ -6,7 +6,7 @@ fed into a FunctionPod + FunctionJobNode + SideEffectPod + PipelineJob) and prin
 all 14 hash site values.  Use explicit source_id values so every hash is
 reproducible across runs.
 
-Run with:  uv run python superpowers/scripts/hash_audit_example.py
+Run with:  uv run python scripts/hash_audit_example.py
 """
 
 from __future__ import annotations

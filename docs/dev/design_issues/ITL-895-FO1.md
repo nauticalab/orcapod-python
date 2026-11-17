@@ -15,7 +15,7 @@ for date and timestamp fields, `bytes` and `str` were decoded and encoded into e
 `1.5` while `as_table()`, the database and the hash gave `1`. Downstream pods read `as_dict()`, so
 the same graph gave different results standalone, on the sync orchestrator and on the async
 orchestrator. Present in every release up to v0.2.0. Root-cause evidence:
-`superpowers/specs/itl-895-float-to-int/FINDINGS.md`.
+`docs/dev/specs/itl-895-float-to-int/FINDINGS.md`.
 
 **Fix (function outputs):** The shared `semantic_types/output_conformance.py` check
 runs in `PythonDataFunction._build_output_data` for both sync and async execution. It

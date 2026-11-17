@@ -20,4 +20,4 @@ The behavior is now documented on `ArrowTableSource`, `SourceStreamBuilder.build
 `docs/concepts/sources.md`, and `record_id_column` is pinned as order-independent by
 `tests/test_pipeline/test_system_tag_run_stability.py`. Changing the default to a
 content-derived record ID invalidates stored identities and is proposed, not implemented, in
-`superpowers/specs/2026-11-09-itl-817-content-derived-record-ids.md`.
+`docs/dev/specs/2026-11-09-itl-817-content-derived-record-ids.md`.

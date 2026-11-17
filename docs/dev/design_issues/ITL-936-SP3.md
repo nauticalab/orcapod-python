@@ -23,7 +23,7 @@ refuses a write that disagrees with the record, and on read restores the record 
 a record are unchanged. The pyspiral fake now reports nullability as the server does. Open:
 the corruption itself is SpiralDB's (to raise with Spiral).
 
-Live check (coordinator, `superpowers/specs/itl-936-live/live_nullability.py write`): the
+Live check (coordinator, `docs/dev/specs/itl-936-live/live_nullability.py write`): the
 connector's nullability record, refusals, a Join and save/load pass. Also found, for a
 top-level struct column (nested structs not tested): SpiralDB cannot store a null struct.
 Written without `push_down_nulls`, pyspiral refuses it (`Spiral does not support null column

@@ -12,7 +12,7 @@ byte order, or with structured fields at other offsets hashed differently. Maske
 their mask silently. `StringDType` failed with a misleading pickle error. A pod declared
 `-> np.ndarray` could return a NumPy scalar unchecked.
 
-v0.3 moves to the value-based format of `superpowers/specs/2026-11-10-array-format-v0.3.md`:
+v0.3 moves to the value-based format of `docs/dev/specs/2026-11-10-array-format-v0.3.md`:
 extension `orcapod.ndarray` over `struct<dtype, shape, data>` (little-endian, C order), hashed
 by value under the label `ndarray_v1` (developer's decisions, November 10 and 11, 2026). Old
 data is neither detected nor migrated in v0.3; migration is deferred to ITL-889. Accepting

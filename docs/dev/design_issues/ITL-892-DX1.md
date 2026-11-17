@@ -21,7 +21,7 @@ Every pyarrow 20.0.0–26.0.1 × deltalake 1.0.2/1.6.6 combination fails, so no 
 Scanning local tables through a native pyarrow filesystem (`SubTreeFileSystem(table_path,
 LocalFileSystem())`) gives 0/100 in every case. Its results are byte-identical. Cloud stores
 keep the Python filesystem and stay exposed until pyarrow ships the fix. Findings, scripts and
-raw results: `superpowers/specs/itl-892-exit-hang/FINDINGS.md`.
+raw results: `docs/dev/specs/itl-892-exit-hang/FINDINGS.md`.
 
 **Fix:** `storage_utils.delta_to_pyarrow_dataset` opens local Delta tables on a native pyarrow
 filesystem (`SubTreeFileSystem` over `LocalFileSystem`). Every scan in `DeltaTableDatabase` and

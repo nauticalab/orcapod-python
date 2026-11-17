@@ -209,11 +209,14 @@ dj_*_conf.json
 .pixi/*
 !.pixi/config.toml
 
-# Superpowers (Claude Code skill artifacts - ignore everything except specs/plans/scripts)
-superpowers/*
-!superpowers/specs
-!superpowers/plans
-!superpowers/scripts
+# Development documents (Claude Code skill artifacts and the design log): ignore everything
+# under docs/dev except these
+docs/dev/*
+!docs/dev/specs
+!docs/dev/plans
+!docs/dev/scripts
+!docs/dev/design_issues
+!docs/dev/orcapod-design.md
 
 # General JSON files at project root
 /*.json

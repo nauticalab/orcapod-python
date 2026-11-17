@@ -33,5 +33,5 @@ with the shared ignore-list metadata of library value types (`{"ignore":[],"vers
 ITL-981; options `column_order`, `struct_field_order`, `series_name`, `attrs`, none ignored
 by default); the old names are no longer registered. Every pandas value hash moved
 once, before the v0.3 tag; stored bytes are unchanged. The investigation is in
-`superpowers/specs/2026-11-11-itl-897-pandas-hash-identity.md`. `pa.Table` values (same
+`docs/dev/specs/2026-11-11-itl-897-pandas-hash-identity.md`. `pa.Table` values (same
 rule) are not included and remain order independent.

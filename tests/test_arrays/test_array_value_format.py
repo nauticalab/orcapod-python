@@ -1,6 +1,6 @@
 """Array values: ``.npy`` storage, what reads back, the hash and refusals (ITL-981).
 
-Design: ``superpowers/specs/2026-11-12-itl-981-library-value-types-design.md``.
+Design: ``docs/dev/specs/2026-11-12-itl-981-library-value-types-design.md``.
 Tests go through sources, streams, function pods and the default data context's
 semantic hasher. The strict hash and the ignore list have their own file,
 ``test_array_strict_hash.py``.

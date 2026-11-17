@@ -42,13 +42,18 @@ When fixing a bug or addressing a design problem:
 When discovering a new issue that won't be fixed immediately, ask the user whether it should be
 logged in docs/dev/design_issues/ before adding it.
 
-## Superpowers artifacts
+## Development documents
 
-Place all superpowers-related artifacts (design specs, plans, etc.) in the superpowers/
-directory at the project root — NOT under docs/. The docs/ directory is reserved for
-actual library documentation.
+Documents written during development are kept in the repository, under docs/dev/
+(developer, November 16, 2026; ITL-1169):
 
-- Specs go in superpowers/specs/
+- Specs go in docs/dev/specs/, plans in docs/dev/plans/, and the scripts and evidence
+  they cite in docs/dev/scripts/ (or beside the spec, under docs/dev/specs/<topic>/).
+- Never put them in the published documentation (docs/ outside docs/dev/) or at the top
+  level of the repository. There is no top-level superpowers/; `scripts/design_issues.py
+  --check` refuses one.
+- docs/dev/ is developer material: mkdocs.yml excludes it from the published site
+  (exclude_docs), and the documentation sample test does not run it.
 
 ## Backward compatibility
 
@@ -81,8 +86,9 @@ other ReST cross-reference roles. Use plain ``backtick`` notation to refer to na
 
 ## Documentation samples
 
-docs/dev/ (the design issues log and the design specification) is developer material, kept
-out of the published site (exclude_docs in mkdocs.yml) and out of the sample test.
+docs/ outside docs/dev/ holds library documentation only. docs/dev/ (the design issues
+log, the design specification, specs, plans and their scripts) is developer material, kept out
+of the published site (exclude_docs in mkdocs.yml) and out of the sample test.
 
 Every fenced python block in README.md, docs/index.md, docs/getting-started.md,
 docs/troubleshooting.md, docs/concepts/, docs/reference/ and docs/tutorial/ is executed by

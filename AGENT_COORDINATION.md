@@ -109,9 +109,9 @@ developer.
   If the developer types into the worker's terminal directly, that instruction wins; tell
   the coordinator with an escalation.
 - **Plan first.** Follow `CLAUDE.md` and the Sensei skill chain (`work-start`, then
-  `brainstorming` or `writing-plans`). Save the plan under `superpowers/` before changing
-  code. For anything beyond a contained bug fix, send the plan summary and open questions
-  through `ask` and wait for the coordinator's approval before implementing. Flag any
+  `brainstorming` or `writing-plans`). Save the plan under `docs/dev/plans/` before
+  changing code; the pull request may summarise it. For anything beyond a contained bug fix,
+  send the plan summary and open questions through `ask` and wait for the coordinator's approval before implementing. Flag any
   point that needs the developer's decision explicitly (see "Approving plans" below).
 - **Tests.** Write the failing regression test first. Run everything through `uv run`.
   The full `uv run pytest tests/` suite must pass before a PR, and pre-existing failures

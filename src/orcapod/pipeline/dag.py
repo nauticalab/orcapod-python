@@ -4,7 +4,7 @@ Replaces `networkx.DiGraph` with a minimal, zero-dependency implementation
 covering exactly the nine API shapes Orcapod requires. Backed by plain dicts
 and `graphlib.TopologicalSorter` from the Python standard library.
 
-See superpowers/specs/2026-05-21-networkx-replacement-design.md for the full
+See docs/dev/specs/2026-05-21-networkx-replacement-design.md for the full
 rationale and migration map.
 
 Example:

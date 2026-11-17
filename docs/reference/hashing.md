@@ -322,7 +322,7 @@ every content hash is reproducible across runs. Run the script to regenerate the
 in this section:
 
 ```
-uv run python superpowers/scripts/hash_audit_example.py
+uv run python scripts/hash_audit_example.py
 ```
 
 ### Example pipeline

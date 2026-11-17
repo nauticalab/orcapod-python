@@ -25,7 +25,7 @@ of `contexts/logical_types.json`. The Arrow hasher hashes a cell under the list 
 column. `numpy.ndarray` is stored as a `.npy` file (format 3.0, no pickle) under
 `orcapod.numpy.ndarray` and hashed in two steps: the element digest of dtype, shape and bits,
 then the type name with memory order, byte order and structured layout, each ignorable.
-Design note: `superpowers/specs/2026-11-12-itl-981-library-value-types-design.md`.
+Design note: `docs/dev/specs/2026-11-12-itl-981-library-value-types-design.md`.
 
 Known limits, by decision: a data context has one list per type and refuses a column stored
 under another (the Python schema carries only `np.ndarray`, so a per-column list needs a user

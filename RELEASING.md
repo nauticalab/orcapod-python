@@ -80,7 +80,7 @@ Do these on `metamorphic-labs` `main` before anything is pushed:
    not exist on PyPI or TestPyPI; neither index allows a version to be uploaded twice, even
    after it is deleted.
 
-Per-release checklists live in `superpowers/plans/` (for example
+Per-release checklists live in `docs/dev/plans/` (for example
 `2026-11-09-v0.2-release-checklist.md`).
 
 ## Pre-push checklist

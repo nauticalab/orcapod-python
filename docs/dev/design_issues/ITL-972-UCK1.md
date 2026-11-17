@@ -19,7 +19,7 @@ class received the other class's object unchanged, while through a database it r
 own class.
 
 **Fix:** two explicit kinds (developer, November 12, 2026; spec
-`superpowers/specs/2026-11-12-itl-972-user-class-kinds.md`).
+`docs/dev/specs/2026-11-12-itl-972-user-class-kinds.md`).
 
 - An ordinary dataclass or pydantic model is an **exact** class: named by module path and
   qualified name, never equivalent to another class. Python subclassing still applies at a
